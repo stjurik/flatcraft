@@ -1,0 +1,33 @@
+{
+  "name": "flatcraft",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Free online platform for parametric sheet-metal design with DXF/PDF/STEP export",
+  "license": "MIT",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write . && pnpm --filter @flatcraft/* exec ruff format . 2>/dev/null || true",
+    "db:migrate": "pnpm --filter @flatcraft/db migrate",
+    "db:seed": "pnpm --filter @flatcraft/db seed",
+    "db:studio": "pnpm --filter @flatcraft/db studio",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "lefthook": "^1.7.18",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8",
+    "turbo": "^2.1.3",
+    "typescript": "^5.6.3"
+  }
+}

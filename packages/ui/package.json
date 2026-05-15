@@ -1,0 +1,41 @@
+{
+  "name": "@flatcraft/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./3d-viewport": "./dist/3d-viewport/index.js",
+    "./parameter-form": "./dist/parameter-form/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flatcraft/types": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.451.0",
+    "tailwind-merge": "^2.5.3",
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "@react-three/drei": "^9.0.0",
+    "@react-three/fiber": "^8.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "vitest": "^2.1.2"
+  }
+}

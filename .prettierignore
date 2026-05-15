@@ -1,0 +1,12 @@
+node_modules
+.next
+.turbo
+dist
+build
+coverage
+**/*.lock
+pnpm-lock.yaml
+uv.lock
+workers/cad/
+*.dxf
+*.step

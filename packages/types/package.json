@@ -1,0 +1,28 @@
+{
+  "name": "@flatcraft/types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./api": "./dist/api/index.js",
+    "./domain": "./dist/domain/index.js",
+    "./templates": "./dist/templates/index.js",
+    "./jobs": "./dist/jobs/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.2"
+  }
+}
