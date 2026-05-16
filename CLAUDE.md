@@ -209,7 +209,9 @@ flatcraft/
 - **Phase 0.1 завершено** (2026-05-15): скелет монорепо створено, `pnpm install` і `pnpm typecheck` зелені по всіх 10 workspace, git ініціалізовано.
 - **Phase 0.2 завершено** (2026-05-16): `docker compose up -d` піднімає Postgres 16, Redis 7, MinIO + bucket init, Mailpit — усі healthy.
 - **Phase 0.3 завершено** (2026-05-16): drizzle schema на 12 таблиць (`docs/05_DATA_MODEL.md`), перша міграція `0000_wandering_vapor.sql` застосована до живої БД, seed додав 7 матеріалів × 10 товщин (нержавійка 10мм виключена) + 5 шаблонів-placeholder. 27 unit-тестів зелені. UUID v4 наразі — ADR-012.
-- **Наступне — Phase 0.4** (див. `docs/02_ROADMAP.md`): Fastify hello-world з health-check, pino, Zod. Далі 0.5 (Next.js + react-three-fiber), 0.6 (CI), 0.7 (lefthook), 0.8 (README).
+- **Phase 0.4 завершено** (2026-05-16): Fastify factory з ZodTypeProvider, GET /health, pino з PII-redact (auth headers, cookie, body.email, body.password, \*.refreshToken), env через Zod. 11 unit-тестів.
+- **Phase 0.5 завершено** (2026-05-16): Next.js 15 App Router + Tailwind, R3F куб (v9, drei v10 — потребували bump через несумісність з React 19), `dynamic(ssr:false)` для три.js, Playwright e2e (2 тести). Куб обертається у браузері на :3000.
+- **Наступне — Phase 0.6**: GitHub Actions CI (lint + typecheck + test + build). Далі 0.7 (lefthook налаштування), 0.8 (README з 5-min setup).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
