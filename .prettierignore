@@ -10,3 +10,6 @@ uv.lock
 workers/cad/
 *.dxf
 *.step
+
+# Drizzle-kit generated metadata — не чіпаємо вручну і не reformat'имо.
+packages/db/src/migrations/
