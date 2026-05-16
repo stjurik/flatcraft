@@ -1,5 +1,6 @@
-"""DXF-експорт: structural-snapshot + байт-у-байт регресія."""
+"""DXF-експорт: structural-snapshot + byte-у-байт регресія (in-process)."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,61 @@ def _params(**overrides: Any) -> LBracketBuildParameters:
     }
     defaults.update(overrides)
     return LBracketBuildParameters(**defaults)
+
+
+def _dxf_structure(dxf_path: Path) -> dict[str, Any]:
+    """Витягує стабільний знімок DXF: layers + entities (без handles, без
+    timestamp-ів, без $HANDSEED, без CLASS section). Структурний snapshot
+    стабільний між середовищами (ezdxf-handles різняться по runtime,
+    байтовий snapshot — ні)."""
+    doc = readfile(dxf_path)
+
+    layers = sorted(
+        (
+            {"name": layer.dxf.name, "color": int(layer.dxf.color)}
+            for layer in doc.layers
+            if layer.dxf.name in {name for name, _ in DXF_LAYERS}
+        ),
+        key=lambda r: r["name"],
+    )
+
+    entities: list[dict[str, Any]] = []
+    for e in doc.modelspace():
+        dxftype = e.dxftype()
+        layer = e.dxf.layer
+        if dxftype == "LWPOLYLINE":
+            entities.append(
+                {
+                    "type": dxftype,
+                    "layer": layer,
+                    "closed": bool(e.closed),  # type: ignore[attr-defined]
+                    "points": [
+                        [round(x, 6), round(y, 6)]
+                        for x, y in e.get_points("xy")  # type: ignore[attr-defined]
+                    ],
+                }
+            )
+        elif dxftype == "LINE":
+            entities.append(
+                {
+                    "type": dxftype,
+                    "layer": layer,
+                    "start": [round(e.dxf.start.x, 6), round(e.dxf.start.y, 6)],
+                    "end": [round(e.dxf.end.x, 6), round(e.dxf.end.y, 6)],
+                }
+            )
+        elif dxftype == "TEXT":
+            entities.append(
+                {
+                    "type": dxftype,
+                    "layer": layer,
+                    "text": e.dxf.text,
+                    "height": round(e.dxf.height, 6),
+                    "insert": [round(e.dxf.insert.x, 6), round(e.dxf.insert.y, 6)],
+                }
+            )
+
+    return {"layers": layers, "entities": entities}
 
 
 class TestStructural:
@@ -91,7 +147,13 @@ class TestStructural:
 
 
 class TestDeterminism:
-    """Phase 1.8: однакові params → байт-у-байт однакові DXF."""
+    """Phase 1.8: однакові params → байт-у-байт однакові DXF.
+
+    Перевіряється in-process (одна Python-сесія): post-write нормалізація
+    усуває timestamp-и/GUID-и. Між середовищами байти можуть різнитися
+    через ezdxf internal handle counter — структурний snapshot стабільний,
+    байтовий — лише як safety-net у dev.
+    """
 
     def test_однаковий_вхід_однакові_байти(self, tmp_path: Path) -> None:
         params = _params()
@@ -113,12 +175,16 @@ class TestDeterminism:
 
 
 class TestSnapshot:
-    """Регресія: фіксований params → фіксований DXF-байт-output.
+    """Регресія: фіксовані params → фіксована structural-структура DXF.
+
+    Snapshot — це JSON-серіалізована структура (шари + entities). Це
+    стабільне між середовищами на відміну від ezdxf-байт (handles auto-
+    increment залежить від runtime).
 
     Якщо тест падає — або змінилася формула розгортки/контур, або
-    оновили ezdxf. У такому випадку:
-      1. Перевірити що зміна геометрично коректна (через TestStructural).
-      2. Оновити snapshot: `pytest --snapshot-update` (pytest-snapshot).
+    додали/прибрали entities. У такому випадку:
+      1. Перевірити через TestStructural, що зміна геометрично коректна.
+      2. Оновити snapshot: `pytest --snapshot-update`.
     """
 
     @pytest.mark.parametrize(
@@ -135,7 +201,7 @@ class TestSnapshot:
             ),
         ],
     )
-    def test_dxf_snapshot(
+    def test_dxf_structural_snapshot(
         self,
         snapshot: Any,
         tmp_path: Path,
@@ -147,7 +213,8 @@ class TestSnapshot:
         out = export_l_bracket_dxf(
             unf, tmp_path / f"{name}.dxf", bend_radius_mm=params.bend_radius_mm
         )
-        # Bytes (а не str) — щоб уникнути newline-нормалізації, бо ezdxf
-        # пише \r\n, а _file_encode у pytest-snapshot забороняє \r у рядках.
+        structure = _dxf_structure(out)
+        # JSON з відсортованими ключами і indent=2 — diff читабельний.
+        json_text = json.dumps(structure, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         snapshot.snapshot_dir = SNAPSHOTS_DIR
-        snapshot.assert_match(out.read_bytes(), f"{name}.dxf")
+        snapshot.assert_match(json_text, f"{name}.json")

@@ -1,0 +1,71 @@
+{
+  "entities": [
+    {
+      "closed": true,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          116.183628,
+          0.0
+        ],
+        [
+          116.183628,
+          100.0
+        ],
+        [
+          0.0,
+          100.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "end": [
+        58.091814,
+        100.0
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        58.091814,
+        0.0
+      ],
+      "type": "LINE"
+    },
+    {
+      "height": 3.0,
+      "insert": [
+        59.091814,
+        101.0
+      ],
+      "layer": "BEND_TEXT",
+      "text": "BEND 90° UP R2.5",
+      "type": "TEXT"
+    }
+  ],
+  "layers": [
+    {
+      "color": 5,
+      "name": "BEND_LINES"
+    },
+    {
+      "color": 3,
+      "name": "BEND_TEXT"
+    },
+    {
+      "color": 8,
+      "name": "DIM"
+    },
+    {
+      "color": 1,
+      "name": "INNER_CUTS"
+    },
+    {
+      "color": 7,
+      "name": "LASER_CUT"
+    }
+  ]
+}
