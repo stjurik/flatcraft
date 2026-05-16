@@ -2,8 +2,12 @@
  * @flatcraft/cad-engine — валідатори листового металу, K-фактор, завантажувач
  * bend-machine spec, утиліти геометрії.
  *
- * Phase 0.1: placeholder. Реальний код (spec.ts, validators/, k-factor.ts,
- * unfold-math.ts) додається у Phase 1. Дані обладнання — у data/bend-machine-esi.yaml.
+ * Реальний код по фазам:
+ *   - Phase 1.2 (поточна): spec.ts — завантажувач + Zod-схема.
+ *   - Phase 1.3: validators/ — validateBend, validateSheet, validateHoles.
+ *   - Phase 1.4: k-factor.ts — обчислення K за матеріалом + R/S.
+ *   - Phase 2.6: opencascade-bridge.ts.
+ * Дані обладнання — у data/bend-machine-esi.yaml.
  */
 
-export const CAD_ENGINE_PACKAGE_VERSION = "0.0.0" as const;
+export { BendMachineSpecSchema, loadSpec, loadSpecFromFile, type BendMachineSpec } from "./spec.js";
