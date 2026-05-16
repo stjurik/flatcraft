@@ -59,6 +59,7 @@ uv.lock-tmp
 workers/cad/out/
 *.dxf
 !packages/cad-engine/data/*.dxf
+!workers/cad/tests/snapshots/**/*.dxf
 *.step
 *.pdf
 !docs/**/*.pdf

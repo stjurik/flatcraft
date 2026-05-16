@@ -62,9 +62,7 @@ def compute_bend_allowance(
     return math.radians(angle_deg) * (inner_radius_mm + k_factor * thickness_mm)
 
 
-def unfold_l_bracket(
-    params: LBracketBuildParameters, k_factor: float
-) -> UnfoldedLBracket:
+def unfold_l_bracket(params: LBracketBuildParameters, k_factor: float) -> UnfoldedLBracket:
     """Розгортає L-кронштейн у плоский патерн.
 
     K-фактор обчислюється у TypeScript (packages/cad-engine/k-factor.ts)
