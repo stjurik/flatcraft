@@ -79,6 +79,7 @@ flatcraft/
 ## 5. Конвенції коду
 
 **TypeScript:**
+
 - `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`.
 - Жодного `any` (тільки `unknown` з narrow-логікою).
 - Імпорти абсолютні через `@flatcraft/*` (path mapping).
@@ -86,17 +87,20 @@ flatcraft/
 - Експорти named, не default (виняток — Next.js page файли).
 
 **Python (CAD worker):**
+
 - Python 3.12, `mypy --strict`, `ruff` для лінту і форматування.
 - Залежності через `uv` (швидкий аналог pip).
 - Кожен handler — pure-функція з типізованим вхід-вихід.
 
 **Тести:**
+
 - Frontend: Vitest + React Testing Library + Playwright (e2e на ключовий happy path).
 - Backend: Vitest + supertest. Інтеграційні тести проти реальної Postgres у Docker (testcontainers).
 - CAD worker: pytest + pytest-cov. Снепшоти DXF (фіксований seed → фіксований байт-output).
 - Покриття: цільове 80% по `src/`, але важливіше — мутаційне тестування на ключових модулях (Stryker для TS).
 
 **Git:**
+
 - Trunk-based: одна гілка `main`, feature-branches короткоживучі (≤ 2 дні).
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`.
 - PR обов'язковий, навіть solo (для history). Squash merge.
@@ -105,12 +109,14 @@ flatcraft/
 ## 6. Що Claude Code _робить_ і _не робить_
 
 ✅ **Робить автоматично:**
+
 - Створює feature-branch і робить commit після кожної логічної зміни.
 - Запускає `pnpm test`/`pytest` після зміни. Не зупиняється, поки тести не зелені.
 - Оновлює відповідну ADR у `docs/03_DECISIONS.md`, якщо рішення архітектурне.
 - Додає типи у `packages/types`, якщо змінює API.
 
 ❌ **Не робить без явної згоди:**
+
 - Не додає нові залежності top-level (тільки в межах існуючих apps/packages).
 - Не змінює `docker-compose.yml` без узгодження.
 - Не пише код у `infra/ansible/` без явного завдання.
@@ -118,20 +124,21 @@ flatcraft/
 
 ## 7. CAD-обмеження (must-know для будь-якого CAD-завдання)
 
-| Параметр | Значення MVP |
-|----------|--------------|
-| Матеріали | сталь холоднокатана, сталь гарячекатана, оцинкована, нержавійка AISI 304/430, алюміній АМг3/5754, мідь, латунь |
-| Діапазон товщин | 0.5 – 8 мм для всіх матеріалів |
-| Макс. довжина гиба | 3050 мм |
-| Макс. зусилля гибки | 100 т |
-| Мін. ширина полиці після гиба | 7.5 мм |
-| Точність кута | ±0.25° |
-| Мін. внутрішній радіус гиба | див. `docs/07_BEND_MACHINE_SPEC.md` (заповнюється окремо) |
-| K-фактор | див. таблицю в `docs/07_BEND_MACHINE_SPEC.md`; default 0.4 для м'яких сталей, 0.33 для алюмінію, 0.45 для нержі |
-| Стандарт креслень | ISO/EN ISO 7200 |
-| Допуски | ДСТУ ISO 2768-m |
+| Параметр                      | Значення MVP                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Матеріали                     | сталь холоднокатана, сталь гарячекатана, оцинкована, нержавійка AISI 304/430, алюміній АМг3/5754, мідь, латунь  |
+| Діапазон товщин               | 0.5 – 8 мм для всіх матеріалів                                                                                  |
+| Макс. довжина гиба            | 3050 мм                                                                                                         |
+| Макс. зусилля гибки           | 100 т                                                                                                           |
+| Мін. ширина полиці після гиба | 7.5 мм                                                                                                          |
+| Точність кута                 | ±0.25°                                                                                                          |
+| Мін. внутрішній радіус гиба   | див. `docs/07_BEND_MACHINE_SPEC.md` (заповнюється окремо)                                                       |
+| K-фактор                      | див. таблицю в `docs/07_BEND_MACHINE_SPEC.md`; default 0.4 для м'яких сталей, 0.33 для алюмінію, 0.45 для нержі |
+| Стандарт креслень             | ISO/EN ISO 7200                                                                                                 |
+| Допуски                       | ДСТУ ISO 2768-m                                                                                                 |
 
 **Перевіряти при кожній зміні параметрів моделі:**
+
 1. Товщина у дозволеному діапазоні.
 2. Радіус гиба ≥ мін. для (матеріал, товщина).
 3. Полиця після гиба ≥ 7.5 мм.
@@ -153,22 +160,24 @@ flatcraft/
 
 ## 9. Performance budget
 
-| Що | Бюджет |
-|----|--------|
-| First Contentful Paint (web) | < 1.5 c на 4G |
-| Time to Interactive (web) | < 3.0 c |
+| Що                                     | Бюджет                                    |
+| -------------------------------------- | ----------------------------------------- |
+| First Contentful Paint (web)           | < 1.5 c на 4G                             |
+| Time to Interactive (web)              | < 3.0 c                                   |
 | Update параметра → перерахунок 3D mesh | < 200 мс (на browser-side OpenCascade.js) |
-| Експорт DXF простого виробу | < 3 c (worker → R2 → presigned URL) |
-| Експорт PDF простого виробу | < 5 c |
-| API p95 | < 200 мс (без CAD) |
-| DB query p95 | < 50 мс |
+| Експорт DXF простого виробу            | < 3 c (worker → R2 → presigned URL)       |
+| Експорт PDF простого виробу            | < 5 c                                     |
+| API p95                                | < 200 мс (без CAD)                        |
+| DB query p95                           | < 50 мс                                   |
 
 ## 10. Як просити Claude Code про роботу
 
 **Поганий промпт (junior typical):**
+
 > "Зроби логін"
 
 **Гарний промпт:**
+
 > "Реалізуй email+password реєстрацію в `apps/api`. Використай Auth.js Credentials provider, Argon2id для хешу. Додай ендпоінти `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `POST /auth/refresh`. Збережи юзера в `users` (вже в schema). Напиши Vitest для happy path і двох помилок (duplicate email, weak password). Оновити `docs/06_API_CONTRACT.md`."
 
 Завжди вказуйте: **де** (apps/path), **що використати** (бібліотеки), **що повернути** (response shape), **які тести**, **який доку-файл оновити**.
@@ -185,15 +194,23 @@ flatcraft/
 
 ## 12. Ключові посилання
 
-- Опитувальник з відповідями: `01_questionnaire_answers.md`
+- **Карта підпроєктів: `AGENTS.md`** — прочитай одразу після цього файлу. Claude Code НЕ вантажить його автоматично, але там опис кожного workspace, команди, структура.
 - Roadmap: `docs/02_ROADMAP.md`
 - Architecture Decision Records: `docs/03_DECISIONS.md`
 - Risks: `docs/04_RISKS.md`
 - Data model: `docs/05_DATA_MODEL.md`
 - API contract: `docs/06_API_CONTRACT.md`
-- Bend machine spec: `docs/07_BEND_MACHINE_SPEC.md` _(заповнюється користувачем)_
-- Open questions: `docs/00_OPEN_QUESTIONS.md`
+- Bend machine spec: `docs/07_BEND_MACHINE_SPEC.md`
+- Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
+- Опитувальник з відповідями: `01_questionnaire_answers.md`
+
+## 13. Поточний стан
+
+- **Phase 0.1 завершено** (2026-05-15): скелет монорепо створено, `pnpm install` і `pnpm typecheck` зелені по всіх 10 workspace, git ініціалізовано (перший коміт + lockfile).
+- **Наступне — Phase 0.2** (див. `docs/02_ROADMAP.md`): `docker compose up -d`, Drizzle init + перша міграція + seed, Fastify hello-world, Next.js hello-world, GitHub Actions CI.
+- Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
+- Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
 ---
 
-_Останнє оновлення: 2026-05-08. Коли архітектура змінюється — оновлюйте цей файл першим, потім код._
+_Останнє оновлення: 2026-05-15. Коли архітектура змінюється — оновлюйте цей файл першим, потім код._
