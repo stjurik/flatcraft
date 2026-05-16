@@ -2,7 +2,7 @@ import { LBracketParametersSchema, L_BRACKET_DEFAULT_PARAMETERS } from "@flatcra
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { LBracketEditor } from "../../../components/l-bracket-editor";
+import { LBracketStudio } from "../../../components/l-bracket-studio";
 import { fetchTemplate } from "../../../lib/api";
 
 interface PageProps {
@@ -45,27 +45,12 @@ export default async function TemplatePage({ params }: PageProps) {
         </p>
       </header>
 
-      <section
-        data-testid="template-detail-editor-section"
-        className="grid gap-6 lg:grid-cols-[1fr_2fr]"
-      >
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-          <h2 className="mb-4 text-lg font-semibold text-zinc-100">Параметри</h2>
-          <TemplateEditor slug={template.slug} defaults={template.defaultParameters} />
-        </div>
-
-        <div
-          className="flex aspect-video items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/40 p-2 text-sm text-zinc-500"
-          data-testid="template-detail-viewport-placeholder"
-        >
-          3D-viewport — Phase 2.2c
-        </div>
-      </section>
+      <TemplateStudio slug={template.slug} defaults={template.defaultParameters} />
     </main>
   );
 }
 
-function TemplateEditor({
+function TemplateStudio({
   slug,
   defaults,
 }: {
@@ -76,14 +61,14 @@ function TemplateEditor({
     // defaults з БД — JSON; уточнюємо Zod-схемою, бо API повертає `unknown`-record.
     const parsed = LBracketParametersSchema.safeParse(defaults);
     return (
-      <LBracketEditor
+      <LBracketStudio
         initialParameters={parsed.success ? parsed.data : L_BRACKET_DEFAULT_PARAMETERS}
       />
     );
   }
   return (
     <p data-testid="template-editor-unsupported" className="text-sm text-zinc-500">
-      Редактор для slug «{slug}» з'явиться у наступних фазах.
+      Студія для slug «{slug}» з'явиться у наступних фазах.
     </p>
   );
 }

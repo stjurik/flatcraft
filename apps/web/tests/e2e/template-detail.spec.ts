@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("/templates/[slug] — L-bracket editor (Phase 2.2)", () => {
-  test("картка → деталь L-bracket: заголовок, форма з defaults, валідація", async ({ page }) => {
+test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
+  test("картка → деталь L-bracket: заголовок, форма з defaults, R3F canvas", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -12,7 +12,7 @@ test.describe("/templates/[slug] — L-bracket editor (Phase 2.2)", () => {
 
     await expect(page).toHaveURL("/templates/l_bracket");
     await expect(page.getByTestId("template-detail-title")).toHaveText("L-кронштейн");
-    await expect(page.getByTestId("template-detail-slug")).toHaveText("l_bracket");
+    await expect(page.getByTestId("l-bracket-studio")).toBeVisible();
     await expect(page.getByTestId("l-bracket-editor")).toBeVisible();
 
     // Дефолтні значення з seed (L_BRACKET_DEFAULT_PARAMETERS).
@@ -20,12 +20,18 @@ test.describe("/templates/[slug] — L-bracket editor (Phase 2.2)", () => {
     await expect(page.getByTestId("param-legB_mm")).toHaveValue("60");
     await expect(page.getByTestId("param-width_mm")).toHaveValue("100");
     await expect(page.getByTestId("param-bend_radius_mm")).toHaveValue("2.5");
-
-    // Дефолтні значення валідні.
     await expect(page.getByTestId("validation-ok")).toBeVisible();
 
-    // 3D viewport — поки що placeholder.
-    await expect(page.getByTestId("template-detail-viewport-placeholder")).toBeVisible();
+    // 3D viewport — Canvas з'являється після dynamic chunk load.
+    await expect(page.getByTestId("l-bracket-viewport")).toBeVisible();
+    const canvas = page.getByTestId("l-bracket-viewport").locator("canvas");
+    await expect(canvas).toBeVisible({ timeout: 15_000 });
+    const dims = await canvas.evaluate((el: HTMLCanvasElement) => ({
+      w: el.width,
+      h: el.height,
+    }));
+    expect(dims.w).toBeGreaterThan(0);
+    expect(dims.h).toBeGreaterThan(0);
 
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });
@@ -39,6 +45,17 @@ test.describe("/templates/[slug] — L-bracket editor (Phase 2.2)", () => {
 
     await expect(page.getByTestId("validation-errors")).toBeVisible();
     await expect(page.getByTestId("validation-ok")).toHaveCount(0);
+  });
+
+  test("зміна параметра live-update'ить JSON preview", async ({ page }) => {
+    await page.goto("/templates/l_bracket");
+    await expect(page.getByTestId("params-preview")).toContainText('"legA_mm": 60');
+
+    await page.getByTestId("param-legA_mm").fill("120");
+
+    await expect(page.getByTestId("params-preview")).toContainText('"legA_mm": 120');
+    // Canvas після зміни лишається видимим (mesh перегенеровано).
+    await expect(page.getByTestId("l-bracket-viewport").locator("canvas")).toBeVisible();
   });
 
   test("неіснуючий шаблон → 404", async ({ page }) => {

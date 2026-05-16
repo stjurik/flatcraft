@@ -1,10 +1,11 @@
 "use client";
 
 import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 interface LBracketEditorProps {
-  readonly initialParameters: LBracketParameters;
+  readonly value: LBracketParameters;
+  readonly onChange: (next: LBracketParameters) => void;
 }
 
 const ALLOWED_RADII = [1, 2.5, 4, 5] as const;
@@ -38,19 +39,17 @@ function NumberField({ label, id, value, min, max, step, onChange }: NumberField
   );
 }
 
-export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
-  const [params, setParams] = useState<LBracketParameters>(initialParameters);
-
+export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
   // Live-валідація: рендеримо помилки Zod (Phase 2.5 розширить — підсвічення
   // конкретних полів + tooltip-и; зараз — компактний список).
-  const validation = useMemo(() => LBracketParametersSchema.safeParse(params), [params]);
+  const validation = useMemo(() => LBracketParametersSchema.safeParse(value), [value]);
 
   const errors: string[] = validation.success
     ? []
     : validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
 
-  const set = <K extends keyof LBracketParameters>(key: K, value: LBracketParameters[K]) =>
-    setParams((prev) => ({ ...prev, [key]: value }));
+  const set = <K extends keyof LBracketParameters>(key: K, v: LBracketParameters[K]) =>
+    onChange({ ...value, [key]: v });
 
   return (
     <form
@@ -62,7 +61,7 @@ export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
         <NumberField
           label="Висота полиці A, мм"
           id="legA_mm"
-          value={params.legA_mm}
+          value={value.legA_mm}
           min={20}
           max={500}
           step={1}
@@ -71,7 +70,7 @@ export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
         <NumberField
           label="Глибина полиці B, мм"
           id="legB_mm"
-          value={params.legB_mm}
+          value={value.legB_mm}
           min={20}
           max={500}
           step={1}
@@ -80,7 +79,7 @@ export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
         <NumberField
           label="Ширина (довжина гиба), мм"
           id="width_mm"
-          value={params.width_mm}
+          value={value.width_mm}
           min={20}
           max={3000}
           step={1}
@@ -92,7 +91,7 @@ export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
           <select
             id="param-bend_radius_mm"
             data-testid="param-bend_radius_mm"
-            value={params.bend_radius_mm}
+            value={value.bend_radius_mm}
             onChange={(e) =>
               set("bend_radius_mm", Number(e.target.value) as LBracketParameters["bend_radius_mm"])
             }
@@ -135,7 +134,7 @@ export function LBracketEditor({ initialParameters }: LBracketEditorProps) {
           data-testid="params-preview"
           className="mt-2 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300"
         >
-          {JSON.stringify(params, null, 2)}
+          {JSON.stringify(value, null, 2)}
         </pre>
       </details>
     </form>
