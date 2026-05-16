@@ -40,7 +40,7 @@
 
 ```bash
 # 1. Клон і setup
-git clone https://github.com/<ваш-org>/flatcraft.git
+git clone https://github.com/stjurik/flatcraft.git
 cd flatcraft
 pnpm install
 cp .env.example .env
@@ -75,21 +75,21 @@ open http://localhost:3000
 
 ## Стек
 
-| Шар | Технологія |
-|-----|------------|
-| Frontend | Next.js 15 + TypeScript + react-three-fiber + Tailwind + shadcn/ui |
-| Backend API | Fastify + TypeScript + Zod |
-| CAD-engine (browser) | OpenCascade.js |
-| CAD-worker (server) | Python 3.12 + CadQuery + FastAPI |
-| База даних | PostgreSQL 16 + Drizzle ORM |
-| Storage | Cloudflare R2 (S3-compatible) / MinIO у dev |
-| Cache & Queue | Redis + BullMQ |
-| Auth | Auth.js v5 |
-| Container | Docker + docker-compose |
-| Hosting | Mirohost Cloud (тариф MS21: 2 vCPU / 4 GB / 40 GB, ДЦ Київ) + Cloudflare DNS/proxy |
-| Observability | Sentry + Plausible |
-| CI/CD | GitHub Actions |
-| IaC | Ansible (Terraform не використовуємо — Mirohost не має провайдера; див. ADR-011) |
+| Шар                  | Технологія                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| Frontend             | Next.js 15 + TypeScript + react-three-fiber + Tailwind + shadcn/ui                 |
+| Backend API          | Fastify + TypeScript + Zod                                                         |
+| CAD-engine (browser) | OpenCascade.js                                                                     |
+| CAD-worker (server)  | Python 3.12 + CadQuery + FastAPI                                                   |
+| База даних           | PostgreSQL 16 + Drizzle ORM                                                        |
+| Storage              | Cloudflare R2 (S3-compatible) / MinIO у dev                                        |
+| Cache & Queue        | Redis + BullMQ                                                                     |
+| Auth                 | Auth.js v5                                                                         |
+| Container            | Docker + docker-compose                                                            |
+| Hosting              | Mirohost Cloud (тариф MS21: 2 vCPU / 4 GB / 40 GB, ДЦ Київ) + Cloudflare DNS/proxy |
+| Observability        | Sentry + Plausible                                                                 |
+| CI/CD                | GitHub Actions                                                                     |
+| IaC                  | Ansible (Terraform не використовуємо — Mirohost не має провайдера; див. ADR-011)   |
 
 ## Структура
 
@@ -119,6 +119,7 @@ flatcraft/
 ## Внесок
 
 Проєкт open source, MIT. Ласкаво просимо PR-и, але:
+
 1. Прочитайте [`CLAUDE.md`](CLAUDE.md) і [`docs/02_ROADMAP.md`](docs/02_ROADMAP.md).
 2. Кожен PR має тести (TDD).
 3. Conventional Commits (`feat:`, `fix:`, …).
@@ -129,6 +130,7 @@ Discord для координації: _(посилання буде після 
 ## Соціальна модель
 
 Платформа — соціальний проєкт без юрособи на старті. Усі донати йдуть напряму через офіційні фонди:
+
 - 🇺🇦 Monobank банка _(посилання буде)_
 - 🌍 [UNITED24](https://u24.gov.ua/)
 
