@@ -219,7 +219,8 @@ flatcraft/
   - L-bracket Zod-схема у packages/types (9 тестів) — спільний контракт між web/api/worker.
   - CLI: `cd workers/cad && uv run pytest` — повний цикл.
 - **Phase 2.1 завершено** (2026-05-16): `GET /templates` (Fastify + drizzle, integration через postgres) + web сторінка `/templates` з grid карток (Next.js server component + Tailwind). L-bracket — єдиний опублікований; решта 4 приховані до Phase 2.10. Seed змінено на `onConflictDoUpdate`, щоб переключення `is_published` відбивалося. Playwright тепер запускає api+web webServer масивом, CI postgres service гарантує live БД у e2e.
-- **Наступне — Phase 2.2**: сторінка `/templates/[slug]` — редактор параметрів + 3D-viewport (apps/web).
+- **Phase 2.2 завершено** (2026-05-16): `GET /templates/:slug` (Detail з defaultParameters), web `/templates/[slug]` зі студією: controlled-editor параметрів (live Zod-validation) + R3F viewport з ExtrudeGeometry-mesh, що live-оновлюється при зміні параметрів. Thickness — поки фіксовано 2.0мм (UI-вибір — Phase 2.4). 8 Playwright e2e, 26 db/types unit, 4 api integration.
+- **Наступне — Phase 2.3**: `packages/ui/src/3d-viewport/` — переніс R3F-сцену у shared package, переписав на v9/v10 peer deps.
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
