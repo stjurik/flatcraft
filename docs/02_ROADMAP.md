@@ -57,7 +57,7 @@
 
 **Definition of Done:** користувач відкриває сайт, вибирає шаблон, крутить повзунки, бачить 3D-прев'ю в реальному часі, скачує DXF + PDF.
 
-- [ ] **2.1.** Сторінка `/templates` — каталог шаблонів з прев'юшками
+- [x] **2.1.** Сторінка `/templates` — каталог шаблонів. API `GET /templates` (Fastify+drizzle, 3 integration + 10 schema), web page (server component, Playwright e2e). L-bracket опубліковано, решта 4 — приховані до Phase 2.10. — 2026-05-16
 - [ ] **2.2.** Сторінка `/templates/[slug]` — редактор параметрів + 3D-viewport
 - [ ] **2.3.** `packages/ui/src/3d-viewport/` — react-three-fiber сцена (orbit controls, zoom, кадрування)
 - [ ] **2.4.** `packages/ui/src/parameter-form/` — авто-генерація форми з Zod-схеми шаблону (number inputs, sliders, селектори матеріалу/товщини)

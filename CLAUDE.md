@@ -218,7 +218,8 @@ flatcraft/
   - workers/cad (Python 3.12 + CadQuery + ezdxf): L-bracket Pydantic+builder, unfold з K, DXF export з 5 шарами + детермінізм через post-write normalize — 41 pytest, 100% coverage.
   - L-bracket Zod-схема у packages/types (9 тестів) — спільний контракт між web/api/worker.
   - CLI: `cd workers/cad && uv run pytest` — повний цикл.
-- **Наступне — Phase 2.1**: сторінка `/templates` з каталогом шаблонів (apps/web).
+- **Phase 2.1 завершено** (2026-05-16): `GET /templates` (Fastify + drizzle, integration через postgres) + web сторінка `/templates` з grid карток (Next.js server component + Tailwind). L-bracket — єдиний опублікований; решта 4 приховані до Phase 2.10. Seed змінено на `onConflictDoUpdate`, щоб переключення `is_published` відбивалося. Playwright тепер запускає api+web webServer масивом, CI postgres service гарантує live БД у e2e.
+- **Наступне — Phase 2.2**: сторінка `/templates/[slug]` — редактор параметрів + 3D-viewport (apps/web).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
