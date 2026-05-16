@@ -14,6 +14,8 @@ dist/
 build/
 out/
 *.tsbuildinfo
+# Next.js auto-generates next-env.d.ts; не комітимо.
+next-env.d.ts
 
 # Coverage
 coverage/
