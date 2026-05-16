@@ -112,6 +112,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  python:
+    name: Python CAD worker (ruff + mypy + pytest)
+    needs: install
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/cad
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.13"
+          enable-cache: true
+      - name: Setup Python
+        run: uv python install 3.12
+      - name: Sync dev dependencies
+        run: uv sync --extra dev
+      - name: Ruff (lint + format check)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Mypy --strict
+        run: uv run mypy .
+      - name: Pytest з coverage
+        run: uv run pytest
+
   e2e:
     name: Playwright e2e (web)
     needs: build

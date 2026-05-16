@@ -40,14 +40,14 @@
 
 **Definition of Done:** з командного рядка можна запустити `cad-worker` із параметрами L-кронштейна → отримати валідний DXF, який відкривається у LibreCAD.
 
-- [ ] **1.1.** `packages/cad-engine/data/bend-machine-esi.yaml` — завантажити з `docs/07_BEND_MACHINE_SPEC.md`
-- [ ] **1.2.** `packages/cad-engine/src/spec.ts` — завантажувач + Zod-схема
-- [ ] **1.3.** `packages/cad-engine/src/validators/` — функції `validateBend`, `validateSheet`, `validateHoles` (TDD: тести спочатку)
-- [ ] **1.4.** `packages/cad-engine/src/k-factor.ts` — обчислення K за матеріалом + R/S
-- [ ] **1.5.** `workers/cad/flatcraft_cad/templates/l_bracket.py` — параметрична модель L-кронштейна на CadQuery
-- [ ] **1.6.** `workers/cad/flatcraft_cad/unfold.py` — алгоритм розгортки з K-фактором (тестовий fixture: ручний розрахунок)
-- [ ] **1.7.** `workers/cad/flatcraft_cad/export/dxf.py` — експорт у DXF з шарами `LASER_CUT`, `INNER_CUTS`, `BEND_LINES`, `BEND_TEXT`, `DIM`
-- [ ] **1.8.** Снепшот-тести: фіксований seed → фіксований DXF byte-output (для регресій)
+- [x] **1.1.** `packages/cad-engine/data/bend-machine-esi.yaml` — завантажено з `docs/07_BEND_MACHINE_SPEC.md` (Phase 0.1)
+- [x] **1.2.** `packages/cad-engine/src/spec.ts` — Zod-завантажувач + 9 тестів — 2026-05-16
+- [x] **1.3.** `packages/cad-engine/src/validators/` — sheet/bend/holes + 19 тестів — 2026-05-16
+- [x] **1.4.** `packages/cad-engine/src/k-factor.ts` — base × multiplier(R/S) + 8 тестів — 2026-05-16
+- [x] **1.5.** `workers/cad/flatcraft_cad/templates/l_bracket.py` — Pydantic + CadQuery + 16 тестів — 2026-05-16
+- [x] **1.6.** `workers/cad/flatcraft_cad/unfold.py` — bend allowance + L-розгортка + 15 тестів — 2026-05-16
+- [x] **1.7.** `workers/cad/flatcraft_cad/export/dxf.py` — 5 шарів (LASER_CUT/INNER_CUTS/BEND_LINES/BEND_TEXT/DIM) + детермінізм — 2026-05-16
+- [x] **1.8.** Снепшоти DXF — 3 фікстури, байт-у-байт регресія через post-write нормалізацію — 2026-05-16
 
 **Тести:** pytest з фікстурами для 3 розмірів L-кронштейна; перевіряємо, що валідатор кидає правильні помилки на занадто товсту/тонку заготовку, на закороткий полиць, на недозволений радіус.
 

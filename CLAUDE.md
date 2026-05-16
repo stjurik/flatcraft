@@ -212,7 +212,13 @@ flatcraft/
 - **Phase 0.4 завершено** (2026-05-16): Fastify factory з ZodTypeProvider, GET /health, pino з PII-redact (auth headers, cookie, body.email, body.password, \*.refreshToken), env через Zod. 11 unit-тестів.
 - **Phase 0.5 завершено** (2026-05-16): Next.js 15 App Router + Tailwind, R3F куб (v9, drei v10 — потребували bump через несумісність з React 19), `dynamic(ssr:false)` для три.js, Playwright e2e (2 тести). Куб обертається у браузері на :3000.
 - **Phase 0.6–0.8 завершено** (2026-05-16): GitHub Actions CI (install → lint/typecheck/test/build → e2e з Postgres service), lefthook вже працює (pre-commit eslint/typecheck/prettier на staged + pre-push pnpm test), README з 5-min setup інструкцією.
-- **Phase 0 повністю закрита.** Наступне — **Phase 1.1**: `packages/cad-engine/data/bend-machine-esi.yaml` (завантажити з docs/07).
+- **Phase 0 повністю закрита.**
+- **Phase 1 повністю закрита** (2026-05-16): CAD core готовий end-to-end.
+  - cad-engine (TS): spec loader, validators (sheet/bend/holes), k-factor — 36 тестів.
+  - workers/cad (Python 3.12 + CadQuery + ezdxf): L-bracket Pydantic+builder, unfold з K, DXF export з 5 шарами + детермінізм через post-write normalize — 41 pytest, 100% coverage.
+  - L-bracket Zod-схема у packages/types (9 тестів) — спільний контракт між web/api/worker.
+  - CLI: `cd workers/cad && uv run pytest` — повний цикл.
+- **Наступне — Phase 2.1**: сторінка `/templates` з каталогом шаблонів (apps/web).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
