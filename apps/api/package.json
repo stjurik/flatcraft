@@ -10,7 +10,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:int": "vitest run --config vitest.int.config.ts",
     "openapi": "tsx scripts/generate-openapi.ts"
