@@ -1,4 +1,5 @@
 import type { TemplateSummary } from "@flatcraft/types";
+import Link from "next/link";
 
 interface TemplateCardProps {
   readonly template: TemplateSummary;
@@ -6,7 +7,8 @@ interface TemplateCardProps {
 
 export function TemplateCard({ template }: TemplateCardProps) {
   return (
-    <article
+    <Link
+      href={`/templates/${template.slug}`}
       data-testid="template-card"
       data-slug={template.slug}
       className="group flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 transition hover:border-zinc-700 hover:bg-zinc-900/70"
@@ -33,6 +35,6 @@ export function TemplateCard({ template }: TemplateCardProps) {
       {template.descriptionUk ? (
         <p className="text-sm text-zinc-400">{template.descriptionUk}</p>
       ) : null}
-    </article>
+    </Link>
   );
 }

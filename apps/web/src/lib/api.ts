@@ -4,7 +4,12 @@
  * Викликається переважно з server components — тому базовий URL береться
  * з `API_BASE_URL` (server-side env), не з NEXT_PUBLIC_*.
  */
-import { TemplateListResponseSchema, type TemplateSummary } from "@flatcraft/types";
+import {
+  TemplateDetailSchema,
+  TemplateListResponseSchema,
+  type TemplateDetail,
+  type TemplateSummary,
+} from "@flatcraft/types";
 
 const API_BASE_URL = process.env["API_BASE_URL"] ?? "http://localhost:4000";
 
@@ -30,4 +35,20 @@ export async function fetchPublishedTemplates(): Promise<TemplateSummary[]> {
   const json = await res.json();
   const parsed = TemplateListResponseSchema.parse(json);
   return parsed.items;
+}
+
+/**
+ * Повертає детальний шаблон. `null` для 404 — щоб page.tsx міг розв'язати
+ * notFound() без обгортки try/catch.
+ */
+export async function fetchTemplate(slug: string): Promise<TemplateDetail | null> {
+  const res = await fetch(`${API_BASE_URL}/templates/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new ApiError(`Failed to fetch /templates/${slug}: ${res.status}`, res.status);
+  }
+  return TemplateDetailSchema.parse(await res.json());
 }
