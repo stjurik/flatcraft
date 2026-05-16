@@ -59,7 +59,7 @@
 
 - [x] **2.1.** Сторінка `/templates` — каталог шаблонів. API `GET /templates` (Fastify+drizzle, 3 integration + 10 schema), web page (server component, Playwright e2e). L-bracket опубліковано, решта 4 — приховані до Phase 2.10. — 2026-05-16
 - [x] **2.2.** Сторінка `/templates/[slug]` — API `GET /templates/:slug` (Detail з defaultParameters), web Studio (controlled editor + R3F viewport з live ExtrudeGeometry). L-bracket — лише slug з повним flow до Phase 2.10. — 2026-05-16
-- [ ] **2.3.** `packages/ui/src/3d-viewport/` — react-three-fiber сцена (orbit controls, zoom, кадрування)
+- [x] **2.3.** `packages/ui/src/3d-viewport/` — LBracketScene + pure-builder buildLBracketShapeCommands (5 unit-тестів). apps/web bunny консумує через dynamic ssr:false. — 2026-05-16
 - [ ] **2.4.** `packages/ui/src/parameter-form/` — авто-генерація форми з Zod-схеми шаблону (number inputs, sliders, селектори матеріалу/товщини)
 - [ ] **2.5.** Live-валідація з підсвіченням обмежень (червоні поля + tooltip з причиною)
 - [ ] **2.6.** Інтеграція OpenCascade.js: оновлення mesh при зміні параметрів (debounce 100мс)
