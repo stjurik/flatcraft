@@ -26,3 +26,5 @@ export {
   type ValidationError,
   type ValidationResult,
 } from "./validators/index.js";
+
+export { computeKFactor, type KFactorInput } from "./k-factor.js";
