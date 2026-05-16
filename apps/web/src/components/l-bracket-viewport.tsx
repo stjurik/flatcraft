@@ -3,7 +3,10 @@
 import type { LBracketParameters } from "@flatcraft/types";
 import dynamic from "next/dynamic";
 
-const Scene = dynamic(() => import("./l-bracket-scene").then((m) => m.LBracketSceneInner), {
+// LBracketScene з @flatcraft/ui — "use client", але three.js потребує
+// браузерний WebGL. dynamic(ssr:false) робить server skip, scene вантажиться
+// тільки після hydration.
+const Scene = dynamic(() => import("@flatcraft/ui").then((m) => m.LBracketScene), {
   ssr: false,
   loading: () => (
     <div

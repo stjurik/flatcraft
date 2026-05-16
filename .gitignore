@@ -16,6 +16,13 @@ out/
 *.tsbuildinfo
 # Next.js auto-generates next-env.d.ts; не комітимо.
 next-env.d.ts
+# tsc/tsx leak: інколи incremental build emit'ить .js/.d.ts поряд з .ts у src/.
+# Реальні артефакти збірки — у dist/. Виключаємо, але .ts/.tsx/.test.ts —
+# нормальні файли.
+packages/**/src/**/*.js
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts.map
 
 # Coverage
 coverage/

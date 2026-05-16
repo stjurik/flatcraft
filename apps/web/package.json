@@ -29,8 +29,8 @@
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@testing-library/react": "^16.0.1",
-    "@types/react": "^18.3.11",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/three": "^0.169.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.12.0",

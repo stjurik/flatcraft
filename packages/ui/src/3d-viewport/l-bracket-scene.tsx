@@ -1,0 +1,75 @@
+"use client";
+
+import type { LBracketParameters } from "@flatcraft/types";
+import { OrbitControls } from "@react-three/drei";
+import { Canvas } from "@react-three/fiber";
+import { useMemo } from "react";
+import { ExtrudeGeometry, Shape } from "three";
+
+import { buildLBracketShapeCommands } from "./geometry.js";
+
+interface SceneProps {
+  readonly parameters: LBracketParameters;
+  /** Товщина листа, мм. UI вибір — Phase 2.4 (MaterialPicker). */
+  readonly thicknessMm: number;
+}
+
+function compileShape(parameters: LBracketParameters, thicknessMm: number): Shape {
+  const cmds = buildLBracketShapeCommands({ parameters, thicknessMm });
+  const shape = new Shape();
+  for (const cmd of cmds) {
+    switch (cmd.kind) {
+      case "moveTo":
+        shape.moveTo(cmd.x, cmd.y);
+        break;
+      case "lineTo":
+        shape.lineTo(cmd.x, cmd.y);
+        break;
+      case "absarc":
+        shape.absarc(cmd.cx, cmd.cy, cmd.radius, cmd.startAngleRad, cmd.endAngleRad, cmd.clockwise);
+        break;
+      case "closePath":
+        shape.closePath();
+        break;
+    }
+  }
+  return shape;
+}
+
+function Bracket({ parameters, thicknessMm }: SceneProps) {
+  const geometry = useMemo(() => {
+    const shape = compileShape(parameters, thicknessMm);
+    return new ExtrudeGeometry(shape, {
+      depth: parameters.width_mm,
+      bevelEnabled: false,
+    });
+  }, [parameters, thicknessMm]);
+
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const cx = bb ? -((bb.max.x + bb.min.x) / 2) : 0;
+  const cy = bb ? -((bb.max.y + bb.min.y) / 2) : 0;
+  const cz = bb ? -((bb.max.z + bb.min.z) / 2) : 0;
+
+  return (
+    <mesh geometry={geometry} position={[cx, cy, cz]}>
+      <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
+    </mesh>
+  );
+}
+
+export function LBracketScene({ parameters, thicknessMm }: SceneProps) {
+  const maxDim = Math.max(parameters.legA_mm, parameters.legB_mm, parameters.width_mm);
+  const camDist = maxDim * 1.8;
+  return (
+    <Canvas
+      camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
+      data-testid="l-bracket-canvas"
+    >
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
+      <Bracket parameters={parameters} thicknessMm={thicknessMm} />
+      <OrbitControls enablePan={false} />
+    </Canvas>
+  );
+}

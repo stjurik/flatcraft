@@ -22,6 +22,10 @@ export default [
       // вони не наша відповідальність і не валідуються нашими правилами.
       "**/.venv/**",
       "**/venv/**",
+      // tsc incremental emit зрідка кидає .js/.d.ts поряд з src/*.ts.
+      // Реальний код — у .ts/.tsx; згенероване ігноруємо.
+      "packages/**/src/**/*.js",
+      "packages/**/src/**/*.d.ts",
     ],
   },
   js.configs.recommended,
