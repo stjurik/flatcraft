@@ -28,3 +28,20 @@ export const TemplateListResponseSchema = z.object({
 });
 
 export type TemplateListResponse = z.infer<typeof TemplateListResponseSchema>;
+
+/**
+ * Detail = Summary + parametersSchema + defaultParameters.
+ *
+ * parametersSchema поки `unknown` JSONB — у `packages/types/templates/*`
+ * є typed Zod-схеми для кожного slug (LBracketParametersSchema). Web
+ * вибирає правильну схему за slug, БД-поле — placeholder для майбутньої
+ * динамічної реєстрації шаблонів.
+ *
+ * defaultParameters — стартові значення для нового draft.
+ */
+export const TemplateDetailSchema = TemplateSummarySchema.extend({
+  parametersSchema: z.unknown(),
+  defaultParameters: z.record(z.string(), z.unknown()),
+});
+
+export type TemplateDetail = z.infer<typeof TemplateDetailSchema>;

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { TemplateListResponseSchema, TemplateSummarySchema } from "./template.js";
+import {
+  TemplateDetailSchema,
+  TemplateListResponseSchema,
+  TemplateSummarySchema,
+} from "./template.js";
 
 const validTemplate = {
   id: "11111111-2222-3333-4444-555555555555",
@@ -58,6 +62,34 @@ describe("TemplateSummarySchema", () => {
         previewImageUrl: "https://example.com/preview.png",
       }),
     ).not.toThrow();
+  });
+});
+
+describe("TemplateDetailSchema", () => {
+  const detail = {
+    ...validTemplate,
+    parametersSchema: { type: "object" },
+    defaultParameters: { legA_mm: 60, bend_radius_mm: 2.5 },
+  };
+
+  it("приймає detail з parametersSchema і defaultParameters", () => {
+    expect(() => TemplateDetailSchema.parse(detail)).not.toThrow();
+  });
+
+  it("приймає null/unknown у parametersSchema (placeholder для майбутньої реєстрації)", () => {
+    expect(() => TemplateDetailSchema.parse({ ...detail, parametersSchema: null })).not.toThrow();
+    expect(() => TemplateDetailSchema.parse({ ...detail, parametersSchema: {} })).not.toThrow();
+  });
+
+  it("відхиляє якщо defaultParameters не record", () => {
+    expect(() =>
+      TemplateDetailSchema.parse({ ...detail, defaultParameters: "not-object" }),
+    ).toThrow();
+  });
+
+  it("успадковує валідації Summary (uuid id, positive version)", () => {
+    expect(() => TemplateDetailSchema.parse({ ...detail, id: "bad" })).toThrow();
+    expect(() => TemplateDetailSchema.parse({ ...detail, version: 0 })).toThrow();
   });
 });
 

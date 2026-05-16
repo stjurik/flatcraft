@@ -86,4 +86,22 @@ describe("SEED_TEMPLATES", () => {
       expect(t.nameEn.length).toBeGreaterThan(0);
     }
   });
+
+  it("L-bracket defaultParameters містить очікувані поля", () => {
+    const lBracket = SEED_TEMPLATES.find((t) => t.slug === "l_bracket");
+    expect(lBracket?.defaultParameters).toMatchObject({
+      legA_mm: expect.any(Number),
+      legB_mm: expect.any(Number),
+      bend_radius_mm: expect.any(Number),
+      bend_angle_deg: 90,
+      width_mm: expect.any(Number),
+    });
+  });
+
+  it("неопубліковані шаблони мають порожній defaultParameters", () => {
+    const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished);
+    for (const t of unpublished) {
+      expect(t.defaultParameters).toEqual({});
+    }
+  });
 });

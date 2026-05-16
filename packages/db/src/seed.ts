@@ -13,6 +13,8 @@
  *   - runSeed(client) — окрема функція, працює з будь-яким drizzle-інстансом
  *     (production, integration tests).
  */
+import { L_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
+
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
 
@@ -85,7 +87,7 @@ export const STANDARD_THICKNESSES_MM: readonly number[] = [
 // За doc/05 §4: нержавійка у 10мм за прайсом ESI не йде.
 export const STAINLESS_EXCLUDED_THICKNESS_MM = 10.0;
 
-// ─── Шаблони (placeholder, реальні Zod-схеми у packages/types) ─────────────
+// ─── Шаблони (Zod-схеми параметрів — у packages/types/templates/*) ─────────
 export interface TemplateSeed {
   readonly slug: string;
   readonly nameUk: string;
@@ -94,6 +96,8 @@ export interface TemplateSeed {
   readonly descriptionEn: string;
   /** Видимий у каталозі `/templates`. false для шаблонів без готового CAD-builder. */
   readonly isPublished: boolean;
+  /** Стартові значення параметрів — підвантажуються у редактор при відкритті. */
+  readonly defaultParameters: Readonly<Record<string, unknown>>;
 }
 
 export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
@@ -105,6 +109,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     descriptionEn: "Two-flange right-angle bracket.",
     // Phase 1.5 — CadQuery-builder готовий, шаблон публікуємо.
     isPublished: true,
+    defaultParameters: L_BRACKET_DEFAULT_PARAMETERS,
   },
   {
     slug: "z_bracket",
@@ -113,6 +118,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     descriptionUk: "Z-подібний кронштейн з трьома секціями.",
     descriptionEn: "Z-shaped bracket with three segments.",
     isPublished: false,
+    defaultParameters: {},
   },
   {
     slug: "corner_angle",
@@ -121,6 +127,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     descriptionUk: "Підсилювальний кутник для меблів та конструкцій.",
     descriptionEn: "Reinforcement angle for furniture and structures.",
     isPublished: false,
+    defaultParameters: {},
   },
   {
     slug: "wall_shelf",
@@ -129,6 +136,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     descriptionUk: "Полиця з гнутих кронштейнів для кріплення до стіни.",
     descriptionEn: "Shelf with bent brackets for wall mounting.",
     isPublished: false,
+    defaultParameters: {},
   },
   {
     slug: "perforated_panel",
@@ -137,6 +145,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     descriptionUk: "Лист із сіткою отворів за заданим кроком.",
     descriptionEn: "Sheet with a grid of holes at a given pitch.",
     isPublished: false,
+    defaultParameters: {},
   },
 ];
 
@@ -186,12 +195,13 @@ async function seedMaterialsAndThicknesses(client: DatabaseClient): Promise<void
 async function seedTemplates(client: DatabaseClient): Promise<void> {
   const { db } = client;
 
-  // parameters_schema / default_parameters заповнимо при імплементації шаблонів
-  // (Phase 1.5 — L-кронштейн, Phase 2.10 — решта). До того ж — пусті JSONB.
+  // parametersSchema залишається {} — Zod-схеми поки в @flatcraft/types,
+  // web вибирає за slug. defaultParameters — реальні preset з типів.
   for (const t of SEED_TEMPLATES) {
     // upsert (onConflictDoUpdate) — щоб переключення is_published / зміна
-    // descriptions у seed-коді відбивалися у БД при повторному `pnpm db:seed`.
-    // onConflictDoNothing залишав би записи у застарілому стані.
+    // descriptions / defaultParameters у seed-коді відбивалися у БД при
+    // повторному `pnpm db:seed`. onConflictDoNothing залишав би записи
+    // у застарілому стані.
     await db
       .insert(templates)
       .values({
@@ -201,7 +211,7 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
         descriptionUk: t.descriptionUk,
         descriptionEn: t.descriptionEn,
         parametersSchema: {},
-        defaultParameters: {},
+        defaultParameters: t.defaultParameters,
         isPublished: t.isPublished,
       })
       .onConflictDoUpdate({
@@ -211,6 +221,7 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
           nameEn: t.nameEn,
           descriptionUk: t.descriptionUk,
           descriptionEn: t.descriptionEn,
+          defaultParameters: t.defaultParameters,
           isPublished: t.isPublished,
         },
       });

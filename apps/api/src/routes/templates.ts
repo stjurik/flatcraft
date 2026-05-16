@@ -1,14 +1,16 @@
 /**
- * GET /templates — каталог опублікованих шаблонів.
+ * Шаблони:
+ *   GET /templates         — каталог опублікованих.
+ *   GET /templates/:slug   — деталі (з default_parameters для редактора).
  *
- * Поки повертає лише `is_published = true`. У майбутньому додамо
- * пейджинг + фільтри (по матеріалу/категорії) — поки 5 шаблонів MVP
- * сорт-результат на клієнті.
+ * Тільки опубліковані повертаються — заглушка контролю доступу до часу,
+ * поки не буде admin-режиму превʼю чорнового шаблону.
  */
-import { TemplateListResponseSchema } from "@flatcraft/types";
+import { TemplateDetailSchema, TemplateListResponseSchema } from "@flatcraft/types";
 import { schema } from "@flatcraft/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { z } from "zod";
 
 export const templateRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
@@ -45,6 +47,51 @@ export const templateRoutes: FastifyPluginAsyncZod = async (app) => {
           createdAt: r.createdAt.toISOString(),
           updatedAt: r.updatedAt.toISOString(),
         })),
+      };
+    },
+  );
+
+  const NotFoundSchema = z.object({ error: z.literal("template_not_found") });
+
+  app.get(
+    "/templates/:slug",
+    {
+      schema: {
+        description: "Деталі шаблону з default_parameters.",
+        tags: ["templates"],
+        params: z.object({
+          slug: z
+            .string()
+            .min(1)
+            .max(64)
+            // slug-формат збігається з seed: lowercase + underscore.
+            .regex(/^[a-z][a-z0-9_]*$/),
+        }),
+        response: {
+          200: TemplateDetailSchema,
+          404: NotFoundSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const [row] = await app.db
+        .select()
+        .from(schema.templates)
+        .where(
+          and(eq(schema.templates.slug, req.params.slug), eq(schema.templates.isPublished, true)),
+        )
+        .limit(1);
+
+      if (!row) {
+        return reply.code(404).send({ error: "template_not_found" as const });
+      }
+
+      return {
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        // drizzle повертає jsonb як unknown → нормалізуємо у Record для Zod.
+        defaultParameters: (row.defaultParameters as Record<string, unknown> | null) ?? {},
       };
     },
   );

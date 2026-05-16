@@ -59,4 +59,37 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     const slugs = body.items.map((t) => t.slug);
     expect(slugs).toEqual([...slugs].sort());
   });
+
+  it("GET /templates/l_bracket → 200 з defaultParameters", async () => {
+    const { TemplateDetailSchema } = await import("@flatcraft/types");
+    const res = await app.inject({ method: "GET", url: "/templates/l_bracket" });
+    expect(res.statusCode).toBe(200);
+    const parsed = TemplateDetailSchema.safeParse(res.json());
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.slug).toBe("l_bracket");
+      expect(parsed.data.defaultParameters).toMatchObject({
+        legA_mm: expect.any(Number),
+        legB_mm: expect.any(Number),
+        bend_radius_mm: expect.any(Number),
+        bend_angle_deg: 90,
+        width_mm: expect.any(Number),
+      });
+    }
+  });
+
+  it("GET /templates/z_bracket → 404 (неопублікований)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates/z_bracket" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("GET /templates/does_not_exist → 404", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates/does_not_exist" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("GET /templates/INVALID-SLUG → 400 (regex validation)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates/INVALID-SLUG" });
+    expect(res.statusCode).toBe(400);
+  });
 });
