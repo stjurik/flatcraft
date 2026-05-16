@@ -12,11 +12,15 @@ pre-commit:
       glob: "*.{ts,tsx,js,jsx,json,md,yaml,yml}"
       run: pnpm exec prettier --check {staged_files}
     python-lint:
-      glob: "workers/cad/**/*.py"
-      run: cd workers/cad && uv run ruff check {staged_files}
+      # root: + glob: → lefthook фільтрує staged-файли під workers/cad/ і
+      # підставляє у {staged_files} відносні шляхи без префіксу.
+      root: "workers/cad/"
+      glob: "*.py"
+      run: uv run ruff check {staged_files}
     python-types:
-      glob: "workers/cad/**/*.py"
-      run: cd workers/cad && uv run mypy .
+      root: "workers/cad/"
+      glob: "*.py"
+      run: uv run mypy .
 
 pre-push:
   commands:
