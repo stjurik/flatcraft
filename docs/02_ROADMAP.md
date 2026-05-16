@@ -28,9 +28,9 @@
 - [x] **0.3.** Drizzle init: 12 таблиць згідно docs/05, перша міграція, seed (7 матеріалів × 10 товщин + 5 шаблонів-placeholder) — 2026-05-16
 - [x] **0.4.** Fastify hello-world з health-check (`/health`), pino logger з PII-redact, Zod-валідація env, fastify-type-provider-zod — 2026-05-16
 - [x] **0.5.** Next.js 15 App Router + Tailwind, R3F куб (`dynamic ssr:false`), Playwright e2e — 2026-05-16
-- [ ] **0.6.** GitHub Actions: lint + typecheck + test + build для всіх workspace
-- [ ] **0.7.** Pre-commit hook (lefthook): lint + typecheck + test
-- [ ] **0.8.** README.md з інструкцією «як запустити локально за 5 хвилин»
+- [x] **0.6.** GitHub Actions CI: install/lint/typecheck/test/build/e2e з Postgres service — 2026-05-16
+- [x] **0.7.** Pre-commit hook (lefthook): lint + typecheck + format на staged, test на pre-push — 2026-05-16
+- [x] **0.8.** README.md з інструкцією «як запустити локально за 5 хвилин» — 2026-05-16
 
 **Тести:** smoke-test, що health-check API повертає 200, web відкривається на `localhost:3000`.
 

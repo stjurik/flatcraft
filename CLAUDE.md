@@ -211,7 +211,8 @@ flatcraft/
 - **Phase 0.3 завершено** (2026-05-16): drizzle schema на 12 таблиць (`docs/05_DATA_MODEL.md`), перша міграція `0000_wandering_vapor.sql` застосована до живої БД, seed додав 7 матеріалів × 10 товщин (нержавійка 10мм виключена) + 5 шаблонів-placeholder. 27 unit-тестів зелені. UUID v4 наразі — ADR-012.
 - **Phase 0.4 завершено** (2026-05-16): Fastify factory з ZodTypeProvider, GET /health, pino з PII-redact (auth headers, cookie, body.email, body.password, \*.refreshToken), env через Zod. 11 unit-тестів.
 - **Phase 0.5 завершено** (2026-05-16): Next.js 15 App Router + Tailwind, R3F куб (v9, drei v10 — потребували bump через несумісність з React 19), `dynamic(ssr:false)` для три.js, Playwright e2e (2 тести). Куб обертається у браузері на :3000.
-- **Наступне — Phase 0.6**: GitHub Actions CI (lint + typecheck + test + build). Далі 0.7 (lefthook налаштування), 0.8 (README з 5-min setup).
+- **Phase 0.6–0.8 завершено** (2026-05-16): GitHub Actions CI (install → lint/typecheck/test/build → e2e з Postgres service), lefthook вже працює (pre-commit eslint/typecheck/prettier на staged + pre-push pnpm test), README з 5-min setup інструкцією.
+- **Phase 0 повністю закрита.** Наступне — **Phase 1.1**: `packages/cad-engine/data/bend-machine-esi.yaml` (завантажити з docs/07).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 

@@ -2,6 +2,7 @@
 
 > Безкоштовна онлайн-платформа для проєктування деталей з листового металу і генерації виробничих креслень (DXF + PDF + STEP) — без CAD-навичок.
 
+[![CI](https://github.com/stjurik/flatcraft/actions/workflows/ci.yml/badge.svg)](https://github.com/stjurik/flatcraft/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--MVP-orange)
 
@@ -36,30 +37,45 @@
 
 ## Швидкий старт (локально)
 
-Передумови: Docker Desktop, Node.js 20+ (через `nvm`), pnpm 9+, Python 3.12 (через `uv`).
+Передумови: Docker (або Docker Desktop), Node.js 20.11+ (через `nvm`), pnpm 9+ (`corepack enable pnpm`), Python 3.12 (через `uv`, потрібен для CAD-воркера — Phase 1+).
 
 ```bash
-# 1. Клон і setup
+# 1. Клон + setup
 git clone https://github.com/stjurik/flatcraft.git
 cd flatcraft
+corepack enable pnpm        # активує pnpm з Node 20+
 pnpm install
 cp .env.example .env
 
-# 2. Підняти інфраструктуру (Postgres + Redis + MinIO)
+# 2. Інфраструктура (Postgres 16 + Redis 7 + MinIO + Mailpit)
 docker compose up -d
+docker compose ps           # усі мають бути healthy
 
-# 3. Міграції + seed
+# 3. Міграції + seed (7 матеріалів × 10 товщин + 5 шаблонів)
 pnpm db:migrate
 pnpm db:seed
 
-# 4. Стартуємо
-pnpm dev    # підіймає web (3000) + api (4000) + cad-worker
-
-# 5. Відкриваємо
-open http://localhost:3000
+# 4. Запуск web + api (cad-worker — Phase 1+)
+pnpm dev
 ```
 
-Усе — за 5 хв. Якщо щось пішло не так — див. `docs/troubleshooting.md` (буде).
+Перевірка:
+
+- **web** — http://localhost:3000 (`flatcraft` hero + 3D-куб)
+- **api** — `curl http://localhost:4000/health` → `{"status":"ok",...}`
+- **MinIO** — http://localhost:9001 (`minioadmin` / `minioadmin`)
+- **Mailpit** — http://localhost:8025
+
+## Тести
+
+```bash
+pnpm typecheck              # tsc --noEmit для всіх workspace
+pnpm lint                   # eslint
+pnpm test                   # vitest unit + integration
+pnpm --filter @flatcraft/web exec playwright test   # e2e (потребує chromium: pnpm exec playwright install chromium)
+```
+
+CI на GitHub Actions проганяє lint + typecheck + test + build + e2e на кожен push та PR.
 
 ## Документація
 
