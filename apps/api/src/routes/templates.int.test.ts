@@ -1,0 +1,62 @@
+/**
+ * Інтеграційний тест GET /templates — проти реальної Postgres.
+ *
+ * Запускається коли `DATABASE_URL` визначений (локально через docker compose,
+ * у CI через postgres service-контейнер). Без env — describe.skip, щоб
+ * `pnpm test` не падав на машинах без бази.
+ *
+ * У beforeAll: повна setup state — migrate + seed. Tearndown: client.close().
+ */
+import { createClient, runMigrations, runSeed, type DatabaseClient } from "@flatcraft/db";
+import type { FastifyInstance } from "fastify";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { createServer } from "../server.js";
+
+const DATABASE_URL = process.env["DATABASE_URL"];
+
+describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
+  let app: FastifyInstance;
+  let client: DatabaseClient;
+
+  beforeAll(async () => {
+    if (!DATABASE_URL) throw new Error("DATABASE_URL required");
+    await runMigrations({ url: DATABASE_URL });
+    await runSeed({ url: DATABASE_URL });
+    client = createClient(DATABASE_URL);
+    app = await createServer({ logger: false, dbClient: client });
+  }, 30_000);
+
+  afterAll(async () => {
+    await app?.close();
+    await client?.close();
+  });
+
+  it("повертає лише опубліковані шаблони (L-bracket — після seed)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      items: Array<{ slug: string; isPublished: boolean; nameUk: string }>;
+    }>();
+    expect(body.items.length).toBeGreaterThanOrEqual(1);
+    expect(body.items.every((t) => t.isPublished)).toBe(true);
+    const slugs = body.items.map((t) => t.slug);
+    expect(slugs).toContain("l_bracket");
+    // Невидимі поки що (з Phase 2.10): z_bracket, corner_angle, wall_shelf, perforated_panel.
+    expect(slugs).not.toContain("z_bracket");
+  });
+
+  it("response відповідає TemplateListResponseSchema", async () => {
+    const { TemplateListResponseSchema } = await import("@flatcraft/types");
+    const res = await app.inject({ method: "GET", url: "/templates" });
+    const parsed = TemplateListResponseSchema.safeParse(res.json());
+    expect(parsed.success).toBe(true);
+  });
+
+  it("відсортовано по slug ASC (стабільний порядок для UI)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates" });
+    const body = res.json<{ items: Array<{ slug: string }> }>();
+    const slugs = body.items.map((t) => t.slug);
+    expect(slugs).toEqual([...slugs].sort());
+  });
+});

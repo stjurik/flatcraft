@@ -5,6 +5,7 @@
  * щоб тести могли використовувати `app.inject()` без відкриття порту.
  * Реальний запуск (listen) — у main() нижче і у `start` npm-скрипті.
  */
+import type { DatabaseClient } from "@flatcraft/db";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import {
   serializerCompiler,
@@ -14,9 +15,17 @@ import {
 
 import { env } from "./env.js";
 import { createLoggerOptions } from "./logger.js";
+import { dbPlugin } from "./plugins/db.js";
 import { healthRoutes } from "./routes/health.js";
+import { templateRoutes } from "./routes/templates.js";
 
-export type CreateServerOptions = Pick<FastifyServerOptions, "logger">;
+export interface CreateServerOptions {
+  readonly logger?: FastifyServerOptions["logger"];
+  /** Override для тестів: інжектити готовий drizzle-клієнт (testcontainers). */
+  readonly dbClient?: DatabaseClient;
+  /** Override DATABASE_URL без зміни env. */
+  readonly dbUrl?: string;
+}
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
@@ -29,7 +38,13 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  await app.register(dbPlugin, {
+    ...(options.dbClient ? { client: options.dbClient } : {}),
+    ...(options.dbUrl ? { url: options.dbUrl } : {}),
+  });
+
   await app.register(healthRoutes);
+  await app.register(templateRoutes);
 
   return app;
 }

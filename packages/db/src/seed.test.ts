@@ -63,6 +63,12 @@ describe("SEED_TEMPLATES", () => {
     expect(SEED_TEMPLATES).toHaveLength(5);
   });
 
+  it("лише L-bracket опубліковано (Phase 1.5 готовий)", () => {
+    const published = SEED_TEMPLATES.filter((t) => t.isPublished);
+    expect(published).toHaveLength(1);
+    expect(published[0]?.slug).toBe("l_bracket");
+  });
+
   it("slug-и унікальні і відповідають roadmap Phase 2.10", () => {
     const slugs = SEED_TEMPLATES.map((t) => t.slug).sort();
     expect(slugs).toEqual([

@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { createServer } from "./server.js";
 
+// Dummy URL — postgres-js створює пул лазі, реальне з'єднання тільки при
+// першому запиті. /health і 404-тести не торкаються db, тому жодних
+// з'єднань не відкривається.
+const DUMMY_DB_URL = "postgresql://dummy:dummy@127.0.0.1:1/dummy";
+
 describe("Fastify server", () => {
   it("GET /health → 200 і повертає валідний health-payload", async () => {
-    const app = await createServer({ logger: false });
+    const app = await createServer({ logger: false, dbUrl: DUMMY_DB_URL });
     try {
       const res = await app.inject({ method: "GET", url: "/health" });
       expect(res.statusCode).toBe(200);
@@ -23,7 +28,7 @@ describe("Fastify server", () => {
   });
 
   it("невідомий URL повертає 404", async () => {
-    const app = await createServer({ logger: false });
+    const app = await createServer({ logger: false, dbUrl: DUMMY_DB_URL });
     try {
       const res = await app.inject({ method: "GET", url: "/this-does-not-exist" });
       expect(res.statusCode).toBe(404);
@@ -33,7 +38,7 @@ describe("Fastify server", () => {
   });
 
   it("ставить sane дефолти безпеки: x-powered-by не виставляється", async () => {
-    const app = await createServer({ logger: false });
+    const app = await createServer({ logger: false, dbUrl: DUMMY_DB_URL });
     try {
       const res = await app.inject({ method: "GET", url: "/health" });
       // Fastify за замовчуванням не додає X-Powered-By; перевіряємо інваріант.

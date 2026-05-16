@@ -92,6 +92,8 @@ export interface TemplateSeed {
   readonly nameEn: string;
   readonly descriptionUk: string;
   readonly descriptionEn: string;
+  /** Видимий у каталозі `/templates`. false для шаблонів без готового CAD-builder. */
+  readonly isPublished: boolean;
 }
 
 export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
@@ -101,6 +103,8 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     nameEn: "L-bracket",
     descriptionUk: "Кутник з двох полиць під 90°.",
     descriptionEn: "Two-flange right-angle bracket.",
+    // Phase 1.5 — CadQuery-builder готовий, шаблон публікуємо.
+    isPublished: true,
   },
   {
     slug: "z_bracket",
@@ -108,6 +112,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     nameEn: "Z-bracket",
     descriptionUk: "Z-подібний кронштейн з трьома секціями.",
     descriptionEn: "Z-shaped bracket with three segments.",
+    isPublished: false,
   },
   {
     slug: "corner_angle",
@@ -115,6 +120,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     nameEn: "Corner angle",
     descriptionUk: "Підсилювальний кутник для меблів та конструкцій.",
     descriptionEn: "Reinforcement angle for furniture and structures.",
+    isPublished: false,
   },
   {
     slug: "wall_shelf",
@@ -122,6 +128,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     nameEn: "Wall shelf",
     descriptionUk: "Полиця з гнутих кронштейнів для кріплення до стіни.",
     descriptionEn: "Shelf with bent brackets for wall mounting.",
+    isPublished: false,
   },
   {
     slug: "perforated_panel",
@@ -129,6 +136,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     nameEn: "Perforated panel",
     descriptionUk: "Лист із сіткою отворів за заданим кроком.",
     descriptionEn: "Sheet with a grid of holes at a given pitch.",
+    isPublished: false,
   },
 ];
 
@@ -181,6 +189,9 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
   // parameters_schema / default_parameters заповнимо при імплементації шаблонів
   // (Phase 1.5 — L-кронштейн, Phase 2.10 — решта). До того ж — пусті JSONB.
   for (const t of SEED_TEMPLATES) {
+    // upsert (onConflictDoUpdate) — щоб переключення is_published / зміна
+    // descriptions у seed-коді відбивалися у БД при повторному `pnpm db:seed`.
+    // onConflictDoNothing залишав би записи у застарілому стані.
     await db
       .insert(templates)
       .values({
@@ -191,8 +202,18 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
         descriptionEn: t.descriptionEn,
         parametersSchema: {},
         defaultParameters: {},
+        isPublished: t.isPublished,
       })
-      .onConflictDoNothing({ target: templates.slug });
+      .onConflictDoUpdate({
+        target: templates.slug,
+        set: {
+          nameUk: t.nameUk,
+          nameEn: t.nameEn,
+          descriptionUk: t.descriptionUk,
+          descriptionEn: t.descriptionEn,
+          isPublished: t.isPublished,
+        },
+      });
   }
 }
 
