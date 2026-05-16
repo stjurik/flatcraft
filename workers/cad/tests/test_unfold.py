@@ -1,0 +1,151 @@
+"""Тести алгоритму розгортки з K-фактором."""
+
+import math
+
+import pytest
+
+from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.unfold import (
+    UnfoldedLBracket,
+    compute_bend_allowance,
+    unfold_l_bracket,
+)
+
+
+class TestBendAllowance:
+    def test_формула_ba_по_нейтральній_лінії(self) -> None:
+        """BA = (π/180) · angle · (R + K·t).
+        Ручний розрахунок: angle=90, R=2.5, t=2, K=0.4
+        → BA = (π/2) · (2.5 + 0.8) = (π/2) · 3.3 ≈ 5.1836.
+        """
+        ba = compute_bend_allowance(
+            angle_deg=90.0, inner_radius_mm=2.5, thickness_mm=2.0, k_factor=0.4
+        )
+        expected = (math.pi / 2) * 3.3
+        assert ba == pytest.approx(expected, abs=1e-9)
+
+    def test_кут_60_градусів(self) -> None:
+        ba = compute_bend_allowance(
+            angle_deg=60.0, inner_radius_mm=2.0, thickness_mm=1.5, k_factor=0.5
+        )
+        expected = (math.pi / 3) * (2.0 + 0.75)
+        assert ba == pytest.approx(expected, abs=1e-9)
+
+    def test_кут_180_означає_півколо(self) -> None:
+        # 180° гиб → довжина BA = π × (R + K·t).
+        ba = compute_bend_allowance(
+            angle_deg=180.0, inner_radius_mm=1.0, thickness_mm=1.0, k_factor=0.4
+        )
+        assert ba == pytest.approx(math.pi * 1.4, abs=1e-9)
+
+    @pytest.mark.parametrize("bad_angle", [-1.0, 0.0, 181.0])
+    def test_невалідний_кут_кидає(self, bad_angle: float) -> None:
+        with pytest.raises(ValueError, match="angle"):
+            compute_bend_allowance(
+                angle_deg=bad_angle, inner_radius_mm=2.5, thickness_mm=2.0, k_factor=0.4
+            )
+
+    def test_невалідний_радіус_кидає(self) -> None:
+        with pytest.raises(ValueError, match="inner_radius"):
+            compute_bend_allowance(
+                angle_deg=90, inner_radius_mm=-1.0, thickness_mm=2.0, k_factor=0.4
+            )
+
+    def test_невалідна_товщина_кидає(self) -> None:
+        with pytest.raises(ValueError, match="thickness"):
+            compute_bend_allowance(
+                angle_deg=90, inner_radius_mm=2.0, thickness_mm=0.0, k_factor=0.4
+            )
+
+    def test_невалідний_k_кидає(self) -> None:
+        with pytest.raises(ValueError, match="k_factor"):
+            compute_bend_allowance(
+                angle_deg=90, inner_radius_mm=2.0, thickness_mm=2.0, k_factor=1.5
+            )
+
+
+class TestUnfoldLBracket:
+    def _params(self, **overrides: float) -> LBracketBuildParameters:
+        defaults: dict[str, float] = {
+            "leg_a_mm": 60.0,
+            "leg_b_mm": 60.0,
+            "bend_radius_mm": 2.5,
+            "bend_angle_deg": 90,
+            "width_mm": 100.0,
+            "thickness_mm": 2.0,
+        }
+        defaults.update(overrides)
+        return LBracketBuildParameters(**defaults)  # type: ignore[arg-type]
+
+    def test_розгортка_60_60_t2_r25_k04(self) -> None:
+        """Конвенція: розгортка починається з полиці B, потім bend, потім полиця A.
+        L = (leg_b − t − R) + BA + (leg_a − t − R)
+          = (60 − 2 − 2.5) + (π/2)(2.5 + 0.4·2) + (60 − 2 − 2.5)
+          ≈ 55.5 + 5.1836 + 55.5 = 116.1836 мм
+        Лінія гиба — центр BA-сегмента від лівого краю.
+        """
+        result = unfold_l_bracket(self._params(), k_factor=0.4)
+        assert isinstance(result, UnfoldedLBracket)
+        expected_ba = (math.pi / 2) * 3.3
+        expected_length = 55.5 + expected_ba + 55.5
+        assert result.length_mm == pytest.approx(expected_length, abs=1e-9)
+        assert result.width_mm == pytest.approx(100.0, abs=1e-9)
+        assert result.bend_allowance_mm == pytest.approx(expected_ba, abs=1e-9)
+        assert result.bend_position_mm == pytest.approx(55.5 + expected_ba / 2, abs=1e-9)
+        assert result.thickness_mm == 2.0
+
+    def test_асиметричні_полиці_конвенція_b_спочатку(self) -> None:
+        """leg_a=40, leg_b=80, t=1.5, R=2.5, K=0.4.
+        Розгортка: спочатку flat_b=76, потім BA, потім flat_a=36.
+        Bend position = flat_b + BA/2.
+        """
+        params = self._params(leg_a_mm=40.0, leg_b_mm=80.0, thickness_mm=1.5, width_mm=200.0)
+        result = unfold_l_bracket(params, k_factor=0.4)
+        expected_ba = (math.pi / 2) * (2.5 + 0.4 * 1.5)
+        expected_length = (80 - 1.5 - 2.5) + expected_ba + (40 - 1.5 - 2.5)
+        assert result.length_mm == pytest.approx(expected_length, abs=1e-9)
+        assert result.bend_position_mm == pytest.approx(
+            (80 - 1.5 - 2.5) + expected_ba / 2, abs=1e-9
+        )
+
+    def test_розгортка_зберігає_площу_приблизно(self) -> None:
+        """Площа розгорнутого аркуша має бути близько до площі профілю
+        L-bracket·width."""
+        params = self._params()
+        result = unfold_l_bracket(params, k_factor=0.4)
+        unfolded_volume = result.length_mm * result.width_mm * result.thickness_mm
+        profile_area = params.thickness_mm * (
+            params.leg_a_mm + params.leg_b_mm - params.thickness_mm
+        )
+        bracket_volume = profile_area * params.width_mm
+        assert unfolded_volume == pytest.approx(bracket_volume, rel=0.03)
+
+    def test_k_фактор_впливає_на_довжину(self) -> None:
+        """Більший K → довша розгортка (більше матеріалу у bend region)."""
+        params = self._params()
+        small_k = unfold_l_bracket(params, k_factor=0.3)
+        big_k = unfold_l_bracket(params, k_factor=0.5)
+        assert big_k.length_mm > small_k.length_mm
+
+    def test_детермінізм(self) -> None:
+        params = self._params()
+        a = unfold_l_bracket(params, k_factor=0.4)
+        b = unfold_l_bracket(params, k_factor=0.4)
+        assert a == b
+
+    def test_закороткі_полиці_кидають(self) -> None:
+        """leg_a − t − R ≤ 0: плоский сегмент відсутній → ValueError."""
+        # leg_a=20 (мінімум валідації), t=8, R=5 → 20 - 8 - 5 = 7 > 0, OK.
+        # Зробимо явно small: t=10, R=5 (макс), leg=20 → 20-10-5=5 > 0
+        # Меньше неможливо через Pydantic constraints.
+        # Достатньо синтетичних значень через model_construct (обхід валідації).
+        params = LBracketBuildParameters.model_construct(
+            leg_a_mm=10.0,
+            leg_b_mm=60.0,
+            bend_radius_mm=5.0,
+            bend_angle_deg=90,
+            width_mm=100.0,
+            thickness_mm=8.0,
+        )
+        with pytest.raises(ValueError, match="too short"):
+            unfold_l_bracket(params, k_factor=0.4)
