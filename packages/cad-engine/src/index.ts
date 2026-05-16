@@ -11,3 +11,18 @@
  */
 
 export { BendMachineSpecSchema, loadSpec, loadSpecFromFile, type BendMachineSpec } from "./spec.js";
+
+export {
+  combine,
+  fail,
+  ok,
+  validateBend,
+  validateHoles,
+  validateSheet,
+  type BendInput,
+  type HoleInput,
+  type HolesInput,
+  type SheetInput,
+  type ValidationError,
+  type ValidationResult,
+} from "./validators/index.js";
