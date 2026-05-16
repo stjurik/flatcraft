@@ -206,8 +206,10 @@ flatcraft/
 
 ## 13. Поточний стан
 
-- **Phase 0.1 завершено** (2026-05-15): скелет монорепо створено, `pnpm install` і `pnpm typecheck` зелені по всіх 10 workspace, git ініціалізовано (перший коміт + lockfile).
-- **Наступне — Phase 0.2** (див. `docs/02_ROADMAP.md`): `docker compose up -d`, Drizzle init + перша міграція + seed, Fastify hello-world, Next.js hello-world, GitHub Actions CI.
+- **Phase 0.1 завершено** (2026-05-15): скелет монорепо створено, `pnpm install` і `pnpm typecheck` зелені по всіх 10 workspace, git ініціалізовано.
+- **Phase 0.2 завершено** (2026-05-16): `docker compose up -d` піднімає Postgres 16, Redis 7, MinIO + bucket init, Mailpit — усі healthy.
+- **Phase 0.3 завершено** (2026-05-16): drizzle schema на 12 таблиць (`docs/05_DATA_MODEL.md`), перша міграція `0000_wandering_vapor.sql` застосована до живої БД, seed додав 7 матеріалів × 10 товщин (нержавійка 10мм виключена) + 5 шаблонів-placeholder. 27 unit-тестів зелені. UUID v4 наразі — ADR-012.
+- **Наступне — Phase 0.4** (див. `docs/02_ROADMAP.md`): Fastify hello-world з health-check, pino, Zod. Далі 0.5 (Next.js + react-three-fiber), 0.6 (CI), 0.7 (lefthook), 0.8 (README).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 

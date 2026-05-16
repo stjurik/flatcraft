@@ -5,15 +5,15 @@
 
 ## Стадії
 
-| Стадія | Терміни (соло-розробник, junior + Claude Code) | Мета |
-|---|---|---|
-| **Phase 0. Setup** | 1 тиждень | Локальне середовище, CI, перший «hello world» end-to-end |
-| **Phase 1. CAD core** | 3 тижні | Валідатор гибки + розгортка + експорт DXF одного шаблону (L-кронштейн) |
-| **Phase 2. UX MVP** | 3 тижні | 3D-редактор + форма параметрів + експорт DXF/PDF + 5 шаблонів |
-| **Phase 3. Auth & Limits** | 2 тижні | Реєстрація, лічильник 10 безкоштовних, гість-режим (без експорту) |
-| **Phase 4. Donations** | 1 тиждень | Monobank Banka link + ручне підтвердження + продовження ліміту |
-| **Phase 5. Hardening + Launch** | 2 тижні | GDPR, Privacy Policy, Sentry, prod-deploy на Mirohost Cloud, домен, SSL |
-| **Total** | ≈ 12 тижнів | Public MVP |
+| Стадія                          | Терміни (соло-розробник, junior + Claude Code) | Мета                                                                    |
+| ------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
+| **Phase 0. Setup**              | 1 тиждень                                      | Локальне середовище, CI, перший «hello world» end-to-end                |
+| **Phase 1. CAD core**           | 3 тижні                                        | Валідатор гибки + розгортка + експорт DXF одного шаблону (L-кронштейн)  |
+| **Phase 2. UX MVP**             | 3 тижні                                        | 3D-редактор + форма параметрів + експорт DXF/PDF + 5 шаблонів           |
+| **Phase 3. Auth & Limits**      | 2 тижні                                        | Реєстрація, лічильник 10 безкоштовних, гість-режим (без експорту)       |
+| **Phase 4. Donations**          | 1 тиждень                                      | Monobank Banka link + ручне підтвердження + продовження ліміту          |
+| **Phase 5. Hardening + Launch** | 2 тижні                                        | GDPR, Privacy Policy, Sentry, prod-deploy на Mirohost Cloud, домен, SSL |
+| **Total**                       | ≈ 12 тижнів                                    | Public MVP                                                              |
 
 Після MVP — окремий roadmap у `docs/02_ROADMAP_v1.md` (поки не створюємо).
 
@@ -23,9 +23,9 @@
 
 **Definition of Done:** `pnpm dev` піднімає весь стек локально. CI на GitHub Actions проганяє lint+test на push.
 
-- [ ] **0.1.** Скелет монорепо (`apps/web`, `apps/api`, `workers/cad`, `packages/*`)
-- [ ] **0.2.** `docker-compose.yml`: Postgres + Redis + MinIO + web + api + cad-worker
-- [ ] **0.3.** Drizzle init: schema файл, перша міграція, seed з 5 матеріалами + 1 шаблоном (L-кронштейн)
+- [x] **0.1.** Скелет монорепо (`apps/web`, `apps/api`, `workers/cad`, `packages/*`) — 2026-05-15
+- [x] **0.2.** `docker-compose.yml`: Postgres + Redis + MinIO + Mailpit (web/api/cad — локально) — 2026-05-16
+- [x] **0.3.** Drizzle init: 12 таблиць згідно docs/05, перша міграція, seed (7 матеріалів × 10 товщин + 5 шаблонів-placeholder) — 2026-05-16
 - [ ] **0.4.** Fastify hello-world з health-check, pino logger, Zod-валідація схеми
 - [ ] **0.5.** Next.js hello-world з Tailwind + shadcn/ui, перша react-three-fiber сцена (куб, який крутиться)
 - [ ] **0.6.** GitHub Actions: lint + typecheck + test + build для всіх workspace

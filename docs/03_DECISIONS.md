@@ -13,6 +13,7 @@
 **Рішення:** pnpm workspaces + Turborepo. Один `package.json` на корені, окремі для кожного workspace. Python (`workers/cad`) живе в тому ж репо, але з власним `pyproject.toml` і `uv` для залежностей.
 
 **Наслідки:**
+
 - ✅ Спільні типи (`packages/types`) перевикористовуються між web і api без публікації npm-пакета.
 - ✅ Один `git push` оновлює і фронт, і бек атомарно.
 - ✅ Turbo кешує `lint`/`build`/`test` між запусками (швидкий CI).
@@ -31,6 +32,7 @@
 **Рішення:** OpenCascade.js на frontend (preview-mesh, миттєвий feedback) + Python CadQuery на сервері (фінальна геометрія, розгортка, експорт).
 
 **Наслідки:**
+
 - ✅ UX швидкий, server-side обчислення детерміновані і легко тестуються.
 - ✅ Python-екосистема краще для CAD-обчислень.
 - ❌ Два мови у проєкті — додатковий інструментарій (uv, pytest, mypy) поряд з pnpm/vitest.
@@ -49,6 +51,7 @@
 **Рішення:** Drizzle ORM.
 
 **Наслідки:**
+
 - ✅ Тонкий рантайм (не запускає окремий Node-процес як Prisma).
 - ✅ SQL-first DSL, явна композиція запитів.
 - ✅ Кращий контроль над JSONB і складними індексами (потрібно для зберігання `model_parameters` як JSON).
@@ -68,6 +71,7 @@
 **Рішення:** Redis + BullMQ. Fastify ставить job → Python-worker (через `bullmq-py`) виконує → пише результат у Postgres + R2 → фронт отримує SSE.
 
 **Наслідки:**
+
 - ✅ Простий setup, Redis вже потрібен для rate-limit і session cache.
 - ✅ Retry-логіка з коробки.
 - ❌ Python-клієнт BullMQ менш активний за TS — якщо буде неприємно, перейдемо на власний invariant через Redis Streams.
@@ -87,6 +91,7 @@
 **Рішення:** один droplet `s-2vcpu-4gb` (~$24/міс) у регіоні `fra1` (Frankfurt, EU GDPR). На ньому крутиться: docker-compose stack — Postgres + Redis + MinIO + web + api + cad-worker. R2 (Cloudflare) для long-term storage DXF/PDF/STEP. Cloudflare DNS + проксі для SSL.
 
 **Наслідки:**
+
 - ✅ Дешево, зрозуміло, відтворювано.
 - ✅ Single-point-of-failure прийнятний для MVP (Privacy Policy має застереження «best-effort uptime, no SLA»).
 - ❌ Якщо завантаження вирасте 10×, треба буде розбивати: Postgres → DO Managed DB; Worker → окремий droplet або Kubernetes.
@@ -103,6 +108,7 @@
 **Контекст:** Аудиторія включає ЄС. Без GDPR-compliance ризикуємо штраф навіть як хобі-проєкт.
 
 **Рішення:**
+
 - Збираємо мінімум PII: тільки email + опційно ім'я (для імені на креслі).
 - IP-адреса використовується тільки для rate-limit, не зберігається довше 24 годин.
 - Усі логи без PII (pino redact + sentry beforeSend).
@@ -111,6 +117,7 @@
 - Privacy Policy + ToS + Cookie Policy у `legal/`, UA + EN.
 
 **Наслідки:**
+
 - ✅ Можемо легально приймати ЄС-користувачів.
 - ❌ Додаткова робота на Phase 5 (~3 дні).
 
@@ -127,6 +134,7 @@
 **Рішення:** Auth.js v5 (поки бета, але стабільний для нашого scope) для Next.js, Fastify консумує JWT, який видає Auth.js.
 
 **Наслідки:**
+
 - ✅ Готова логіка OAuth, CSRF, JWT.
 - ✅ Open-source, без vendor lock-in.
 - ❌ Бета-версія — слідкуємо за breaking changes у release notes.
@@ -144,6 +152,7 @@
 **Рішення:** Cloudflare R2 (S3-compatible API). Локально в dev — MinIO у docker-compose.
 
 **Наслідки:**
+
 - ✅ Egress безкоштовний (велика економія).
 - ✅ S3-compatible — переносимо на AWS S3 за 5 хвилин якщо потрібно.
 - ✅ EU-юрисдикція (CF EU) — артефакти й бекапи фізично поза Україною, що дає resilience для київського ДЦ.
@@ -161,12 +170,14 @@
 **Контекст:** CAD-обчислення — найгірший клас помилок: «непомітно неправильно», виробник зробить криве замовлення. Треба регресійні снепшоти.
 
 **Рішення:**
+
 - Кожна нова фіча → спочатку red test, потім green code, потім refactor.
 - CAD-engine: snapshot-тести (фіксований seed → фіксований DXF byte-output).
 - Cтек тестів: Vitest (TS), pytest (Python), Playwright (e2e), supertest (API integration).
 - 80% line coverage — необхідна умова, але не достатня. Mutation testing (Stryker) на ключових модулях `cad-engine`, `validators`, `unfold`.
 
 **Наслідки:**
+
 - ✅ Безпечні рефакторинги.
 - ✅ Документація через тести.
 - ❌ Phase 1–2 повільніші на 30%; компенсується менше багами на Phase 5.
@@ -180,6 +191,7 @@
 **Контекст:** Простий setup для одного сервера, треба збирати JSON-логи + redact PII.
 
 **Рішення:**
+
 - Pino у Fastify і CAD-worker (через `python-json-logger`).
 - Redact: `req.headers.authorization`, `req.body.password`, `*.email` → `[REDACTED]`.
 - У dev — pino-pretty.
@@ -199,12 +211,14 @@
 **Рішення:** **Mirohost Cloud, тариф MS21 — 2 vCPU / 4 GB RAM / 40 GB SSD**, дата-центр Київ («EU-IEV-1»). Продукт Cloud надає root-доступ → ставимо Docker самостійно. На сервері — той самий docker-compose stack, що планувався: Postgres + Redis + web + api + cad-worker.
 
 Похідні рішення, що випливають із характеристик MS21:
+
 1. **Артефакти (DXF/PDF/STEP/thumbnails) і бекапи → Cloudflare R2, обов'язково.** 40 ГБ диска не вмістить зростаючі файли (~80 МБ/день, ~30 ГБ/рік). Self-hosted MinIO лишається тільки для dev. Це посилює ADR-008.
 2. **CAD-worker concurrency = 1** (макс. 2) і обов'язковий swap — 4 ГБ RAM на весь стек із CadQuery/OpenCascade тіснувато.
 3. **Без Terraform.** Mirohost не має Terraform-провайдера. Інфраструктуру (сервер) створює замовник вручну в панелі Mirohost; усе налаштування (Docker, docker-compose, .env, systemd, backups, firewall) — через **Ansible** на вже наявному сервері. Каталог `infra/terraform/` з репо прибираємо.
 4. **Cloudflare лишається попереду** як DNS + проксі + SSL + WAF (геоблок RU/BY). З українським origin-сервером це навіть цінніше: ховає реальний IP, додає DDoS-захист.
 
 **Наслідки:**
+
 - ✅ Український провайдер, оплата у грн, підтримка українською — узгоджено з соціальним характером проєкту.
 - ✅ Root + Docker → архітектура (ADR-001..004) не змінюється, лише цільова машина.
 - ✅ Cloudflare R2 для бекапів поза Україною = resilience, якщо київський ДЦ постраждає.
@@ -214,10 +228,34 @@
 - ❌ Немає Terraform-відтворюваності інфри — компенсуємо Ansible-плейбуком + документованою інструкцією створення сервера.
 
 **Альтернативи:**
+
 - DigitalOcean (ADR-005) — скасовано рішенням замовника.
 - Mirohost shared-хостинг (тарифи Міні/Сайт/Портал) — **непридатний**: лише PHP/MySQL, без Docker, без root, без PostgreSQL/Redis/Node/Python.
 - Mirohost eVPS — дешевше за Cloud, але сторінка продукту не гарантує root + Docker; ризиковано.
 - Hetzner — дешевший і в ЄС-юрисдикції, але замовник свідомо обрав українського провайдера.
+
+---
+
+## ADR-012: UUID v4 у схемі, v7 — окремою міграцією після Postgres 18
+
+**Статус:** Accepted (2026-05-16)
+
+**Контекст:** `docs/05_DATA_MODEL.md` §1 декларує `uuid v7` як id-тип для всіх таблиць (sortable + unique, краще для btree-індексів на `(user_id, created_at)`). Реалізація з drizzle 0.36 / Postgres 16-alpine: нативного `gen_uuid_v7()` нема до Postgres 18; pg-uuidv7 extension не входить у офіційний образ і вимагає окремої збірки.
+
+**Рішення:** Phase 0.3 використовує `gen_random_uuid()` (uuid v4) як default для всіх PK. Перехід на v7 — окрема міграція коли (а) Mirohost дасть Postgres 18, або (б) додамо `uuid-ossp`/`pg-uuidv7` extension у image. Зміна default не ламає existing рядки — старі v4-id залишаться валідні uuid-и.
+
+**Наслідки:**
+
+- ✅ Phase 0.3 не блокується відсутністю v7 generator.
+- ✅ Зміна на v7 — це лише `ALTER TABLE … ALTER COLUMN id SET DEFAULT uuid_v7()`, без backfill.
+- ⚠️ Втрачаємо timestamp-sortability id-шників (нерелевантно для MVP — індекси на `created_at` і так є).
+- ❌ ER-діаграма у doc/05 говорить «uuid v7» — формально невідповідність; виправимо після переходу.
+
+**Альтернативи:**
+
+- pg-uuidv7 extension зараз: окрема збірка image, ризик блокування на Mirohost.
+- JS-generator uuid v7 у застосунку (через `uuid` npm): додаткова залежність, не використовує DB-default → треба ставити id вручну при insert у кожному місці.
+- Чекати Postgres 18 у LTS: фіксує MVP на 2026Q4, неприпустимо.
 
 ---
 
