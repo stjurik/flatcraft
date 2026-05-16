@@ -25,7 +25,7 @@
     - name: Встановлення правильних прав на Swap-файл
       file:
         path: "{{ swap_file_path }}"
-        mode: '0600'
+        mode: "0600"
       when: not swap_stat.stat.exists
 
     - name: Ініціалізація Swap (mkswap)
@@ -49,14 +49,14 @@
     - name: Оптимізація swappiness (використовувати диск лише у крайньому разі)
       sysctl:
         name: vm.swappiness
-        value: '10'
+        value: "10"
         state: present
 
     # --- НАЛАШТУВАННЯ FIREWALL (UFW) ---
     - name: Дозвіл SSH (з лімітом підключень від брутфорсу)
       ufw:
         rule: limit
-        port: '22'
+        port: "22"
         proto: tcp
 
     - name: Дозвіл HTTP та HTTPS трафіку
@@ -65,8 +65,8 @@
         port: "{{ item }}"
         proto: tcp
       loop:
-        - '80'
-        - '443'
+        - "80"
+        - "443"
 
     - name: Увімкнення UFW та блокування всього іншого
       ufw:
@@ -86,13 +86,13 @@
       file:
         path: /etc/apt/keyrings
         state: directory
-        mode: '0755'
+        mode: "0755"
 
     - name: Додавання офіційного GPG-ключа Docker
       get_url:
         url: https://download.docker.com/linux/ubuntu/gpg
         dest: /etc/apt/keyrings/docker.asc
-        mode: '0644'
+        mode: "0644"
 
     - name: Додавання репозиторію Docker (для Ubuntu 24.04 Noble)
       apt_repository:

@@ -11,8 +11,8 @@ machine:
 
 global:
   max_force_t: 100
-  min_flange_mm: 7.5             # мін. ширина полиці після гиба
-  angle_tolerance_deg: 0.25      # ±0.25°
+  min_flange_mm: 7.5 # мін. ширина полиці після гиба
+  angle_tolerance_deg: 0.25 # ±0.25°
   allowed_angles_deg: [30, 45, 60, 90, 120, 135]
   default_angle_deg: 90
 

@@ -5,7 +5,9 @@ export default defineConfig({
   out: "./src/migrations",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgresql://flatcraft:flatcraft_dev_only_change_me@localhost:5432/flatcraft",
+    url:
+      process.env.DATABASE_URL ??
+      "postgresql://flatcraft:flatcraft_dev_only_change_me@localhost:5432/flatcraft",
   },
   strict: true,
   verbose: true,

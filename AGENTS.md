@@ -9,6 +9,7 @@
 **Стек:** Next.js 15 (App Router), TypeScript strict, react-three-fiber, Tailwind, shadcn/ui, Auth.js client.
 
 **Команди:**
+
 ```bash
 pnpm --filter @flatcraft/web dev           # порт 3000
 pnpm --filter @flatcraft/web build
@@ -18,6 +19,7 @@ pnpm --filter @flatcraft/web lint
 ```
 
 **Структура:**
+
 ```
 apps/web/
 ├── src/
@@ -46,6 +48,7 @@ apps/web/
 **Стек:** Fastify, TypeScript strict, Zod, Drizzle, BullMQ, Auth.js (Fastify integration), pino.
 
 **Команди:**
+
 ```bash
 pnpm --filter @flatcraft/api dev           # порт 4000
 pnpm --filter @flatcraft/api start
@@ -54,6 +57,7 @@ pnpm --filter @flatcraft/api test:int      # testcontainers (Postgres у Docker)
 ```
 
 **Структура:**
+
 ```
 apps/api/
 ├── src/
@@ -83,6 +87,7 @@ apps/api/
 **Стек:** Python 3.12, CadQuery, FastAPI (для health/metrics), pytest, mypy strict, ruff, uv.
 
 **Команди:**
+
 ```bash
 cd workers/cad
 uv sync
@@ -94,6 +99,7 @@ uv run python -m flatcraft_cad.cli render --template l_bracket --params @params.
 ```
 
 **Структура:**
+
 ```
 workers/cad/
 ├── pyproject.toml
@@ -127,12 +133,14 @@ workers/cad/
 **Стек:** TypeScript strict, Zod, OpenCascade.js (peer dependency).
 
 **Команди:**
+
 ```bash
 pnpm --filter @flatcraft/cad-engine test
 pnpm --filter @flatcraft/cad-engine build
 ```
 
 **Структура:**
+
 ```
 packages/cad-engine/
 ├── src/
@@ -159,6 +167,7 @@ packages/cad-engine/
 **Стек:** Drizzle ORM, drizzle-kit.
 
 **Команди:**
+
 ```bash
 pnpm --filter @flatcraft/db generate       # drizzle-kit generate
 pnpm --filter @flatcraft/db migrate
@@ -167,6 +176,7 @@ pnpm --filter @flatcraft/db seed
 ```
 
 **Структура:**
+
 ```
 packages/db/
 ├── src/
@@ -186,6 +196,7 @@ packages/db/
 **Стек:** TypeScript strict, Zod, `@asteasolutions/zod-to-openapi`.
 
 **Структура:**
+
 ```
 packages/types/
 └── src/
@@ -207,6 +218,7 @@ packages/types/
 **Стек:** React 19, TypeScript, Tailwind, shadcn/ui.
 
 **Структура:**
+
 ```
 packages/ui/
 └── src/
@@ -230,6 +242,7 @@ packages/ui/
 **Стек:** Ansible 2.16+.
 
 **Команди:**
+
 ```bash
 cd infra/ansible
 ansible-playbook -i inventory.ini site.yml          # повне налаштування
@@ -245,6 +258,7 @@ ansible-playbook -i inventory.ini site.yml --tags deploy   # тільки re-dep
 **Призначення:** генератори, перевірки, мікро-утиліти.
 
 **Приклади:**
+
 - `tools/scripts/generate-openapi.ts` — генерує `apps/api/openapi.json` з Zod.
 - `tools/scripts/calibrate-k-factor.py` — допомагає переcalibrate K після пілота.
 - `tools/scripts/check-cad-determinism.sh` — запускає експорт двічі і diff байт-у-байт.

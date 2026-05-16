@@ -29,9 +29,7 @@
   "status": 422,
   "detail": "Field 'thickness_mm' must be one of [1, 1.5, 2, ...]",
   "instance": "/v1/exports",
-  "errors": [
-    { "field": "thickness_mm", "code": "INVALID_ENUM", "value": 7 }
-  ]
+  "errors": [{ "field": "thickness_mm", "code": "INVALID_ENUM", "value": 7 }]
 }
 ```
 
@@ -69,28 +67,32 @@ errors:
 ```yaml
 request: { email, password }
 response 200:
-  access_token: string  # JWT
+  access_token: string # JWT
   user: { id, email, display_name, role, locale, units }
-  set-cookie: flatcraft_rt=...  # HttpOnly
-errors:
-  401 INVALID_CREDENTIALS
-  423 ACCOUNT_LOCKED  # після 5 невдалих спроб — 15 хв пауза
+  set-cookie: flatcraft_rt=... # HttpOnly
+errors: 401 INVALID_CREDENTIALS
+  423 ACCOUNT_LOCKED # після 5 невдалих спроб — 15 хв пауза
 ```
 
 ### POST /v1/auth/refresh
+
 - Cookie `flatcraft_rt` + `X-Csrf-Token`.
 - Видає новий access_token, ротує refresh.
 
 ### POST /v1/auth/logout
+
 - Інвалідовує refresh у БД, очищає cookie.
 
 ### GET /v1/auth/oauth/google/start
+
 - 302 → Google.
 
 ### GET /v1/auth/oauth/google/callback
+
 - 302 → web з access token у короткоживучому одноразовому query (одразу обмінюємо на cookie).
 
 ### POST /v1/auth/email/verify
+
 - Body: `{ token }`. Token приходить листом.
 
 ---
@@ -98,12 +100,15 @@ errors:
 ## 2. Account
 
 ### GET /v1/account/me
+
 - Профіль.
 
 ### PATCH /v1/account/me
+
 - `display_name`, `locale`, `units`.
 
 ### GET /v1/account/quota
+
 ```json
 {
   "period_start": "2026-05-01",
@@ -113,13 +118,16 @@ errors:
 }
 ```
 
-### POST /v1/account/export-data  (GDPR)
+### POST /v1/account/export-data (GDPR)
+
 - Створює job → email з лінком на JSON-дамп.
 
-### POST /v1/account/delete  (GDPR soft-delete з 30-day grace)
+### POST /v1/account/delete (GDPR soft-delete з 30-day grace)
+
 - Body: `{ confirm_email: string }`.
 
 ### GET /v1/account/sessions
+
 - Список активних refresh-сесій з User-Agent.
 
 ### DELETE /v1/account/sessions/{session_id}
@@ -129,6 +137,7 @@ errors:
 ## 3. Templates / Materials
 
 ### GET /v1/templates
+
 - Кешуємо 1 хв CDN-side, 1 год клієнт-side.
 - Query: `?lang=uk` (default з заголовка), `?published=true`.
 
@@ -152,15 +161,21 @@ errors:
 ```
 
 ### GET /v1/templates/{slug}
+
 - Те саме, але один.
 
 ### GET /v1/materials
+
 ```json
 {
   "items": [
-    { "code": "cold_rolled_steel", "name": "Холоднокатана сталь DC01",
-      "category": "steel", "density_kg_m3": 7850,
-      "thicknesses_mm": [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8] }
+    {
+      "code": "cold_rolled_steel",
+      "name": "Холоднокатана сталь DC01",
+      "category": "steel",
+      "density_kg_m3": 7850,
+      "thicknesses_mm": [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8]
+    }
   ]
 }
 ```
@@ -170,9 +185,11 @@ errors:
 ## 4. Drafts (стан проєкту користувача)
 
 ### GET /v1/drafts
+
 - Список чернеток поточного користувача (paginated).
 
 ### POST /v1/drafts
+
 ```yaml
 request:
   template_slug: string
@@ -189,9 +206,11 @@ response 201:
 ### GET /v1/drafts/{id}
 
 ### PATCH /v1/drafts/{id}
+
 - Часткове оновлення. Тригерить ре-валідацію.
 
 ### POST /v1/drafts/{id}/validate
+
 - Повертає `{ status: 'valid' | 'invalid', errors: [...] }`.
 
 ### DELETE /v1/drafts/{id}
@@ -201,6 +220,7 @@ response 201:
 ## 5. Exports (генерація DXF/PDF/STEP)
 
 ### POST /v1/exports
+
 ```yaml
 request:
   draft_id: uuid
@@ -216,6 +236,7 @@ errors:
 ```
 
 ### GET /v1/exports/{id}
+
 ```json
 {
   "id": "uuid",
@@ -237,10 +258,12 @@ errors:
 }
 ```
 
-### GET /v1/exports/{id}/events  (SSE)
+### GET /v1/exports/{id}/events (SSE)
+
 - Поточний статус + progress: `event: progress\ndata: {"phase":"unfold","percent":40}`.
 
 ### GET /v1/exports
+
 - Історія користувача (paginated, останні 30 днів).
 
 ---
@@ -248,9 +271,11 @@ errors:
 ## 6. Donations
 
 ### GET /v1/donations/channels
+
 - Перелік активних каналів і їхніх параметрів (банка-лінк, USDT-адреса, UNITED24-лінк).
 
 ### POST /v1/donations/claim
+
 ```yaml
 request:
   channel: 'monobank_banka' | 'united24' | 'usdt'
@@ -260,7 +285,8 @@ response 201:
   claim_id, status: 'pending'
 ```
 
-### POST /v1/uploads  (multipart, для proof)
+### POST /v1/uploads (multipart, для proof)
+
 - Тільки для авторизованих, max 5 MB, тільки `image/*` і `application/pdf`.
 
 ---
@@ -269,18 +295,24 @@ response 201:
 
 Усі під префіксом `/v1/admin/...`, потребують `role = admin`.
 
-### GET /v1/admin/users  (search, paginate)
-### GET /v1/admin/donations/claims  (фільтр `status=pending`)
+### GET /v1/admin/users (search, paginate)
+
+### GET /v1/admin/donations/claims (фільтр `status=pending`)
+
 ### POST /v1/admin/donations/claims/{id}/approve
+
 ### POST /v1/admin/donations/claims/{id}/reject
-### GET /v1/admin/exports  (моніторинг)
-### POST /v1/admin/templates  (CRUD)
+
+### GET /v1/admin/exports (моніторинг)
+
+### POST /v1/admin/templates (CRUD)
 
 ---
 
 ## 8. Webhooks
 
-### POST /v1/webhooks/monobank-acquiring  (v1.1)
+### POST /v1/webhooks/monobank-acquiring (v1.1)
+
 - Підтвердження донату через офіційний шлюз.
 - Аутентифікація: HMAC-SHA256 у заголовку `X-Sign`.
 
@@ -289,12 +321,14 @@ response 201:
 ## 9. Health & Ops
 
 ### GET /healthz
+
 - Liveness: завжди 200.
 
 ### GET /readyz
+
 - Readiness: 200 якщо БД + Redis доступні.
 
-### GET /metrics  (Prometheus exposition format, тільки з internal IP)
+### GET /metrics (Prometheus exposition format, тільки з internal IP)
 
 ---
 

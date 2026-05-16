@@ -80,6 +80,7 @@ docker compose -f infra/compose/docker-compose.prod.yml up -d
 ## Backups
 
 Щоденно (cron на сервері, role `backups`):
+
 1. `pg_dump` → стиснення → шифрування `age` → upload у R2 bucket `flatcraft-backups` (через `rclone`).
 2. Ретенція: 30 днів rolling (lifecycle rule на R2 bucket).
 3. Раз на місяць — restore-test у staging.
