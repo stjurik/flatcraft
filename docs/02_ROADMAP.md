@@ -63,7 +63,7 @@
 - [x] **2.4.** `packages/ui/src/parameter-form/` — `introspectSchema(zodObject)` (13 unit) + AutoForm з NumberField/EnumField/LiteralField. L-bracket editor мігровано. Селектори матеріалу/товщини — окремо (Phase 3.5 / окремий MaterialPicker). — 2026-05-17
 - [x] **2.5.** Live-валідація з підсвіченням обмежень — zodIssuesToFieldErrors (6 unit) + AutoForm errors prop (border-red + aria-invalid + inline `<ul>` під полем). 2 нові Playwright e2e. — 2026-05-17
 - [x] **2.6.** Debounce 100мс на mesh-rebuild — `useDebouncedValue` у `@flatcraft/ui` (6 unit). OpenCascade.js bridge відкладено (ADR-013): three.js Shape + ExtrudeGeometry достатньо для MVP, точна геометрія — CadQuery server-side. — 2026-05-17
-- [ ] **2.7.** Кнопка «Export» → API `/exports` → BullMQ → cad-worker → presigned URL з R2/MinIO
+- [x] **2.7.** Кнопка Export — sync HTTP-flow (BullMQ async — Phase 2.8). Python FastAPI POST /export (6 pytest, 96% cov), Fastify POST /exports (5 unit з mock fetch), Web ExportButton (3 e2e з mock'ed API). L-bracket: web → api → cad-worker → S3 presigned URL. — 2026-05-17
 - [ ] **2.8.** Прогрес-індикатор (SSE) поки worker генерує
 - [ ] **2.9.** PDF з розгорткою + ізометрією + таблицею гибів + BOM + QR-код (workers/cad/export/pdf.py через ReportLab або WeasyPrint)
 - [ ] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR
