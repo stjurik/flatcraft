@@ -223,7 +223,8 @@ flatcraft/
 - **Phase 2.3 завершено** (2026-05-16): R3F-сцена і pure-builder перенесено у `@flatcraft/ui`. peerDeps оновлено на R3F v9 + drei v10 (React 19). apps/web консумує `LBracketScene` через `dynamic(ssr:false)`.
 - **Phase 2.4 завершено** (2026-05-17): `packages/ui/parameter-form/` — pure `introspectSchema(zodObject) → FieldDescriptor[]` (13 unit) + AutoForm React-компонент. L-bracket editor мігровано з ручних inputs на AutoForm; testIds збереглися, e2e зелені. Holes (array) поки не підтримується generic'ом — рендериться окремим renderField override (повноцінний holes-editor у Phase 2.7).
 - **Phase 2.5 завершено** (2026-05-17): `zodIssuesToFieldErrors` (6 unit) + AutoForm errors prop. Невалідні поля: border-red + aria-invalid + inline `<ul>` під полем; data-invalid="true" на label для e2e. Editor wrapper передає Zod issues у згрупованому вигляді. 9 e2e зелені.
-- **Наступне — Phase 2.6**: OpenCascade.js bridge для preview mesh (debounce 100мс).
+- **Phase 2.6 завершено** (2026-05-17): debounce 100мс на mesh-rebuild через `useDebouncedValue` (6 unit на pure createDebouncer). OpenCascade.js bridge відкладено — ADR-013: three.js Shape + ExtrudeGeometry достатньо для MVP, точна геометрія — CadQuery server-side.
+- **Наступне — Phase 2.7**: Кнопка «Export» → API `/exports` → BullMQ → cad-worker → presigned URL.
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
