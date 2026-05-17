@@ -1,9 +1,10 @@
 "use client";
 
-import type { LBracketParameters } from "@flatcraft/types";
+import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
 import { useDebouncedValue } from "@flatcraft/ui";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { ExportButton } from "./export-button";
 import { LBracketEditor } from "./l-bracket-editor";
 import { LBracketViewport } from "./l-bracket-viewport";
 
@@ -29,14 +30,27 @@ export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
   const debouncedParameters = useDebouncedValue(parameters, VIEWPORT_DEBOUNCE_MS);
   const thicknessMm = 2.0;
 
-  return (
-    <div data-testid="l-bracket-studio" className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="mb-4 text-lg font-semibold text-zinc-100">Параметри</h2>
-        <LBracketEditor value={parameters} onChange={setParameters} />
-      </div>
+  const isValid = useMemo(
+    () => LBracketParametersSchema.safeParse(parameters).success,
+    [parameters],
+  );
 
-      <LBracketViewport parameters={debouncedParameters} thicknessMm={thicknessMm} />
+  return (
+    <div data-testid="l-bracket-studio" className="flex flex-col gap-4">
+      <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
+        <div className="flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+          <h2 className="text-lg font-semibold text-zinc-100">Параметри</h2>
+          <LBracketEditor value={parameters} onChange={setParameters} />
+          <ExportButton
+            templateSlug="l_bracket"
+            parameters={parameters}
+            thicknessMm={thicknessMm}
+            disabled={!isValid}
+          />
+        </div>
+
+        <LBracketViewport parameters={debouncedParameters} thicknessMm={thicknessMm} />
+      </div>
     </div>
   );
 }
