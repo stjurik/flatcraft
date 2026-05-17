@@ -1,14 +1,15 @@
 "use client";
 
-import type { LBracketParameters } from "@flatcraft/types";
-import { useState } from "react";
+import type { ExportJobEvent, ExportResponse, LBracketParameters } from "@flatcraft/types";
+import { useEffect, useRef, useState } from "react";
 
-import { ApiError, createExport } from "../lib/api";
+import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
 
 type ExportState =
   | { readonly status: "idle" }
-  | { readonly status: "loading" }
-  | { readonly status: "success"; readonly url: string; readonly bytes: number }
+  | { readonly status: "queued"; readonly jobId: string; readonly progress: number }
+  | { readonly status: "running"; readonly jobId: string; readonly progress: number }
+  | { readonly status: "done"; readonly result: ExportResponse }
   | { readonly status: "error"; readonly message: string };
 
 interface ExportButtonProps {
@@ -25,16 +26,38 @@ export function ExportButton({
   disabled = false,
 }: ExportButtonProps) {
   const [state, setState] = useState<ExportState>({ status: "idle" });
+  const closeRef = useRef<(() => void) | null>(null);
+
+  // Прибираємо open SSE на unmount, щоб не текти listeners при routing.
+  useEffect(() => () => closeRef.current?.(), []);
+
+  const handleEvent = (ev: ExportJobEvent) => {
+    if (ev.status === "done" && ev.result) {
+      setState({ status: "done", result: ev.result });
+    } else if (ev.status === "failed") {
+      setState({ status: "error", message: ev.error ?? "Експорт не вдався" });
+    } else {
+      setState({
+        status: ev.status === "running" ? "running" : "queued",
+        jobId: ev.id,
+        progress: ev.progress,
+      });
+    }
+  };
 
   const click = async () => {
-    setState({ status: "loading" });
+    closeRef.current?.();
+    setState({ status: "queued", jobId: "", progress: 0 });
     try {
-      const res = await createExport({
+      const accepted = await createExport({
         template_slug: templateSlug,
         parameters,
         thickness_mm: thicknessMm,
       });
-      setState({ status: "success", url: res.dxf_url, bytes: res.bytes });
+      setState({ status: "queued", jobId: accepted.id, progress: 0 });
+      closeRef.current = subscribeExportEvents(accepted.id, handleEvent, (err) =>
+        setState({ status: "error", message: err.message }),
+      );
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -46,8 +69,9 @@ export function ExportButton({
     }
   };
 
-  const isBusy = state.status === "loading";
+  const isBusy = state.status === "queued" || state.status === "running";
   const isDisabled = disabled || isBusy;
+  const progress = state.status === "queued" || state.status === "running" ? state.progress : 0;
 
   return (
     <div data-testid="export-button-section" className="flex flex-col gap-2">
@@ -63,18 +87,32 @@ export function ExportButton({
             : "bg-emerald-700 text-white hover:bg-emerald-600"
         }`}
       >
-        {isBusy ? "Експорт…" : "Експортувати DXF"}
+        {isBusy ? `Експорт… ${progress}%` : "Експортувати DXF"}
       </button>
 
-      {state.status === "success" ? (
+      {isBusy ? (
+        <div
+          data-testid="export-progress-bar"
+          className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+        >
+          <div
+            data-testid="export-progress-bar-fill"
+            data-progress={progress}
+            className="h-full bg-emerald-500 transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      ) : null}
+
+      {state.status === "done" ? (
         <a
           data-testid="export-download-link"
-          href={state.url}
+          href={state.result.dxf_url}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-emerald-300 underline hover:text-emerald-200"
         >
-          Завантажити DXF ({Math.round(state.bytes / 1024)} КБ)
+          Завантажити DXF ({Math.round(state.result.bytes / 1024)} КБ)
         </a>
       ) : null}
 

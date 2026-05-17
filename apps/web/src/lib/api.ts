@@ -7,12 +7,14 @@
  *   Next.js не серіалізує не-PUBLIC env у клієнтський bundle.
  */
 import {
+  ExportJobAcceptedSchema,
+  ExportJobEventSchema,
   ExportRequestSchema,
-  ExportResponseSchema,
   TemplateDetailSchema,
   TemplateListResponseSchema,
+  type ExportJobAccepted,
+  type ExportJobEvent,
   type ExportRequest,
-  type ExportResponse,
   type TemplateDetail,
   type TemplateSummary,
 } from "@flatcraft/types";
@@ -60,11 +62,10 @@ export async function fetchTemplate(slug: string): Promise<TemplateDetail | null
 }
 
 /**
- * Створює експорт (sync flow Phase 2.7). Викликається з client component —
- * браузер шле POST до Fastify, який forward'ить на Python cad-worker.
+ * Створює async export-job (Phase 2.8). Повертає лише jobId; реальний
+ * результат приходить через subscribeExportEvents().
  */
-export async function createExport(request: ExportRequest): Promise<ExportResponse> {
-  // Парсимо локально — додатковий захист від несподіванок з UI-сторони.
+export async function createExport(request: ExportRequest): Promise<ExportJobAccepted> {
   const body = ExportRequestSchema.parse(request);
   const res = await fetch(`${clientApiBaseUrl()}/exports`, {
     method: "POST",
@@ -74,5 +75,39 @@ export async function createExport(request: ExportRequest): Promise<ExportRespon
   if (!res.ok) {
     throw new ApiError(`Failed to POST /exports: ${res.status}`, res.status);
   }
-  return ExportResponseSchema.parse(await res.json());
+  return ExportJobAcceptedSchema.parse(await res.json());
+}
+
+/**
+ * Підписка на прогрес експорту через Server-Sent Events.
+ * Повертає функцію `close()` — викликати на unmount або після final event.
+ */
+export function subscribeExportEvents(
+  jobId: string,
+  onEvent: (event: ExportJobEvent) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  const url = `${clientApiBaseUrl()}/exports/${encodeURIComponent(jobId)}/events`;
+  const source = new EventSource(url);
+
+  source.onmessage = (msg) => {
+    try {
+      const parsed = ExportJobEventSchema.parse(JSON.parse(msg.data as string));
+      onEvent(parsed);
+      if (parsed.status === "done" || parsed.status === "failed") {
+        source.close();
+      }
+    } catch (err) {
+      onError?.(err instanceof Error ? err : new Error(String(err)));
+      source.close();
+    }
+  };
+
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) return;
+    onError?.(new Error("SSE connection failed"));
+    source.close();
+  };
+
+  return () => source.close();
 }
