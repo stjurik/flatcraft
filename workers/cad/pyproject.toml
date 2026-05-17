@@ -67,3 +67,10 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --cov=flatcraft_cad --cov-report=term-missing"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "moto>=5.2.1",
+    "types-boto3>=1.43.9",
+]
