@@ -61,7 +61,7 @@
 - [x] **2.2.** Сторінка `/templates/[slug]` — API `GET /templates/:slug` (Detail з defaultParameters), web Studio (controlled editor + R3F viewport з live ExtrudeGeometry). L-bracket — лише slug з повним flow до Phase 2.10. — 2026-05-16
 - [x] **2.3.** `packages/ui/src/3d-viewport/` — LBracketScene + pure-builder buildLBracketShapeCommands (5 unit-тестів). apps/web bunny консумує через dynamic ssr:false. — 2026-05-16
 - [x] **2.4.** `packages/ui/src/parameter-form/` — `introspectSchema(zodObject)` (13 unit) + AutoForm з NumberField/EnumField/LiteralField. L-bracket editor мігровано. Селектори матеріалу/товщини — окремо (Phase 3.5 / окремий MaterialPicker). — 2026-05-17
-- [ ] **2.5.** Live-валідація з підсвіченням обмежень (червоні поля + tooltip з причиною)
+- [x] **2.5.** Live-валідація з підсвіченням обмежень — zodIssuesToFieldErrors (6 unit) + AutoForm errors prop (border-red + aria-invalid + inline `<ul>` під полем). 2 нові Playwright e2e. — 2026-05-17
 - [ ] **2.6.** Інтеграція OpenCascade.js: оновлення mesh при зміні параметрів (debounce 100мс)
 - [ ] **2.7.** Кнопка «Export» → API `/exports` → BullMQ → cad-worker → presigned URL з R2/MinIO
 - [ ] **2.8.** Прогрес-індикатор (SSE) поки worker генерує
