@@ -224,8 +224,9 @@ flatcraft/
 - **Phase 2.4 завершено** (2026-05-17): `packages/ui/parameter-form/` — pure `introspectSchema(zodObject) → FieldDescriptor[]` (13 unit) + AutoForm React-компонент. L-bracket editor мігровано з ручних inputs на AutoForm; testIds збереглися, e2e зелені. Holes (array) поки не підтримується generic'ом — рендериться окремим renderField override (повноцінний holes-editor у Phase 2.7).
 - **Phase 2.5 завершено** (2026-05-17): `zodIssuesToFieldErrors` (6 unit) + AutoForm errors prop. Невалідні поля: border-red + aria-invalid + inline `<ul>` під полем; data-invalid="true" на label для e2e. Editor wrapper передає Zod issues у згрупованому вигляді. 9 e2e зелені.
 - **Phase 2.6 завершено** (2026-05-17): debounce 100мс на mesh-rebuild через `useDebouncedValue` (6 unit на pure createDebouncer). OpenCascade.js bridge відкладено — ADR-013: three.js Shape + ExtrudeGeometry достатньо для MVP, точна геометрія — CadQuery server-side.
-- **Phase 2.7 завершено** (2026-05-17): sync Export pipeline web → api → cad-worker → S3 presigned URL. Python FastAPI /export (boto3 + moto тести, 6 pytest 96% cov), Fastify POST /exports з CORS + Zod-валідація обох directions (5 unit з mock fetch), Web ExportButton з idle/loading/success/error станами (3 e2e). BullMQ async-шлях — Phase 2.8.
-- **Наступне — Phase 2.8**: прогрес-індикатор (SSE) поки worker генерує.
+- **Phase 2.7 завершено** (2026-05-17): sync Export pipeline web → api → cad-worker → S3 presigned URL. Python FastAPI /export (boto3 + moto тести, 6 pytest 96% cov), Fastify POST /exports з CORS + Zod-валідація обох directions (5 unit з mock fetch), Web ExportButton з idle/loading/success/error станами (3 e2e).
+- **Phase 2.8 завершено** (2026-05-17): async export з SSE прогресом. API: in-memory `JobStore` з pub/sub (7 unit), POST /exports → 202+jobId, GET /:id, GET /:id/events (SSE через `reply.raw.write`). Web: `subscribeExportEvents` через EventSource, ExportButton показує progress bar 0..100%, при done/failed закриває source. BullMQ distributed — Phase 5.
+- **Наступне — Phase 2.9**: PDF з розгорткою + ізометрією + BOM + QR-код (workers/cad через ReportLab).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
