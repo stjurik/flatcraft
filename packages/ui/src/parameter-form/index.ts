@@ -7,3 +7,4 @@ export {
   type NumberField,
   type UnsupportedField,
 } from "./schema-inspector.js";
+export { zodIssuesToFieldErrors, type FieldErrors } from "./zod-errors.js";

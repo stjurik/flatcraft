@@ -36,15 +36,39 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });
 
-  test("параметр поза діапазоном → showsValidationError", async ({ page }) => {
+  test("параметр поза діапазоном → showsValidationError + підсвічення поля", async ({ page }) => {
     await page.goto("/templates/l_bracket");
     await expect(page.getByTestId("validation-ok")).toBeVisible();
+    // Дефолтне поле — не invalid.
+    await expect(page.getByTestId("field-legA_mm")).toHaveAttribute("data-invalid", "false");
 
     // legA_mm < 20 → Zod min(20) fails.
     await page.getByTestId("param-legA_mm").fill("10");
 
+    // Summary list з'явився.
     await expect(page.getByTestId("validation-errors")).toBeVisible();
     await expect(page.getByTestId("validation-ok")).toHaveCount(0);
+
+    // Конкретне поле підсвічене: data-invalid=true + aria-invalid + inline error.
+    await expect(page.getByTestId("field-legA_mm")).toHaveAttribute("data-invalid", "true");
+    await expect(page.getByTestId("param-legA_mm")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByTestId("field-error-legA_mm")).toBeVisible();
+
+    // Інші поля лишаються невинуватими.
+    await expect(page.getByTestId("field-legB_mm")).toHaveAttribute("data-invalid", "false");
+    await expect(page.getByTestId("field-error-legB_mm")).toHaveCount(0);
+  });
+
+  test("виправлення значення прибирає підсвічення", async ({ page }) => {
+    await page.goto("/templates/l_bracket");
+    await page.getByTestId("param-legA_mm").fill("10");
+    await expect(page.getByTestId("field-legA_mm")).toHaveAttribute("data-invalid", "true");
+
+    // Повертаємо у валідний діапазон.
+    await page.getByTestId("param-legA_mm").fill("80");
+    await expect(page.getByTestId("field-legA_mm")).toHaveAttribute("data-invalid", "false");
+    await expect(page.getByTestId("field-error-legA_mm")).toHaveCount(0);
+    await expect(page.getByTestId("validation-ok")).toBeVisible();
   });
 
   test("зміна параметра live-update'ить JSON preview", async ({ page }) => {

@@ -1,7 +1,12 @@
 "use client";
 
 import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
-import { AutoForm, type AutoFormLabels, type FieldDescriptor } from "@flatcraft/ui";
+import {
+  AutoForm,
+  zodIssuesToFieldErrors,
+  type AutoFormLabels,
+  type FieldDescriptor,
+} from "@flatcraft/ui";
 import { useMemo } from "react";
 
 interface LBracketEditorProps {
@@ -19,7 +24,7 @@ const LABELS: AutoFormLabels = {
 };
 
 /**
- * Holes (z.array(...)) поки рендериться окремим editor'ом — Phase 2.5.
+ * Holes (z.array(...)) поки рендериться окремим editor'ом — Phase 2.7.
  * Поки приховуємо як info-rebra: "0 отворів — додамо у наступній фазі".
  */
 function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNode | null {
@@ -27,7 +32,7 @@ function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNo
     const count = Array.isArray(value) ? value.length : 0;
     return (
       <p data-testid={`auto-form-holes-placeholder`} className="text-xs text-zinc-500">
-        Отвори ({count}) — редактор у Phase 2.5.
+        Отвори ({count}) — редактор у Phase 2.7.
       </p>
     );
   }
@@ -35,13 +40,19 @@ function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNo
 }
 
 export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
-  // Live-валідація проти оригінальної схеми (AutoForm не валідує — це
-  // контракт: він рендерить, перевіряє Studio контейнер).
+  // Live-валідація: безперервно парс'имо у Studio, AutoForm підсвічує
+  // конкретні поля + summary рендериться знизу як list.
   const validation = useMemo(() => LBracketParametersSchema.safeParse(value), [value]);
 
-  const errors: string[] = validation.success
-    ? []
-    : validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
+  const fieldErrors = useMemo(
+    () => (validation.success ? {} : zodIssuesToFieldErrors(validation.error.issues)),
+    [validation],
+  );
+
+  const allErrors = useMemo(() => {
+    if (validation.success) return [] as string[];
+    return validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
+  }, [validation]);
 
   return (
     <form
@@ -54,6 +65,7 @@ export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as LBracketParameters)}
         labels={LABELS}
+        errors={fieldErrors}
         renderField={renderField}
       />
 
@@ -61,12 +73,12 @@ export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
         Кут гиба — 90° (MVP). Інші кути додамо post-launch.
       </p>
 
-      {errors.length > 0 ? (
+      {allErrors.length > 0 ? (
         <ul
           data-testid="validation-errors"
           className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300"
         >
-          {errors.map((msg) => (
+          {allErrors.map((msg) => (
             <li key={msg}>{msg}</li>
           ))}
         </ul>
