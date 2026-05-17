@@ -1,6 +1,7 @@
 "use client";
 
 import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
+import { AutoForm, type AutoFormLabels, type FieldDescriptor } from "@flatcraft/ui";
 import { useMemo } from "react";
 
 interface LBracketEditorProps {
@@ -8,48 +9,39 @@ interface LBracketEditorProps {
   readonly onChange: (next: LBracketParameters) => void;
 }
 
-const ALLOWED_RADII = [1, 2.5, 4, 5] as const;
+const LABELS: AutoFormLabels = {
+  legA_mm: "Висота полиці A, мм",
+  legB_mm: "Глибина полиці B, мм",
+  bend_radius_mm: "Внутрішній радіус гиба, мм",
+  bend_angle_deg: "Кут гиба, °",
+  width_mm: "Ширина (довжина гиба), мм",
+  holes: "Отвори",
+};
 
-interface NumberFieldProps {
-  readonly label: string;
-  readonly id: keyof LBracketParameters;
-  readonly value: number;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly onChange: (v: number) => void;
-}
-
-function NumberField({ label, id, value, min, max, step, onChange }: NumberFieldProps) {
-  return (
-    <label className="flex flex-col gap-1 text-sm" htmlFor={`param-${id}`}>
-      <span className="text-zinc-400">{label}</span>
-      <input
-        id={`param-${id}`}
-        data-testid={`param-${id}`}
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 focus:border-zinc-600 focus:outline-none"
-      />
-    </label>
-  );
+/**
+ * Holes (z.array(...)) поки рендериться окремим editor'ом — Phase 2.5.
+ * Поки приховуємо як info-rebra: "0 отворів — додамо у наступній фазі".
+ */
+function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNode | null {
+  if (descriptor.name === "holes") {
+    const count = Array.isArray(value) ? value.length : 0;
+    return (
+      <p data-testid={`auto-form-holes-placeholder`} className="text-xs text-zinc-500">
+        Отвори ({count}) — редактор у Phase 2.5.
+      </p>
+    );
+  }
+  return undefined;
 }
 
 export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
-  // Live-валідація: рендеримо помилки Zod (Phase 2.5 розширить — підсвічення
-  // конкретних полів + tooltip-и; зараз — компактний список).
+  // Live-валідація проти оригінальної схеми (AutoForm не валідує — це
+  // контракт: він рендерить, перевіряє Studio контейнер).
   const validation = useMemo(() => LBracketParametersSchema.safeParse(value), [value]);
 
   const errors: string[] = validation.success
     ? []
     : validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
-
-  const set = <K extends keyof LBracketParameters>(key: K, v: LBracketParameters[K]) =>
-    onChange({ ...value, [key]: v });
 
   return (
     <form
@@ -57,54 +49,13 @@ export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
       className="flex flex-col gap-4"
       onSubmit={(e) => e.preventDefault()}
     >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <NumberField
-          label="Висота полиці A, мм"
-          id="legA_mm"
-          value={value.legA_mm}
-          min={20}
-          max={500}
-          step={1}
-          onChange={(v) => set("legA_mm", v)}
-        />
-        <NumberField
-          label="Глибина полиці B, мм"
-          id="legB_mm"
-          value={value.legB_mm}
-          min={20}
-          max={500}
-          step={1}
-          onChange={(v) => set("legB_mm", v)}
-        />
-        <NumberField
-          label="Ширина (довжина гиба), мм"
-          id="width_mm"
-          value={value.width_mm}
-          min={20}
-          max={3000}
-          step={1}
-          onChange={(v) => set("width_mm", v)}
-        />
-
-        <label className="flex flex-col gap-1 text-sm" htmlFor="param-bend_radius_mm">
-          <span className="text-zinc-400">Внутрішній радіус гиба, мм</span>
-          <select
-            id="param-bend_radius_mm"
-            data-testid="param-bend_radius_mm"
-            value={value.bend_radius_mm}
-            onChange={(e) =>
-              set("bend_radius_mm", Number(e.target.value) as LBracketParameters["bend_radius_mm"])
-            }
-            className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 focus:border-zinc-600 focus:outline-none"
-          >
-            {ALLOWED_RADII.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <AutoForm
+        schema={LBracketParametersSchema}
+        value={value as unknown as Record<string, unknown>}
+        onChange={(next) => onChange(next as unknown as LBracketParameters)}
+        labels={LABELS}
+        renderField={renderField}
+      />
 
       <p className="text-xs text-zinc-500" data-testid="bend-angle-info">
         Кут гиба — 90° (MVP). Інші кути додамо post-launch.
