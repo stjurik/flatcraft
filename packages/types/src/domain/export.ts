@@ -27,3 +27,29 @@ export const ExportResponseSchema = z.object({
 });
 
 export type ExportResponse = z.infer<typeof ExportResponseSchema>;
+
+/**
+ * Async-флоу (Phase 2.8): POST /exports повертає JobAccepted, далі
+ * клієнт підписується на /exports/:id/events (SSE) і отримує JobEvent
+ * допоки status='done' або 'failed'.
+ */
+export const JobStatusSchema = z.enum(["queued", "running", "done", "failed"]);
+export type JobStatus = z.infer<typeof JobStatusSchema>;
+
+export const ExportJobAcceptedSchema = z.object({
+  id: z.string().uuid(),
+  status: JobStatusSchema,
+});
+export type ExportJobAccepted = z.infer<typeof ExportJobAcceptedSchema>;
+
+export const ExportJobEventSchema = z.object({
+  id: z.string().uuid(),
+  status: JobStatusSchema,
+  /** 0..100. Для queued — 0; для done — 100; running — proportional. */
+  progress: z.number().min(0).max(100),
+  /** Заповнено коли status='done'. */
+  result: ExportResponseSchema.optional(),
+  /** Заповнено коли status='failed'. */
+  error: z.string().optional(),
+});
+export type ExportJobEvent = z.infer<typeof ExportJobEventSchema>;

@@ -1,67 +1,164 @@
 /**
- * POST /exports — синхронний експорт DXF (Phase 2.7).
+ * POST /exports          — створює async job, повертає 202 + jobId.
+ * GET  /exports/:id      — поточний стан job (для retries/refresh).
+ * GET  /exports/:id/events — SSE: стрім {status, progress, result?, error?}.
  *
- * Flow: web → api (валідація + forward) → cad-worker (DXF gen + S3 upload)
- * → presigned URL → клієнт скачує.
+ * Flow: API ставить job у in-memory store → background fetch до Python
+ * /export → update store з результатом → SSE-listener шле події клієнту.
  *
- * Async BullMQ-шлях — Phase 2.8 (status polling/SSE). Цей endpoint
- * лишиться як sync-fallback для дрібних виробів (<3 секунди).
+ * Persistence + distributed scaling — Phase 5 (BullMQ + Redis). Зараз
+ * in-memory достатньо для одного API-replica MVP.
  */
-import { ExportRequestSchema, ExportResponseSchema } from "@flatcraft/types";
+import {
+  ExportJobAcceptedSchema,
+  ExportJobEventSchema,
+  ExportRequestSchema,
+  ExportResponseSchema,
+} from "@flatcraft/types";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 
 import { env } from "../env.js";
+import type { ExportJob } from "../lib/job-store.js";
+import { JobStore } from "../lib/job-store.js";
 
-const UpstreamErrorSchema = z.object({
-  error: z.literal("cad_worker_failed"),
-  status: z.number().int(),
-  detail: z.string().optional(),
-});
+const NotFoundSchema = z.object({ error: z.literal("job_not_found") });
 
-export const exportRoutes: FastifyPluginAsyncZod = async (app) => {
-  app.post(
-    "/exports",
-    {
-      schema: {
-        description: "Sync export: forward до cad-worker, повертає presigned URL з S3/R2.",
-        tags: ["exports"],
-        body: ExportRequestSchema,
-        response: {
-          200: ExportResponseSchema,
-          502: UpstreamErrorSchema,
+const PARAMS = z.object({ id: z.string().uuid() });
+
+function toEvent(job: ExportJob) {
+  const base = {
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+  } as const;
+  if (job.status === "done" && job.result) {
+    return { ...base, result: job.result };
+  }
+  if (job.status === "failed" && job.error) {
+    return { ...base, error: job.error };
+  }
+  return base;
+}
+
+async function runJob(store: JobStore, jobId: string, body: unknown): Promise<void> {
+  store.update(jobId, { status: "running", progress: 10 });
+  try {
+    const upstream = await fetch(`${env.CAD_WORKER_URL}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!upstream.ok) {
+      const detail = (await upstream.text().catch(() => "")).slice(0, 256);
+      store.update(jobId, {
+        status: "failed",
+        progress: 0,
+        error: `cad-worker ${upstream.status}: ${detail || "no detail"}`,
+      });
+      return;
+    }
+    store.update(jobId, { status: "running", progress: 80 });
+    const data = await upstream.json();
+    const result = ExportResponseSchema.parse(data);
+    store.update(jobId, { status: "done", progress: 100, result });
+  } catch (err) {
+    store.update(jobId, {
+      status: "failed",
+      progress: 0,
+      error: err instanceof Error ? err.message : "unknown error",
+    });
+  }
+}
+
+export interface ExportRoutesOptions {
+  readonly store?: JobStore;
+}
+
+export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPluginAsyncZod {
+  const store = options.store ?? new JobStore();
+
+  return async (app) => {
+    app.post(
+      "/exports",
+      {
+        schema: {
+          description: "Async export: створює job, виконує у фоні, returns 202 + jobId.",
+          tags: ["exports"],
+          body: ExportRequestSchema,
+          response: { 202: ExportJobAcceptedSchema },
         },
       },
-    },
-    async (req, reply) => {
-      const upstream = await fetch(`${env.CAD_WORKER_URL}/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(req.body),
-      }).catch((err: unknown) => {
-        app.log.error({ err }, "cad-worker fetch failed");
-        return null;
-      });
+      async (req, reply) => {
+        const job = store.create();
+        // background: не await — щоб клієнт одразу отримав jobId.
+        void runJob(store, job.id, req.body);
+        return reply.code(202).send({ id: job.id, status: job.status });
+      },
+    );
 
-      if (!upstream) {
-        return reply
-          .code(502)
-          .send({ error: "cad_worker_failed" as const, status: 0, detail: "unreachable" });
-      }
+    app.get(
+      "/exports/:id",
+      {
+        schema: {
+          params: PARAMS,
+          response: { 200: ExportJobEventSchema, 404: NotFoundSchema },
+        },
+      },
+      async (req, reply) => {
+        const job = store.get(req.params.id);
+        if (!job) return reply.code(404).send({ error: "job_not_found" as const });
+        return toEvent(job);
+      },
+    );
 
-      if (!upstream.ok) {
-        const text = await upstream.text().catch(() => "");
-        return reply.code(502).send({
-          error: "cad_worker_failed" as const,
-          status: upstream.status,
-          detail: text.slice(0, 256),
+    app.get(
+      "/exports/:id/events",
+      {
+        schema: { params: PARAMS },
+      },
+      async (req, reply) => {
+        const job = store.get(req.params.id);
+        if (!job) {
+          return reply.code(404).send({ error: "job_not_found" as const });
+        }
+
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          // CORS — Fastify already встановив через @fastify/cors на основі
+          // origin header; SSE також потребує цих заголовків (cors plugin
+          // не зачіпає reply.raw напряму).
+          "Access-Control-Allow-Origin": req.headers.origin ?? env.APP_BASE_URL,
+          "Access-Control-Allow-Credentials": "true",
         });
-      }
 
-      const data = await upstream.json();
-      // Zod validate response — захищає клієнта від рассинхрону схеми
-      // worker'а (тип-сейф контракт між сервісами через @flatcraft/types).
-      return ExportResponseSchema.parse(data);
-    },
-  );
-};
+        const send = (j: ExportJob) => {
+          reply.raw.write(`data: ${JSON.stringify(toEvent(j))}\n\n`);
+        };
+
+        // Поточний стан → одразу.
+        send(job);
+        if (job.status === "done" || job.status === "failed") {
+          reply.raw.end();
+          return reply;
+        }
+
+        const unsubscribe = store.subscribe(job.id, (updated) => {
+          send(updated);
+          if (updated.status === "done" || updated.status === "failed") {
+            unsubscribe();
+            reply.raw.end();
+          }
+        });
+
+        req.raw.on("close", () => {
+          unsubscribe();
+        });
+
+        return reply;
+      },
+    );
+  };
+}

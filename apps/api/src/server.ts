@@ -17,7 +17,8 @@ import {
 import { env } from "./env.js";
 import { createLoggerOptions } from "./logger.js";
 import { dbPlugin } from "./plugins/db.js";
-import { exportRoutes } from "./routes/exports.js";
+import { buildExportRoutes } from "./routes/exports.js";
+import type { JobStore } from "./lib/job-store.js";
 import { healthRoutes } from "./routes/health.js";
 import { templateRoutes } from "./routes/templates.js";
 
@@ -27,6 +28,8 @@ export interface CreateServerOptions {
   readonly dbClient?: DatabaseClient;
   /** Override DATABASE_URL без зміни env. */
   readonly dbUrl?: string;
+  /** Override job-store (тестам зручно інжектити власний). */
+  readonly jobStore?: JobStore;
 }
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -55,7 +58,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
   await app.register(healthRoutes);
   await app.register(templateRoutes);
-  await app.register(exportRoutes);
+  await app.register(buildExportRoutes(options.jobStore ? { store: options.jobStore } : {}));
 
   return app;
 }
