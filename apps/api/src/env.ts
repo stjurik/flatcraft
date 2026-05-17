@@ -12,6 +12,8 @@ const EnvSchema = z.object({
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().positive().max(65535).default(4000),
   LOG_LEVEL: z.enum(LOG_LEVELS).optional(),
+  APP_BASE_URL: z.string().url().default("http://localhost:3000"),
+  CAD_WORKER_URL: z.string().url().default("http://localhost:5000"),
 });
 
 export type Env = z.infer<typeof EnvSchema> & { LOG_LEVEL: (typeof LOG_LEVELS)[number] };

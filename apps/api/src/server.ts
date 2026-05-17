@@ -5,6 +5,7 @@
  * щоб тести могли використовувати `app.inject()` без відкриття порту.
  * Реальний запуск (listen) — у main() нижче і у `start` npm-скрипті.
  */
+import cors from "@fastify/cors";
 import type { DatabaseClient } from "@flatcraft/db";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import {
@@ -16,6 +17,7 @@ import {
 import { env } from "./env.js";
 import { createLoggerOptions } from "./logger.js";
 import { dbPlugin } from "./plugins/db.js";
+import { exportRoutes } from "./routes/exports.js";
 import { healthRoutes } from "./routes/health.js";
 import { templateRoutes } from "./routes/templates.js";
 
@@ -38,6 +40,14 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // CORS: web на localhost:3000 / APP_BASE_URL → api на :4000. Без цього
+  // браузер блокує fetch до іншого origin. У prod APP_BASE_URL — реальний
+  // домен.
+  await app.register(cors, {
+    origin: [env.APP_BASE_URL],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  });
+
   await app.register(dbPlugin, {
     ...(options.dbClient ? { client: options.dbClient } : {}),
     ...(options.dbUrl ? { url: options.dbUrl } : {}),
@@ -45,6 +55,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
   await app.register(healthRoutes);
   await app.register(templateRoutes);
+  await app.register(exportRoutes);
 
   return app;
 }
