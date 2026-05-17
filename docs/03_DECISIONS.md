@@ -259,6 +259,39 @@
 
 ---
 
+## ADR-013: Browser-side preview через three.js Shape, OpenCascade.js відкладено
+
+**Статус:** Accepted (2026-05-17)
+
+**Контекст:** ADR-002 і roadmap Phase 2.6 закладали OpenCascade.js на frontend для preview-mesh. Реальне впровадження зіткнулось з:
+
+- Bundle ~20 MB WASM (важко для FCP, потребує async loader + UI fallback).
+- API OpenCascade.js (beta) — TopoDS_Shape → mesh потребує okt-bridge коду + buffer-marshalling.
+- MVP-шаблони (L-bracket Phase 2; Z, кутник, полиця, перфо-панель Phase 2.10) геометрично прості — extrude 2D-профілю достатньо.
+- Phase 1 уже дає точну геометрію через server-side CadQuery (workers/cad) — це авторитетне джерело для DXF/STEP. Browser preview — для UX feedback, не для виробничих файлів.
+
+**Рішення:** Phase 2.6 — використовуємо `three.js Shape + ExtrudeGeometry` для browser preview (`packages/ui/src/3d-viewport/`). Шару параметрів додаємо `useDebouncedValue(100мс)` для уникнення re-build mesh на кожен keystroke (CLAUDE.md §9 поріг). OpenCascade.js — відкладено до фази, коли реально знадобиться:
+
+- Boolean-операції (вирізи з користувацькими отворами поза template-grid).
+- Імпорт STEP/STL для custom-моделей.
+- Точна validation колізій у браузері (зараз — CadQuery server-side через export-черги).
+
+**Наслідки:**
+
+- ✅ Phase 2 закривається без heavy WASM. FCP лишається <1.5c (CLAUDE.md §9).
+- ✅ `@flatcraft/cad-engine` peerDep `opencascade.js` залишається опційним — bridge-файл додамо коли підемо у post-MVP.
+- ✅ Pure `buildLBracketShapeCommands` (packages/ui) тестується без WebGL/WASM.
+- ⚠️ AGENTS.md і docs/03 (ADR-002) згадують OpenCascade.js як архітектурну частину — апдейтнуто посиланням на цей ADR.
+- ❌ Якщо знадобиться precise validation у браузері до Phase 4 — повертаємось і вкладаємось в OpenCascade.js bridge. Імовірність: низька (server-side флоу через CadQuery уже покриває).
+
+**Альтернативи:**
+
+- Опускати OpenCascade.js повністю — ризик, якщо коли-небудь захочемо STEP-imports. Відкидаємо: peerDep лишаємо.
+- Build OpenCascade.js bridge у Phase 2.6 одразу — overengineering без use-case.
+- Replicad / Manifold — інші open-source CAD-libs; той же розмір/складність WASM. Не виграш.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

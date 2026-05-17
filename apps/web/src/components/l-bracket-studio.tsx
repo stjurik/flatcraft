@@ -1,6 +1,7 @@
 "use client";
 
 import type { LBracketParameters } from "@flatcraft/types";
+import { useDebouncedValue } from "@flatcraft/ui";
 import { useState } from "react";
 
 import { LBracketEditor } from "./l-bracket-editor";
@@ -10,15 +11,22 @@ interface LBracketStudioProps {
   readonly initialParameters: LBracketParameters;
 }
 
+const VIEWPORT_DEBOUNCE_MS = 100;
+
 /**
  * Lift-state контейнер для L-bracket: редактор параметрів + 3D viewport
- * діляться одним state-ом, щоб міняти input → live-оновлювати mesh.
+ * діляться одним state-ом.
  *
- * thickness — Phase 2.4 додасть UI-вибір через MaterialPicker; поки 2.0
+ * Editor читає live-параметри (instant input feedback + live-валідація).
+ * Viewport отримує debounced-копію — ExtrudeGeometry-rebuild не блокує
+ * клавіш-події при швидкому скролі чисел. 100мс = CLAUDE.md §9 поріг.
+ *
+ * thickness — Phase 3 додасть UI-вибір через MaterialPicker; поки 2.0
  * (CLAUDE.md §7 — мінімум типового діапазону для L-bracket).
  */
 export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
   const [parameters, setParameters] = useState<LBracketParameters>(initialParameters);
+  const debouncedParameters = useDebouncedValue(parameters, VIEWPORT_DEBOUNCE_MS);
   const thicknessMm = 2.0;
 
   return (
@@ -28,7 +36,7 @@ export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
         <LBracketEditor value={parameters} onChange={setParameters} />
       </div>
 
-      <LBracketViewport parameters={parameters} thicknessMm={thicknessMm} />
+      <LBracketViewport parameters={debouncedParameters} thicknessMm={thicknessMm} />
     </div>
   );
 }
