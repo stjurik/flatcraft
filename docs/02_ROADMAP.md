@@ -66,11 +66,13 @@
 - [x] **2.7.** Кнопка Export — sync HTTP-flow (BullMQ async — Phase 2.8). Python FastAPI POST /export (6 pytest, 96% cov), Fastify POST /exports (5 unit з mock fetch), Web ExportButton (3 e2e з mock'ed API). L-bracket: web → api → cad-worker → S3 presigned URL. — 2026-05-17
 - [x] **2.8.** Async export pipeline з SSE прогресом. API: in-memory JobStore (7 unit) + POST/GET/SSE /exports (6 нових unit). Web: EventSource у ExportButton + progress bar (2 нові e2e). BullMQ distributed — Phase 5. — 2026-05-17
 - [x] **2.9.** PDF з розгорткою + bend table + BOM + QR через ReportLab (compute_bom pure-функція з 3 unit). /export повертає ExportResponse.artifacts.{dxf,pdf}. Ізометрія 3D — пропущено до Phase 5 (потребує WebGL→PNG pipeline). — 2026-05-18
-- [~] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR
+- [x] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR. — 2026-05-18
   - [x] **2.10.a.** Z-кронштейн — Zod + Pydantic схеми, CadQuery builder, unfold (2 гиби), DXF/PDF з generic exporters, Studio/Editor/Viewport, ExportRequest discriminatedUnion, 3 e2e. — 2026-05-18
   - [x] **2.10.b.** Кутник (corner_angle) — auto-grid отворів (rows × cols × 2 полиці) замість ручних координат L-bracket. `_distribute` pure-функція, `Hole2D` додано до unfold, DXF/PDF малюють CIRCLE на INNER_CUTS, R3F рендерить cylinder-отвори для preview. 97 pytest (99% cov), 32 db tests, 4 нових e2e (19 разом). — 2026-05-18
   - [x] **2.10.c.** Полиця настінна (wall_shelf) — U-channel back+shelf+(optional)lip. front_lip=0 → 2 сегменти/1 гиб, ≥5 → 3 сегменти/2 гиби. Auto-grid mounting holes на back. Cross-field constraint "0 або ≥5" через `WallShelfParametersBaseSchema` + refine wrapper (base використовується у discriminatedUnion). 118 pytest (99% cov), 33 db tests, 4 нові e2e (23 разом). — 2026-05-18
-  - [ ] **2.10.d.** Перфо-панель (perforated_panel)
+  - [x] **2.10.d.** Перфо-панель (perforated_panel) — плоский лист без гибів, centered grid отворів за pitch_x/pitch_y/margin. Layout автоматичний: `n_cols = floor((length - 2*margin)/pitch) + 1`, eff_margin перераховується для симетрії. Reuse `_export_flat_dxf(holes, bend_lines=())` без модифікацій. Окремий PDF без bend table — натомість Hole grid summary. 137 pytest (99% cov), 34 db tests, 4 нові e2e (27 разом). — 2026-05-18
+
+**Phase 2 повністю закрита: 5 шаблонів end-to-end (web → api → cad-worker → S3).**
 
 **Тести:** Playwright e2e — відкрити сторінку → змінити параметр → побачити оновлення 3D → клікнути Export → отримати DXF.
 

@@ -20,22 +20,29 @@ from pydantic import BaseModel, ConfigDict, Field
 from flatcraft_cad.export.dxf import (
     export_corner_angle_dxf,
     export_l_bracket_dxf,
+    export_perforated_panel_dxf,
     export_wall_shelf_dxf,
     export_z_bracket_dxf,
 )
 from flatcraft_cad.export.pdf import (
     export_corner_angle_pdf,
     export_l_bracket_pdf,
+    export_perforated_panel_pdf,
     export_wall_shelf_pdf,
     export_z_bracket_pdf,
 )
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters, build_corner_angle
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
+from flatcraft_cad.templates.perforated_panel import (
+    PerforatedPanelBuildParameters,
+    build_perforated_panel,
+)
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters, build_wall_shelf
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters, build_z_bracket
 from flatcraft_cad.unfold import (
     unfold_corner_angle,
     unfold_l_bracket,
+    unfold_perforated_panel,
     unfold_wall_shelf,
     unfold_z_bracket,
 )
@@ -43,7 +50,7 @@ from flatcraft_cad.unfold import (
 PRESIGN_EXPIRES_SEC = 3600
 
 # Допустимі slugs — підтягуємо з типу для безпеки.
-TemplateSlug = Literal["l_bracket", "z_bracket", "corner_angle", "wall_shelf"]
+TemplateSlug = Literal["l_bracket", "z_bracket", "corner_angle", "wall_shelf", "perforated_panel"]
 
 
 class ExportRequest(BaseModel):
@@ -154,6 +161,25 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
     return dxf, pdf
 
 
+def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
+    """Повертає (dxf_bytes, pdf_bytes) для perforated_panel.
+
+    k_factor не використовується (немає bends), приймається як no-op.
+    """
+    try:
+        params = PerforatedPanelBuildParameters.model_validate(
+            {**req.parameters, "thickness_mm": req.thickness_mm},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
+
+    _ = build_perforated_panel(params)
+    unfolded = unfold_perforated_panel(params)
+    dxf = export_perforated_panel_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
+    pdf = export_perforated_panel_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    return dxf, pdf
+
+
 def _build_app() -> FastAPI:
     app = FastAPI(title="flatcraft-cad", version="0.0.0")
 
@@ -173,6 +199,8 @@ def _build_app() -> FastAPI:
                 dxf_data, pdf_data = _generate_corner_angle(req, tmpdir)
             elif req.template_slug == "wall_shelf":
                 dxf_data, pdf_data = _generate_wall_shelf(req, tmpdir)
+            elif req.template_slug == "perforated_panel":
+                dxf_data, pdf_data = _generate_perforated_panel(req, tmpdir)
             else:
                 # Pydantic Literal вже відсіює інші, але type-narrow для mypy.
                 raise HTTPException(status_code=400, detail="unsupported_template")

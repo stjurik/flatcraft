@@ -25,6 +25,7 @@ from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
     UnfoldedLBracket,
+    UnfoldedPerforatedPanel,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -201,6 +202,24 @@ def export_wall_shelf_dxf(
         bend_lines_mm=unfolded.bend_positions_mm,
         bend_radius_mm=bend_radius_mm,
         bend_angle_deg=bend_angle_deg,
+        output_path=output_path,
+        holes=unfolded.holes,
+    )
+
+
+def export_perforated_panel_dxf(
+    unfolded: UnfoldedPerforatedPanel,
+    output_path: Path,
+) -> Path:
+    """Perforated_panel DXF: лише прямокутник + grid отворів, без bends."""
+    # bend_radius_mm/bend_angle_deg формально потрібні API, але цикл по
+    # bend_lines_mm=() не виконається — їхні значення не використовуються.
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=(),
+        bend_radius_mm=0.0,
+        bend_angle_deg=0.0,
         output_path=output_path,
         holes=unfolded.holes,
     )

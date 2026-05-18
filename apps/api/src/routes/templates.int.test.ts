@@ -32,21 +32,22 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     await client?.close();
   });
 
-  it("повертає лише опубліковані шаблони (4 з 5 у Phase 2.10.c)", async () => {
+  it("повертає всі 5 опублікованих шаблонів (Phase 2.10 закрита)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates" });
     expect(res.statusCode).toBe(200);
     const body = res.json<{
       items: Array<{ slug: string; isPublished: boolean; nameUk: string }>;
     }>();
-    expect(body.items.length).toBeGreaterThanOrEqual(4);
+    expect(body.items.length).toBe(5);
     expect(body.items.every((t) => t.isPublished)).toBe(true);
-    const slugs = body.items.map((t) => t.slug);
-    expect(slugs).toContain("l_bracket");
-    expect(slugs).toContain("z_bracket");
-    expect(slugs).toContain("corner_angle");
-    expect(slugs).toContain("wall_shelf");
-    // Phase 2.10.d ще не опубліковано:
-    expect(slugs).not.toContain("perforated_panel");
+    const slugs = body.items.map((t) => t.slug).sort();
+    expect(slugs).toEqual([
+      "corner_angle",
+      "l_bracket",
+      "perforated_panel",
+      "wall_shelf",
+      "z_bracket",
+    ]);
   });
 
   it("response відповідає TemplateListResponseSchema", async () => {
@@ -121,9 +122,19 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     });
   });
 
-  it("GET /templates/perforated_panel → 404 (неопублікований)", async () => {
+  it("GET /templates/perforated_panel → 200 з pitch-grid у defaults (Phase 2.10.d)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates/perforated_panel" });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ slug: string; defaultParameters: Record<string, unknown> }>();
+    expect(body.slug).toBe("perforated_panel");
+    expect(body.defaultParameters).toMatchObject({
+      length_mm: expect.any(Number),
+      width_mm: expect.any(Number),
+      hole_diameter_mm: expect.any(Number),
+      pitch_x_mm: expect.any(Number),
+      pitch_y_mm: expect.any(Number),
+      margin_mm: expect.any(Number),
+    });
   });
 
   it("GET /templates/does_not_exist → 404", async () => {

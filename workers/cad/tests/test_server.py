@@ -93,12 +93,22 @@ WALL_SHELF_VALID_PARAMS: dict[str, object] = {
 }
 
 
+PERFORATED_PANEL_VALID_PARAMS: dict[str, object] = {
+    "length_mm": 200,
+    "width_mm": 150,
+    "hole_diameter_mm": 8,
+    "pitch_x_mm": 20,
+    "pitch_y_mm": 20,
+    "margin_mm": 15,
+}
+
+
 class TestExportValidation:
     def test_невалідний_template_slug_422(self, client: TestClient) -> None:
         res = client.post(
             "/export",
             json={
-                "template_slug": "perforated_panel",
+                "template_slug": "non_existent_template",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
             },
@@ -445,3 +455,103 @@ class TestWallShelfExport:
         )
         assert dxf.count("\nCIRCLE\n") == 4
         assert "INNER_CUTS" in dxf
+
+
+class TestPerforatedPanelExport:
+    def test_perforated_panel_успішний_експорт_dxf_і_pdf(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "perforated_panel",
+                "parameters": PERFORATED_PANEL_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        for kind in ("dxf", "pdf"):
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].endswith(f"_perforated_panel.{kind}")
+
+    def test_perforated_panel_pitch_x_за_межами_422(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "perforated_panel",
+                "parameters": {**PERFORATED_PANEL_VALID_PARAMS, "pitch_x_mm": 5},
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 422
+
+    def test_perforated_panel_dxf_без_bend_lines(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Без bends → 0 BEND text annotations. 9×7 grid = 63 CIRCLE."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "perforated_panel",
+                "parameters": PERFORATED_PANEL_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        dxf = (
+            s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=res["artifacts"]["dxf"]["s3_key"])[
+                "Body"
+            ]
+            .read()
+            .decode("utf-8")
+        )
+        # Жодних BEND текстів (без гибів):
+        assert dxf.count("BEND ") == 0
+        # 9 × 7 = 63 кола з grid.
+        assert dxf.count("\nCIRCLE\n") == 63
+        assert "INNER_CUTS" in dxf
+
+    def test_perforated_panel_pitch_впливає_на_кількість_отворів(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Більший pitch → менше отворів у DXF."""
+        small_pitch = client.post(
+            "/export",
+            json={
+                "template_slug": "perforated_panel",
+                "parameters": PERFORATED_PANEL_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        big_pitch = client.post(
+            "/export",
+            json={
+                "template_slug": "perforated_panel",
+                "parameters": {
+                    **PERFORATED_PANEL_VALID_PARAMS,
+                    "pitch_x_mm": 50,
+                    "pitch_y_mm": 50,
+                },
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        small = (
+            s3.get_object(
+                Bucket=os.environ["S3_BUCKET"], Key=small_pitch["artifacts"]["dxf"]["s3_key"]
+            )["Body"]
+            .read()
+            .decode("utf-8")
+        )
+        big = (
+            s3.get_object(
+                Bucket=os.environ["S3_BUCKET"], Key=big_pitch["artifacts"]["dxf"]["s3_key"]
+            )["Body"]
+            .read()
+            .decode("utf-8")
+        )
+        assert small.count("\nCIRCLE\n") > big.count("\nCIRCLE\n")

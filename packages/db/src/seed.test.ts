@@ -63,11 +63,17 @@ describe("SEED_TEMPLATES", () => {
     expect(SEED_TEMPLATES).toHaveLength(5);
   });
 
-  it("L-bracket, Z-bracket, corner_angle, wall_shelf опубліковано (Phase 2.10.c)", () => {
+  it("усі 5 шаблонів опубліковано (Phase 2.10 повністю закрита)", () => {
     const published = SEED_TEMPLATES.filter((t) => t.isPublished)
       .map((t) => t.slug)
       .sort();
-    expect(published).toEqual(["corner_angle", "l_bracket", "wall_shelf", "z_bracket"]);
+    expect(published).toEqual([
+      "corner_angle",
+      "l_bracket",
+      "perforated_panel",
+      "wall_shelf",
+      "z_bracket",
+    ]);
   });
 
   it("slug-и унікальні і відповідають roadmap Phase 2.10", () => {
@@ -142,10 +148,20 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
-  it("неопубліковані шаблони мають порожній defaultParameters", () => {
+  it("perforated_panel defaultParameters містить pitch-grid поля", () => {
+    const panel = SEED_TEMPLATES.find((t) => t.slug === "perforated_panel");
+    expect(panel?.defaultParameters).toMatchObject({
+      length_mm: expect.any(Number),
+      width_mm: expect.any(Number),
+      hole_diameter_mm: expect.any(Number),
+      pitch_x_mm: expect.any(Number),
+      pitch_y_mm: expect.any(Number),
+      margin_mm: expect.any(Number),
+    });
+  });
+
+  it("більше немає шаблонів з isPublished=false (Phase 2.10 закрита)", () => {
     const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished);
-    for (const t of unpublished) {
-      expect(t.defaultParameters).toEqual({});
-    }
+    expect(unpublished).toHaveLength(0);
   });
 });

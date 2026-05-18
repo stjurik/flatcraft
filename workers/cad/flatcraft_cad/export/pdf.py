@@ -43,12 +43,14 @@ from reportlab.pdfgen import canvas as pdfcanvas
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
     UnfoldedLBracket,
+    UnfoldedPerforatedPanel,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -57,7 +59,13 @@ PAGE_WIDTH, PAGE_HEIGHT = landscape(A4)
 
 
 def compute_bom(
-    unfolded: UnfoldedLBracket | UnfoldedZBracket | UnfoldedCornerAngle | UnfoldedWallShelf,
+    unfolded: (
+        UnfoldedLBracket
+        | UnfoldedZBracket
+        | UnfoldedCornerAngle
+        | UnfoldedWallShelf
+        | UnfoldedPerforatedPanel
+    ),
     *,
     density_kg_m3: float = 7850.0,
 ) -> dict[str, float]:
@@ -683,6 +691,125 @@ def export_wall_shelf_pdf(
         15 * mm,
         15 * mm,
         "DXF для лазерного різання · BEND-LINES = гиби · INNER_CUTS = mounting holes",
+    )
+
+    c.showPage()
+    c.save()
+    _normalize_pdf_bytes(output_path)
+    return output_path
+
+
+def export_perforated_panel_pdf(
+    parameters: PerforatedPanelBuildParameters,
+    unfolded: UnfoldedPerforatedPanel,
+    output_path: Path,
+    *,
+    material_label: str = "cold_rolled_steel",
+    density_kg_m3: float = 7850.0,
+    permalink_url: str | None = None,
+) -> Path:
+    """PDF для perforated_panel: rectangle + hole grid + BOM + QR (без bend table)."""
+    article = (
+        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
+        .hexdigest()[:10]
+        .upper()
+    )
+    qr_payload = permalink_url or f"flatcraft://perforated_panel/{article}"
+    n_holes = len(unfolded.holes)
+
+    c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
+    c.setTitle(f"Perforated panel {article}")
+    c.setAuthor("flatcraft")
+    c.setCreator("flatcraft-cad-worker")
+    c.setProducer("flatcraft-cad-worker")
+    c.setSubject(
+        f"Perforated panel {parameters.length_mm}×{parameters.width_mm} мм, "
+        f"{n_holes} holes Ø{parameters.hole_diameter_mm}"
+    )
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(15 * mm, (210 - 15) * mm, "Перфо-панель")
+    c.setFont("Helvetica", 10)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    c.drawString(
+        15 * mm,
+        (210 - 20) * mm,
+        f"slug: perforated_panel · артикул: {article} · дата: {today}",
+    )
+    c.drawString(
+        15 * mm,
+        (210 - 24) * mm,
+        f"Лист {parameters.length_mm}×{parameters.width_mm} мм · крок "
+        f"pitch_x={parameters.pitch_x_mm} pitch_y={parameters.pitch_y_mm} · "
+        f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
+        f"Ø{parameters.hole_diameter_mm:g} мм",
+    )
+
+    _draw_unfold_generic(
+        c,
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_positions_mm=(),
+        origin_mm=(15, 70),
+        canvas_size_mm=(150, 100),
+        holes=unfolded.holes,
+    )
+
+    # Без bend table — натомість grid summary.
+    ox, oy = 175, 170
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Hole grid")
+    c.setFont("Helvetica", 9)
+    for i, line in enumerate(
+        [
+            f"Колонок (по X): {unfolded.grid_cols}",
+            f"Рядів (по Y): {unfolded.grid_rows}",
+            f"Усього отворів: {n_holes}",
+            f"Pitch X: {parameters.pitch_x_mm:g} мм",
+            f"Pitch Y: {parameters.pitch_y_mm:g} мм",
+            f"Діаметр: {parameters.hole_diameter_mm:g} мм",
+        ],
+    ):
+        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+
+    # BOM.
+    ox_b, oy_b = 175, 140
+    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(ox_b * mm, oy_b * mm, "Bill of materials")
+    c.setFont("Helvetica", 9)
+    for i, line in enumerate(
+        [
+            f"Матеріал: {material_label}",
+            f"Товщина: {unfolded.thickness_mm:.2f} мм",
+            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
+            f"Маса (приблизно): {bom['mass_g']:.1f} г",
+        ],
+    ):
+        c.drawString(ox_b * mm, (oy_b - 4 - i * 4) * mm, line)
+
+    qr_png = _make_qr_png(qr_payload)
+    qr_size_mm = 30
+    qr_buf = io.BytesIO(qr_png)
+    c.drawImage(
+        _ImageReader(qr_buf),
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        15 * mm,
+        width=qr_size_mm * mm,
+        height=qr_size_mm * mm,
+    )
+    c.setFont("Helvetica", 7)
+    c.drawString(
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        12 * mm,
+        f"QR: {qr_payload[:48]}",
+    )
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(
+        15 * mm,
+        15 * mm,
+        "DXF для лазерного різання · INNER_CUTS = отвори · BEND операцій немає",
     )
 
     c.showPage()

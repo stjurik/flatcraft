@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Каталог /templates", () => {
-  test("показує L/Z/corner_angle/wall_shelf картки (Phase 2.10.c)", async ({ page }) => {
+  test("показує всі 5 шаблонів — Phase 2.10 закрита", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -11,26 +11,19 @@ test.describe("Каталог /templates", () => {
 
     await expect(page.getByTestId("templates-page-title")).toHaveText("Шаблони");
 
-    const lBracketCard = page.locator('[data-testid="template-card"][data-slug="l_bracket"]');
-    await expect(lBracketCard).toBeVisible();
-    await expect(lBracketCard).toContainText("L-кронштейн");
+    const expectedSlugs: ReadonlyArray<{ slug: string; name: string }> = [
+      { slug: "l_bracket", name: "L-кронштейн" },
+      { slug: "z_bracket", name: "Z-кронштейн" },
+      { slug: "corner_angle", name: "Кутник" },
+      { slug: "wall_shelf", name: "Полиця настінна" },
+      { slug: "perforated_panel", name: "Перфо-панель" },
+    ];
 
-    const zBracketCard = page.locator('[data-testid="template-card"][data-slug="z_bracket"]');
-    await expect(zBracketCard).toBeVisible();
-    await expect(zBracketCard).toContainText("Z-кронштейн");
-
-    const cornerCard = page.locator('[data-testid="template-card"][data-slug="corner_angle"]');
-    await expect(cornerCard).toBeVisible();
-    await expect(cornerCard).toContainText("Кутник");
-
-    const shelfCard = page.locator('[data-testid="template-card"][data-slug="wall_shelf"]');
-    await expect(shelfCard).toBeVisible();
-    await expect(shelfCard).toContainText("Полиця настінна");
-
-    // perforated_panel — поки прихована до Phase 2.10.d.
-    await expect(
-      page.locator('[data-testid="template-card"][data-slug="perforated_panel"]'),
-    ).toHaveCount(0);
+    for (const { slug, name } of expectedSlugs) {
+      const card = page.locator(`[data-testid="template-card"][data-slug="${slug}"]`);
+      await expect(card).toBeVisible();
+      await expect(card).toContainText(name);
+    }
 
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });

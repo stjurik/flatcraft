@@ -16,6 +16,7 @@
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
@@ -150,10 +151,11 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     slug: "perforated_panel",
     nameUk: "Перфо-панель",
     nameEn: "Perforated panel",
-    descriptionUk: "Лист із сіткою отворів за заданим кроком.",
-    descriptionEn: "Sheet with a grid of holes at a given pitch.",
-    isPublished: false,
-    defaultParameters: {},
+    descriptionUk: "Плоский лист із сіткою отворів за заданим pitch (без гибів).",
+    descriptionEn: "Flat sheet with a grid of holes at given pitch (no bends).",
+    // Phase 2.10.d — Phase 2.10 повністю закрита.
+    isPublished: true,
+    defaultParameters: PERFORATED_PANEL_DEFAULT_PARAMETERS,
   },
 ];
 

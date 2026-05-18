@@ -6,17 +6,20 @@ import pytest
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
     UnfoldedCornerAngle,
     UnfoldedLBracket,
+    UnfoldedPerforatedPanel,
     UnfoldedWallShelf,
     UnfoldedZBracket,
     _distribute,
     compute_bend_allowance,
     unfold_corner_angle,
     unfold_l_bracket,
+    unfold_perforated_panel,
     unfold_wall_shelf,
     unfold_z_bracket,
 )
@@ -393,4 +396,80 @@ class TestUnfoldWallShelf:
         params = self._params()
         a = unfold_wall_shelf(params, k_factor=0.4)
         b = unfold_wall_shelf(params, k_factor=0.4)
+        assert a == b
+
+
+class TestUnfoldPerforatedPanel:
+    def _params(self, **overrides: float) -> PerforatedPanelBuildParameters:
+        defaults: dict[str, float] = {
+            "length_mm": 200.0,
+            "width_mm": 150.0,
+            "thickness_mm": 2.0,
+            "hole_diameter_mm": 8.0,
+            "pitch_x_mm": 20.0,
+            "pitch_y_mm": 20.0,
+            "margin_mm": 15.0,
+        }
+        defaults.update(overrides)
+        return PerforatedPanelBuildParameters(**defaults)
+
+    def test_дефолти_200x150_pitch20_margin15(self) -> None:
+        """avail_x = 200-30 = 170; n_cols = 170//20+1 = 9.
+        avail_y = 150-30 = 120; n_rows = 120//20+1 = 7.
+        Усього = 63 отвори. eff_margin_x = (200 - 8*20)/2 = 20.
+        """
+        result = unfold_perforated_panel(self._params())
+        assert isinstance(result, UnfoldedPerforatedPanel)
+        assert result.grid_cols == 9
+        assert result.grid_rows == 7
+        assert len(result.holes) == 63
+
+    def test_centered_layout(self) -> None:
+        """eff_margin = (200 - (9-1)*20) / 2 = 20. Перший hole.x = 20,
+        останній = 20 + 8*20 = 180. Симетрично, тобто 200-180=20."""
+        result = unfold_perforated_panel(self._params())
+        xs = sorted({h.x_mm for h in result.holes})
+        assert xs[0] == pytest.approx(20.0, abs=1e-9)
+        assert xs[-1] == pytest.approx(180.0, abs=1e-9)
+        # Симетрія: відступи з обох боків однакові.
+        assert (200.0 - xs[-1]) == pytest.approx(xs[0], abs=1e-9)
+
+    def test_pitch_x_дорівнює_довжині_дає_1_колонку(self) -> None:
+        """Якщо pitch_x ≥ available_x, отримуємо лише 1 колонку посередині."""
+        result = unfold_perforated_panel(
+            self._params(pitch_x_mm=200.0)  # > avail_x=170
+        )
+        assert result.grid_cols == 1
+        # Один отвір по центру: x = length/2 = 100.
+        xs = {h.x_mm for h in result.holes}
+        assert len(xs) == 1
+        assert next(iter(xs)) == pytest.approx(100.0, abs=1e-9)
+
+    def test_більший_pitch_менше_отворів(self) -> None:
+        small_pitch = unfold_perforated_panel(self._params(pitch_x_mm=20.0, pitch_y_mm=20.0))
+        big_pitch = unfold_perforated_panel(self._params(pitch_x_mm=50.0, pitch_y_mm=50.0))
+        assert len(big_pitch.holes) < len(small_pitch.holes)
+
+    def test_усі_отвори_мають_однаковий_діаметр(self) -> None:
+        result = unfold_perforated_panel(self._params())
+        for h in result.holes:
+            assert h.diameter_mm == 8.0
+
+    def test_невалідний_margin_кидає(self) -> None:
+        params = PerforatedPanelBuildParameters.model_construct(
+            length_mm=50.0,
+            width_mm=150.0,
+            thickness_mm=2.0,
+            hole_diameter_mm=8.0,
+            pitch_x_mm=20.0,
+            pitch_y_mm=20.0,
+            margin_mm=30.0,  # 2*30 > 50 → no room
+        )
+        with pytest.raises(ValueError, match="no room"):
+            unfold_perforated_panel(params)
+
+    def test_детермінізм(self) -> None:
+        params = self._params()
+        a = unfold_perforated_panel(params)
+        b = unfold_perforated_panel(params)
         assert a == b

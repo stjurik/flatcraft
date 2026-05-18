@@ -3,6 +3,8 @@ import {
   CornerAngleParametersSchema,
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
+  PerforatedPanelParametersSchema,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
   ZBracketParametersSchema,
@@ -13,6 +15,7 @@ import { notFound } from "next/navigation";
 
 import { CornerAngleStudio } from "../../../components/corner-angle-studio";
 import { LBracketStudio } from "../../../components/l-bracket-studio";
+import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
 import { WallShelfStudio } from "../../../components/wall-shelf-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
 import { fetchTemplate } from "../../../lib/api";
@@ -98,6 +101,14 @@ function TemplateStudio({
     return (
       <WallShelfStudio
         initialParameters={parsed.success ? parsed.data : WALL_SHELF_DEFAULT_PARAMETERS}
+      />
+    );
+  }
+  if (slug === "perforated_panel") {
+    const parsed = PerforatedPanelParametersSchema.safeParse(defaults);
+    return (
+      <PerforatedPanelStudio
+        initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
       />
     );
   }

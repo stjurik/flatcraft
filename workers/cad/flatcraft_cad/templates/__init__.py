@@ -11,6 +11,11 @@ from flatcraft_cad.templates.l_bracket import (
     LBracketTemplate,
     build_l_bracket,
 )
+from flatcraft_cad.templates.perforated_panel import (
+    PerforatedPanelBuildParameters,
+    PerforatedPanelTemplate,
+    build_perforated_panel,
+)
 from flatcraft_cad.templates.wall_shelf import (
     WallShelfBuildParameters,
     WallShelfTemplate,
@@ -27,6 +32,8 @@ __all__ = [
     "CornerAngleTemplate",
     "LBracketBuildParameters",
     "LBracketTemplate",
+    "PerforatedPanelBuildParameters",
+    "PerforatedPanelTemplate",
     "Template",
     "WallShelfBuildParameters",
     "WallShelfTemplate",
@@ -34,6 +41,7 @@ __all__ = [
     "ZBracketTemplate",
     "build_corner_angle",
     "build_l_bracket",
+    "build_perforated_panel",
     "build_wall_shelf",
     "build_z_bracket",
 ]

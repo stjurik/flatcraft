@@ -24,3 +24,9 @@ export {
   WallShelfParametersSchema,
   type WallShelfParameters,
 } from "./wall-shelf.js";
+
+export {
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
+  PerforatedPanelParametersSchema,
+  type PerforatedPanelParameters,
+} from "./perforated-panel.js";
