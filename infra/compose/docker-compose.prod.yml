@@ -89,10 +89,6 @@ services:
     restart: unless-stopped
     # CadQuery + OpenCascade тримають 800-1200 MB у пам'яті на render.
     mem_limit: 1500m
-    # TODO Phase 5B: коли cad-worker.Dockerfile перейде на CMD ["python","-m","flatcraft_cad.server"]
-    # — видалити цей override. Поточний Dockerfile запускає `.worker` (BullMQ listener),
-    # але /export ендпоінт живе у `.server` (FastAPI).
-    command: ["python", "-m", "flatcraft_cad.server"]
     depends_on:
       redis:
         condition: service_healthy
@@ -119,7 +115,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 15s
+      # CadQuery + OpenCascade cold start ~12-15с (smoke-test у Phase 5B). 30с дає запас.
+      start_period: 30s
     logging: *default-logging
 
   # ─── API (Fastify) ──────────────────────────────────────────────────────

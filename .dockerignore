@@ -1,0 +1,84 @@
+# .dockerignore — що НЕ потрапляє у build-context (і отже не може бути скопійоване в image).
+# Чим менший контекст — тим швидший build і менший шанс leak'у secrets.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+.github
+
+# Залежності та venv'и (контейнер ставить чисто, без host-артефактів)
+node_modules
+.pnpm-store
+.pnpm-debug.log
+.venv
+venv
+__pycache__
+*.pyc
+
+# Build-outputs (всередині контейнера білдимо заново)
+.next
+.turbo
+dist
+build
+out
+*.tsbuildinfo
+
+# Тестові артефакти
+coverage
+.nyc_output
+htmlcov
+.coverage
+.coverage.*
+.pytest_cache
+playwright-report
+test-results
+**/snapshots-actual
+
+# IDE / OS
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local env (ніколи в image)
+.env
+.env.local
+.env.*.local
+.env.prod
+
+# Markdown — за вимогою брифа: тільки README.md з кореня лишається.
+# README у workers/cad — whitelist, бо pyproject.toml має `readme = "README.md"`
+# і hatchling під час `uv sync` шукає його.
+*.md
+!/README.md
+!workers/cad/README.md
+
+# Документація — окремий PR не вмонтовує її в runtime
+docs
+
+# Інфра — Ansible, compose, Dockerfile-и; самі образи знають свою конфігурацію
+infra
+
+# Логи / кеші
+*.log
+logs
+.cache
+.docker
+
+# Drizzle scratch (генерується)
+packages/db/drizzle
+
+# CAD-артефакти користувача (генерується локально, тести мають свої snapshots)
+*.dxf
+*.step
+*.stl
+*.iges
+*.pdf
+!packages/cad-engine/data/*.dxf
+!workers/cad/tests/snapshots/**/*.dxf
+
+# Sentry
+.sentryclirc
