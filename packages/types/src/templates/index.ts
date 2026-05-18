@@ -11,3 +11,9 @@ export {
   type ZBracketHole,
   type ZBracketParameters,
 } from "./z-bracket.js";
+
+export {
+  CORNER_ANGLE_DEFAULT_PARAMETERS,
+  CornerAngleParametersSchema,
+  type CornerAngleParameters,
+} from "./corner-angle.js";

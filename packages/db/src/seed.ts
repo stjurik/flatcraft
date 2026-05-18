@@ -13,7 +13,11 @@
  *   - runSeed(client) — окрема функція, працює з будь-яким drizzle-інстансом
  *     (production, integration tests).
  */
-import { L_BRACKET_DEFAULT_PARAMETERS, Z_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
+import {
+  CORNER_ANGLE_DEFAULT_PARAMETERS,
+  L_BRACKET_DEFAULT_PARAMETERS,
+  Z_BRACKET_DEFAULT_PARAMETERS,
+} from "@flatcraft/types";
 
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
@@ -125,10 +129,11 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     slug: "corner_angle",
     nameUk: "Кутник",
     nameEn: "Corner angle",
-    descriptionUk: "Підсилювальний кутник для меблів та конструкцій.",
-    descriptionEn: "Reinforcement angle for furniture and structures.",
-    isPublished: false,
-    defaultParameters: {},
+    descriptionUk: "Підсилювальний кутник з grid отворів для меблів та конструкцій.",
+    descriptionEn: "Reinforcement angle with hole grid for furniture and structures.",
+    // Phase 2.10.b — CadQuery-builder і auto-grid hole pattern готові.
+    isPublished: true,
+    defaultParameters: CORNER_ANGLE_DEFAULT_PARAMETERS,
   },
   {
     slug: "wall_shelf",

@@ -63,11 +63,11 @@ describe("SEED_TEMPLATES", () => {
     expect(SEED_TEMPLATES).toHaveLength(5);
   });
 
-  it("L-bracket і Z-bracket опубліковано (Phase 2.10 готовий)", () => {
+  it("L-bracket, Z-bracket, corner_angle опубліковано (Phase 2.10.b)", () => {
     const published = SEED_TEMPLATES.filter((t) => t.isPublished)
       .map((t) => t.slug)
       .sort();
-    expect(published).toEqual(["l_bracket", "z_bracket"]);
+    expect(published).toEqual(["corner_angle", "l_bracket", "z_bracket"]);
   });
 
   it("slug-и унікальні і відповідають roadmap Phase 2.10", () => {
@@ -108,6 +108,21 @@ describe("SEED_TEMPLATES", () => {
       bend_radius_mm: expect.any(Number),
       bend_angle_deg: 90,
       width_mm: expect.any(Number),
+    });
+  });
+
+  it("corner_angle defaultParameters містить hole-grid поля", () => {
+    const corner = SEED_TEMPLATES.find((t) => t.slug === "corner_angle");
+    expect(corner?.defaultParameters).toMatchObject({
+      legA_mm: expect.any(Number),
+      legB_mm: expect.any(Number),
+      bend_radius_mm: expect.any(Number),
+      bend_angle_deg: 90,
+      width_mm: expect.any(Number),
+      hole_diameter_mm: expect.any(Number),
+      hole_rows: expect.any(Number),
+      hole_cols: expect.any(Number),
+      hole_margin_mm: expect.any(Number),
     });
   });
 

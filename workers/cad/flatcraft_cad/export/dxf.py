@@ -21,7 +21,7 @@ from typing import Final
 from ezdxf import new as ezdxf_new  # type: ignore[attr-defined]
 from ezdxf.document import Drawing
 
-from flatcraft_cad.unfold import UnfoldedLBracket, UnfoldedZBracket
+from flatcraft_cad.unfold import Hole2D, UnfoldedCornerAngle, UnfoldedLBracket, UnfoldedZBracket
 
 # Шари, які створюємо у кожному DXF (порядок важливий — впливає на байти).
 DXF_LAYERS: Final[tuple[tuple[str, int], ...]] = (
@@ -75,9 +75,12 @@ def _export_flat_dxf(
     bend_radius_mm: float,
     bend_angle_deg: float,
     output_path: Path,
+    holes: tuple[Hole2D, ...] = (),
 ) -> Path:
     """Базовий exporter: прямокутна заготовка length × width + bend lines
-    на вказаних позиціях. Reuse'абельний для всіх шаблонів (L/Z/wall_shelf).
+    на вказаних позиціях + опціональні внутрішні отвори.
+
+    Reuse'абельний для всіх шаблонів (L/Z/corner_angle/wall_shelf).
     """
     # setup=False вимикає авто-створення VISUALSTYLE/DictionaryVariables,
     # які тримають timestamp поточної версії ezdxf і ламають детермінізм.
@@ -109,6 +112,13 @@ def _export_flat_dxf(
                 "height": _BEND_TEXT_HEIGHT_MM,
                 "insert": (bend_x + 1.0, width_mm + 1.0),
             },
+        )
+
+    for hole in holes:
+        msp.add_circle(
+            center=(hole.x_mm, hole.y_mm),
+            radius=hole.diameter_mm / 2.0,
+            dxfattribs={"layer": "INNER_CUTS"},
         )
 
     doc.saveas(output_path)
@@ -149,6 +159,25 @@ def export_z_bracket_dxf(
         bend_radius_mm=bend_radius_mm,
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,
+    )
+
+
+def export_corner_angle_dxf(
+    unfolded: UnfoldedCornerAngle,
+    output_path: Path,
+    *,
+    bend_radius_mm: float,
+    bend_angle_deg: float = 90.0,
+) -> Path:
+    """Corner_angle DXF: один гиб + grid отворів на INNER_CUTS layer."""
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=(unfolded.bend_position_mm,),
+        bend_radius_mm=bend_radius_mm,
+        bend_angle_deg=bend_angle_deg,
+        output_path=output_path,
+        holes=unfolded.holes,
     )
 
 

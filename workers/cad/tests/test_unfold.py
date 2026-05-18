@@ -4,12 +4,16 @@ import math
 
 import pytest
 
+from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
+    UnfoldedCornerAngle,
     UnfoldedLBracket,
     UnfoldedZBracket,
+    _distribute,
     compute_bend_allowance,
+    unfold_corner_angle,
     unfold_l_bracket,
     unfold_z_bracket,
 )
@@ -225,3 +229,87 @@ class TestUnfoldZBracket:
         small = unfold_z_bracket(params, k_factor=0.3)
         big = unfold_z_bracket(params, k_factor=0.5)
         assert big.length_mm > small.length_mm
+
+
+class TestDistribute:
+    def test_n_1_повертає_центр_сегмента(self) -> None:
+        assert _distribute(1, 0.0, 100.0, 12.0) == (50.0,)
+
+    def test_n_2_повертає_крайні_позиції_з_margin(self) -> None:
+        assert _distribute(2, 0.0, 100.0, 12.0) == (12.0, 88.0)
+
+    def test_n_3_рівні_інтервали(self) -> None:
+        result = _distribute(3, 0.0, 100.0, 10.0)
+        assert result == (10.0, 50.0, 90.0)
+
+    def test_надто_великий_margin_кидає(self) -> None:
+        with pytest.raises(ValueError, match="margin"):
+            _distribute(3, 0.0, 20.0, 15.0)  # 15 > (20-15)
+
+
+class TestUnfoldCornerAngle:
+    def _params(self, **overrides: float | int) -> CornerAngleBuildParameters:
+        defaults: dict[str, float | int] = {
+            "leg_a_mm": 50.0,
+            "leg_b_mm": 50.0,
+            "bend_radius_mm": 2.5,
+            "bend_angle_deg": 90,
+            "width_mm": 80.0,
+            "thickness_mm": 2.0,
+            "hole_diameter_mm": 5.0,
+            "hole_rows": 1,
+            "hole_cols": 2,
+            "hole_margin_mm": 12.0,
+        }
+        defaults.update(overrides)
+        return CornerAngleBuildParameters(**defaults)  # type: ignore[arg-type]
+
+    def test_розгортка_50_50_t2_r25_k04(self) -> None:
+        """L = (leg_b − t − R) + BA + (leg_a − t − R) = 45.5 + BA + 45.5."""
+        result = unfold_corner_angle(self._params(), k_factor=0.4)
+        assert isinstance(result, UnfoldedCornerAngle)
+        expected_ba = (math.pi / 2) * 3.3
+        expected_length = 45.5 + expected_ba + 45.5
+        assert result.length_mm == pytest.approx(expected_length, abs=1e-9)
+        assert result.bend_position_mm == pytest.approx(45.5 + expected_ba / 2, abs=1e-9)
+
+    def test_grid_1x2_дає_4_отвори(self) -> None:
+        """rows=1 × cols=2 × 2 полиці = 4 отвори."""
+        result = unfold_corner_angle(self._params(), k_factor=0.4)
+        assert len(result.holes) == 4
+        # rows=1 → y = width/2 = 40 для всіх отворів.
+        for h in result.holes:
+            assert h.y_mm == pytest.approx(40.0, abs=1e-9)
+            assert h.diameter_mm == 5.0
+
+    def test_grid_2x3_дає_12_отворів(self) -> None:
+        result = unfold_corner_angle(self._params(hole_rows=2, hole_cols=3), k_factor=0.4)
+        assert len(result.holes) == 12
+
+    def test_grid_розподіляється_симетрично_по_полицях(self) -> None:
+        """B (0..flat_b=45.5) і A (flat_b+BA..length): однакові x-offsets."""
+        params = self._params(hole_cols=2, hole_rows=1, hole_margin_mm=10.0)
+        result = unfold_corner_angle(params, k_factor=0.4)
+        # 4 отвори: 2 на B (x=10, 35.5), 2 на A (зсунуті на flat_b+BA).
+        ba = result.bend_allowance_mm
+        b_xs = sorted(h.x_mm for h in result.holes if h.x_mm < 45.5)
+        a_xs = sorted(h.x_mm for h in result.holes if h.x_mm > 45.5)
+        assert b_xs == pytest.approx([10.0, 35.5], abs=1e-9)
+        assert a_xs == pytest.approx([45.5 + ba + 10.0, 45.5 + ba + 35.5], abs=1e-9)
+
+    def test_grid_1x1_дає_2_отвори_у_центрах(self) -> None:
+        result = unfold_corner_angle(
+            self._params(hole_rows=1, hole_cols=1, hole_margin_mm=10.0), k_factor=0.4
+        )
+        assert len(result.holes) == 2
+        # x: центр сегмента B = 22.75; центр A = 45.5+BA + 22.75
+        ba = result.bend_allowance_mm
+        xs = sorted(h.x_mm for h in result.holes)
+        assert xs[0] == pytest.approx(45.5 / 2, abs=1e-9)
+        assert xs[1] == pytest.approx(45.5 + ba + 45.5 / 2, abs=1e-9)
+
+    def test_детермінізм(self) -> None:
+        params = self._params()
+        a = unfold_corner_angle(params, k_factor=0.4)
+        b = unfold_corner_angle(params, k_factor=0.4)
+        assert a == b

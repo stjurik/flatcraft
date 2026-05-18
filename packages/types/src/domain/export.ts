@@ -9,6 +9,7 @@
  */
 import { z } from "zod";
 
+import { CornerAngleParametersSchema } from "../templates/corner-angle.js";
 import { LBracketParametersSchema } from "../templates/l-bracket.js";
 import { ZBracketParametersSchema } from "../templates/z-bracket.js";
 
@@ -21,6 +22,11 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
   z.object({
     template_slug: z.literal("z_bracket"),
     parameters: ZBracketParametersSchema,
+    thickness_mm: z.number().positive().max(10),
+  }),
+  z.object({
+    template_slug: z.literal("corner_angle"),
+    parameters: CornerAngleParametersSchema,
     thickness_mm: z.number().positive().max(10),
   }),
 ]);

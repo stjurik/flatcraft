@@ -66,6 +66,19 @@ class TestHealth:
         assert res.json() == {"status": "ok"}
 
 
+CORNER_VALID_PARAMS: dict[str, object] = {
+    "legA_mm": 50,
+    "legB_mm": 50,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
+    "width_mm": 80,
+    "hole_diameter_mm": 5,
+    "hole_rows": 1,
+    "hole_cols": 2,
+    "hole_margin_mm": 12,
+}
+
+
 class TestExportValidation:
     def test_невалідний_template_slug_422(self, client: TestClient) -> None:
         res = client.post(
@@ -236,3 +249,89 @@ class TestZBracketExport:
             Bucket=os.environ["S3_BUCKET"], Key=z_res["artifacts"]["dxf"]["s3_key"]
         )["Body"].read()
         assert l_dxf != z_dxf
+
+
+class TestCornerAngleExport:
+    def test_corner_angle_успішний_експорт_dxf_і_pdf(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "corner_angle",
+                "parameters": CORNER_VALID_PARAMS,
+                "thickness_mm": 2,
+                "k_factor": 0.4,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        for kind in ("dxf", "pdf"):
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].endswith(f"_corner_angle.{kind}")
+
+    def test_corner_angle_hole_rows_за_межами_422(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "corner_angle",
+                "parameters": {**CORNER_VALID_PARAMS, "hole_rows": 6},
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 422
+
+    def test_corner_angle_dxf_має_inner_cuts_layer(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """1×2 grid × 2 полиці = 4 отвори → DXF має CIRCLE entities на INNER_CUTS."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "corner_angle",
+                "parameters": CORNER_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        dxf_bytes = s3.get_object(
+            Bucket=os.environ["S3_BUCKET"], Key=res["artifacts"]["dxf"]["s3_key"]
+        )["Body"].read()
+        dxf_text = dxf_bytes.decode("utf-8")
+        # 4 CIRCLE entities, всі на INNER_CUTS layer.
+        assert dxf_text.count("\nCIRCLE\n") == 4
+        # Layer-string з'являється поряд із CIRCLE-entities.
+        assert "INNER_CUTS" in dxf_text
+
+    def test_l_і_corner_angle_дають_різні_артефакти(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """corner_angle і L-bracket з однаковими розмірами полиць мають
+        різні DXF через grid отворів у corner_angle."""
+        l_res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": {**VALID_PARAMS, "legA_mm": 50, "legB_mm": 50, "width_mm": 80},
+                "thickness_mm": 2,
+            },
+        ).json()
+        c_res = client.post(
+            "/export",
+            json={
+                "template_slug": "corner_angle",
+                "parameters": CORNER_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        l_dxf = s3.get_object(
+            Bucket=os.environ["S3_BUCKET"], Key=l_res["artifacts"]["dxf"]["s3_key"]
+        )["Body"].read()
+        c_dxf = s3.get_object(
+            Bucket=os.environ["S3_BUCKET"], Key=c_res["artifacts"]["dxf"]["s3_key"]
+        )["Body"].read()
+        assert l_dxf != c_dxf

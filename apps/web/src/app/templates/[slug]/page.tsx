@@ -1,4 +1,6 @@
 import {
+  CORNER_ANGLE_DEFAULT_PARAMETERS,
+  CornerAngleParametersSchema,
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
   ZBracketParametersSchema,
@@ -7,6 +9,7 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { CornerAngleStudio } from "../../../components/corner-angle-studio";
 import { LBracketStudio } from "../../../components/l-bracket-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
 import { fetchTemplate } from "../../../lib/api";
@@ -76,6 +79,14 @@ function TemplateStudio({
     return (
       <ZBracketStudio
         initialParameters={parsed.success ? parsed.data : Z_BRACKET_DEFAULT_PARAMETERS}
+      />
+    );
+  }
+  if (slug === "corner_angle") {
+    const parsed = CornerAngleParametersSchema.safeParse(defaults);
+    return (
+      <CornerAngleStudio
+        initialParameters={parsed.success ? parsed.data : CORNER_ANGLE_DEFAULT_PARAMETERS}
       />
     );
   }

@@ -32,19 +32,20 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     await client?.close();
   });
 
-  it("повертає лише опубліковані шаблони (L-bracket — після seed)", async () => {
+  it("повертає лише опубліковані шаблони (L-bracket, Z-bracket, corner_angle)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates" });
     expect(res.statusCode).toBe(200);
     const body = res.json<{
       items: Array<{ slug: string; isPublished: boolean; nameUk: string }>;
     }>();
-    expect(body.items.length).toBeGreaterThanOrEqual(2);
+    expect(body.items.length).toBeGreaterThanOrEqual(3);
     expect(body.items.every((t) => t.isPublished)).toBe(true);
     const slugs = body.items.map((t) => t.slug);
     expect(slugs).toContain("l_bracket");
     expect(slugs).toContain("z_bracket");
-    // Невидимі поки що: corner_angle, wall_shelf, perforated_panel.
-    for (const slug of ["corner_angle", "wall_shelf", "perforated_panel"]) {
+    expect(slugs).toContain("corner_angle");
+    // Phase 2.10.c/d ще не опубліковано:
+    for (const slug of ["wall_shelf", "perforated_panel"]) {
       expect(slugs).not.toContain(slug);
     }
   });
@@ -93,8 +94,22 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     });
   });
 
-  it("GET /templates/corner_angle → 404 (неопублікований)", async () => {
+  it("GET /templates/corner_angle → 200 з hole_rows/cols у defaults (Phase 2.10.b)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates/corner_angle" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ slug: string; defaultParameters: Record<string, unknown> }>();
+    expect(body.slug).toBe("corner_angle");
+    expect(body.defaultParameters).toMatchObject({
+      legA_mm: expect.any(Number),
+      legB_mm: expect.any(Number),
+      hole_rows: expect.any(Number),
+      hole_cols: expect.any(Number),
+      hole_diameter_mm: expect.any(Number),
+    });
+  });
+
+  it("GET /templates/wall_shelf → 404 (неопублікований)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates/wall_shelf" });
     expect(res.statusCode).toBe(404);
   });
 
