@@ -66,10 +66,7 @@ def build_z_bracket(params: ZBracketBuildParameters) -> cq.Workplane:
     off = params.offset_mm
     w = params.width_mm
 
-    bottom = (
-        cq.Workplane("XY")
-        .box(bf, t, w, centered=(False, False, False))
-    )
+    bottom = cq.Workplane("XY").box(bf, t, w, centered=(False, False, False))
     middle = (
         cq.Workplane("XY")
         .workplane(offset=0)
@@ -77,9 +74,7 @@ def build_z_bracket(params: ZBracketBuildParameters) -> cq.Workplane:
         .translate((bf - t, 0, 0))
     )
     top = (
-        cq.Workplane("XY")
-        .box(tf, t, w, centered=(False, False, False))
-        .translate((bf - t, off, 0))
+        cq.Workplane("XY").box(tf, t, w, centered=(False, False, False)).translate((bf - t, off, 0))
     )
     return bottom.union(middle).union(top)
 

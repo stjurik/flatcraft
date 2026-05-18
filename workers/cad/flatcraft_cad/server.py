@@ -65,9 +65,7 @@ def _upload(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> E
     return ExportArtifact(url=url, bytes=len(data), expires_at=expires, s3_key=key)
 
 
-def _generate_l_bracket(
-    req: ExportRequest, tmpdir: Path
-) -> tuple[bytes, bytes]:
+def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
     """Повертає (dxf_bytes, pdf_bytes) для L-bracket."""
     try:
         params = LBracketBuildParameters.model_validate(
@@ -85,9 +83,7 @@ def _generate_l_bracket(
     return dxf, pdf
 
 
-def _generate_z_bracket(
-    req: ExportRequest, tmpdir: Path
-) -> tuple[bytes, bytes]:
+def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
     """Повертає (dxf_bytes, pdf_bytes) для Z-bracket."""
     try:
         params = ZBracketBuildParameters.model_validate(

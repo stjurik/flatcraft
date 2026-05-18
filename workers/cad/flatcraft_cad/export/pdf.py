@@ -318,9 +318,11 @@ def export_z_bracket_pdf(
     import hashlib
     import json
 
-    article = hashlib.sha256(
-        json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8")
-    ).hexdigest()[:10].upper()
+    article = (
+        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
+        .hexdigest()[:10]
+        .upper()
+    )
     qr_payload = permalink_url or f"flatcraft://z_bracket/{article}"
 
     c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
