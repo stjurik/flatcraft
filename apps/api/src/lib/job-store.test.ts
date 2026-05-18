@@ -4,10 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JobStore } from "./job-store.js";
 
 const SAMPLE_RESULT: ExportResponse = {
-  dxf_url: "https://example.com/test.dxf?Signature=x&Expires=1",
-  bytes: 1024,
-  expires_at: "2026-05-17T00:00:00.000Z",
-  s3_key: "exports/test.dxf",
+  artifacts: {
+    dxf: {
+      url: "https://example.com/test.dxf?Signature=x&Expires=1",
+      bytes: 1024,
+      expires_at: "2026-05-17T00:00:00.000Z",
+      s3_key: "exports/test.dxf",
+    },
+    pdf: {
+      url: "https://example.com/test.pdf?Signature=x&Expires=1",
+      bytes: 512,
+      expires_at: "2026-05-17T00:00:00.000Z",
+      s3_key: "exports/test.pdf",
+    },
+  },
 };
 
 describe("JobStore", () => {

@@ -82,13 +82,23 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     await expect(page.getByTestId("l-bracket-viewport").locator("canvas")).toBeVisible();
   });
 
-  test("Export → async SSE → progress bar → download link", async ({ page }) => {
+  test("Export → async SSE → progress bar → download links (DXF + PDF)", async ({ page }) => {
     const jobId = "11111111-2222-3333-4444-555555555555";
     const resultObj = {
-      dxf_url: "https://example-bucket.s3.amazonaws.com/exports/test.dxf?Signature=abc&Expires=999",
-      bytes: 16384,
-      expires_at: "2026-05-17T00:00:00.000Z",
-      s3_key: "exports/test.dxf",
+      artifacts: {
+        dxf: {
+          url: "https://example-bucket.s3.amazonaws.com/exports/test.dxf?Signature=abc&Expires=999",
+          bytes: 16384,
+          expires_at: "2026-05-17T00:00:00.000Z",
+          s3_key: "exports/test.dxf",
+        },
+        pdf: {
+          url: "https://example-bucket.s3.amazonaws.com/exports/test.pdf?Signature=abc&Expires=999",
+          bytes: 8192,
+          expires_at: "2026-05-17T00:00:00.000Z",
+          s3_key: "exports/test.pdf",
+        },
+      },
     };
     let received: unknown = null;
     // POST /exports → 202 + jobId.
@@ -117,11 +127,14 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     await expect(exportBtn).toHaveAttribute("data-state", "idle");
     await exportBtn.click();
 
-    // Финальний стан після SSE — done з посиланням.
     await expect(page.getByTestId("export-download-link")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("export-download-link-pdf")).toBeVisible();
     await expect(exportBtn).toHaveAttribute("data-state", "done");
-    const href = await page.getByTestId("export-download-link").getAttribute("href");
-    expect(href).toBe(resultObj.dxf_url);
+
+    const dxfHref = await page.getByTestId("export-download-link").getAttribute("href");
+    const pdfHref = await page.getByTestId("export-download-link-pdf").getAttribute("href");
+    expect(dxfHref).toBe(resultObj.artifacts.dxf.url);
+    expect(pdfHref).toBe(resultObj.artifacts.pdf.url);
     expect(received).toMatchObject({ template_slug: "l_bracket", thickness_mm: 2 });
   });
 

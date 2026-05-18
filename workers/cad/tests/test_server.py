@@ -93,7 +93,7 @@ class TestExportValidation:
 
 
 class TestExportHappy:
-    def test_успішний_експорт_заливає_dxf_у_бакет_і_повертає_presigned_url(
+    def test_успішний_експорт_заливає_dxf_і_pdf_артефакти(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
         res = client.post(
@@ -107,19 +107,39 @@ class TestExportHappy:
         )
         assert res.status_code == 200, res.text
         body = res.json()
-        assert body["bytes"] > 0
-        assert body["s3_key"].startswith("exports/")
-        assert body["s3_key"].endswith("_l_bracket.dxf")
-        assert "expires_at" in body
-        # boto3 за замовчуванням генерує SigV2 для S3 без region constraint:
-        # ?Signature=...&Expires=... ; для SigV4 — X-Amz-Signature. Приймаємо обидва.
-        assert "Signature=" in body["dxf_url"] or "X-Amz-Signature" in body["dxf_url"]
-        assert "Expires=" in body["dxf_url"] or "X-Amz-Expires" in body["dxf_url"]
+        assert "artifacts" in body
+        assert set(body["artifacts"].keys()) == {"dxf", "pdf"}
 
         s3 = boto3.client("s3", region_name="us-east-1")
-        head = s3.head_object(Bucket=os.environ["S3_BUCKET"], Key=body["s3_key"])
-        assert head["ContentLength"] == body["bytes"]
-        assert head["ContentType"] == "application/dxf"
+
+        for kind, content_type in [("dxf", "application/dxf"), ("pdf", "application/pdf")]:
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].startswith("exports/")
+            assert art["s3_key"].endswith(f"_l_bracket.{kind}")
+            # SigV2 (Signature=) або SigV4 (X-Amz-Signature) — обидва ОК.
+            assert "Signature=" in art["url"] or "X-Amz-Signature" in art["url"]
+            head = s3.head_object(Bucket=os.environ["S3_BUCKET"], Key=art["s3_key"])
+            assert head["ContentLength"] == art["bytes"]
+            assert head["ContentType"] == content_type
+
+    def test_dxf_і_pdf_мають_спільний_timestamp_у_s3_key(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Один HTTP-виклик → один timestamp prefix для обох артефактів,
+        щоб у бакеті dxf і pdf лежали поруч одного export'у."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        )
+        body = res.json()
+        dxf_prefix = body["artifacts"]["dxf"]["s3_key"].rsplit(".", 1)[0]
+        pdf_prefix = body["artifacts"]["pdf"]["s3_key"].rsplit(".", 1)[0]
+        assert dxf_prefix == pdf_prefix
 
     def test_детермінізм_однакові_params_однакові_байти(
         self, client: TestClient, aws_with_bucket: None
@@ -132,8 +152,14 @@ class TestExportHappy:
         }
         a = client.post("/export", json=payload).json()
         b = client.post("/export", json=payload).json()
-        assert a["bytes"] == b["bytes"]
+        assert a["artifacts"]["dxf"]["bytes"] == b["artifacts"]["dxf"]["bytes"]
+        assert a["artifacts"]["pdf"]["bytes"] == b["artifacts"]["pdf"]["bytes"]
         s3 = boto3.client("s3", region_name="us-east-1")
-        body_a = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=a["s3_key"])["Body"].read()
-        body_b = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=b["s3_key"])["Body"].read()
-        assert body_a == body_b
+        for kind in ("dxf", "pdf"):
+            body_a = s3.get_object(
+                Bucket=os.environ["S3_BUCKET"], Key=a["artifacts"][kind]["s3_key"]
+            )["Body"].read()
+            body_b = s3.get_object(
+                Bucket=os.environ["S3_BUCKET"], Key=b["artifacts"][kind]["s3_key"]
+            )["Body"].read()
+            assert body_a == body_b, f"{kind} not deterministic"

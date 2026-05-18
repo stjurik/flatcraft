@@ -27,10 +27,20 @@ const VALID_REQUEST = {
 };
 
 const UPSTREAM_OK_BODY = {
-  dxf_url: "https://flatcraft.s3.amazonaws.com/key.dxf?Signature=abc&Expires=123",
-  bytes: 16384,
-  expires_at: "2026-05-17T00:00:00.000Z",
-  s3_key: "exports/2026/05/17/abc_l_bracket.dxf",
+  artifacts: {
+    dxf: {
+      url: "https://flatcraft.s3.amazonaws.com/key.dxf?Signature=abc&Expires=123",
+      bytes: 16384,
+      expires_at: "2026-05-17T00:00:00.000Z",
+      s3_key: "exports/2026/05/17/abc_l_bracket.dxf",
+    },
+    pdf: {
+      url: "https://flatcraft.s3.amazonaws.com/key.pdf?Signature=abc&Expires=123",
+      bytes: 8192,
+      expires_at: "2026-05-17T00:00:00.000Z",
+      s3_key: "exports/2026/05/17/abc_l_bracket.pdf",
+    },
+  },
 };
 
 async function flushAsync(): Promise<void> {

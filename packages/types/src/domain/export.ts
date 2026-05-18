@@ -19,11 +19,20 @@ export const ExportRequestSchema = z.object({
 
 export type ExportRequest = z.infer<typeof ExportRequestSchema>;
 
-export const ExportResponseSchema = z.object({
-  dxf_url: z.string().url(),
+export const ExportArtifactSchema = z.object({
+  url: z.string().url(),
   bytes: z.number().int().positive(),
   expires_at: z.string().datetime(),
   s3_key: z.string().min(1),
+});
+
+export type ExportArtifact = z.infer<typeof ExportArtifactSchema>;
+
+export const ExportResponseSchema = z.object({
+  artifacts: z.object({
+    dxf: ExportArtifactSchema,
+    pdf: ExportArtifactSchema,
+  }),
 });
 
 export type ExportResponse = z.infer<typeof ExportResponseSchema>;

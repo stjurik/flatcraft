@@ -8,11 +8,13 @@ export {
 } from "./template.js";
 
 export {
+  ExportArtifactSchema,
   ExportJobAcceptedSchema,
   ExportJobEventSchema,
   ExportRequestSchema,
   ExportResponseSchema,
   JobStatusSchema,
+  type ExportArtifact,
   type ExportJobAccepted,
   type ExportJobEvent,
   type ExportRequest,

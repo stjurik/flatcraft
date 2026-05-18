@@ -1,13 +1,13 @@
 """HTTP-сервер CAD-воркера (FastAPI).
 
 Phase 2.7 sync flow: API ↔ HTTP ↔ Python ↔ MinIO/R2.
-BullMQ async — Phase 2.8 (тоді цей же server лишається як fallback /
-admin-trigger; основний шлях буде через bullmq-py listener).
+Phase 2.9: повертає одночасно DXF + PDF artifacts (одним викликом —
+один CadQuery-обчислення, два upload + два presigned URL).
 
 Ендпоінти:
-  GET  /health       — для health-check (k8s/docker-compose).
-  POST /export       — генерує DXF + uploads + повертає presigned URL.
-                       Тільки l_bracket у Phase 2.7; решта — 400.
+  GET  /health       — health-check (k8s/docker-compose).
+  POST /export       — генерує DXF+PDF, заливає у S3, повертає
+                       presigned URL для обох. Тільки l_bracket.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from flatcraft_cad.export.dxf import export_l_bracket_dxf
+from flatcraft_cad.export.pdf import export_l_bracket_pdf
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
 from flatcraft_cad.unfold import unfold_l_bracket
 
@@ -43,11 +44,34 @@ class ExportRequest(BaseModel):
     k_factor: float = Field(default=0.4, gt=0.0, le=1.0)
 
 
-class ExportResponse(BaseModel):
-    dxf_url: str
+class ExportArtifact(BaseModel):
+    """Один артефакт (DXF або PDF). Поля — те ж, що ExportArtifactSchema у
+    `packages/types/domain/export.ts`."""
+
+    url: str
     bytes: int
     expires_at: str
     s3_key: str
+
+
+class ExportArtifacts(BaseModel):
+    dxf: ExportArtifact
+    pdf: ExportArtifact
+
+
+class ExportResponse(BaseModel):
+    artifacts: ExportArtifacts
+
+
+def _upload(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> ExportArtifact:
+    s3.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=PRESIGN_EXPIRES_SEC,
+    )
+    expires = (datetime.now(UTC) + timedelta(seconds=PRESIGN_EXPIRES_SEC)).isoformat()
+    return ExportArtifact(url=url, bytes=len(data), expires_at=expires, s3_key=key)
 
 
 def _build_app() -> FastAPI:
@@ -76,12 +100,15 @@ def _build_app() -> FastAPI:
         unfolded = unfold_l_bracket(params, req.k_factor)
 
         with tempfile.TemporaryDirectory() as td:
-            out = export_l_bracket_dxf(
+            dxf_path = export_l_bracket_dxf(
                 unfolded,
                 Path(td) / "out.dxf",
                 bend_radius_mm=params.bend_radius_mm,
             )
-            data = out.read_bytes()
+            dxf_data = dxf_path.read_bytes()
+
+            pdf_path = export_l_bracket_pdf(params, unfolded, Path(td) / "out.pdf")
+            pdf_data = pdf_path.read_bytes()
 
         # endpoint_url=None → дефолтний AWS resolver, що дозволяє moto
         # перехоплювати boto3 у тестах. У dev/prod явно вказуємо MinIO/R2.
@@ -95,15 +122,16 @@ def _build_app() -> FastAPI:
         )
         bucket = os.environ["S3_BUCKET"]
         now = datetime.now(UTC)
-        key = f"exports/{now.strftime('%Y/%m/%d')}/{now.strftime('%H%M%S_%f')}_l_bracket.dxf"
-        s3.put_object(Bucket=bucket, Key=key, Body=data, ContentType="application/dxf")
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": key},
-            ExpiresIn=PRESIGN_EXPIRES_SEC,
+        date_path = now.strftime("%Y/%m/%d")
+        ts = now.strftime("%H%M%S_%f")
+        dxf_key = f"exports/{date_path}/{ts}_l_bracket.dxf"
+        pdf_key = f"exports/{date_path}/{ts}_l_bracket.pdf"
+
+        artifacts = ExportArtifacts(
+            dxf=_upload(s3, bucket, dxf_key, dxf_data, "application/dxf"),
+            pdf=_upload(s3, bucket, pdf_key, pdf_data, "application/pdf"),
         )
-        expires = (now + timedelta(seconds=PRESIGN_EXPIRES_SEC)).isoformat()
-        return ExportResponse(dxf_url=url, bytes=len(data), expires_at=expires, s3_key=key)
+        return ExportResponse(artifacts=artifacts)
 
     return app
 

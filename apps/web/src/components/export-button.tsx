@@ -105,15 +105,26 @@ export function ExportButton({
       ) : null}
 
       {state.status === "done" ? (
-        <a
-          data-testid="export-download-link"
-          href={state.result.dxf_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-emerald-300 underline hover:text-emerald-200"
-        >
-          Завантажити DXF ({Math.round(state.result.bytes / 1024)} КБ)
-        </a>
+        <div className="flex flex-col gap-1 text-sm">
+          <a
+            data-testid="export-download-link"
+            href={state.result.artifacts.dxf.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-emerald-300 underline hover:text-emerald-200"
+          >
+            Завантажити DXF ({Math.round(state.result.artifacts.dxf.bytes / 1024)} КБ)
+          </a>
+          <a
+            data-testid="export-download-link-pdf"
+            href={state.result.artifacts.pdf.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-emerald-300 underline hover:text-emerald-200"
+          >
+            Завантажити PDF ({Math.round(state.result.artifacts.pdf.bytes / 1024)} КБ)
+          </a>
+        </div>
       ) : null}
 
       {state.status === "error" ? (
