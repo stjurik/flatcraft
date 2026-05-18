@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Каталог /templates", () => {
-  test("показує L-bracket, Z-bracket і corner_angle картки (Phase 2.10.b)", async ({ page }) => {
+  test("показує L/Z/corner_angle/wall_shelf картки (Phase 2.10.c)", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -23,12 +23,14 @@ test.describe("Каталог /templates", () => {
     await expect(cornerCard).toBeVisible();
     await expect(cornerCard).toContainText("Кутник");
 
-    // Решта 2 — поки приховані до Phase 2.10.c/d (wall_shelf, perforated_panel).
-    for (const slug of ["wall_shelf", "perforated_panel"]) {
-      await expect(page.locator(`[data-testid="template-card"][data-slug="${slug}"]`)).toHaveCount(
-        0,
-      );
-    }
+    const shelfCard = page.locator('[data-testid="template-card"][data-slug="wall_shelf"]');
+    await expect(shelfCard).toBeVisible();
+    await expect(shelfCard).toContainText("Полиця настінна");
+
+    // perforated_panel — поки прихована до Phase 2.10.d.
+    await expect(
+      page.locator('[data-testid="template-card"][data-slug="perforated_panel"]'),
+    ).toHaveCount(0);
 
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });

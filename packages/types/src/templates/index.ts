@@ -17,3 +17,10 @@ export {
   CornerAngleParametersSchema,
   type CornerAngleParameters,
 } from "./corner-angle.js";
+
+export {
+  WALL_SHELF_DEFAULT_PARAMETERS,
+  WallShelfParametersBaseSchema,
+  WallShelfParametersSchema,
+  type WallShelfParameters,
+} from "./wall-shelf.js";

@@ -43,14 +43,21 @@ from reportlab.pdfgen import canvas as pdfcanvas
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
-from flatcraft_cad.unfold import Hole2D, UnfoldedCornerAngle, UnfoldedLBracket, UnfoldedZBracket
+from flatcraft_cad.unfold import (
+    Hole2D,
+    UnfoldedCornerAngle,
+    UnfoldedLBracket,
+    UnfoldedWallShelf,
+    UnfoldedZBracket,
+)
 
 PAGE_WIDTH, PAGE_HEIGHT = landscape(A4)
 
 
 def compute_bom(
-    unfolded: UnfoldedLBracket | UnfoldedZBracket | UnfoldedCornerAngle,
+    unfolded: UnfoldedLBracket | UnfoldedZBracket | UnfoldedCornerAngle | UnfoldedWallShelf,
     *,
     density_kg_m3: float = 7850.0,
 ) -> dict[str, float]:
@@ -540,6 +547,142 @@ def export_corner_angle_pdf(
         15 * mm,
         15 * mm,
         "DXF для лазерного різання · BEND-LINE = лінія гиба · INNER_CUTS = отвори",
+    )
+
+    c.showPage()
+    c.save()
+    _normalize_pdf_bytes(output_path)
+    return output_path
+
+
+def export_wall_shelf_pdf(
+    parameters: WallShelfBuildParameters,
+    unfolded: UnfoldedWallShelf,
+    output_path: Path,
+    *,
+    material_label: str = "cold_rolled_steel",
+    density_kg_m3: float = 7850.0,
+    permalink_url: str | None = None,
+) -> Path:
+    """PDF для wall_shelf U-channel: 1-2 bends + mount holes + bend table + BOM + QR."""
+    article = (
+        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
+        .hexdigest()[:10]
+        .upper()
+    )
+    qr_payload = permalink_url or f"flatcraft://wall_shelf/{article}"
+    n_bends = len(unfolded.bend_positions_mm)
+    n_holes = len(unfolded.holes)
+
+    c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
+    c.setTitle(f"Wall shelf {article}")
+    c.setAuthor("flatcraft")
+    c.setCreator("flatcraft-cad-worker")
+    c.setProducer("flatcraft-cad-worker")
+    c.setSubject(
+        f"Wall shelf back={parameters.back_height_mm} shelf={parameters.shelf_depth_mm} "
+        f"lip={parameters.front_lip_mm} W={parameters.width_mm} мм"
+    )
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(15 * mm, (210 - 15) * mm, "Полиця настінна")
+    c.setFont("Helvetica", 10)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    c.drawString(
+        15 * mm,
+        (210 - 20) * mm,
+        f"slug: wall_shelf · артикул: {article} · дата: {today}",
+    )
+    c.drawString(
+        15 * mm,
+        (210 - 24) * mm,
+        f"back={parameters.back_height_mm} · shelf={parameters.shelf_depth_mm} · "
+        f"lip={parameters.front_lip_mm} мм · W={parameters.width_mm} мм · "
+        f"гибів: {n_bends} · отворів: {n_holes} (Ø{parameters.mount_hole_diameter_mm:g})",
+    )
+
+    _draw_unfold_generic(
+        c,
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_positions_mm=unfolded.bend_positions_mm,
+        origin_mm=(15, 70),
+        canvas_size_mm=(150, 100),
+        holes=unfolded.holes,
+    )
+
+    # Bend table (1 або 2 рядки).
+    ox_t, oy_t = 175, 170
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(ox_t * mm, oy_t * mm, "Гиби")
+    header = ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм")
+    body_rows = [
+        (
+            str(i + 1),
+            f"{parameters.bend_angle_deg}",
+            f"{parameters.bend_radius_mm}",
+            f"{parameters.width_mm:.1f}",
+            "0.40",
+            f"{unfolded.bend_allowance_mm:.2f}",
+        )
+        for i in range(n_bends)
+    ]
+    rows: list[tuple[str, ...]] = [header, *body_rows]
+    col_widths_mm = [10, 18, 22, 25, 22, 22]
+    row_h_mm = 6
+    cur_y_mm = oy_t - 7
+    c.setLineWidth(0.4)
+    for r_idx, row in enumerate(rows):
+        cur_x_mm = ox_t
+        if r_idx == 0:
+            c.setFont("Helvetica-Bold", 8)
+        else:
+            c.setFont("Helvetica", 9)
+        for cell, w_mm in zip(row, col_widths_mm, strict=True):
+            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
+            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
+            cur_x_mm += w_mm
+        cur_y_mm -= row_h_mm
+
+    # BOM.
+    ox, oy = 175, 140
+    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Bill of materials")
+    c.setFont("Helvetica", 9)
+    for i, line in enumerate(
+        [
+            f"Матеріал: {material_label}",
+            f"Товщина: {unfolded.thickness_mm:.2f} мм",
+            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
+            f"Об'єм: {bom['volume_m3']:.6f} м³",
+            f"Маса (приблизно): {bom['mass_g']:.1f} г",
+        ],
+    ):
+        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+
+    qr_png = _make_qr_png(qr_payload)
+    qr_size_mm = 30
+    qr_buf = io.BytesIO(qr_png)
+    c.drawImage(
+        _ImageReader(qr_buf),
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        15 * mm,
+        width=qr_size_mm * mm,
+        height=qr_size_mm * mm,
+    )
+    c.setFont("Helvetica", 7)
+    c.drawString(
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        12 * mm,
+        f"QR: {qr_payload[:48]}",
+    )
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(
+        15 * mm,
+        15 * mm,
+        "DXF для лазерного різання · BEND-LINES = гиби · INNER_CUTS = mounting holes",
     )
 
     c.showPage()

@@ -3,6 +3,8 @@ import {
   CornerAngleParametersSchema,
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
+  WALL_SHELF_DEFAULT_PARAMETERS,
+  WallShelfParametersSchema,
   ZBracketParametersSchema,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
@@ -11,6 +13,7 @@ import { notFound } from "next/navigation";
 
 import { CornerAngleStudio } from "../../../components/corner-angle-studio";
 import { LBracketStudio } from "../../../components/l-bracket-studio";
+import { WallShelfStudio } from "../../../components/wall-shelf-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
 import { fetchTemplate } from "../../../lib/api";
 
@@ -87,6 +90,14 @@ function TemplateStudio({
     return (
       <CornerAngleStudio
         initialParameters={parsed.success ? parsed.data : CORNER_ANGLE_DEFAULT_PARAMETERS}
+      />
+    );
+  }
+  if (slug === "wall_shelf") {
+    const parsed = WallShelfParametersSchema.safeParse(defaults);
+    return (
+      <WallShelfStudio
+        initialParameters={parsed.success ? parsed.data : WALL_SHELF_DEFAULT_PARAMETERS}
       />
     );
   }

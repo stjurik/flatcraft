@@ -1,8 +1,4 @@
-"""Параметричні шаблони листового металу.
-
-Кожен шаблон — окремий модуль (l_bracket, z_bracket, corner_angle, ...) з
-власною Pydantic-схемою параметрів і build-функцією, що повертає cq.Workplane.
-"""
+"""Параметричні шаблони листового металу."""
 
 from flatcraft_cad.templates.base import Template
 from flatcraft_cad.templates.corner_angle import (
@@ -14,6 +10,11 @@ from flatcraft_cad.templates.l_bracket import (
     LBracketBuildParameters,
     LBracketTemplate,
     build_l_bracket,
+)
+from flatcraft_cad.templates.wall_shelf import (
+    WallShelfBuildParameters,
+    WallShelfTemplate,
+    build_wall_shelf,
 )
 from flatcraft_cad.templates.z_bracket import (
     ZBracketBuildParameters,
@@ -27,9 +28,12 @@ __all__ = [
     "LBracketBuildParameters",
     "LBracketTemplate",
     "Template",
+    "WallShelfBuildParameters",
+    "WallShelfTemplate",
     "ZBracketBuildParameters",
     "ZBracketTemplate",
     "build_corner_angle",
     "build_l_bracket",
+    "build_wall_shelf",
     "build_z_bracket",
 ]

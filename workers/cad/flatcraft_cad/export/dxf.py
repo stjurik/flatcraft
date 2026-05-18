@@ -21,7 +21,13 @@ from typing import Final
 from ezdxf import new as ezdxf_new  # type: ignore[attr-defined]
 from ezdxf.document import Drawing
 
-from flatcraft_cad.unfold import Hole2D, UnfoldedCornerAngle, UnfoldedLBracket, UnfoldedZBracket
+from flatcraft_cad.unfold import (
+    Hole2D,
+    UnfoldedCornerAngle,
+    UnfoldedLBracket,
+    UnfoldedWallShelf,
+    UnfoldedZBracket,
+)
 
 # Шари, які створюємо у кожному DXF (порядок важливий — впливає на байти).
 DXF_LAYERS: Final[tuple[tuple[str, int], ...]] = (
@@ -174,6 +180,25 @@ def export_corner_angle_dxf(
         length_mm=unfolded.length_mm,
         width_mm=unfolded.width_mm,
         bend_lines_mm=(unfolded.bend_position_mm,),
+        bend_radius_mm=bend_radius_mm,
+        bend_angle_deg=bend_angle_deg,
+        output_path=output_path,
+        holes=unfolded.holes,
+    )
+
+
+def export_wall_shelf_dxf(
+    unfolded: UnfoldedWallShelf,
+    output_path: Path,
+    *,
+    bend_radius_mm: float,
+    bend_angle_deg: float = 90.0,
+) -> Path:
+    """Wall_shelf DXF: 1 або 2 bends + mount holes на back-секції."""
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=unfolded.bend_positions_mm,
         bend_radius_mm=bend_radius_mm,
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,

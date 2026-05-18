@@ -181,8 +181,8 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     expect(res?.status()).toBe(404);
   });
 
-  test("неопублікований wall_shelf → 404", async ({ page }) => {
-    const res = await page.goto("/templates/wall_shelf");
+  test("неопублікований perforated_panel → 404", async ({ page }) => {
+    const res = await page.goto("/templates/perforated_panel");
     expect(res?.status()).toBe(404);
   });
 });

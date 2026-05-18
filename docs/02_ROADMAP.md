@@ -69,7 +69,7 @@
 - [~] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR
   - [x] **2.10.a.** Z-кронштейн — Zod + Pydantic схеми, CadQuery builder, unfold (2 гиби), DXF/PDF з generic exporters, Studio/Editor/Viewport, ExportRequest discriminatedUnion, 3 e2e. — 2026-05-18
   - [x] **2.10.b.** Кутник (corner_angle) — auto-grid отворів (rows × cols × 2 полиці) замість ручних координат L-bracket. `_distribute` pure-функція, `Hole2D` додано до unfold, DXF/PDF малюють CIRCLE на INNER_CUTS, R3F рендерить cylinder-отвори для preview. 97 pytest (99% cov), 32 db tests, 4 нових e2e (19 разом). — 2026-05-18
-  - [ ] **2.10.c.** Полиця настінна (wall_shelf)
+  - [x] **2.10.c.** Полиця настінна (wall_shelf) — U-channel back+shelf+(optional)lip. front_lip=0 → 2 сегменти/1 гиб, ≥5 → 3 сегменти/2 гиби. Auto-grid mounting holes на back. Cross-field constraint "0 або ≥5" через `WallShelfParametersBaseSchema` + refine wrapper (base використовується у discriminatedUnion). 118 pytest (99% cov), 33 db tests, 4 нові e2e (23 разом). — 2026-05-18
   - [ ] **2.10.d.** Перфо-панель (perforated_panel)
 
 **Тести:** Playwright e2e — відкрити сторінку → змінити параметр → побачити оновлення 3D → клікнути Export → отримати DXF.

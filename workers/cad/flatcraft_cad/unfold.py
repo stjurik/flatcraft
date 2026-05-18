@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 
 
@@ -81,6 +82,25 @@ class UnfoldedCornerAngle:
     bend_position_mm: float
     bend_allowance_mm: float
     holes: tuple[Hole2D, ...]
+
+
+@dataclass(frozen=True)
+class UnfoldedWallShelf:
+    """Розгортка wall_shelf U-channel: back + shelf + (optional) lip.
+
+    Конвенція: розгортка починається з back, далі bend, shelf, bend, lip.
+    Якщо front_lip_mm=0 → один bend, lip_length=0.
+    """
+
+    length_mm: float
+    width_mm: float
+    thickness_mm: float
+    bend_positions_mm: tuple[float, ...]
+    """1 або 2 bend lines залежно від lip."""
+
+    bend_allowance_mm: float
+    holes: tuple[Hole2D, ...]
+    """Mounting holes на back-секції (x ∈ [0, flat_back])."""
 
 
 def compute_bend_allowance(
@@ -246,4 +266,56 @@ def unfold_corner_angle(
         bend_position_mm=flat_b + ba / 2,
         bend_allowance_mm=ba,
         holes=tuple(holes),
+    )
+
+
+def unfold_wall_shelf(params: WallShelfBuildParameters, k_factor: float) -> UnfoldedWallShelf:
+    """Розгортка U-channel: back + (BA) + shelf + (BA) + lip.
+
+    Mount holes — auto-grid на back-секції (x ∈ [0, flat_back]).
+    Якщо front_lip_mm=0, lip-сегмент пропускаємо, лишається 1 bend.
+    """
+    t = params.thickness_mm
+    r = params.bend_radius_mm
+    lip_present = params.front_lip_mm > 0
+
+    flat_back = params.back_height_mm - t - r
+    # Shelf має 1 або 2 bends: якщо є lip → віднімаємо t+r з обох країв.
+    flat_shelf = params.shelf_depth_mm - (t + r) - (t + r if lip_present else 0)
+    flat_lip = (params.front_lip_mm - t - r) if lip_present else 0.0
+
+    if flat_back <= 0 or flat_shelf <= 0 or (lip_present and flat_lip <= 0):
+        raise ValueError(
+            f"wall_shelf segments too short for bend (back={params.back_height_mm}, "
+            f"shelf={params.shelf_depth_mm}, lip={params.front_lip_mm}, t={t}, R={r}): "
+            "one or more flat segments would be non-positive"
+        )
+
+    ba = compute_bend_allowance(
+        angle_deg=float(params.bend_angle_deg),
+        inner_radius_mm=r,
+        thickness_mm=t,
+        k_factor=k_factor,
+    )
+
+    bend_positions: list[float] = [flat_back + ba / 2]
+    length = flat_back + ba + flat_shelf
+    if lip_present:
+        bend_positions.append(flat_back + ba + flat_shelf + ba / 2)
+        length += ba + flat_lip
+
+    # Auto-grid mount holes на back-секції.
+    xs = _distribute(params.mount_hole_cols, 0.0, flat_back, params.mount_hole_margin_mm)
+    ys = _distribute(params.mount_hole_rows, 0.0, params.width_mm, params.mount_hole_margin_mm)
+    holes = tuple(
+        Hole2D(x_mm=x, y_mm=y, diameter_mm=params.mount_hole_diameter_mm) for x in xs for y in ys
+    )
+
+    return UnfoldedWallShelf(
+        length_mm=length,
+        width_mm=params.width_mm,
+        thickness_mm=t,
+        bend_positions_mm=tuple(bend_positions),
+        bend_allowance_mm=ba,
+        holes=holes,
     )

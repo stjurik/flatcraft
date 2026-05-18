@@ -11,6 +11,9 @@ import { z } from "zod";
 
 import { CornerAngleParametersSchema } from "../templates/corner-angle.js";
 import { LBracketParametersSchema } from "../templates/l-bracket.js";
+// Base (non-refined) — discriminatedUnion вимагає ZodObject, не ZodEffects.
+// Cross-field constraint живе у `WallShelfParametersSchema` (UI), і у Pydantic.
+import { WallShelfParametersBaseSchema } from "../templates/wall-shelf.js";
 import { ZBracketParametersSchema } from "../templates/z-bracket.js";
 
 export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
@@ -27,6 +30,11 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
   z.object({
     template_slug: z.literal("corner_angle"),
     parameters: CornerAngleParametersSchema,
+    thickness_mm: z.number().positive().max(10),
+  }),
+  z.object({
+    template_slug: z.literal("wall_shelf"),
+    parameters: WallShelfParametersBaseSchema,
     thickness_mm: z.number().positive().max(10),
   }),
 ]);

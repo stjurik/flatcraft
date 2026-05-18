@@ -16,6 +16,7 @@
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
+  WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
 
@@ -139,10 +140,11 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     slug: "wall_shelf",
     nameUk: "Полиця настінна",
     nameEn: "Wall shelf",
-    descriptionUk: "Полиця з гнутих кронштейнів для кріплення до стіни.",
-    descriptionEn: "Shelf with bent brackets for wall mounting.",
-    isPublished: false,
-    defaultParameters: {},
+    descriptionUk: "U-channel настінна полиця з mounting holes на back-стінці.",
+    descriptionEn: "U-channel wall shelf with mounting holes on the back.",
+    // Phase 2.10.c — CadQuery-builder + 1/2 bends + auto-grid mount holes.
+    isPublished: true,
+    defaultParameters: WALL_SHELF_DEFAULT_PARAMETERS,
   },
   {
     slug: "perforated_panel",

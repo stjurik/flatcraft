@@ -79,6 +79,20 @@ CORNER_VALID_PARAMS: dict[str, object] = {
 }
 
 
+WALL_SHELF_VALID_PARAMS: dict[str, object] = {
+    "back_height_mm": 80,
+    "shelf_depth_mm": 150,
+    "front_lip_mm": 20,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
+    "width_mm": 300,
+    "mount_hole_diameter_mm": 6,
+    "mount_hole_rows": 2,
+    "mount_hole_cols": 2,
+    "mount_hole_margin_mm": 15,
+}
+
+
 class TestExportValidation:
     def test_невалідний_template_slug_422(self, client: TestClient) -> None:
         res = client.post(
@@ -335,3 +349,99 @@ class TestCornerAngleExport:
             Bucket=os.environ["S3_BUCKET"], Key=c_res["artifacts"]["dxf"]["s3_key"]
         )["Body"].read()
         assert l_dxf != c_dxf
+
+
+class TestWallShelfExport:
+    def test_wall_shelf_успішний_експорт_dxf_і_pdf(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": WALL_SHELF_VALID_PARAMS,
+                "thickness_mm": 2,
+                "k_factor": 0.4,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        for kind in ("dxf", "pdf"):
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].endswith(f"_wall_shelf.{kind}")
+
+    def test_wall_shelf_back_за_межами_422(self, client: TestClient, aws_with_bucket: None) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": {**WALL_SHELF_VALID_PARAMS, "back_height_mm": 10},
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 422
+
+    def test_wall_shelf_без_lip_має_1_bend(self, client: TestClient, aws_with_bucket: None) -> None:
+        """front_lip=0 → DXF має лише 1 BEND text annotation (не 2)."""
+        # З lip: 2 bend lines + 2 BEND text annotations.
+        with_lip_res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": WALL_SHELF_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        # Без lip: 1 bend line + 1 BEND text annotation.
+        without_lip_res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": {**WALL_SHELF_VALID_PARAMS, "front_lip_mm": 0},
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        with_lip = (
+            s3.get_object(
+                Bucket=os.environ["S3_BUCKET"],
+                Key=with_lip_res["artifacts"]["dxf"]["s3_key"],
+            )["Body"]
+            .read()
+            .decode("utf-8")
+        )
+        without_lip = (
+            s3.get_object(
+                Bucket=os.environ["S3_BUCKET"],
+                Key=without_lip_res["artifacts"]["dxf"]["s3_key"],
+            )["Body"]
+            .read()
+            .decode("utf-8")
+        )
+        # BEND text annotation: "BEND 90° UP R2.5" (Cyrillic-safe ASCII).
+        assert with_lip.count("BEND 90") == 2
+        assert without_lip.count("BEND 90") == 1
+
+    def test_wall_shelf_dxf_має_4_inner_cuts_circles(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """2×2 mount holes = 4 CIRCLE entities на INNER_CUTS."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": WALL_SHELF_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        dxf = (
+            s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=res["artifacts"]["dxf"]["s3_key"])[
+                "Body"
+            ]
+            .read()
+            .decode("utf-8")
+        )
+        assert dxf.count("\nCIRCLE\n") == 4
+        assert "INNER_CUTS" in dxf

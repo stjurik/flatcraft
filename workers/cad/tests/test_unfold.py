@@ -6,15 +6,18 @@ import pytest
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
     UnfoldedCornerAngle,
     UnfoldedLBracket,
+    UnfoldedWallShelf,
     UnfoldedZBracket,
     _distribute,
     compute_bend_allowance,
     unfold_corner_angle,
     unfold_l_bracket,
+    unfold_wall_shelf,
     unfold_z_bracket,
 )
 
@@ -312,4 +315,82 @@ class TestUnfoldCornerAngle:
         params = self._params()
         a = unfold_corner_angle(params, k_factor=0.4)
         b = unfold_corner_angle(params, k_factor=0.4)
+        assert a == b
+
+
+class TestUnfoldWallShelf:
+    def _params(self, **overrides: float | int) -> WallShelfBuildParameters:
+        defaults: dict[str, float | int] = {
+            "back_height_mm": 80.0,
+            "shelf_depth_mm": 150.0,
+            "front_lip_mm": 20.0,
+            "bend_radius_mm": 2.5,
+            "bend_angle_deg": 90,
+            "width_mm": 300.0,
+            "thickness_mm": 2.0,
+            "mount_hole_diameter_mm": 6.0,
+            "mount_hole_rows": 2,
+            "mount_hole_cols": 2,
+            "mount_hole_margin_mm": 15.0,
+        }
+        defaults.update(overrides)
+        return WallShelfBuildParameters(**defaults)  # type: ignore[arg-type]
+
+    def test_розгортка_з_lip_80_150_20_t2_r25(self) -> None:
+        """L = (80 − 2 − 2.5) + BA + (150 − 2·(2+2.5)) + BA + (20 − 2 − 2.5)
+        = 75.5 + BA + 141 + BA + 15.5.
+        """
+        result = unfold_wall_shelf(self._params(), k_factor=0.4)
+        assert isinstance(result, UnfoldedWallShelf)
+        ba = (math.pi / 2) * 3.3
+        expected = 75.5 + ba + 141.0 + ba + 15.5
+        assert result.length_mm == pytest.approx(expected, abs=1e-9)
+        assert len(result.bend_positions_mm) == 2
+        # bend1 = flat_back + BA/2 = 75.5 + BA/2
+        assert result.bend_positions_mm[0] == pytest.approx(75.5 + ba / 2, abs=1e-9)
+        # bend2 = flat_back + BA + flat_shelf + BA/2 = 75.5 + BA + 141 + BA/2
+        assert result.bend_positions_mm[1] == pytest.approx(75.5 + ba + 141.0 + ba / 2, abs=1e-9)
+
+    def test_без_lip_тільки_1_bend(self) -> None:
+        """front_lip_mm=0 → пропускаємо 2-й сегмент і другий гиб."""
+        result = unfold_wall_shelf(self._params(front_lip_mm=0.0), k_factor=0.4)
+        ba = (math.pi / 2) * 3.3
+        # flat_shelf без lip = sd - (t+r) (один кут) = 150 - 4.5 = 145.5
+        expected = 75.5 + ba + 145.5
+        assert result.length_mm == pytest.approx(expected, abs=1e-9)
+        assert len(result.bend_positions_mm) == 1
+
+    def test_mount_holes_2x2_дає_4_отвори_на_back(self) -> None:
+        result = unfold_wall_shelf(self._params(), k_factor=0.4)
+        assert len(result.holes) == 4
+        # Усі отвори у back-секції (x ∈ [0, flat_back=75.5]).
+        for h in result.holes:
+            assert 0 <= h.x_mm <= 75.5
+            assert h.diameter_mm == 6.0
+
+    def test_mount_holes_3x3_дає_9_отворів(self) -> None:
+        result = unfold_wall_shelf(self._params(mount_hole_rows=3, mount_hole_cols=3), k_factor=0.4)
+        assert len(result.holes) == 9
+
+    def test_закороткий_back_кидає(self) -> None:
+        params = WallShelfBuildParameters.model_construct(
+            back_height_mm=10.0,
+            shelf_depth_mm=150.0,
+            front_lip_mm=20.0,
+            bend_radius_mm=5.0,
+            bend_angle_deg=90,
+            width_mm=300.0,
+            thickness_mm=8.0,
+            mount_hole_diameter_mm=6.0,
+            mount_hole_rows=2,
+            mount_hole_cols=2,
+            mount_hole_margin_mm=15.0,
+        )
+        with pytest.raises(ValueError, match="too short"):
+            unfold_wall_shelf(params, k_factor=0.4)
+
+    def test_детермінізм(self) -> None:
+        params = self._params()
+        a = unfold_wall_shelf(params, k_factor=0.4)
+        b = unfold_wall_shelf(params, k_factor=0.4)
         assert a == b
