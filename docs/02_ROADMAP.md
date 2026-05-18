@@ -66,7 +66,11 @@
 - [x] **2.7.** Кнопка Export — sync HTTP-flow (BullMQ async — Phase 2.8). Python FastAPI POST /export (6 pytest, 96% cov), Fastify POST /exports (5 unit з mock fetch), Web ExportButton (3 e2e з mock'ed API). L-bracket: web → api → cad-worker → S3 presigned URL. — 2026-05-17
 - [x] **2.8.** Async export pipeline з SSE прогресом. API: in-memory JobStore (7 unit) + POST/GET/SSE /exports (6 нових unit). Web: EventSource у ExportButton + progress bar (2 нові e2e). BullMQ distributed — Phase 5. — 2026-05-17
 - [x] **2.9.** PDF з розгорткою + bend table + BOM + QR через ReportLab (compute_bom pure-функція з 3 unit). /export повертає ExportResponse.artifacts.{dxf,pdf}. Ізометрія 3D — пропущено до Phase 5 (потребує WebGL→PNG pipeline). — 2026-05-18
-- [ ] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR
+- [~] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR
+  - [x] **2.10.a.** Z-кронштейн — Zod + Pydantic схеми, CadQuery builder, unfold (2 гиби), DXF/PDF з generic exporters, Studio/Editor/Viewport, ExportRequest discriminatedUnion, 3 e2e. — 2026-05-18
+  - [ ] **2.10.b.** Кутник (corner_angle)
+  - [ ] **2.10.c.** Полиця настінна (wall_shelf)
+  - [ ] **2.10.d.** Перфо-панель (perforated_panel)
 
 **Тести:** Playwright e2e — відкрити сторінку → змінити параметр → побачити оновлення 3D → клікнути Export → отримати DXF.
 
