@@ -226,7 +226,8 @@ flatcraft/
 - **Phase 2.6 завершено** (2026-05-17): debounce 100мс на mesh-rebuild через `useDebouncedValue` (6 unit на pure createDebouncer). OpenCascade.js bridge відкладено — ADR-013: three.js Shape + ExtrudeGeometry достатньо для MVP, точна геометрія — CadQuery server-side.
 - **Phase 2.7 завершено** (2026-05-17): sync Export pipeline web → api → cad-worker → S3 presigned URL. Python FastAPI /export (boto3 + moto тести, 6 pytest 96% cov), Fastify POST /exports з CORS + Zod-валідація обох directions (5 unit з mock fetch), Web ExportButton з idle/loading/success/error станами (3 e2e).
 - **Phase 2.8 завершено** (2026-05-17): async export з SSE прогресом. API: in-memory `JobStore` з pub/sub (7 unit), POST /exports → 202+jobId, GET /:id, GET /:id/events (SSE через `reply.raw.write`). Web: `subscribeExportEvents` через EventSource, ExportButton показує progress bar 0..100%, при done/failed закриває source. BullMQ distributed — Phase 5.
-- **Наступне — Phase 2.9**: PDF з розгорткою + ізометрією + BOM + QR-код (workers/cad через ReportLab).
+- **Phase 2.9 завершено** (2026-05-18): PDF export через ReportLab — header, розгортка з bend line, bend table, BOM, QR-код. `compute_bom` pure-функція (3 unit з аналітичними числами). /export тепер повертає `artifacts.{dxf,pdf}` (breaking — синхронізовано web/api/python). Ізометрія 3D пропущена до Phase 5 (потребує WebGL→PNG pipeline).
+- **Наступне — Phase 2.10**: решта 4 шаблони (Z, кутник, полиця, перфо-панель).
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
