@@ -769,7 +769,10 @@ dev = [
 dev = [
     { name = "httpx" },
     { name = "moto" },
+    { name = "pypdf" },
     { name = "types-boto3" },
+    { name = "types-qrcode" },
+    { name = "types-reportlab" },
 ]
 
 [package.metadata]
@@ -802,7 +805,10 @@ provides-extras = ["dev"]
 dev = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "moto", specifier = ">=5.2.1" },
+    { name = "pypdf", specifier = ">=6.11.0" },
     { name = "types-boto3", specifier = ">=1.43.9" },
+    { name = "types-qrcode", specifier = ">=8.2.0.20260508" },
+    { name = "types-reportlab", specifier = ">=4.5.0.20260509" },
 ]
 
 [[package]]
@@ -1920,6 +1926,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypdf"
+version = "6.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/58/6dd97d78a4b17a7a6b9d1c6ad23895abc41f0fdc49c553cc05bdfdcc36d0/pypdf-6.11.0.tar.gz", hash = "sha256:062b51c81b0910e6d2755e99e1c5547a0a23b7d0a32322af66240d8edcfabe87", size = 6453975, upload-time = "2026-05-09T13:26:48.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/b1/68feb7eb3b99f0c020b414234825f4a5d70e0126c18d933770e8c93a35fc/pypdf-6.11.0-py3-none-any.whl", hash = "sha256:769394d5756d5b304c9b6bef88b54b1816b328e7e6fc9254e625529a15ed4ab8", size = 338819, upload-time = "2026-05-09T13:26:46.904Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2315,6 +2330,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/36/85/0d9fafce21be112e977a89677f1ce9d1aef921d745b17c758c93e861c11f/types_pyyaml-6.0.12.20260510.tar.gz", hash = "sha256:09c1f1cb65a6eebea1e2e51ccf4918b8288e152909609a35cdb0d805efd125ad", size = 17831, upload-time = "2026-05-10T05:26:28.136Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/ad/fd618a218925daada7b8a5e7326e662599fa5fdff4a4c44ab2795bd2d9ca/types_pyyaml-6.0.12.20260510-py3-none-any.whl", hash = "sha256:3492eb9ba4d9d833473214c4d5736cccf5f37d93f5854059721e1c84f785309d", size = 20304, upload-time = "2026-05-10T05:26:26.981Z" },
+]
+
+[[package]]
+name = "types-qrcode"
+version = "8.2.0.20260508"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/f1/1363a9c951dbe141968e20b3e662c40506629e5f4de0dec7f9f602dfac12/types_qrcode-8.2.0.20260508.tar.gz", hash = "sha256:8d610ee09910653047fb680045797bdf6210f95927aae2f2dba074c7118fa9db", size = 15248, upload-time = "2026-05-08T04:51:55.188Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/99/57d891724cea5e020a25b5b7790b6d39da75a66910fc1004bb8a701ef202/types_qrcode-8.2.0.20260508-py3-none-any.whl", hash = "sha256:153fe7786d7ada13bb88c3c7ae535cca722569300cbf594b5d517898ab3ab014", size = 19813, upload-time = "2026-05-08T04:51:54.284Z" },
+]
+
+[[package]]
+name = "types-reportlab"
+version = "4.5.0.20260509"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/b0/49340b03f2417ff19b02f3a93d2fbca4578c7e40c6f68286afbe2fcc3f30/types_reportlab-4.5.0.20260509.tar.gz", hash = "sha256:a36cbdb1227ed1977a3ec8bd5d629821bb4181e83d62e2238394d59a111ab358", size = 71893, upload-time = "2026-05-09T04:58:51.495Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/86/aa8a8d4721f6094e273b2635f15cd7a278bc300728c248ab14b255255d6c/types_reportlab-4.5.0.20260509-py3-none-any.whl", hash = "sha256:b64e452be52f469ae0820d809eefb3ae4929e815d1318407cebe79ec0153b6e8", size = 112848, upload-time = "2026-05-09T04:58:50.244Z" },
 ]
 
 [[package]]

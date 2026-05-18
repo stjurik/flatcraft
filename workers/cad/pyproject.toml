@@ -72,5 +72,8 @@ addopts = "-ra --strict-markers --cov=flatcraft_cad --cov-report=term-missing"
 dev = [
     "httpx>=0.28.1",
     "moto>=5.2.1",
+    "pypdf>=6.11.0",
     "types-boto3>=1.43.9",
+    "types-qrcode>=8.2.0.20260508",
+    "types-reportlab>=4.5.0.20260509",
 ]
