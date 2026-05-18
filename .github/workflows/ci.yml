@@ -112,6 +112,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  compose-validate:
+    name: Validate prod compose + Caddyfile
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render .env.prod from example (placeholder values)
+        run: cp .env.prod.example .env.prod
+      - name: docker compose config
+        run: docker compose --env-file .env.prod -f infra/compose/docker-compose.prod.yml config --quiet
+      - name: Validate Caddyfile syntax
+        # `caddy adapt` парсить Caddyfile у JSON без provisioning TLS-модуля,
+        # тому не потребує реальних cert.pem/key.pem (їх кладе Ansible на сервер).
+        run: |
+          docker run --rm \
+            -v "$PWD/infra/compose/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy adapt --config /etc/caddy/Caddyfile > /dev/null
+
   python:
     name: Python CAD worker (ruff + mypy + pytest)
     needs: install

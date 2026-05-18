@@ -1,0 +1,232 @@
+# Production / staging stack for flatcraft (hart.crimea.ua).
+# Target host: Mirohost Cloud MS21 — 2 vCPU / 4 GB RAM / 40 GB SSD (ADR-011).
+#
+# Render `.env.prod` from `.env.prod.example` + vault before running.
+# Default invocation (run from repo root):
+#     docker compose --env-file .env.prod \
+#       -f infra/compose/docker-compose.prod.yml up -d
+#
+# Принципи цього файлу:
+#   * Жодних `ports:` крім Caddy → внутрішній трафік не виходить за docker-мережу.
+#   * Два named bridge networks: `internal` (db/redis/worker) і `web` (caddy↔api/web).
+#     Caddy НЕ має доступу до postgres/redis, postgres/redis НЕ доступні з web-net.
+#   * `mem_limit` на кожному сервісі — сума ≤ 3.5 GB, лишається запас + 2 GB swap (Ansible base role).
+#   * Healthcheck на всіх 6 сервісах; `depends_on: service_healthy` для коректного boot order.
+#   * Образи з `${IMAGE_PREFIX}/<service>:${APP_VERSION}` — release pinning через APP_VERSION.
+
+name: flatcraft
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  internal:
+    driver: bridge
+  web:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+services:
+  # ─── Postgres ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+
+  # ─── Redis ──────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    # maxmemory нижче за mem_limit, щоб не впиратися в OOM-killer контейнера.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 200mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging: *default-logging
+
+  # ─── CAD worker (Python FastAPI + CadQuery) ─────────────────────────────
+  cad-worker:
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/cad-worker:${APP_VERSION:-staging}
+    restart: unless-stopped
+    # CadQuery + OpenCascade тримають 800-1200 MB у пам'яті на render.
+    mem_limit: 1500m
+    # TODO Phase 5B: коли cad-worker.Dockerfile перейде на CMD ["python","-m","flatcraft_cad.server"]
+    # — видалити цей override. Поточний Dockerfile запускає `.worker` (BullMQ listener),
+    # але /export ендпоінт живе у `.server` (FastAPI).
+    command: ["python", "-m", "flatcraft_cad.server"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      CAD_WORKER_CONCURRENCY: ${CAD_WORKER_CONCURRENCY:-1}
+      CAD_WORKER_TIMEOUT_SECONDS: ${CAD_WORKER_TIMEOUT_SECONDS:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      - internal
+    healthcheck:
+      # urlopen() кидає при не-200 і при connect-error — exit code mapping безкоштовний.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging: *default-logging
+
+  # ─── API (Fastify) ──────────────────────────────────────────────────────
+  api:
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/api:${APP_VERSION:-staging}
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      cad-worker:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      APP_BASE_URL: ${APP_BASE_URL}
+      API_BASE_URL: ${API_BASE_URL}
+      CAD_WORKER_URL: ${CAD_WORKER_URL:-http://cad-worker:8080}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: ${AUTH_TRUST_HOST:-true}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-2592000}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-staging}
+      FREE_EXPORTS_PER_MONTH: ${FREE_EXPORTS_PER_MONTH:-10}
+      RATE_LIMIT_GLOBAL_PER_MIN: ${RATE_LIMIT_GLOBAL_PER_MIN:-100}
+      RATE_LIMIT_EXPORT_PER_MIN: ${RATE_LIMIT_EXPORT_PER_MIN:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Fastify за замовчуванням слухає 127.0.0.1 → у контейнері це невидимо ззовні.
+      HOST: "0.0.0.0"
+      PORT: "4000"
+    networks:
+      - internal
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging: *default-logging
+
+  # ─── Web (Next.js standalone) ───────────────────────────────────────────
+  web:
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/web:${APP_VERSION:-staging}
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      APP_BASE_URL: ${APP_BASE_URL}
+      API_BASE_URL: ${API_BASE_URL}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://api:4000}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-staging}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging: *default-logging
+
+  # ─── Caddy (reverse-proxy + TLS termination з CF Origin Cert, ADR-014) ──
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Ansible-роль flatcraft кладе cert.pem+key.pem у /etc/caddy/cf-origin/ на хост.
+      - /etc/caddy/cf-origin:/etc/caddy/cf-origin:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+    healthcheck:
+      # Caddy admin API на :2019 — повертає 200 на /config/ якщо процес живий.
+      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:2019/config/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging

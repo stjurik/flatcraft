@@ -41,7 +41,9 @@ test-results/
 .env
 .env.local
 .env.*.local
+.env.prod
 !.env.example
+!.env.prod.example
 *.pem
 *.key
 secrets/
