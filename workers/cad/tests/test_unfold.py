@@ -5,10 +5,13 @@ import math
 import pytest
 
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
     UnfoldedLBracket,
+    UnfoldedZBracket,
     compute_bend_allowance,
     unfold_l_bracket,
+    unfold_z_bracket,
 )
 
 
@@ -149,3 +152,76 @@ class TestUnfoldLBracket:
         )
         with pytest.raises(ValueError, match="too short"):
             unfold_l_bracket(params, k_factor=0.4)
+
+
+class TestUnfoldZBracket:
+    def _params(self, **overrides: float) -> ZBracketBuildParameters:
+        defaults: dict[str, float] = {
+            "top_flange_mm": 60.0,
+            "bottom_flange_mm": 60.0,
+            "offset_mm": 40.0,
+            "bend_radius_mm": 2.5,
+            "bend_angle_deg": 90,
+            "width_mm": 100.0,
+            "thickness_mm": 2.0,
+        }
+        defaults.update(overrides)
+        return ZBracketBuildParameters(**defaults)  # type: ignore[arg-type]
+
+    def test_симетричний_z_60_40_60_t2_r25(self) -> None:
+        result = unfold_z_bracket(self._params(), k_factor=0.4)
+        assert isinstance(result, UnfoldedZBracket)
+        # flat_bottom = flat_top = 60 - 2 - 2.5 = 55.5
+        # flat_middle = 40 - 2 - 2.5 = 35.5
+        # BA = (π/2)·(2.5 + 0.4·2) = (π/2)·3.3 ≈ 5.1836
+        expected_ba = (math.pi / 2) * 3.3
+        expected_length = 55.5 + expected_ba + 35.5 + expected_ba + 55.5
+        assert result.length_mm == pytest.approx(expected_length, abs=1e-9)
+        assert result.bend_allowance_mm == pytest.approx(expected_ba, abs=1e-9)
+        # bend1 = flat_bottom + BA/2; bend2 = flat_bottom + BA + flat_middle + BA/2
+        assert result.bend_positions_mm[0] == pytest.approx(55.5 + expected_ba / 2, abs=1e-9)
+        assert result.bend_positions_mm[1] == pytest.approx(
+            55.5 + expected_ba + 35.5 + expected_ba / 2, abs=1e-9
+        )
+
+    def test_асиметричні_полиці(self) -> None:
+        # top=80, bottom=40, offset=60, t=1.5, R=2.5
+        params = self._params(
+            top_flange_mm=80.0, bottom_flange_mm=40.0, offset_mm=60.0, thickness_mm=1.5
+        )
+        result = unfold_z_bracket(params, k_factor=0.4)
+        expected_ba = (math.pi / 2) * (2.5 + 0.4 * 1.5)
+        flat_b = 40 - 1.5 - 2.5
+        flat_m = 60 - 1.5 - 2.5
+        flat_t = 80 - 1.5 - 2.5
+        expected_length = flat_b + expected_ba + flat_m + expected_ba + flat_t
+        assert result.length_mm == pytest.approx(expected_length, abs=1e-9)
+        # bend1 — після bottom
+        assert result.bend_positions_mm[0] == pytest.approx(
+            (40 - 1.5 - 2.5) + expected_ba / 2, abs=1e-9
+        )
+
+    def test_закороткий_offset_кидає(self) -> None:
+        params = ZBracketBuildParameters.model_construct(
+            top_flange_mm=60.0,
+            bottom_flange_mm=60.0,
+            offset_mm=5.0,
+            bend_radius_mm=5.0,
+            bend_angle_deg=90,
+            width_mm=100.0,
+            thickness_mm=8.0,
+        )
+        with pytest.raises(ValueError, match="too short"):
+            unfold_z_bracket(params, k_factor=0.4)
+
+    def test_детермінізм(self) -> None:
+        params = self._params()
+        a = unfold_z_bracket(params, k_factor=0.4)
+        b = unfold_z_bracket(params, k_factor=0.4)
+        assert a == b
+
+    def test_k_фактор_впливає_на_довжину(self) -> None:
+        params = self._params()
+        small = unfold_z_bracket(params, k_factor=0.3)
+        big = unfold_z_bracket(params, k_factor=0.5)
+        assert big.length_mm > small.length_mm

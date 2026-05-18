@@ -1,13 +1,8 @@
 """HTTP-сервер CAD-воркера (FastAPI).
 
-Phase 2.7 sync flow: API ↔ HTTP ↔ Python ↔ MinIO/R2.
-Phase 2.9: повертає одночасно DXF + PDF artifacts (одним викликом —
-один CadQuery-обчислення, два upload + два presigned URL).
-
-Ендпоінти:
-  GET  /health       — health-check (k8s/docker-compose).
-  POST /export       — генерує DXF+PDF, заливає у S3, повертає
-                       presigned URL для обох. Тільки l_bracket.
+Phase 2.7: sync API ↔ Python ↔ MinIO/R2.
+Phase 2.9: повертає DXF + PDF artifacts одним викликом.
+Phase 2.10: підтримка multiple slugs (l_bracket, z_bracket).
 """
 
 from __future__ import annotations
@@ -22,32 +17,28 @@ import boto3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from flatcraft_cad.export.dxf import export_l_bracket_dxf
-from flatcraft_cad.export.pdf import export_l_bracket_pdf
+from flatcraft_cad.export.dxf import export_l_bracket_dxf, export_z_bracket_dxf
+from flatcraft_cad.export.pdf import export_l_bracket_pdf, export_z_bracket_pdf
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
-from flatcraft_cad.unfold import unfold_l_bracket
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters, build_z_bracket
+from flatcraft_cad.unfold import unfold_l_bracket, unfold_z_bracket
 
 PRESIGN_EXPIRES_SEC = 3600
 
+# Допустимі slugs — підтягуємо з типу для безпеки.
+TemplateSlug = Literal["l_bracket", "z_bracket"]
+
 
 class ExportRequest(BaseModel):
-    """Payload від API: уже Zod-валідований на TS-стороні, але pydantic
-    лишається defense-in-depth (схема не дрейфує без оновлення обох)."""
-
     model_config = ConfigDict(extra="forbid")
 
-    template_slug: Literal["l_bracket"]
+    template_slug: TemplateSlug
     parameters: dict[str, Any]
     thickness_mm: float = Field(gt=0, le=10)
-    # K-фактор — обчислюється на TS (cad-engine k-factor.ts), передається сюди.
-    # Дефолт 0.4 для cold-rolled steel; Phase 3.x — справжній розрахунок з матеріалу.
     k_factor: float = Field(default=0.4, gt=0.0, le=1.0)
 
 
 class ExportArtifact(BaseModel):
-    """Один артефакт (DXF або PDF). Поля — те ж, що ExportArtifactSchema у
-    `packages/types/domain/export.ts`."""
-
     url: str
     bytes: int
     expires_at: str
@@ -74,6 +65,46 @@ def _upload(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> E
     return ExportArtifact(url=url, bytes=len(data), expires_at=expires, s3_key=key)
 
 
+def _generate_l_bracket(
+    req: ExportRequest, tmpdir: Path
+) -> tuple[bytes, bytes]:
+    """Повертає (dxf_bytes, pdf_bytes) для L-bracket."""
+    try:
+        params = LBracketBuildParameters.model_validate(
+            {**req.parameters, "thickness_mm": req.thickness_mm},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
+
+    _ = build_l_bracket(params)
+    unfolded = unfold_l_bracket(params, req.k_factor)
+    dxf = export_l_bracket_dxf(
+        unfolded, tmpdir / "out.dxf", bend_radius_mm=params.bend_radius_mm
+    ).read_bytes()
+    pdf = export_l_bracket_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    return dxf, pdf
+
+
+def _generate_z_bracket(
+    req: ExportRequest, tmpdir: Path
+) -> tuple[bytes, bytes]:
+    """Повертає (dxf_bytes, pdf_bytes) для Z-bracket."""
+    try:
+        params = ZBracketBuildParameters.model_validate(
+            {**req.parameters, "thickness_mm": req.thickness_mm},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
+
+    _ = build_z_bracket(params)
+    unfolded = unfold_z_bracket(params, req.k_factor)
+    dxf = export_z_bracket_dxf(
+        unfolded, tmpdir / "out.dxf", bend_radius_mm=params.bend_radius_mm
+    ).read_bytes()
+    pdf = export_z_bracket_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    return dxf, pdf
+
+
 def _build_app() -> FastAPI:
     app = FastAPI(title="flatcraft-cad", version="0.0.0")
 
@@ -83,35 +114,16 @@ def _build_app() -> FastAPI:
 
     @app.post("/export", response_model=ExportResponse)
     def export(req: ExportRequest) -> ExportResponse:
-        if req.template_slug != "l_bracket":
-            raise HTTPException(status_code=400, detail="unsupported_template")
-
-        try:
-            params = LBracketBuildParameters.model_validate(
-                {**req.parameters, "thickness_mm": req.thickness_mm}
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
-
-        # build тут не використовується безпосередньо — unfold має досить
-        # параметрів через Pydantic-модель. Залишаємо виклик щоб ловити
-        # ранні геометричні помилки (наприклад legA < t+r).
-        _ = build_l_bracket(params)
-        unfolded = unfold_l_bracket(params, req.k_factor)
-
         with tempfile.TemporaryDirectory() as td:
-            dxf_path = export_l_bracket_dxf(
-                unfolded,
-                Path(td) / "out.dxf",
-                bend_radius_mm=params.bend_radius_mm,
-            )
-            dxf_data = dxf_path.read_bytes()
+            tmpdir = Path(td)
+            if req.template_slug == "l_bracket":
+                dxf_data, pdf_data = _generate_l_bracket(req, tmpdir)
+            elif req.template_slug == "z_bracket":
+                dxf_data, pdf_data = _generate_z_bracket(req, tmpdir)
+            else:
+                # Pydantic Literal вже відсіює інші, але type-narrow для mypy.
+                raise HTTPException(status_code=400, detail="unsupported_template")
 
-            pdf_path = export_l_bracket_pdf(params, unfolded, Path(td) / "out.pdf")
-            pdf_data = pdf_path.read_bytes()
-
-        # endpoint_url=None → дефолтний AWS resolver, що дозволяє moto
-        # перехоплювати boto3 у тестах. У dev/prod явно вказуємо MinIO/R2.
         endpoint_url = os.environ.get("S3_ENDPOINT") or None
         s3 = boto3.client(
             "s3",
@@ -124,8 +136,8 @@ def _build_app() -> FastAPI:
         now = datetime.now(UTC)
         date_path = now.strftime("%Y/%m/%d")
         ts = now.strftime("%H%M%S_%f")
-        dxf_key = f"exports/{date_path}/{ts}_l_bracket.dxf"
-        pdf_key = f"exports/{date_path}/{ts}_l_bracket.pdf"
+        dxf_key = f"exports/{date_path}/{ts}_{req.template_slug}.dxf"
+        pdf_key = f"exports/{date_path}/{ts}_{req.template_slug}.pdf"
 
         artifacts = ExportArtifacts(
             dxf=_upload(s3, bucket, dxf_key, dxf_data, "application/dxf"),

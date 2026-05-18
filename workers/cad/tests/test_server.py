@@ -48,6 +48,16 @@ VALID_PARAMS: dict[str, object] = {
     "holes": [],
 }
 
+Z_VALID_PARAMS: dict[str, object] = {
+    "top_flange_mm": 60,
+    "bottom_flange_mm": 60,
+    "offset_mm": 40,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
+    "width_mm": 100,
+    "holes": [],
+}
+
 
 class TestHealth:
     def test_health_повертає_ok(self, client: TestClient) -> None:
@@ -61,7 +71,7 @@ class TestExportValidation:
         res = client.post(
             "/export",
             json={
-                "template_slug": "z_bracket",
+                "template_slug": "perforated_panel",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
             },
@@ -163,3 +173,66 @@ class TestExportHappy:
                 Bucket=os.environ["S3_BUCKET"], Key=b["artifacts"][kind]["s3_key"]
             )["Body"].read()
             assert body_a == body_b, f"{kind} not deterministic"
+
+
+class TestZBracketExport:
+    def test_z_bracket_успішний_експорт_dxf_і_pdf(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": Z_VALID_PARAMS,
+                "thickness_mm": 2,
+                "k_factor": 0.4,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert "artifacts" in body
+        for kind in ("dxf", "pdf"):
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].endswith(f"_z_bracket.{kind}")
+
+    def test_z_bracket_offset_за_межами_422(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {**Z_VALID_PARAMS, "offset_mm": 10},
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 422
+
+    def test_l_і_z_bracket_дають_різні_артефакти(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        l_res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        z_res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": Z_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        ).json()
+        s3 = boto3.client("s3", region_name="us-east-1")
+        l_dxf = s3.get_object(
+            Bucket=os.environ["S3_BUCKET"], Key=l_res["artifacts"]["dxf"]["s3_key"]
+        )["Body"].read()
+        z_dxf = s3.get_object(
+            Bucket=os.environ["S3_BUCKET"], Key=z_res["artifacts"]["dxf"]["s3_key"]
+        )["Body"].read()
+        assert l_dxf != z_dxf

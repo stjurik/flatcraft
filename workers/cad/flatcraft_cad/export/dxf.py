@@ -21,7 +21,7 @@ from typing import Final
 from ezdxf import new as ezdxf_new  # type: ignore[attr-defined]
 from ezdxf.document import Drawing
 
-from flatcraft_cad.unfold import UnfoldedLBracket
+from flatcraft_cad.unfold import UnfoldedLBracket, UnfoldedZBracket
 
 # Шари, які створюємо у кожному DXF (порядок важливий — впливає на байти).
 DXF_LAYERS: Final[tuple[tuple[str, int], ...]] = (
@@ -67,23 +67,17 @@ def _make_deterministic(doc: Drawing) -> None:
     doc.header["$VERSIONGUID"] = _FROZEN_VERSION_GUID
 
 
-def export_l_bracket_dxf(
-    unfolded: UnfoldedLBracket,
-    output_path: Path,
+def _export_flat_dxf(
     *,
+    length_mm: float,
+    width_mm: float,
+    bend_lines_mm: tuple[float, ...],
     bend_radius_mm: float,
-    bend_angle_deg: float = 90.0,
+    bend_angle_deg: float,
+    output_path: Path,
 ) -> Path:
-    """Генерує DXF з розгорнутою L-bracket-заготовкою.
-
-    Layout (координати у мм, origin = лівий-нижній кут заготовки):
-        LASER_CUT  ↪ замкнутий прямокутник [0,0]→[L,0]→[L,W]→[0,W]→[0,0].
-        BEND_LINES ↪ вертикаль (bend_position, 0)→(bend_position, W).
-        BEND_TEXT  ↪ текст "BEND <angle>° UP R<r>" над лінією.
-
-    INNER_CUTS / DIM поки порожні — додамо в Phase 2 (отвори у параметрах).
-
-    Повертає шлях до збереженого файлу.
+    """Базовий exporter: прямокутна заготовка length × width + bend lines
+    на вказаних позиціях. Reuse'абельний для всіх шаблонів (L/Z/wall_shelf).
     """
     # setup=False вимикає авто-створення VISUALSTYLE/DictionaryVariables,
     # які тримають timestamp поточної версії ezdxf і ламають детермінізм.
@@ -95,34 +89,67 @@ def export_l_bracket_dxf(
             doc.layers.add(name=name, color=color)
 
     msp = doc.modelspace()
-    length = unfolded.length_mm
-    width = unfolded.width_mm
-    bend_x = unfolded.bend_position_mm
 
     msp.add_lwpolyline(
-        points=[(0, 0), (length, 0), (length, width), (0, width)],
+        points=[(0, 0), (length_mm, 0), (length_mm, width_mm), (0, width_mm)],
         close=True,
         dxfattribs={"layer": "LASER_CUT"},
     )
 
-    msp.add_line(
-        start=(bend_x, 0),
-        end=(bend_x, width),
-        dxfattribs={"layer": "BEND_LINES"},
-    )
-
-    msp.add_text(
-        f"BEND {bend_angle_deg:g}° UP R{bend_radius_mm:g}",
-        dxfattribs={
-            "layer": "BEND_TEXT",
-            "height": _BEND_TEXT_HEIGHT_MM,
-            "insert": (bend_x + 1.0, width + 1.0),
-        },
-    )
+    for bend_x in bend_lines_mm:
+        msp.add_line(
+            start=(bend_x, 0),
+            end=(bend_x, width_mm),
+            dxfattribs={"layer": "BEND_LINES"},
+        )
+        msp.add_text(
+            f"BEND {bend_angle_deg:g}° UP R{bend_radius_mm:g}",
+            dxfattribs={
+                "layer": "BEND_TEXT",
+                "height": _BEND_TEXT_HEIGHT_MM,
+                "insert": (bend_x + 1.0, width_mm + 1.0),
+            },
+        )
 
     doc.saveas(output_path)
     _normalize_dxf_bytes(output_path)
     return output_path
+
+
+def export_l_bracket_dxf(
+    unfolded: UnfoldedLBracket,
+    output_path: Path,
+    *,
+    bend_radius_mm: float,
+    bend_angle_deg: float = 90.0,
+) -> Path:
+    """L-bracket DXF: один гиб у центрі."""
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=(unfolded.bend_position_mm,),
+        bend_radius_mm=bend_radius_mm,
+        bend_angle_deg=bend_angle_deg,
+        output_path=output_path,
+    )
+
+
+def export_z_bracket_dxf(
+    unfolded: UnfoldedZBracket,
+    output_path: Path,
+    *,
+    bend_radius_mm: float,
+    bend_angle_deg: float = 90.0,
+) -> Path:
+    """Z-bracket DXF: два паралельні гиби."""
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=unfolded.bend_positions_mm,
+        bend_radius_mm=bend_radius_mm,
+        bend_angle_deg=bend_angle_deg,
+        output_path=output_path,
+    )
 
 
 def _normalize_dxf_bytes(path: Path) -> None:

@@ -6,17 +6,21 @@
 
 Для L-кронштейна з одним 90° гибом розгортка — це смужка довжиною
     L = (leg_a − t − R) + BA + (leg_b − t − R)
-і шириною = width_mm. Bend line проходить по центру BA-сегмента.
+з лінією гиба у центрі BA-сегмента.
 
-Phase 1.6 покриває L-bracket. Решта шаблонів (Z, кутник, ...) — додамо,
-як з'являться. CadQuery-розгортка через `Workplane.shell()` поки не
-використовується — формула достатня для регулярних гнутих профілів.
+Для Z-кронштейна (Phase 2.10) — два 90° гиби, 3 плоских сегменти,
+2 лінії гиба:
+    L = (bottom − t − R) + BA + (offset − t − R) + BA + (top − t − R)
+
+CadQuery-розгортка через `Workplane.shell()` поки не використовується —
+формула достатня для регулярних гнутих профілів.
 """
 
 import math
 from dataclasses import dataclass
 
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,20 @@ class UnfoldedLBracket:
 
     bend_allowance_mm: float
     """Довжина матеріалу у bend region (по нейтральній осі)."""
+
+
+@dataclass(frozen=True)
+class UnfoldedZBracket:
+    """Результат розгортки Z-кронштейна. 2 bends → 2 bend positions."""
+
+    length_mm: float
+    width_mm: float
+    thickness_mm: float
+    bend_positions_mm: tuple[float, float]
+    """Відстані від лівого краю до кожної з двох ліній гиба."""
+
+    bend_allowance_mm: float
+    """Однаковий BA для обох гибів (однаковий angle/R/t/K)."""
 
 
 def compute_bend_allowance(
@@ -91,5 +109,43 @@ def unfold_l_bracket(params: LBracketBuildParameters, k_factor: float) -> Unfold
         width_mm=params.width_mm,
         thickness_mm=t,
         bend_position_mm=flat_b + ba / 2,
+        bend_allowance_mm=ba,
+    )
+
+
+def unfold_z_bracket(params: ZBracketBuildParameters, k_factor: float) -> UnfoldedZBracket:
+    """Розгортає Z-кронштейн у смужку з 3 плоских сегментів + 2 BA.
+
+    Конвенція ordering: bottom → bend1 → middle → bend2 → top.
+    Позиції bend lines — центри BA-сегментів.
+    """
+    t = params.thickness_mm
+    r = params.bend_radius_mm
+    flat_bottom = params.bottom_flange_mm - t - r
+    flat_middle = params.offset_mm - t - r
+    flat_top = params.top_flange_mm - t - r
+
+    if flat_bottom <= 0 or flat_middle <= 0 or flat_top <= 0:
+        raise ValueError(
+            f"Z-bracket segments too short for bend (top={params.top_flange_mm}, "
+            f"bottom={params.bottom_flange_mm}, offset={params.offset_mm}, t={t}, R={r}): "
+            "one or more flat segments would be non-positive"
+        )
+
+    ba = compute_bend_allowance(
+        angle_deg=float(params.bend_angle_deg),
+        inner_radius_mm=r,
+        thickness_mm=t,
+        k_factor=k_factor,
+    )
+
+    bend1 = flat_bottom + ba / 2
+    bend2 = flat_bottom + ba + flat_middle + ba / 2
+
+    return UnfoldedZBracket(
+        length_mm=flat_bottom + ba + flat_middle + ba + flat_top,
+        width_mm=params.width_mm,
+        thickness_mm=t,
+        bend_positions_mm=(bend1, bend2),
         bend_allowance_mm=ba,
     )
