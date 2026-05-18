@@ -82,8 +82,10 @@ workers/cad/out/
 infra/ansible/*.retry
 infra/ansible/inventory.ini
 infra/ansible/group_vars/all.yml
+infra/ansible/group_vars/all.vault.yml
 !infra/ansible/inventory.ini.example
 !infra/ansible/group_vars/all.yml.example
+!infra/ansible/group_vars/all.vault.yml.example
 
 # Logs
 *.log

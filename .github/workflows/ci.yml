@@ -130,6 +130,33 @@ jobs:
             -v "$PWD/infra/compose/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine caddy adapt --config /etc/caddy/Caddyfile > /dev/null
 
+  ansible-validate:
+    name: Ansible — syntax-check + ansible-lint
+    needs: install
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/ansible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ansible + ansible-lint
+        # Pinned версії — щоб lint-результат не плив між run'ами.
+        run: pip install "ansible-core>=2.16,<2.17" "ansible-lint>=24"
+      - name: Install required Ansible collections
+        run: ansible-galaxy collection install community.general community.docker ansible.posix
+      - name: Render example files (щоб vars-resolution не падав)
+        run: |
+          cp inventory.ini.example inventory.ini
+          cp group_vars/all.yml.example group_vars/all.yml
+          cp group_vars/all.vault.yml.example group_vars/all.vault.yml
+      - name: ansible-playbook --syntax-check
+        run: ansible-playbook site.yml --syntax-check
+      - name: ansible-lint
+        run: ansible-lint --offline
+
   python:
     name: Python CAD worker (ruff + mypy + pytest)
     needs: install

@@ -1,0 +1,206 @@
+---
+# Базова підготовка Debian 12 сервера на Mirohost Cloud MS21.
+# Запускається з ansible_user=root (одноразово, до створення deploy-юзера).
+
+# ─── 1. Apt + unattended-upgrades ──────────────────────────────────────────
+- name: Update apt cache (max 1 hour old, інакше ставимо застарілий софт)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - curl
+      - ca-certificates
+      - gnupg
+      - vim
+      - htop
+      - rsync
+      - fail2ban
+      - unattended-upgrades
+      - apt-listchanges
+      - logrotate
+      - cron
+      - tzdata
+      - locales
+      - python3-pip
+      - python3-cryptography # для ansible-vault на target (потрібен модулю)
+    state: present
+
+- name: Enable unattended-upgrades для security updates
+  # Чому: на MS21 з 4 GB RAM ми не моніторимо CVE щодня; security-only
+  # auto-upgrades — нижча планка safety без ризику breaking changes.
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+
+# ─── 2. Timezone + locale ──────────────────────────────────────────────────
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Ensure locale is generated
+  community.general.locale_gen:
+    name: "{{ locale }}"
+    state: present
+
+# ─── 3. Swap 2 GB (КРИТИЧНО для 4 GB RAM, ADR-011) ─────────────────────────
+- name: Check if swap file exists
+  ansible.builtin.stat:
+    path: /swapfile
+  register: base_swap_file_stat
+
+- name: Create swap file
+  # Чому: CadQuery + Postgres + Node — за пікового експорту легко з'їдають
+  # >3 GB. Без swap OOM-killer вирубає випадковий процес (зазвичай postgres).
+  ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M /swapfile"
+  args:
+    creates: /swapfile
+  when: not base_swap_file_stat.stat.exists
+
+- name: Set swap file permissions (root-only readable)
+  ansible.builtin.file:
+    path: /swapfile
+    owner: root
+    group: root
+    mode: "0600"
+  when: not base_swap_file_stat.stat.exists
+
+- name: Initialize swap area
+  ansible.builtin.command: mkswap /swapfile
+  when: not base_swap_file_stat.stat.exists
+  changed_when: true
+
+- name: Enable swap
+  ansible.builtin.command: swapon /swapfile
+  when: not base_swap_file_stat.stat.exists
+  changed_when: true
+
+- name: Persist swap in /etc/fstab
+  ansible.posix.mount:
+    name: none
+    src: /swapfile
+    fstype: swap
+    opts: sw
+    state: present
+
+- name: Lower swappiness (10 — використовуй swap тільки при справжньому тиску)
+  # Чому: default 60 надмірно агресивний, постійно витискає Postgres-кеш у swap.
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "10"
+    state: present
+    sysctl_set: true
+    reload: true
+
+# ─── 4. Deploy user (для re-runs з SSH-ключа, не root) ─────────────────────
+- name: Create deploy group
+  ansible.builtin.group:
+    name: "{{ app_user }}"
+    state: present
+
+- name: Create deploy user
+  ansible.builtin.user:
+    name: "{{ app_user }}"
+    group: "{{ app_user }}"
+    home: "{{ app_user_home }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Set up authorized_keys for deploy user
+  ansible.posix.authorized_key:
+    user: "{{ app_user }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ deploy_authorized_keys }}"
+
+- name: Allow deploy user passwordless sudo (для re-runs Ansible з deploy-account'а)
+  # Чому: re-deploy має проходити без інтерактивного пароля. На staging — прийнятно;
+  # для production додамо обмеження на конкретні команди (docker, systemctl).
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ app_user }}"
+    content: "{{ app_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+# ─── 5. SSH hardening ──────────────────────────────────────────────────────
+- name: Disable password authentication (тільки SSH-ключі)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+    validate: "sshd -t -f %s"
+  notify: Restart sshd
+
+- name: Disable challenge-response authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?ChallengeResponseAuthentication"
+    line: "ChallengeResponseAuthentication no"
+    state: present
+    validate: "sshd -t -f %s"
+  notify: Restart sshd
+
+- name: Disable root password login (ключем — можна)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PermitRootLogin"
+    line: "PermitRootLogin prohibit-password"
+    state: present
+    validate: "sshd -t -f %s"
+  notify: Restart sshd
+
+# ─── 6. Fail2ban для SSH brute-force ───────────────────────────────────────
+- name: Configure fail2ban for sshd
+  # Чому: навіть з ключ-онлі ауф brute-force боти забивають журнал. Banним за 3 спроби.
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/sshd.local
+    content: |
+      [sshd]
+      enabled = true
+      port = ssh
+      maxretry = 3
+      bantime = 3600
+      findtime = 600
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started
+
+# ─── 7. Каталоги для додатку ───────────────────────────────────────────────
+- name: Ensure app directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0755"
+  loop:
+    - "{{ app_dir }}"
+    - "{{ backups_local_dir }}"
+    - "{{ monitoring_log_dir }}"
+
+- name: Ensure Caddy origin-cert dir exists (root-only — містить private key)
+  ansible.builtin.file:
+    path: "{{ caddy_origin_cert_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"

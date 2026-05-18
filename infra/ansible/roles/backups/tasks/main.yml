@@ -1,0 +1,72 @@
+---
+# Daily encrypted pg_dump → R2.
+# Шлях: pg_dump (через docker exec) → age encrypt → rclone copy → cleanup local.
+
+- name: Install backup dependencies
+  ansible.builtin.apt:
+    name:
+      - age # encrypt-at-rest. Бекап не можна тримати plaintext у R2 (поза нашою юрисдикцією).
+      - rclone # S3-compatible CLI з progress і retry
+    state: present
+
+# ─── rclone config (R2 remote) ─────────────────────────────────────────────
+- name: Ensure rclone config dir
+  ansible.builtin.file:
+    path: "{{ app_user_home }}/.config/rclone"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0700"
+
+- name: Render rclone.conf для R2
+  # Чому 0600: містить access_key_id + secret_access_key (root-equivalent на R2 bucket).
+  ansible.builtin.copy:
+    dest: "{{ app_user_home }}/.config/rclone/rclone.conf"
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0600"
+    content: |
+      [r2]
+      type = s3
+      provider = Cloudflare
+      access_key_id = {{ vault_s3_access_key_id }}
+      secret_access_key = {{ vault_s3_secret_access_key }}
+      endpoint = {{ vault_s3_endpoint }}
+      acl = private
+      no_check_bucket = true
+
+# ─── Backup script ─────────────────────────────────────────────────────────
+- name: Install backup script
+  ansible.builtin.template:
+    src: backup.sh.j2
+    dest: /usr/local/bin/flatcraft-backup.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+# ─── Cron job (03:00 щодня, у timezone сервера = Europe/Kyiv) ──────────────
+- name: Schedule daily backup cron
+  ansible.builtin.cron:
+    name: "flatcraft daily db backup"
+    user: "{{ app_user }}"
+    minute: "{{ backup_cron_minute }}"
+    hour: "{{ backup_cron_hour }}"
+    job: "/usr/local/bin/flatcraft-backup.sh >> /var/log/flatcraft/backup.log 2>&1"
+    state: present
+
+- name: Logrotate config для backup.log
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/flatcraft-backup
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      /var/log/flatcraft/backup.log {
+          weekly
+          rotate 4
+          compress
+          delaycompress
+          missingok
+          notifempty
+          copytruncate
+      }

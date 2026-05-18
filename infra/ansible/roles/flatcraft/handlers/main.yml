@@ -1,0 +1,14 @@
+---
+- name: Restart flatcraft stack
+  # Чому через `restart` а не `up -d`: ми вже зробили up у tasks. Handler
+  # спрацьовує при зміні .env.prod або cert'у — тоді треба перезапустити
+  # лише ті сервіси, що читають їх (read at boot).
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_dir }}"
+    files:
+      - "infra/compose/docker-compose.prod.yml"
+    env_files:
+      - "{{ app_dir }}/.env.prod"
+    state: restarted
+  become: true
+  become_user: "{{ app_user }}"

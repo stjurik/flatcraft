@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# flatcraft health monitor. Cron'иться кожні {{ monitor_interval_minutes }} хв.
+# Алертить у Discord webhook коли:
+#   1. disk usage / > {{ monitor_disk_threshold_pct }}%
+#   2. будь-який container зі стека не healthy (status != "healthy" і != "starting")
+#
+# State-tracking у /tmp/flatcraft-monitor.state — щоб не спамити webhook кожні 5 хв,
+# поки інцидент триває. Шлемо повторно лише після recovery → знову бида.
+
+set -euo pipefail
+
+WEBHOOK_URL="{{ discord_webhook }}"
+STATE_FILE="/tmp/flatcraft-monitor.state"
+DISK_THRESHOLD={{ monitor_disk_threshold_pct }}
+
+# ─── Notification helper ───────────────────────────────────────────────────
+notify() {
+    local severity="$1"; shift
+    local msg="$*"
+    local color
+    case "$severity" in
+        ERROR) color=15158332 ;;   # red
+        OK)    color=3066993  ;;   # green
+        *)     color=15844367 ;;   # yellow
+    esac
+    curl -fsS -X POST "$WEBHOOK_URL" \
+        -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg t "[$severity] $msg" --argjson c "$color" \
+              '{embeds:[{title:$t, color:$c, timestamp:(now|todateiso8601)}]}')" \
+        > /dev/null || echo "WARNING: Discord notify failed" >&2
+}
+
+# State tracking — щоб не спамити поки інцидент триває.
+read_state() { [ -f "$STATE_FILE" ] && cat "$STATE_FILE" || echo "OK"; }
+write_state() { echo "$1" > "$STATE_FILE"; }
+
+PREV_STATE=$(read_state)
+CURRENT_PROBLEMS=()
+
+# ─── 1. Disk usage ─────────────────────────────────────────────────────────
+disk_pct=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+if [ "$disk_pct" -ge "$DISK_THRESHOLD" ]; then
+    CURRENT_PROBLEMS+=("Disk usage / = ${disk_pct}% (threshold ${DISK_THRESHOLD}%)")
+fi
+
+# ─── 2. Container health ───────────────────────────────────────────────────
+# docker ps повертає унікальний name'ом у форматі `flatcraft-<service>-1` (Compose Spec).
+while IFS= read -r line; do
+    name=$(echo "$line" | jq -r '.Names')
+    health=$(echo "$line" | jq -r '.Health // "none"')
+    status=$(echo "$line" | jq -r '.State')
+    # Container з healthcheck повинен бути healthy. Без healthcheck — пропускаємо.
+    if [[ "$health" != "none" && "$health" != "healthy" && "$health" != "starting" ]]; then
+        CURRENT_PROBLEMS+=("Container $name health=$health (state=$status)")
+    fi
+done < <(docker ps --filter "name=flatcraft-" --format '{"Names":"{{ "{{" }}.Names{{ "}}" }}","State":"{{ "{{" }}.State{{ "}}" }}","Health":"{{ "{{" }}.Status{{ "}}" }}"}' | jq -c '.')
+
+# ─── 3. Compose stack: чи є взагалі сервіси? ───────────────────────────────
+running_count=$(docker ps --filter "name=flatcraft-" --format '{{ "{{" }}.Names{{ "}}" }}' | wc -l)
+if [ "$running_count" -eq 0 ]; then
+    CURRENT_PROBLEMS+=("Stack down: 0 containers running.")
+fi
+
+# ─── 4. Dispatch ───────────────────────────────────────────────────────────
+if [ ${#CURRENT_PROBLEMS[@]} -gt 0 ]; then
+    if [ "$PREV_STATE" = "OK" ]; then
+        # New incident
+        msg="🚨 flatcraft staging issue(s):\n$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
+        notify ERROR "$msg"
+    fi
+    write_state "PROBLEM"
+    echo "[$(date -u +%FT%TZ)] PROBLEMS: ${CURRENT_PROBLEMS[*]}"
+    exit 0
+fi
+
+# Все ОК
+if [ "$PREV_STATE" = "PROBLEM" ]; then
+    notify OK "✅ flatcraft staging recovered — all containers healthy, disk ${disk_pct}%."
+fi
+write_state "OK"
+echo "[$(date -u +%FT%TZ)] OK (disk ${disk_pct}%, ${running_count} containers)"

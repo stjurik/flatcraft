@@ -1,0 +1,82 @@
+---
+# Встановлення Docker Engine + compose plugin з офіційного Debian repo.
+
+- name: Install Docker apt key
+  # Чому з ASCII-armored (.asc): новий шлях з docker docs (Debian 12+);
+  # бінарний .gpg ще приймається але deprecated.
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+    force: false
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable"
+    state: present
+    filename: docker
+    update_cache: true
+
+- name: Install Docker Engine + compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+      - docker-buildx-plugin
+    state: present
+
+- name: Configure docker daemon (логи з ротацією — не з'їдає 40 GB диск)
+  # Чому: docker default `json-file` без обмеження → один балакучий контейнер
+  # за тиждень з'їдає весь диск. 10MB × 3 files = 30MB cap на сервіс.
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        },
+        "live-restore": true
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Enable and start Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Add deploy user to docker group
+  # Чому: deploy має робити `docker compose` без sudo для re-deploy. Це
+  # фактично root-equivalent (через docker exec); ризик прийнятий для staging.
+  ansible.builtin.user:
+    name: "{{ app_user }}"
+    groups: docker
+    append: true
+
+- name: Docker login до ghcr.io (для приватних flatcraft-* образів)
+  # Чому через `docker login` запис у /root/.docker/config.json: docker compose
+  # pull на root-systemd-сервісі (якщо колись з'явиться) бачитиме credentials.
+  # Для deploy-user логін окремий нижче.
+  ansible.builtin.command:
+    cmd: "docker login ghcr.io -u {{ vault_ghcr_username }} --password-stdin"
+    stdin: "{{ vault_ghcr_token }}"
+  register: docker_ghcr_login_root
+  changed_when: "'Login Succeeded' in docker_ghcr_login_root.stdout"
+  no_log: true # ховаємо токен з viewer'а
+
+- name: Docker login до ghcr.io для deploy-user
+  ansible.builtin.command:
+    cmd: "docker login ghcr.io -u {{ vault_ghcr_username }} --password-stdin"
+    stdin: "{{ vault_ghcr_token }}"
+  become: true
+  become_user: "{{ app_user }}"
+  register: docker_ghcr_login_deploy
+  changed_when: "'Login Succeeded' in docker_ghcr_login_deploy.stdout"
+  no_log: true

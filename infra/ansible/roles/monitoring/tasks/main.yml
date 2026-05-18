@@ -1,0 +1,57 @@
+---
+# Простий health-watch без node_exporter: bash + cron + Discord webhook.
+# Тригериться при disk > 80% або container не healthy.
+
+- name: Install monitoring dependencies (curl, jq для парсингу docker output)
+  ansible.builtin.apt:
+    name:
+      - curl
+      - jq
+    state: present
+
+- name: Install monitor script
+  ansible.builtin.template:
+    src: monitor.sh.j2
+    dest: /usr/local/bin/flatcraft-monitor.sh
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    discord_webhook: "{{ vault_discord_webhook_url }}"
+
+- name: Schedule monitor cron
+  ansible.builtin.cron:
+    name: "flatcraft health monitor"
+    user: "{{ app_user }}"
+    minute: "*/{{ monitor_interval_minutes }}"
+    job: "/usr/local/bin/flatcraft-monitor.sh >> /var/log/flatcraft/monitor.log 2>&1"
+    state: present
+
+- name: Schedule weekly docker image prune
+  # Чому щонеділі о 04:00: після backup'у (03:00) — щоб не змагатися за disk I/O.
+  # `until=168h` — старіше 7 днів. Тримає disk usage низько без втрати кешу останнього тижня.
+  ansible.builtin.cron:
+    name: "flatcraft weekly docker image prune"
+    user: "{{ app_user }}"
+    weekday: "{{ docker_prune_cron_dayofweek }}"
+    hour: "{{ docker_prune_cron_hour }}"
+    minute: "0"
+    job: "docker image prune -af --filter 'until=168h' >> /var/log/flatcraft/prune.log 2>&1"
+    state: present
+
+- name: Logrotate config для monitor/prune логів
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/flatcraft-monitoring
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      /var/log/flatcraft/monitor.log /var/log/flatcraft/prune.log {
+          weekly
+          rotate 4
+          compress
+          delaycompress
+          missingok
+          notifempty
+          copytruncate
+      }

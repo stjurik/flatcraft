@@ -1,0 +1,14 @@
+; Скопіювати у inventory.ini (gitignored) і вписати реальний IP/host.
+; Підключаємось як user 'root' для першого provision; роль `base` створює
+; deploy-юзера, після цього можна перемкнути ansible_user='deploy'.
+
+[staging]
+; staging-server ansible_host=__REPLACE_with_mirohost_ipv4__ ansible_user=root
+
+[production]
+; production поки відсутній — додамо коли підемо у Phase 5.10.
+
+[staging:vars]
+; Після першого provision поміняти на ansible_user=deploy і використовувати
+; ansible_ssh_private_key_file для деплой-ключа (НЕ root-ключа).
+ansible_python_interpreter=/usr/bin/python3

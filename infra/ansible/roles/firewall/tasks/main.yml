@@ -1,0 +1,100 @@
+---
+# UFW (Uncomplicated Firewall) — single layer поверх Cloudflare proxy.
+# Принцип: default deny incoming, allow тільки 22 (SSH) і 80/443 (HTTP) лише від CF.
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set default ufw policy — deny incoming
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set default ufw policy — allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Set default ufw policy — deny routed
+  community.general.ufw:
+    direction: routed
+    policy: deny
+
+# ─── SSH (port 22) ─────────────────────────────────────────────────────────
+- name: Allow SSH from ssh_allowed_ips
+  # Чому з allowlist'а: відкривати SSH world-wide небезпечно навіть з key-only +
+  # fail2ban. На staging можна 0.0.0.0/0 (dev convenience); на production —
+  # звужуємо до конкретних IP розробників.
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    src: "{{ item }}"
+  loop: "{{ ssh_allowed_ips }}"
+
+# ─── HTTP/HTTPS (80/443) — тільки від Cloudflare ───────────────────────────
+- name: Read Cloudflare IPv4 ranges
+  # Чому з файлу: ranges міняються нечасто (~1-2 рази на рік). Файл оновлюємо
+  # вручну з https://www.cloudflare.com/ips-v4 при оновленні докер-роли.
+  # Альтернатива — fetch у task'у через uri-module: ризик run-time мережевого збою.
+  ansible.builtin.set_fact:
+    firewall_cf_ipv4_ranges: "{{ lookup('ansible.builtin.file', 'cloudflare_ipv4.txt').splitlines() | reject('match', '^$') | reject('match', '^#') | list }}"
+
+- name: Read Cloudflare IPv6 ranges
+  ansible.builtin.set_fact:
+    firewall_cf_ipv6_ranges: "{{ lookup('ansible.builtin.file', 'cloudflare_ipv6.txt').splitlines() | reject('match', '^$') | reject('match', '^#') | list }}"
+
+- name: Allow HTTP (port 80) from Cloudflare IPv4
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv4_ranges }}"
+
+- name: Allow HTTPS (port 443) from Cloudflare IPv4
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv4_ranges }}"
+
+- name: Allow HTTPS UDP (port 443/HTTP3 QUIC) from Cloudflare IPv4
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: udp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv4_ranges }}"
+
+- name: Allow HTTP (port 80) from Cloudflare IPv6
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv6_ranges }}"
+
+- name: Allow HTTPS (port 443) from Cloudflare IPv6
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv6_ranges }}"
+
+- name: Allow HTTPS UDP (port 443/HTTP3 QUIC) from Cloudflare IPv6
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: udp
+    src: "{{ item }}"
+  loop: "{{ firewall_cf_ipv6_ranges }}"
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+    logging: "low"
