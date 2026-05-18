@@ -21,6 +21,14 @@ pre-commit:
       root: "workers/cad/"
       glob: "*.py"
       run: uv run mypy .
+    vault-encrypted:
+      # Захист: ansible vault файли мають бути зашифровані перед commit.
+      # Якщо файл починається не з `$ANSIBLE_VAULT` — fail.
+      glob: "infra/ansible/group_vars/all.vault.yml"
+      run: |
+        for f in {staged_files}; do
+          head -1 "$f" | grep -q '^\$ANSIBLE_VAULT' || { echo "ERROR: $f is not ansible-vault-encrypted. Run: ansible-vault encrypt $f"; exit 1; }
+        done
 
 pre-push:
   commands:

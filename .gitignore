@@ -81,11 +81,13 @@ workers/cad/out/
 # Local infra (Ansible — Terraform не використовуємо, див. ADR-011)
 infra/ansible/*.retry
 infra/ansible/inventory.ini
+infra/ansible/inventory.staging.ini  # runtime-generated у deploy-staging.yml
 infra/ansible/group_vars/all.yml
-infra/ansible/group_vars/all.vault.yml
 !infra/ansible/inventory.ini.example
 !infra/ansible/group_vars/all.yml.example
 !infra/ansible/group_vars/all.vault.yml.example
+# all.vault.yml — комітимо ЗАШИФРОВАНИМ (ansible-vault encrypt). pre-commit
+# hook у lefthook.yml перевіряє `$ANSIBLE_VAULT` header перед прийняттям.
 
 # Logs
 *.log

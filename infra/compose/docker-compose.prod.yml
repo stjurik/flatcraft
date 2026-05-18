@@ -12,7 +12,7 @@
 #     Caddy НЕ має доступу до postgres/redis, postgres/redis НЕ доступні з web-net.
 #   * `mem_limit` на кожному сервісі — сума ≤ 3.5 GB, лишається запас + 2 GB swap (Ansible base role).
 #   * Healthcheck на всіх 6 сервісах; `depends_on: service_healthy` для коректного boot order.
-#   * Образи з `${IMAGE_PREFIX}/<service>:${APP_VERSION}` — release pinning через APP_VERSION.
+#   * Образи з `${IMAGE_PREFIX}/flatcraft-<service>:${APP_VERSION}` — release pinning через APP_VERSION.
 
 name: flatcraft
 
@@ -85,7 +85,7 @@ services:
 
   # ─── CAD worker (Python FastAPI + CadQuery) ─────────────────────────────
   cad-worker:
-    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/cad-worker:${APP_VERSION:-staging}
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-cad-worker:${APP_VERSION:-staging}
     restart: unless-stopped
     # CadQuery + OpenCascade тримають 800-1200 MB у пам'яті на render.
     mem_limit: 1500m
@@ -121,7 +121,7 @@ services:
 
   # ─── API (Fastify) ──────────────────────────────────────────────────────
   api:
-    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/api:${APP_VERSION:-staging}
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-api:${APP_VERSION:-staging}
     restart: unless-stopped
     mem_limit: 512m
     depends_on:
@@ -170,7 +170,7 @@ services:
 
   # ─── Web (Next.js standalone) ───────────────────────────────────────────
   web:
-    image: ${IMAGE_PREFIX:-ghcr.io/stjurik/flatcraft}/web:${APP_VERSION:-staging}
+    image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-web:${APP_VERSION:-staging}
     restart: unless-stopped
     mem_limit: 512m
     depends_on:

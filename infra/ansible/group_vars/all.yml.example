@@ -17,7 +17,8 @@ app_base_url: "https://{{ app_domain }}"
 api_base_url: "https://{{ api_domain }}"
 
 # Image release pinning. Override через --extra-vars app_version=<sha> з CI.
-image_prefix: ghcr.io/stjurik/flatcraft
+# Compose додає `flatcraft-<service>` сам — це власник у ghcr.io.
+image_prefix: ghcr.io/stjurik
 app_version: staging
 
 # Git source для `git pull` на сервері (роль flatcraft).
