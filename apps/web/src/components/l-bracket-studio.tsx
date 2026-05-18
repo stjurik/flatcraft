@@ -42,9 +42,11 @@ export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
           <h2 className="text-lg font-semibold text-zinc-100">Параметри</h2>
           <LBracketEditor value={parameters} onChange={setParameters} />
           <ExportButton
-            templateSlug="l_bracket"
-            parameters={parameters}
-            thicknessMm={thicknessMm}
+            request={{
+              template_slug: "l_bracket",
+              parameters,
+              thickness_mm: thicknessMm,
+            }}
             disabled={!isValid}
           />
         </div>

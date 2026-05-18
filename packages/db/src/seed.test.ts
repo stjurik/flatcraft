@@ -63,10 +63,11 @@ describe("SEED_TEMPLATES", () => {
     expect(SEED_TEMPLATES).toHaveLength(5);
   });
 
-  it("лише L-bracket опубліковано (Phase 1.5 готовий)", () => {
-    const published = SEED_TEMPLATES.filter((t) => t.isPublished);
-    expect(published).toHaveLength(1);
-    expect(published[0]?.slug).toBe("l_bracket");
+  it("L-bracket і Z-bracket опубліковано (Phase 2.10 готовий)", () => {
+    const published = SEED_TEMPLATES.filter((t) => t.isPublished)
+      .map((t) => t.slug)
+      .sort();
+    expect(published).toEqual(["l_bracket", "z_bracket"]);
   });
 
   it("slug-и унікальні і відповідають roadmap Phase 2.10", () => {
@@ -92,6 +93,18 @@ describe("SEED_TEMPLATES", () => {
     expect(lBracket?.defaultParameters).toMatchObject({
       legA_mm: expect.any(Number),
       legB_mm: expect.any(Number),
+      bend_radius_mm: expect.any(Number),
+      bend_angle_deg: 90,
+      width_mm: expect.any(Number),
+    });
+  });
+
+  it("Z-bracket defaultParameters містить очікувані поля", () => {
+    const zBracket = SEED_TEMPLATES.find((t) => t.slug === "z_bracket");
+    expect(zBracket?.defaultParameters).toMatchObject({
+      top_flange_mm: expect.any(Number),
+      bottom_flange_mm: expect.any(Number),
+      offset_mm: expect.any(Number),
       bend_radius_mm: expect.any(Number),
       bend_angle_deg: 90,
       width_mm: expect.any(Number),

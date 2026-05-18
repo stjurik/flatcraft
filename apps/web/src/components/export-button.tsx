@@ -1,6 +1,6 @@
 "use client";
 
-import type { ExportJobEvent, ExportResponse, LBracketParameters } from "@flatcraft/types";
+import type { ExportJobEvent, ExportRequest, ExportResponse } from "@flatcraft/types";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
@@ -13,18 +13,12 @@ type ExportState =
   | { readonly status: "error"; readonly message: string };
 
 interface ExportButtonProps {
-  readonly templateSlug: "l_bracket";
-  readonly parameters: LBracketParameters;
-  readonly thicknessMm: number;
+  /** Готовий ExportRequest payload — discriminated на template_slug. */
+  readonly request: ExportRequest;
   readonly disabled?: boolean;
 }
 
-export function ExportButton({
-  templateSlug,
-  parameters,
-  thicknessMm,
-  disabled = false,
-}: ExportButtonProps) {
+export function ExportButton({ request, disabled = false }: ExportButtonProps) {
   const [state, setState] = useState<ExportState>({ status: "idle" });
   const closeRef = useRef<(() => void) | null>(null);
 
@@ -49,11 +43,7 @@ export function ExportButton({
     closeRef.current?.();
     setState({ status: "queued", jobId: "", progress: 0 });
     try {
-      const accepted = await createExport({
-        template_slug: templateSlug,
-        parameters,
-        thickness_mm: thicknessMm,
-      });
+      const accepted = await createExport(request);
       setState({ status: "queued", jobId: accepted.id, progress: 0 });
       closeRef.current = subscribeExportEvents(accepted.id, handleEvent, (err) =>
         setState({ status: "error", message: err.message }),
@@ -87,7 +77,7 @@ export function ExportButton({
             : "bg-emerald-700 text-white hover:bg-emerald-600"
         }`}
       >
-        {isBusy ? `Експорт… ${progress}%` : "Експортувати DXF"}
+        {isBusy ? `Експорт… ${progress}%` : "Експортувати DXF + PDF"}
       </button>
 
       {isBusy ? (

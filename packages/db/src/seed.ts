@@ -13,7 +13,7 @@
  *   - runSeed(client) — окрема функція, працює з будь-яким drizzle-інстансом
  *     (production, integration tests).
  */
-import { L_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
+import { L_BRACKET_DEFAULT_PARAMETERS, Z_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
 
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
@@ -115,10 +115,11 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     slug: "z_bracket",
     nameUk: "Z-кронштейн",
     nameEn: "Z-bracket",
-    descriptionUk: "Z-подібний кронштейн з трьома секціями.",
-    descriptionEn: "Z-shaped bracket with three segments.",
-    isPublished: false,
-    defaultParameters: {},
+    descriptionUk: "Z-подібний кронштейн з трьома секціями і двома гибами.",
+    descriptionEn: "Z-shaped bracket with three segments and two bends.",
+    // Phase 2.10 — CadQuery-builder і CAD-pipeline готові.
+    isPublished: true,
+    defaultParameters: Z_BRACKET_DEFAULT_PARAMETERS,
   },
   {
     slug: "corner_angle",

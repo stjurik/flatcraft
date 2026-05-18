@@ -1,8 +1,14 @@
-import { LBracketParametersSchema, L_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
+import {
+  LBracketParametersSchema,
+  L_BRACKET_DEFAULT_PARAMETERS,
+  ZBracketParametersSchema,
+  Z_BRACKET_DEFAULT_PARAMETERS,
+} from "@flatcraft/types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { LBracketStudio } from "../../../components/l-bracket-studio";
+import { ZBracketStudio } from "../../../components/z-bracket-studio";
 import { fetchTemplate } from "../../../lib/api";
 
 interface PageProps {
@@ -58,11 +64,18 @@ function TemplateStudio({
   readonly defaults: Record<string, unknown>;
 }) {
   if (slug === "l_bracket") {
-    // defaults з БД — JSON; уточнюємо Zod-схемою, бо API повертає `unknown`-record.
     const parsed = LBracketParametersSchema.safeParse(defaults);
     return (
       <LBracketStudio
         initialParameters={parsed.success ? parsed.data : L_BRACKET_DEFAULT_PARAMETERS}
+      />
+    );
+  }
+  if (slug === "z_bracket") {
+    const parsed = ZBracketParametersSchema.safeParse(defaults);
+    return (
+      <ZBracketStudio
+        initialParameters={parsed.success ? parsed.data : Z_BRACKET_DEFAULT_PARAMETERS}
       />
     );
   }

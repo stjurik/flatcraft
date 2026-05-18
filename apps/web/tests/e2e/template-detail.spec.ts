@@ -181,8 +181,8 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     expect(res?.status()).toBe(404);
   });
 
-  test("неопублікований z_bracket → 404", async ({ page }) => {
-    const res = await page.goto("/templates/z_bracket");
+  test("неопублікований corner_angle → 404", async ({ page }) => {
+    const res = await page.goto("/templates/corner_angle");
     expect(res?.status()).toBe(404);
   });
 });

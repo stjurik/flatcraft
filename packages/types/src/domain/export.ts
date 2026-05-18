@@ -1,21 +1,29 @@
 /**
  * Контракт `POST /exports` між web → api → cad-worker.
  *
- * thickness — у MVP параметрі моделі (Phase 3.5 додасть MaterialPicker
- * у UI; зараз web передає 2.0 за замовчуванням, але контракт уже типизований).
+ * Phase 2.10: discriminated union на slug. Кожен шаблон має свою
+ * Zod-схему параметрів. Якщо payload не пройде discriminator — 400.
  *
- * Тільки L-bracket у Phase 2.7. Для решти шаблонів треба буде union
- * на parameters з відповідною Zod-схемою (Phase 2.10).
+ * thickness_mm — окремо від parameters (Phase 3.5 додасть MaterialPicker;
+ * поки web передає 2.0 за замовчуванням).
  */
 import { z } from "zod";
 
 import { LBracketParametersSchema } from "../templates/l-bracket.js";
+import { ZBracketParametersSchema } from "../templates/z-bracket.js";
 
-export const ExportRequestSchema = z.object({
-  template_slug: z.literal("l_bracket"),
-  parameters: LBracketParametersSchema,
-  thickness_mm: z.number().positive().max(10),
-});
+export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
+  z.object({
+    template_slug: z.literal("l_bracket"),
+    parameters: LBracketParametersSchema,
+    thickness_mm: z.number().positive().max(10),
+  }),
+  z.object({
+    template_slug: z.literal("z_bracket"),
+    parameters: ZBracketParametersSchema,
+    thickness_mm: z.number().positive().max(10),
+  }),
+]);
 
 export type ExportRequest = z.infer<typeof ExportRequestSchema>;
 

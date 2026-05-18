@@ -38,12 +38,15 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     const body = res.json<{
       items: Array<{ slug: string; isPublished: boolean; nameUk: string }>;
     }>();
-    expect(body.items.length).toBeGreaterThanOrEqual(1);
+    expect(body.items.length).toBeGreaterThanOrEqual(2);
     expect(body.items.every((t) => t.isPublished)).toBe(true);
     const slugs = body.items.map((t) => t.slug);
     expect(slugs).toContain("l_bracket");
-    // Невидимі поки що (з Phase 2.10): z_bracket, corner_angle, wall_shelf, perforated_panel.
-    expect(slugs).not.toContain("z_bracket");
+    expect(slugs).toContain("z_bracket");
+    // Невидимі поки що: corner_angle, wall_shelf, perforated_panel.
+    for (const slug of ["corner_angle", "wall_shelf", "perforated_panel"]) {
+      expect(slugs).not.toContain(slug);
+    }
   });
 
   it("response відповідає TemplateListResponseSchema", async () => {
@@ -78,8 +81,20 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     }
   });
 
-  it("GET /templates/z_bracket → 404 (неопублікований)", async () => {
+  it("GET /templates/z_bracket → 200 з offset_mm у defaults (Phase 2.10)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates/z_bracket" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ slug: string; defaultParameters: Record<string, unknown> }>();
+    expect(body.slug).toBe("z_bracket");
+    expect(body.defaultParameters).toMatchObject({
+      top_flange_mm: expect.any(Number),
+      bottom_flange_mm: expect.any(Number),
+      offset_mm: expect.any(Number),
+    });
+  });
+
+  it("GET /templates/corner_angle → 404 (неопублікований)", async () => {
+    const res = await app.inject({ method: "GET", url: "/templates/corner_angle" });
     expect(res.statusCode).toBe(404);
   });
 
