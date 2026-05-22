@@ -81,7 +81,9 @@ workers/cad/out/
 # Local infra (Ansible — Terraform не використовуємо, див. ADR-011)
 infra/ansible/*.retry
 infra/ansible/inventory.ini
-infra/ansible/inventory.staging.ini  # runtime-generated у deploy-staging.yml
+# runtime-generated у deploy-staging.yml + може містити реальний origin IP
+infra/ansible/inventory.staging.ini
+infra/ansible/inventory.production.ini
 infra/ansible/group_vars/all.yml
 !infra/ansible/inventory.ini.example
 !infra/ansible/group_vars/all.yml.example

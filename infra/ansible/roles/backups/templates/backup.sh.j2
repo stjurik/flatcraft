@@ -17,16 +17,24 @@ COMPOSE_FILE="{{ app_dir }}/infra/compose/docker-compose.prod.yml"
 COMPOSE_ENV="{{ app_dir }}/.env.prod"
 
 TS=$(date -u +%Y%m%dT%H%M%SZ)
-RAW_FILE="$LOCAL_DIR/flatcraft-db-$TS.sql.gz"
-ENC_FILE="$LOCAL_DIR/flatcraft-db-$TS.sql.gz.age"
+# Чому `.dump`, не `.sql.gz`: pg_dump -Fc — custom binary format із власним zlib
+# (rfc1950) стисненням. Додатковий gzip ще раз компресує entropy-rich байти —
+# марна CPU/IO операція з ~5% bloat'ом. Файл restoreabl'ний через pg_restore.
+RAW_FILE="$LOCAL_DIR/flatcraft-db-$TS.dump"
+ENC_FILE="$LOCAL_DIR/flatcraft-db-$TS.dump.age"
 
 mkdir -p "$LOCAL_DIR"
 
 # ─── 1. pg_dump через docker exec ──────────────────────────────────────────
+# Чому через `sh -c '...'` з одинарними лапками: підставити саме контейнерні
+# $POSTGRES_USER/$POSTGRES_PASSWORD/$POSTGRES_DB (їх postgres image вже має у
+# своєму env'і). Без цього `pg_dump -U flatcraft` упирається у pg_hba.conf,
+# якщо POSTGRES_HOST_AUTH_METHOD коли-небудь зміниться зі scram-sha-256 на щось
+# strict'іше для local socket'у.
 echo "[$(date -u +%FT%TZ)] Dumping postgres…"
 docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" exec -T postgres \
-    pg_dump -U "{{ postgres_user }}" -Fc "{{ postgres_db }}" \
-    | gzip -9 > "$RAW_FILE"
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
+    > "$RAW_FILE"
 
 SIZE=$(du -h "$RAW_FILE" | cut -f1)
 echo "[$(date -u +%FT%TZ)] Dump done ($SIZE)."
@@ -44,6 +52,6 @@ rclone --config "$HOME/.config/rclone/rclone.conf" copy \
 
 # ─── 4. Cleanup local ──────────────────────────────────────────────────────
 echo "[$(date -u +%FT%TZ)] Cleanup: keeping last $RETENTION_DAYS days locally."
-find "$LOCAL_DIR" -name 'flatcraft-db-*.sql.gz.age' -mtime "+$RETENTION_DAYS" -delete
+find "$LOCAL_DIR" -name 'flatcraft-db-*.dump.age' -mtime "+$RETENTION_DAYS" -delete
 
 echo "[$(date -u +%FT%TZ)] Backup OK: $ENC_FILE"

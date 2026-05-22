@@ -5,9 +5,12 @@
 ## Pipeline
 
 ```
-pg_dump (docker exec) → gzip → age encrypt → rclone copy → r2://flatcraft-backups/
-                                                       \--→ local /var/lib/flatcraft/backups/ (3 дні)
+pg_dump -Fc (docker exec, custom format = zlib-compressed binary)
+  → age encrypt → rclone copy → r2://flatcraft-backups/
+              \--→ local /var/lib/flatcraft/backups/ (3 дні)
 ```
+
+Назва файла: `flatcraft-db-YYYYMMDDTHHMMSSZ.dump.age`. Жодного зайвого `gzip` — pg_dump'ом `-Fc` (custom format) вже стискає внутрішньо.
 
 ## Чому age, а не GPG
 
@@ -23,16 +26,16 @@ Lifecycle rule налаштовується у CF dashboard вручну (Ansibl
 
 ```bash
 # 1. Pull encrypted dump з R2
-rclone --config rclone.conf copy r2:flatcraft-backups/flatcraft-db-20260518T030000Z.sql.gz.age ./
+rclone --config rclone.conf copy r2:flatcraft-backups/flatcraft-db-20260518T030000Z.dump.age ./
 
 # 2. Decrypt (приватний age-key — у Bitwarden, НЕ у vault'і)
-age -d -i ~/secrets/age.key -o flatcraft-db-20260518.sql.gz \
-    flatcraft-db-20260518T030000Z.sql.gz.age
+age -d -i ~/secrets/age.key -o flatcraft-db-20260518.dump \
+    flatcraft-db-20260518T030000Z.dump.age
 
 # 3. Restore у Postgres (на свіжу базу!)
-gunzip -c flatcraft-db-20260518.sql.gz | \
-    docker compose -f docker-compose.prod.yml exec -T postgres \
-    pg_restore -U flatcraft -d flatcraft --clean --if-exists
+docker compose -f docker-compose.prod.yml exec -T postgres \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' \
+    < flatcraft-db-20260518.dump
 ```
 
 Раз на місяць — restore-test у staging. (TODO: автоматизувати через cron на іншому сервері.)
