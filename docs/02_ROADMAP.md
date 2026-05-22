@@ -118,10 +118,10 @@
 - [ ] **5.3.** Cookie banner (мінімальний, GDPR-сумісний — наш власний компонент)
 - [ ] **5.4.** Privacy Policy + ToS + Cookie Policy (UA + EN, шаблон у `legal/`)
 - [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete`
-- [ ] **5.6.** Створити сервер Mirohost Cloud (MS21) у панелі + Cloudflare DNS + R2 bucket; задокументувати кроки в `infra/README.md`
-- [ ] **5.7.** Ansible-плейбук для налаштування сервера (Docker, docker-compose, automatic backups, firewall, swap)
-- [ ] **5.8.** Backup-скрипт: щоденний `pg_dump` → R2 (зашифрований age)
-- [ ] **5.9.** Staging environment (окремий Cloud-сервер або Docker namespace на тому ж)
+- [x] **5.6.** Cloud-сервер + DNS + R2 — **код готовий** (Phase 5A: `infra/compose/docker-compose.prod.yml` + `Caddyfile` з CF Origin Cert, ADR-014). Сам сервер створює yurii за runbook'ом `docs/08_DEPLOYMENT.md` §0. — 2026-05-18
+- [x] **5.7.** Ansible-плейбук — 6 ролей (base/docker/firewall/flatcraft/backups/monitoring) на Debian 12 (Phase 5C). `--syntax-check` і `ansible-lint --profile production` зелені у CI. — 2026-05-18
+- [x] **5.8.** Backup-скрипт: cron 03:00 → `pg_dump -Fc` (docker exec з PGPASSWORD) → age encrypt → rclone у R2 `flatcraft-backups`. Recovery flow задокументовано (`docs/08_DEPLOYMENT.md` §5.5). — 2026-05-18 (hotfix 2026-05-22 на double-compression і auth)
+- [x] **5.9.** Staging environment — CI/CD pipeline (`.github/workflows/release.yml` + `deploy-staging.yml`, Phase 5D) + runbook (`docs/08_DEPLOYMENT.md`, Phase 5E). Готово до першого реального deploy'у яurii'єм. — 2026-05-22
 - [ ] **5.10.** Production deploy + smoke tests + перші реальні замовлення з пілотним підрядником
 
 ---
