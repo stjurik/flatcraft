@@ -12,6 +12,8 @@
 
 Це робить **yurii перед першим `ansible-playbook`**. Решта системи — автоматизована.
 
+> 💡 **Детальніша версія** з паралельними треками, click-by-click інструкціями, troubleshooting'ом і фінальним 5-точковим checkpoint'ом — у `docs/09_STAGING_PREFLIGHT.md`. Цей §0 — компактна reference-версія. Якщо ти проходиш препідготовку вперше — читай **09 натомість**.
+
 ### 0.1. Замовити Mirohost Cloud MS21
 
 1. Зайди на https://mirohost.net/cloud → тариф **MS21** (2 vCPU / 4 GB / 40 GB).

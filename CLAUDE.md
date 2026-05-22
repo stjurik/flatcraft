@@ -202,6 +202,7 @@ flatcraft/
 - API contract: `docs/06_API_CONTRACT.md`
 - Bend machine spec: `docs/07_BEND_MACHINE_SPEC.md`
 - Deployment runbook: `docs/08_DEPLOYMENT.md`
+- Staging preflight checklist (manual setup до Ansible): `docs/09_STAGING_PREFLIGHT.md`
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
 
