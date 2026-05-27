@@ -111,7 +111,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"
       interval: 10s
       timeout: 5s
       retries: 6
@@ -161,7 +161,7 @@ services:
       - internal
       - web
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:4000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --spider http://127.0.0.1:4000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -190,7 +190,7 @@ services:
     networks:
       - web
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:3000/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --spider http://127.0.0.1:3000/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 6
@@ -221,7 +221,7 @@ services:
       - web
     healthcheck:
       # Caddy admin API на :2019 — повертає 200 на /config/ якщо процес живий.
-      test: ["CMD-SHELL", "wget -qO- --spider http://localhost:2019/config/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --spider http://127.0.0.1:2019/config/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
