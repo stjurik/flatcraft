@@ -88,11 +88,12 @@
   # обслуговувати — наступні tasks (smoke-test з runbook'у) можуть розраховувати на API up.
   ansible.builtin.shell:
     cmd: |
-      set -eo pipefail
+      set -e
       for i in $(seq 1 30); do
         status=$(docker inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' flatcraft-api-1 2>/dev/null || echo missing)
         [ "$status" = "healthy" ] && exit 0
         sleep 2
       done
       echo "api never became healthy" >&2; exit 1
+    executable: /bin/sh
   changed_when: false
