@@ -1,0 +1,98 @@
+---
+# Деплой flatcraft-стеку: git pull → render .env.prod → CF cert → docker compose up.
+# Запускається на --tags deploy (і автоматично у повному run'і).
+
+# ─── 1. Git checkout (потрібен лише compose.prod.yml + Caddyfile) ──────────
+- name: Ensure app directory exists and is owned by deploy
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0755"
+
+- name: Clone or update flatcraft repo
+  # Чому деплоюємо ВЕСЬ repo: нам потрібен infra/compose/docker-compose.prod.yml
+  # і infra/compose/Caddyfile. Образи самі — з ghcr.io, тут лише config-файли.
+  # Альтернатива — копіювати config'и через `template`/`copy`; обрали git pull
+  # за простоту: одне джерело істини, історія в git, легко rollback.
+  ansible.builtin.git:
+    repo: "{{ repo_url }}"
+    dest: "{{ app_dir }}"
+    version: "{{ repo_branch }}"
+    accept_hostkey: true
+    update: true
+  become: true
+  become_user: "{{ app_user }}"
+
+# ─── 2. Render .env.prod з vault ───────────────────────────────────────────
+- name: Render .env.prod
+  # Чому НЕ Ansible-vault encrypt'имо результат: file на сервері — root-only
+  # (0600), і повний docker stack має до нього доступ. vault шифрує source-of-truth
+  # на git-side; на target держимо plaintext під strict perms.
+  ansible.builtin.template:
+    src: env.prod.j2
+    dest: "{{ app_dir }}/.env.prod"
+    owner: "{{ app_user }}"
+    group: "{{ app_user }}"
+    mode: "0600"
+  notify: Restart flatcraft stack
+
+# ─── 3. Cloudflare Origin Certificate ──────────────────────────────────────
+- name: Install CF Origin certificate
+  ansible.builtin.copy:
+    content: "{{ vault_cf_origin_cert }}"
+    dest: "{{ caddy_origin_cert_dir }}/cert.pem"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart flatcraft stack
+
+- name: Install CF Origin private key
+  ansible.builtin.copy:
+    content: "{{ vault_cf_origin_key }}"
+    dest: "{{ caddy_origin_cert_dir }}/key.pem"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart flatcraft stack
+
+# ─── 4. Docker compose pull + up -d ────────────────────────────────────────
+- name: Pull latest images
+  # Чому окремо від `up -d`: щоб у разі failure (наприклад, ghcr rate-limit)
+  # ми не повалили живий стек — старі образи лишаються запущеними.
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ app_dir }}"
+    files:
+      - "infra/compose/docker-compose.prod.yml"
+    env_files:
+      - "{{ app_dir }}/.env.prod"
+  become: true
+  become_user: "{{ app_user }}"
+
+- name: Docker compose up -d
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_dir }}"
+    files:
+      - "infra/compose/docker-compose.prod.yml"
+    env_files:
+      - "{{ app_dir }}/.env.prod"
+    state: present
+    remove_orphans: true
+    pull: never # вже зробили вище
+  become: true
+  become_user: "{{ app_user }}"
+
+- name: Wait until api healthcheck reports healthy
+  # Чому: блокуємо повернення Ansible'у успіху до того, як стек реально готовий
+  # обслуговувати — наступні tasks (smoke-test з runbook'у) можуть розраховувати на API up.
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      for i in $(seq 1 30); do
+        status=$(docker inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' flatcraft-api-1 2>/dev/null || echo missing)
+        [ "$status" = "healthy" ] && exit 0
+        sleep 2
+      done
+      echo "api never became healthy" >&2; exit 1
+  changed_when: false

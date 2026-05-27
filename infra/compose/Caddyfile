@@ -1,0 +1,63 @@
+# Caddyfile для staging.hart.crimea.ua + api.staging.hart.crimea.ua.
+# TLS — Cloudflare Origin Certificate (15 років, ADR-014). НЕ Let's Encrypt:
+# CF проксі робить Full (strict), CF↔origin перевіряє наш cert.
+# Cert+key монтуються з хоста: /etc/caddy/cf-origin/{cert,key}.pem.
+{
+	# Вимикаємо ACME: ми використовуємо CF Origin Cert, а не Let's Encrypt.
+	auto_https off
+
+	# Admin API на :2019 — internal-only через docker network (web).
+	admin :2019
+
+	# Prometheus metrics endpoint на /metrics admin API.
+	metrics
+
+	servers {
+		# Caddy довіряє X-Forwarded-* від CF; private_ranges покриває docker-мережу
+		# (172.16/12, 10/8). Для production-сервера: оновити на актуальний список
+		# Cloudflare IPv4/IPv6 (див. docs/08_DEPLOYMENT.md).
+		trusted_proxies static private_ranges
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# Прибираємо version-disclosure заголовки.
+		-Server
+		-X-Powered-By
+	}
+}
+
+# ─── Web (фронт, Next.js) ───────────────────────────────────────────────────
+staging.hart.crimea.ua {
+	tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
+	import security_headers
+
+	reverse_proxy web:3000 {
+		# Next.js standalone не любить буферизацію — flush одразу.
+		flush_interval -1
+	}
+}
+
+# ─── API (Fastify) ──────────────────────────────────────────────────────────
+api.staging.hart.crimea.ua {
+	tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
+	import security_headers
+
+	# SSE-стрім прогресу експорту: вимикаємо буферизацію і піднімаємо upstream-timeout
+	# до 24h, щоб довгі jobs не падали на response_header_timeout default 1m.
+	@sse path /v1/exports/*/events
+	reverse_proxy @sse api:4000 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 24h
+		}
+	}
+
+	reverse_proxy api:4000
+}

@@ -1,0 +1,60 @@
+---
+# ════════════════════════════════════════════════════════════════════════════
+#  ШИФРОВАНІ змінні. Не комітимо у відкритому вигляді — лише `.example`.
+#
+#  Робочий процес:
+#    1. cp all.vault.yml.example all.vault.yml
+#    2. Заповнити реальні значення (інструкція в `docs/08_DEPLOYMENT.md`)
+#    3. ansible-vault encrypt all.vault.yml
+#    4. На деплой-станції: export ANSIBLE_VAULT_PASSWORD_FILE=~/.flatcraft-vault-pass
+#       (або щоразу `--ask-vault-pass`)
+#
+#  Генерація випадкових значень:
+#    openssl rand -hex 32       # для AUTH_SECRET, POSTGRES_PASSWORD
+#    openssl rand -hex 16       # для admin password
+#    age-keygen -o age.key      # для backup encryption (зберегти приватний десь поза vault'ом!)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ─── Postgres ───────────────────────────────────────────────────────────────
+vault_postgres_password: "__REPLACE_postgres_password_openssl_rand_hex_32__"
+
+# ─── Cloudflare R2 (S3-compatible) ──────────────────────────────────────────
+vault_s3_endpoint: "https://__REPLACE_cf_account_id__.r2.cloudflarestorage.com"
+vault_s3_access_key_id: "__REPLACE_r2_token_access_key__"
+vault_s3_secret_access_key: "__REPLACE_r2_token_secret_key__"
+
+# ─── Auth ───────────────────────────────────────────────────────────────────
+vault_auth_secret: "__REPLACE_openssl_rand_hex_32__"
+
+# ─── Admin seed (Phase 3) ───────────────────────────────────────────────────
+vault_seed_admin_password: "__REPLACE_openssl_rand_hex_16__"
+
+# ─── Sentry (порожнє до Phase 5.1) ──────────────────────────────────────────
+vault_sentry_dsn: ""
+
+# ─── GHCR — для `docker login` при `docker compose pull` приватних образів ─
+vault_ghcr_username: "__REPLACE_github_username__"
+# Personal Access Token з read:packages scope.
+vault_ghcr_token: "__REPLACE_ghp_token_with_read_packages__"
+
+# ─── Cloudflare Origin Certificate (multiline PEM) ──────────────────────────
+# Згенерувати у CF dashboard → SSL/TLS → Origin Server → Create Certificate.
+# Тривалість — 15 років, тип RSA-2048 або ECC-secp256r1.
+vault_cf_origin_cert: |
+  -----BEGIN CERTIFICATE-----
+  __REPLACE_paste_full_cert_pem_content_here__
+  -----END CERTIFICATE-----
+vault_cf_origin_key: |
+  -----BEGIN PRIVATE KEY-----
+  __REPLACE_paste_full_private_key_pem_content_here__
+  -----END PRIVATE KEY-----
+
+# ─── Backups: age public key ────────────────────────────────────────────────
+# Лише ПУБЛІЧНА частина age-keypair (приватний — зберігаємо ПОЗА vault'ом,
+# інакше при компрометації vault'у втрачаємо і бекапи). Формат: `age1...`.
+vault_age_public_key: "age1__REPLACE_with_age_public_key__"
+
+# ─── Monitoring: Discord webhook ────────────────────────────────────────────
+# https://discord.com/developers/docs/resources/webhook#execute-webhook
+# Створити у налаштуваннях каналу → Integrations → Webhooks → New Webhook.
+vault_discord_webhook_url: "https://discord.com/api/webhooks/__REPLACE_with_real_webhook__"

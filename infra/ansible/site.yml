@@ -1,0 +1,41 @@
+---
+# Головний playbook для flatcraft staging/production.
+#
+# Зазвичай Phase 5 deploy виглядає так:
+#   1. Перший раз  →  ansible-playbook site.yml -i inventory.staging.ini
+#                     (запускає всі ролі)
+#   2. Повторно    →  ansible-playbook site.yml -i inventory.staging.ini --tags deploy
+#                     (підтягує новий image + restart)
+#   3. Перевірка   →  ansible-playbook site.yml --syntax-check (без -i працює)
+#
+# Tag matrix:
+#   provision  → base, docker, firewall (одноразова системна підготовка)
+#   deploy     → flatcraft (re-runs для оновлення коду/образів)
+#   backup     → backups (cron + script install)
+#   monitoring → monitoring (cron + script install)
+
+- name: Provision and deploy flatcraft
+  hosts: staging
+  become: true
+  vars_files:
+    - group_vars/all.yml
+    - group_vars/all.vault.yml
+
+  roles:
+    - role: base
+      tags: [provision, base]
+
+    - role: docker
+      tags: [provision, docker]
+
+    - role: firewall
+      tags: [provision, firewall]
+
+    - role: flatcraft
+      tags: [deploy, flatcraft]
+
+    - role: backups
+      tags: [provision, backup]
+
+    - role: monitoring
+      tags: [provision, monitoring]

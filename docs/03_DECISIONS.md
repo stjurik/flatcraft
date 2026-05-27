@@ -292,6 +292,39 @@
 
 ---
 
+## ADR-014: Caddy + Cloudflare Origin Certificate замість Let's Encrypt
+
+**Статус:** Accepted (2026-05-22)
+
+**Контекст:** Phase 5A потребує reverse-proxy + TLS термінацію на staging.hart.crimea.ua перед api/web контейнерами. Cloudflare уже стоїть як proxy (DNS + WAF + DDoS, ADR-011), отже handshake клієнт↔CF робить сам CF. Залишається TLS на segment CF↔origin (Mirohost server).
+
+Варіанти TLS на origin:
+
+1. **Let's Encrypt через ACME** — традиційний путь. Caddy має `auto_https` з вбудованим ACME клієнтом. Потребує: (а) port 80 відкритим world-wide (HTTP-01) АБО (б) DNS-01 challenge через DNS provider API plugin. У нас port 80 закритий від усього крім CF IP-ranges (UFW), тож HTTP-01 не пройде. DNS-01 — додавати CF DNS plugin у Caddy build (custom image або xcaddy). Renew кожні 60 днів + автоматизація.
+
+2. **Cloudflare Origin Certificate** — CF випускає cert на 15 років, підписаний CF Origin CA. CF приймає його при `Full (strict)` mode (на edge-↔origin segment). НЕ valid'ний для прямого підключення з браузера (бо browser не довіряє CF Origin CA), що влаштовує — пряме підключення в обхід CF ми навмисно блокуємо UFW'ом.
+
+**Рішення:** Cloudflare Origin Certificate + Caddy з `auto_https off`. Cert + key монтуються у `/etc/caddy/cf-origin/` (Ansible flatcraft role з vault). Caddy має 2 директиви `tls /path/to/cert.pem /path/to/key.pem` (одна для `staging.hart.crimea.ua`, одна для `api.staging.hart.crimea.ua`).
+
+**Наслідки:**
+
+- ✅ Жодних ACME плагінів, build-time complexity, DNS-API tokens у production.
+- ✅ Cert живе 15 років — renew-логіка не існує. У worst case ротація — одна команда (ADR-014 не міняється).
+- ✅ Port 80 НЕ потрібен від world; UFW allow тільки 80/443 від CF IPs.
+- ✅ Caddyfile тривіальний (40 рядків з security headers), без auto_https complexity.
+- ⚠ Залежимо від Cloudflare (lock-in на TLS termination). Якщо CF колись зникне → треба швидко перейти на LE з DNS-01. Mitigation: cert chain зберігається у vault'і; перехід — додати ACME-блок у Caddyfile + `auto_https on`.
+- ⚠ Direct connection до origin IP (в обхід CF) видасть CF Origin Cert, який браузер не довіряє — користувачі побачать "Not trusted" попередження. Це фіча, не баг: ми навмисно ховаємо origin IP (DNS proxied + UFW from CF only).
+- ❌ Якщо випадково розкриєш origin IP — публічно про це сигналізує (browser warning ≈ "ваш сайт відкрито в обхід CF"). У staging — це швидко помітно, у production — ніч страшна.
+
+**Альтернативи:**
+
+- Let's Encrypt HTTP-01 — потребує port 80 worldwide → губимо UFW-захист origin'у. Відкидаємо.
+- Let's Encrypt DNS-01 з CF API plugin — custom Caddy build з xcaddy АБО окремий cert-bot контейнер. Складніше, ще один token у vault, renew logic. Прийнятно, але overengineering для одного staging.
+- nginx + certbot — як попереднє, ще й окремий сервіс. Caddy одним конфігом вирішує те саме.
+- HAProxy + manual cert — досвід вимагає більше; для одного origin'у не виправдано.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

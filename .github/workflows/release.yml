@@ -1,0 +1,97 @@
+name: Release images
+
+# Тригериться:
+#   - push tags `v*.*.*`   → пушить `v<version>`, `latest`, `<sha>` теги в GHCR
+#   - workflow_dispatch    → manual run; з main пушить `staging`, `<sha>`;
+#                            з іншої гілки — лише `<sha>` (sandbox builds)
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Чому ручний release (для аудит-trail у Actions UI)"
+        required: false
+        default: "manual staging snapshot"
+
+concurrency:
+  # Один release у момент часу — інакше двa паралельні `:staging` push'и
+  # створять race на mutable теги.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write # потрібен для push у ghcr.io під GITHUB_TOKEN
+
+jobs:
+  build:
+    name: Build & push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: infra/docker/api.Dockerfile
+          - service: web
+            dockerfile: infra/docker/web.Dockerfile
+          - service: cad-worker
+            dockerfile: infra/docker/cad-worker.Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        # buildx-білдер потрібен для multi-platform і GHA-cache backend.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        # docker/metadata-action рахує OCI-сумісні теги і labels на основі ref'у.
+        # Логіка тегів узгоджена з compose.prod.yml IMAGE_PREFIX:
+        #   ghcr.io/<owner>/flatcraft-<service>
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/flatcraft-${{ matrix.service }}
+          # type=sha формує `sha-<8 chars>`. format=long → повний sha (узгоджено з APP_VERSION).
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=staging,enable=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+          # OCI labels — потрапляють в LABEL image config, доповнюючи ті, що в Dockerfile.
+          labels: |
+            org.opencontainers.image.title=flatcraft-${{ matrix.service }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # Mirohost MS21 — amd64; multi-arch (arm64) додамо коли буде потреба.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # ARG'и пробрасуються у Dockerfile LABEL'и (revision + version).
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          # GHA-cache: окремий scope per service, mode=max зберігає всі intermediate layers.
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          provenance: false # SBOM/provenance attestations поки не потрібні; зайвий вантаж.
+
+      - name: Output image digest
+        # Для аудиту: у Actions UI видно immutable digest для rollback'у.
+        run: echo "Pushed ${{ matrix.service }} with tags:\n${{ steps.meta.outputs.tags }}"

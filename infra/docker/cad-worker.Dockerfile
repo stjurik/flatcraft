@@ -1,10 +1,13 @@
 # syntax=docker/dockerfile:1.7
-# Dockerfile для workers/cad (Python 3.12 + CadQuery).
-# CadQuery потребує OpenCascade — використовуємо офіційний образ або встановлюємо через conda.
+# Multi-stage Dockerfile для workers/cad (Python 3.12 + CadQuery + FastAPI).
+# CadQuery тягне OpenCascade — потрібні libgl/libfontconfig системно.
 
-FROM python:3.12-slim-bookworm AS builder
+ARG PYTHON_VERSION=3.12
 
-# CadQuery з OpenCascade потребує build-essential і кілька системних пакетів
+# ─── Builder ────────────────────────────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+
+# Системні залежності для OpenCascade + curl для uv installer-як-захист
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgl1 \
@@ -14,21 +17,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi6 \
     libsm6 \
     libfontconfig1 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Встановлюємо uv (швидкий пакетний менеджер)
+# uv для швидкого pip-резолва (тримаємо pinned версію)
 COPY --from=ghcr.io/astral-sh/uv:0.4.18 /uv /usr/local/bin/uv
 
 WORKDIR /app
-COPY workers/cad/pyproject.toml workers/cad/uv.lock* ./
+COPY workers/cad/pyproject.toml workers/cad/uv.lock* workers/cad/README.md ./
+# --frozen: respect lockfile. --no-dev: пропустити [dependency-groups.dev] групу.
 RUN uv sync --frozen --no-dev
 
-COPY workers/cad/ ./
+COPY workers/cad/flatcraft_cad ./flatcraft_cad
 COPY packages/cad-engine/data/bend-machine-esi.yaml /app/data/bend-machine-esi.yaml
 
-# ─── Runtime ───────────────────────────────────────────────────────────────
-FROM python:3.12-slim-bookworm AS runner
+# ─── Runtime ────────────────────────────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runner
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
@@ -48,6 +51,17 @@ COPY --from=builder --chown=cad:cad /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 ENV BEND_MACHINE_SPEC_PATH=/app/data/bend-machine-esi.yaml
 
-# Worker слухає чергу. Healthcheck — мінімальний HTTP на 8080.
+# OCI labels — CI підставляє GIT_COMMIT і APP_VERSION з GH metadata.
+ARG GIT_COMMIT=local
+ARG APP_VERSION=staging
+LABEL org.opencontainers.image.source="https://github.com/stjurik/flatcraft" \
+      org.opencontainers.image.title="flatcraft-cad-worker" \
+      org.opencontainers.image.description="CadQuery + FastAPI worker для DXF/PDF/STEP експорту" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.licenses="MIT"
+
 EXPOSE 8080
-CMD ["python", "-m", "flatcraft_cad.worker"]
+# uvicorn — production ASGI сервер. server.py експозить `app` на module-level.
+# Workers=1, бо CAD_WORKER_CONCURRENCY=1 (ADR-011, 4 GB RAM constraint).
+CMD ["uvicorn", "flatcraft_cad.server:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

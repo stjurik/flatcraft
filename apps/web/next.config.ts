@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const config: NextConfig = {
   reactStrictMode: true,
+  // Standalone output — мінімальний runtime з лише потрібними node_modules,
+  // потрібен для production-Dockerfile (apps/web → docker image).
+  // У dev-режимі ігнорується.
+  output: "standalone",
   // Workspace-пакети не публікуються — Next транспілює їх з джерела.
   transpilePackages: ["@flatcraft/ui", "@flatcraft/cad-engine", "@flatcraft/types"],
   webpack: (cfg) => {

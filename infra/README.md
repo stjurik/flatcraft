@@ -18,20 +18,22 @@ infra/
 │   ├── api.Dockerfile
 │   └── cad-worker.Dockerfile
 ├── compose/
-│   ├── docker-compose.dev.yml      # для local dev
-│   ├── docker-compose.prod.yml     # для сервера Mirohost Cloud
-│   └── docker-compose.test.yml     # для CI integration tests
+│   ├── docker-compose.prod.yml     # для сервера Mirohost Cloud (Phase 5A)
+│   └── Caddyfile                   # reverse-proxy + TLS з CF Origin Cert
 └── ansible/
-    ├── inventory.ini.example       # IP сервера вписується вручну, реальний inventory не комітимо
-    ├── site.yml                    # головний playbook
+    ├── ansible.cfg                 # roles_path, ssh pipelining
+    ├── inventory.ini.example       # [staging] placeholder; реальний inventory.ini gitignored
+    ├── site.yml                    # головний playbook з тегами provision/deploy/backup/monitoring
     ├── group_vars/
-    │   └── all.yml.example         # змінні (без секретів)
+    │   ├── all.yml.example         # non-secret defaults (paths, domain, schedule)
+    │   └── all.vault.yml.example   # secret placeholders (encrypt'имо ansible-vault'ом)
     └── roles/
-        ├── base/                   # пакети, swap (важливо при 4 GB RAM), unattended-upgrades
-        ├── docker/                 # Docker + docker-compose plugin
-        ├── firewall/               # ufw: дозволити лише 22, 80, 443 (Cloudflare IP ranges)
-        ├── flatcraft/              # клон repo, .env з vault, docker compose up, systemd unit
-        └── backups/                # cron + age + rclone → R2
+        ├── base/                   # apt + unattended-upgrades, swap 2GB, deploy-user, SSH hardening, fail2ban
+        ├── docker/                 # Docker Engine + compose plugin, ghcr.io login
+        ├── firewall/               # ufw: SSH allowlist + 80/443 лише з Cloudflare ranges
+        ├── flatcraft/              # git pull, render .env.prod, CF Origin Cert, docker compose up -d
+        ├── backups/                # cron 03:00 → pg_dump → age encrypt → rclone у R2
+        └── monitoring/             # cron 5min → Discord webhook на disk>80% / unhealthy / down; weekly image prune
 ```
 
 ## Передумови (один раз, вручну)
@@ -49,21 +51,26 @@ infra/
 ```bash
 cd infra/ansible
 
-# Повне налаштування сервера з нуля
-ansible-playbook -i inventory.ini site.yml
+# Один раз: copy + encrypt vault
+cp group_vars/all.vault.yml.example group_vars/all.vault.yml
+# (заповнити плейсхолдери — згенеровані secrets, CF cert/key, age public key)
+ansible-vault encrypt group_vars/all.vault.yml
 
-# Тільки re-deploy коду (після Phase 5)
-ansible-playbook -i inventory.ini site.yml --tags deploy
+cp group_vars/all.yml.example group_vars/all.yml          # tweak domain/users/IPs
+cp inventory.ini.example inventory.ini                    # вписати IP сервера
+
+# Повний provision + deploy
+ansible-playbook -i inventory.ini site.yml --ask-vault-pass
+
+# Re-deploy коду / нова версія
+ansible-playbook -i inventory.ini site.yml --ask-vault-pass --tags deploy --extra-vars app_version=<git-sha>
+
+# Локальна перевірка синтаксису (CI також робить)
+ansible-playbook --syntax-check site.yml
+ansible-lint   # потребує pipx install ansible-lint
 ```
 
-Після цього на сервері:
-
-```bash
-ssh deploy@<server-ip>
-cd /srv/flatcraft
-docker compose -f infra/compose/docker-compose.prod.yml pull
-docker compose -f infra/compose/docker-compose.prod.yml up -d
-```
+Після першого `site.yml` ручне втручання на сервері не потрібно — все під cron'ом.
 
 ## Особливості через обмеження тарифу MS21
 

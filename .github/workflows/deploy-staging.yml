@@ -1,0 +1,110 @@
+name: Deploy to staging
+
+# Manual-only: workflow_dispatch.
+# Прип'ято: ця воркфлоу НЕ збирає образи — release.yml має зробити це раніше.
+# Тут просто SSH у staging-сервер і викликаємо ansible-playbook --tags deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag to deploy (sha-<full>, v0.5.0, staging, latest)"
+        required: false
+        default: "staging"
+
+concurrency:
+  # Деплоїти одночасно лише раз. Inflight deploy блокує наступні.
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Ansible deploy to staging
+    runs-on: ubuntu-latest
+    environment:
+      # GH Environments дають окремий набір secrets + ручний approval (якщо ввімкнено).
+      name: staging
+      url: https://staging.hart.crimea.ua
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible + collections
+        run: |
+          pip install "ansible-core>=2.16,<2.17"
+          ansible-galaxy collection install community.general community.docker ansible.posix
+
+      - name: Configure SSH key + known_hosts
+        # SSH_PRIVATE_KEY — приватний ключ deploy-юзера (НЕ root!), додається у GH
+        # secrets з `ssh-keygen -t ed25519` без passphrase. STAGING_HOST — IP або
+        # hostname (бажано через CF як `staging-direct.hart.crimea.ua` non-proxied,
+        # бо CF проксі не дозволяє SSH).
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Write vault password file
+        env:
+          VAULT_PASS: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          printf '%s' "$VAULT_PASS" > ~/.vault_pass
+          chmod 600 ~/.vault_pass
+
+      - name: Render dynamic inventory.staging.ini
+        # Чому не committed: STAGING_HOST = origin IP, ховаємо у secrets щоб не
+        # засвітити у git history (CF proxy працює лише поки origin IP невідомий).
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          cat > infra/ansible/inventory.staging.ini <<EOF
+          [staging]
+          staging ansible_host=${STAGING_HOST} ansible_user=deploy
+
+          [staging:vars]
+          ansible_python_interpreter=/usr/bin/python3
+          EOF
+
+      - name: Verify vault decrypts (sanity check before SSH)
+        # Якщо вaultовий пароль неправильний — краще fail-fast тут, ніж після того,
+        # як ansible вже встановив зв'язок і почав запускати roles.
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: /home/runner/.vault_pass
+        run: |
+          test -f group_vars/all.vault.yml || { echo "::error::group_vars/all.vault.yml not committed"; exit 1; }
+          ansible-vault view group_vars/all.vault.yml > /dev/null
+
+      - name: Run deploy playbook
+        working-directory: infra/ansible
+        env:
+          ANSIBLE_VAULT_PASSWORD_FILE: /home/runner/.vault_pass
+          ANSIBLE_HOST_KEY_CHECKING: "True"
+          ANSIBLE_FORCE_COLOR: "1"
+        run: |
+          ansible-playbook \
+            -i inventory.staging.ini \
+            site.yml \
+            --tags deploy \
+            --extra-vars "app_version=${{ github.event.inputs.version }}"
+
+      - name: Smoke-test staging public endpoints
+        # Quick sanity-check post-deploy. Якщо CF DNS / firewall зламані —
+        # видно у воркфлоу UI без логування у сервер.
+        run: |
+          set -e
+          echo "→ web GET /"
+          curl -fsS -o /dev/null -w "HTTP %{http_code}\n" https://staging.hart.crimea.ua/
+          echo "→ api GET /health"
+          curl -fsS https://api.staging.hart.crimea.ua/health

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Daily DB backup: pg_dump → age encrypt → rclone copy → cleanup local.
+#
+# Запускається cron'ом у {{ backup_cron_hour }}:{{ backup_cron_minute }} server-local time.
+# Зашифрований age (single-key encrypt) — для розшифровки потрібен приватний age-key,
+# який зберігається ПОЗА vault'ом (інакше компроментація repo = доступ до бекапів).
+
+set -euo pipefail
+
+# ─── Config ────────────────────────────────────────────────────────────────
+LOCAL_DIR="{{ backups_local_dir }}"
+RETENTION_DAYS="{{ backup_local_retention_days }}"
+R2_BUCKET="{{ s3_bucket_backups }}"
+AGE_RECIPIENT="{{ vault_age_public_key }}"
+COMPOSE_FILE="{{ app_dir }}/infra/compose/docker-compose.prod.yml"
+COMPOSE_ENV="{{ app_dir }}/.env.prod"
+
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+# Чому `.dump`, не `.sql.gz`: pg_dump -Fc — custom binary format із власним zlib
+# (rfc1950) стисненням. Додатковий gzip ще раз компресує entropy-rich байти —
+# марна CPU/IO операція з ~5% bloat'ом. Файл restoreabl'ний через pg_restore.
+RAW_FILE="$LOCAL_DIR/flatcraft-db-$TS.dump"
+ENC_FILE="$LOCAL_DIR/flatcraft-db-$TS.dump.age"
+
+mkdir -p "$LOCAL_DIR"
+
+# ─── 1. pg_dump через docker exec ──────────────────────────────────────────
+# Чому через `sh -c '...'` з одинарними лапками: підставити саме контейнерні
+# $POSTGRES_USER/$POSTGRES_PASSWORD/$POSTGRES_DB (їх postgres image вже має у
+# своєму env'і). Без цього `pg_dump -U flatcraft` упирається у pg_hba.conf,
+# якщо POSTGRES_HOST_AUTH_METHOD коли-небудь зміниться зі scram-sha-256 на щось
+# strict'іше для local socket'у.
+echo "[$(date -u +%FT%TZ)] Dumping postgres…"
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" exec -T postgres \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
+    > "$RAW_FILE"
+
+SIZE=$(du -h "$RAW_FILE" | cut -f1)
+echo "[$(date -u +%FT%TZ)] Dump done ($SIZE)."
+
+# ─── 2. age encrypt ────────────────────────────────────────────────────────
+echo "[$(date -u +%FT%TZ)] Encrypting…"
+age -r "$AGE_RECIPIENT" -o "$ENC_FILE" "$RAW_FILE"
+rm -f "$RAW_FILE"   # plaintext не лишаємо ні секунди
+
+# ─── 3. Upload у R2 ────────────────────────────────────────────────────────
+echo "[$(date -u +%FT%TZ)] Uploading to r2://$R2_BUCKET/…"
+rclone --config "$HOME/.config/rclone/rclone.conf" copy \
+    --s3-no-check-bucket --retries 3 \
+    "$ENC_FILE" "r2:$R2_BUCKET/"
+
+# ─── 4. Cleanup local ──────────────────────────────────────────────────────
+echo "[$(date -u +%FT%TZ)] Cleanup: keeping last $RETENTION_DAYS days locally."
+find "$LOCAL_DIR" -name 'flatcraft-db-*.dump.age' -mtime "+$RETENTION_DAYS" -delete
+
+echo "[$(date -u +%FT%TZ)] Backup OK: $ENC_FILE"

@@ -201,6 +201,8 @@ flatcraft/
 - Data model: `docs/05_DATA_MODEL.md`
 - API contract: `docs/06_API_CONTRACT.md`
 - Bend machine spec: `docs/07_BEND_MACHINE_SPEC.md`
+- Deployment runbook: `docs/08_DEPLOYMENT.md`
+- Staging preflight checklist (manual setup до Ansible): `docs/09_STAGING_PREFLIGHT.md`
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
 
@@ -232,9 +234,17 @@ flatcraft/
 - **Phase 2.10.c завершено** (2026-05-18): wall_shelf U-channel (back + shelf + optional front_lip). 3 сегменти, 2 гиби в одну сторону, з підтримкою front_lip=0 (тоді 2 сегменти, 1 гиб — вироджена форма). Auto-grid mounting holes на back-секції (для дюбелів). Pydantic `_lip_zero_or_min5` validator + Zod `WallShelfParametersBaseSchema` (plain) + `WallShelfParametersSchema` (refined) — base йде у `discriminatedUnion` (вимагає ZodObject), refined — у редактор. Reuse `_export_flat_dxf(holes)` + `_draw_unfold_generic` без модифікацій. R3F: 2-3 BoxGeometry + cylinder mounting holes (axis ‖ X через rotate Z). 118 pytest (99% cov, +21 нових), 33 db tests, 4 нові e2e (23 разом).
 - **Phase 2.10.d завершено** (2026-05-18): perforated_panel — плоский лист з centered grid отворів за pitch'ом. Принципово відрізняється від решти Phase 2.10: НЕ має гибів. Layout автоматичний: `n_cols = floor((length-2*margin)/pitch_x) + 1`, eff_margin перераховується для симетрії. Web/Python обчислюють однаково. Reuse `_export_flat_dxf(holes, bend_lines=())` без модифікацій — generic exporter довів свою архітектурну вартість на 4-му шаблоні. PDF без bend table — натомість Hole grid summary. 3D: BoxGeometry + cylinder overlay з cap'ом 500 отворів (поза cap'ом — лише box, точна геометрія у DXF). 137 pytest (99% cov, +19 нових), 34 db tests, 4 нові e2e (27 разом).
 - **Phase 2 повністю закрита**: 5 шаблонів end-to-end. **Наступне — Phase 3**: Auth & Limits (Auth.js, donation gate, monthly counter).
+- **Phase 5 INFRASTRUCTURE (паралельний трек, in progress, 2026-05-18..22):**
+  - **5A (2026-05-18)** — `infra/compose/docker-compose.prod.yml` + `Caddyfile` + `.env.prod.example`: 6-сервісний staging-стек (postgres/redis/cad-worker/api/web/caddy) з internal+web мережами, mem_limits (worker 1.5g), healthcheck на всіх, Caddy з CF Origin Cert (ADR-014). CI job `compose-validate` (docker compose config + caddy adapt).
+  - **5B (2026-05-18)** — prod Dockerfiles review + smoke build. Fix: `cad-worker.Dockerfile` CMD → `uvicorn flatcraft_cad.server:app`; `--ignore-scripts` у `pnpm install/deploy` (lefthook потребує git, якого нема у alpine); `next.config.ts` += `output: "standalone"`; OCI labels у всіх трьох. `.dockerignore` створено. Smoke: api 317MB, web 303MB, cad-worker 1.96GB; cad-worker boot ~13с.
+  - **5C (2026-05-18)** — Ansible playbook + 6 ролей (base/docker/firewall/flatcraft/backups/monitoring) для Debian 12 на Mirohost MS21. Кожна роль має `README.md` з «що + чому». Backups: pg_dump (-Fc) → age encrypt → rclone у R2 (cron 03:00). Monitoring: bash + Discord webhook (state-tracked, не спамить) + weekly image prune. CI job `ansible-validate` (syntax-check + ansible-lint profile "production").
+  - **5D (2026-05-18)** — GH Actions: `release.yml` (push tags v*.*._ або workflow_dispatch → builds 3 GHCR пакети `flatcraft-<service>` з tag matrix sha/staging/v_/latest), `deploy-staging.yml` (manual workflow_dispatch → SSH + ansible --tags deploy + smoke curl). Image-naming aligned: `ghcr.io/<owner>/flatcraft-<service>`. Vault commitable (encrypted); lefthook check `$ANSIBLE_VAULT` header.
+  - **5 hotfix (2026-05-22)** — backup.sh: прибрав зайвий `gzip` (pg_dump -Fc вже стискає), додав explicit `PGPASSWORD` через `sh -c`. `.gitignore` inline-comment ламав pattern для `inventory.staging.ini` — реальний файл з origin IP був готовий потрапити у commit; перевірка `git check-ignore` тепер OK.
+  - **5E (2026-05-22)** — `docs/08_DEPLOYMENT.md` runbook. 6 розділів (preflight/setup/first deploy/regular deploy/incidents/secret rotation), кожен крок із `✓ Verify:` блоком. Покриває: Mirohost order, CF DNS+R2+Origin Cert, WAF, secrets, Ansible flow, rollback по sha, restore з R2 backup, OOM diagnostics.
+  - **Не зроблено ще:** перший реальний deploy (yurii після §0); ADR-014 (Caddy+CF) у docs/03; Roadmap 5.6-5.9 не оновлено; R-11 не дописано; ADR-014 reference у Caddyfile є але самої ADR ще нема.
 - Розробка ведеться у WSL Ubuntu-24.04, каталог `~/hart` (native ext4). Хостинг продакшну — Mirohost Cloud (ADR-011).
 - Bootstrap-скрипт `setup.sh` у корені — одноразовий, для відтворення середовища з нуля.
 
 ---
 
-_Останнє оновлення: 2026-05-15. Коли архітектура змінюється — оновлюйте цей файл першим, потім код._
+_Останнє оновлення: 2026-05-22. Коли архітектура змінюється — оновлюйте цей файл першим, потім код._
