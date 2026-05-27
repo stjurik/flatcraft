@@ -2,7 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "outDir": "dist"
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@flatcraft/*": ["packages/*/dist", "apps/*/dist"]
+    }
   },
   "exclude": ["node_modules", "dist", "src/**/*.test.ts", "tests/**", "scripts/**"]
 }
