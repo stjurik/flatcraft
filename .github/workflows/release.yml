@@ -29,6 +29,10 @@ jobs:
   build:
     name: Build & push ${{ matrix.service }}
     runs-on: ubuntu-latest
+    # Захист від zombie-runs: коли GHCR віддає 5xx, buildx робить exponential
+    # backoff і може висіти до дефолтних 360 хв. 45 хв — це з запасом навіть
+    # для cad-worker (~2GB): build ~3хв, push ~2хв на здоровому GHCR.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +79,10 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v6
+        # Step-level fence: якщо push висить на retry'ях GHCR, ріжемо за 30 хв,
+        # не чекаючи job-timeout. Job залишається 45 хв, щоб checkout/buildx-setup
+        # мали запас при холодному runner'i.
+        timeout-minutes: 30
         with:
           context: .
           file: ${{ matrix.dockerfile }}
