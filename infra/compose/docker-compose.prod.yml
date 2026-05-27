@@ -212,7 +212,7 @@ services:
       - "443:443"
       - "443:443/udp" # HTTP/3 (QUIC)
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/compose/Caddyfile:/etc/caddy/Caddyfile:ro
       # Ansible-роль flatcraft кладе cert.pem+key.pem у /etc/caddy/cf-origin/ на хост.
       - /etc/caddy/cf-origin:/etc/caddy/cf-origin:ro
       - caddy_data:/data
