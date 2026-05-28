@@ -22,7 +22,7 @@
 - 🔑 R2 API token (Object R+W на ці 2 bucket'и)
 - 🛡 CF Origin Certificate (15 років, RSA-2048 або ECC-P256, wildcard)
 - 🛡 WAF Country Block для RU/BY
-- 📡 DNS records `staging.hart.crimea.ua` + `api.staging.hart.crimea.ua` (proxied)
+- 📡 DNS records `staging.hart.crimea.ua` + `api-staging.hart.crimea.ua` (proxied)
 - 🔐 SSL/TLS Mode = Full (strict), Always HTTPS = On
 - 🎲 15 згенерованих secrets у password manager (паролі + age keypair)
 - 🐙 GitHub PAT з `read:packages` scope
@@ -578,7 +578,7 @@ rm /tmp/r2-test.conf /tmp/r2-test.txt
 8. **Comment** (опційно): `flatcraft staging`.
 9. Save.
 
-## E.2. Створити `api.staging.hart.crimea.ua`
+## E.2. Створити `api-staging.hart.crimea.ua`
 
 Повтори E.1, лише:
 
@@ -596,7 +596,7 @@ dig +short staging.hart.crimea.ua
 # Якщо побачив справжній IP свого сервера (з B.4) — proxied OFF; повернись у E.1 і ввімкни orange cloud.
 
 # E.2: api.staging — те саме
-dig +short api.staging.hart.crimea.ua
+dig +short api-staging.hart.crimea.ua
 # Очікувано: ті ж IP-и (CF проксі для обох записів використовує одні й ті ж edge IP'и)
 
 # E.3: HTTPS на CF edge відповідає (хоч origin ще не піднятий)

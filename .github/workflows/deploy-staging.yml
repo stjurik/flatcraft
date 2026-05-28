@@ -107,4 +107,4 @@ jobs:
           echo "→ web GET /"
           curl -fsS -o /dev/null -w "HTTP %{http_code}\n" https://staging.hart.crimea.ua/
           echo "→ api GET /health"
-          curl -fsS https://api.staging.hart.crimea.ua/health
+          curl -fsS https://api-staging.hart.crimea.ua/health

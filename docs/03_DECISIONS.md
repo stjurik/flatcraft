@@ -304,7 +304,7 @@
 
 2. **Cloudflare Origin Certificate** — CF випускає cert на 15 років, підписаний CF Origin CA. CF приймає його при `Full (strict)` mode (на edge-↔origin segment). НЕ valid'ний для прямого підключення з браузера (бо browser не довіряє CF Origin CA), що влаштовує — пряме підключення в обхід CF ми навмисно блокуємо UFW'ом.
 
-**Рішення:** Cloudflare Origin Certificate + Caddy з `auto_https off`. Cert + key монтуються у `/etc/caddy/cf-origin/` (Ansible flatcraft role з vault). Caddy має 2 директиви `tls /path/to/cert.pem /path/to/key.pem` (одна для `staging.hart.crimea.ua`, одна для `api.staging.hart.crimea.ua`).
+**Рішення:** Cloudflare Origin Certificate + Caddy з `auto_https off`. Cert + key монтуються у `/etc/caddy/cf-origin/` (Ansible flatcraft role з vault). Caddy має 2 директиви `tls /path/to/cert.pem /path/to/key.pem` (одна для `staging.hart.crimea.ua`, одна для `api-staging.hart.crimea.ua`).
 
 **Наслідки:**
 

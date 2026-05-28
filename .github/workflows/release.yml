@@ -92,9 +92,13 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # ARG'и пробрасуються у Dockerfile LABEL'и (revision + version).
+          # NEXT_PUBLIC_API_BASE_URL інлайниться у web client-bundle на build-time;
+          # для api/cad-worker — unused build-arg (лише warning). Override під prod
+          # через repo variable vars.NEXT_PUBLIC_API_BASE_URL.
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             APP_VERSION=${{ steps.meta.outputs.version }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL || 'https://api-staging.hart.crimea.ua' }}
           # GHA-cache: окремий scope per service, mode=max зберігає всі intermediate layers.
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}

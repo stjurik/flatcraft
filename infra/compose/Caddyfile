@@ -1,4 +1,4 @@
-# Caddyfile для staging.hart.crimea.ua + api.staging.hart.crimea.ua.
+# Caddyfile для staging.hart.crimea.ua + api-staging.hart.crimea.ua.
 # TLS — Cloudflare Origin Certificate (15 років, ADR-014). НЕ Let's Encrypt:
 # CF проксі робить Full (strict), CF↔origin перевіряє наш cert.
 # Cert+key монтуються з хоста: /etc/caddy/cf-origin/{cert,key}.pem.
@@ -45,7 +45,7 @@ staging.hart.crimea.ua {
 }
 
 # ─── API (Fastify) ──────────────────────────────────────────────────────────
-api.staging.hart.crimea.ua {
+api-staging.hart.crimea.ua {
 	tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
 	import security_headers
 

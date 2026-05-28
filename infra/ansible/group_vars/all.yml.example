@@ -12,7 +12,7 @@ monitoring_log_dir: /var/log/flatcraft
 
 # ─── App ───────────────────────────────────────────────────────────────────
 app_domain: staging.hart.crimea.ua
-api_domain: api.staging.hart.crimea.ua
+api_domain: api-staging.hart.crimea.ua
 app_base_url: "https://{{ app_domain }}"
 api_base_url: "https://{{ api_domain }}"
 

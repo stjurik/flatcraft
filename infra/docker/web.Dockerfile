@@ -27,6 +27,10 @@ COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY --from=deps /app/packages/cad-engine/node_modules ./packages/cad-engine/node_modules
 COPY . .
+# NEXT_PUBLIC_* інлайняться у клієнтський bundle на build-time (не runtime).
+# Без цього браузер бере fallback localhost:4000 (apps/web/src/lib/api.ts).
+ARG NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 # Next.js standalone output вимагає `output: 'standalone'` у next.config.ts.
 RUN pnpm --filter @flatcraft/web... build
 

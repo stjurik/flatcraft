@@ -203,7 +203,7 @@ CF dashboard → `hart.crimea.ua` → **DNS** → **Records** → Add record.
 ```bash
 dig +short staging.hart.crimea.ua
 # Очікувано: IP з 173.245.x.x АБО 104.16.x.x — це Cloudflare ranges, НЕ твій сервер
-dig +short api.staging.hart.crimea.ua
+dig +short api-staging.hart.crimea.ua
 # Очікувано: те саме
 ```
 
@@ -559,7 +559,7 @@ ssh deploy@<server_ip> 'docker ps --format "table {{.Names}}\t{{.Status}}"'
 curl -sI https://staging.hart.crimea.ua/ | head -1
 # Очікувано: HTTP/2 200
 
-curl -s https://api.staging.hart.crimea.ua/health
+curl -s https://api-staging.hart.crimea.ua/health
 # Очікувано: {"status":"ok","uptime":...,"version":"0.0.0"}
 
 # Cron'и зареєстровані?
