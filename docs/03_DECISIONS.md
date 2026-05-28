@@ -325,6 +325,28 @@
 
 ---
 
+## ADR-015: Drizzle міграції + seed у entrypoint api-контейнера
+
+**Статус:** Accepted (2026-05-28)
+
+**Контекст:** Prod-стек (`docker-compose.prod.yml`) піднімав api з порожньою БД — deploy-флоу (Ansible `--tags deploy`) ніколи не застосовував міграції чи seed, тож `GET /templates` падав `500 relation "templates" does not exist`. Треба детерміновано довести БД до актуальної схеми + довідкових даних при кожному деплої, без ручних кроків на сервері. Обмеження: prod api-образ — slim standalone (`pnpm deploy --prod`), без `drizzle-kit`/`tsx`; `@flatcraft/db` лінкується симлінком у `.pnpm`.
+
+**Рішення:** `api-entrypoint.sh` запускає `node node_modules/@flatcraft/db/dist/init-prod.js` (явний виклик `runMigrations()` + `runSeed()`) перед `exec node dist/server.js`. Два супутні фікси: (1) `@flatcraft/db` build копіює `src/migrations/*.sql` у `dist` (tsc їх не бере); (2) `init-prod.ts` викликає експортовані функції напряму, бо `isMain`-перевірка (`import.meta.url === file://${argv[1]}`) під симлінком `pnpm deploy` мовчки = false.
+
+**Наслідки:**
+
+- ✅ Self-healing: будь-який deploy (CI чи ручний) сам приводить БД у потрібний стан; нуль ручних кроків.
+- ✅ Seed ідемпотентний (`onConflictDoNothing` / `onConflictDoUpdate`) — безпечно на кожен boot; помилка migrate/seed → `set -e` → контейнер падає (healthcheck не пройде) = fail loud, а не напівпорожня БД.
+- ⚠ Seed біжить на кожен рестарт api — для статичних довідників (матеріали/шаблони) ок; якщо колись seed стане важким, винести у окремий one-shot job (`service_completed_successfully`).
+- ⚠ При кількох репліках api майбутній distributed-сценарій потребує advisory-lock на міграції (зараз 1 репліка — не проблема).
+
+**Альтернативи:**
+
+- Окремий one-shot `migrate`-сервіс у compose (`depends_on: service_completed_successfully`) — чистіше розділення, але більше чіпає compose; обрали entrypoint за мінімальну зміну і відповідність наміру в `migrate.ts`.
+- Ручний `psql < .sql` + `seed.js` на сервері — не відтворювано, поза git-флоу. Відкинуто.
+
+---
+
 _Шаблон нової ADR:_
 
 ```
