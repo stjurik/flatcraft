@@ -84,7 +84,8 @@ infra/ansible/inventory.ini
 # runtime-generated у deploy-staging.yml + може містити реальний origin IP
 infra/ansible/inventory.staging.ini
 infra/ansible/inventory.production.ini
-infra/ansible/group_vars/all.yml
+# all.yml — non-secret config-as-code, committed: site.yml vars_files його вимагає
+# у CI-чекауті (deploy-staging.yml). Секрети — лише в all.vault.yml (зашифровано).
 !infra/ansible/inventory.ini.example
 !infra/ansible/group_vars/all.yml.example
 !infra/ansible/group_vars/all.vault.yml.example

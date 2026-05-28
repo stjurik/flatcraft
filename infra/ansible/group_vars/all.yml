@@ -1,0 +1,72 @@
+---
+# Non-secret defaults. Скопіюй у `all.yml` (gitignored) і скоригуй під своє середовище.
+# Секрети — у `all.vault.yml` (шифруйте `ansible-vault encrypt`).
+
+# ─── User + paths ──────────────────────────────────────────────────────────
+app_user: deploy
+app_user_home: /home/deploy
+app_dir: /srv/flatcraft
+caddy_origin_cert_dir: /etc/caddy/cf-origin
+backups_local_dir: /var/lib/flatcraft/backups
+monitoring_log_dir: /var/log/flatcraft
+
+# ─── App ───────────────────────────────────────────────────────────────────
+app_domain: staging.hart.crimea.ua
+api_domain: api-staging.hart.crimea.ua
+app_base_url: "https://{{ app_domain }}"
+api_base_url: "https://{{ api_domain }}"
+
+# Image release pinning. Override через --extra-vars app_version=<sha> з CI.
+# Compose додає `flatcraft-<service>` сам — це власник у ghcr.io.
+image_prefix: ghcr.io/stjurik
+app_version: staging
+
+# Git source для `git pull` на сервері (роль flatcraft).
+repo_url: git@github.com:stjurik/flatcraft.git
+repo_branch: main
+
+# ─── Postgres (non-secret частина — username/dbname) ───────────────────────
+postgres_user: flatcraft
+postgres_db: flatcraft
+
+# ─── S3 / R2 bucket-імена (endpoint/keys — у vault) ────────────────────────
+s3_bucket: flatcraft-artifacts
+s3_bucket_backups: flatcraft-backups
+
+# ─── Sentry env tag ────────────────────────────────────────────────────────
+sentry_environment: staging
+
+# ─── Admin seed ────────────────────────────────────────────────────────────
+seed_admin_email: admin@hart.crimea.ua
+
+# ─── Logging ───────────────────────────────────────────────────────────────
+log_level: info
+timezone: Europe/Kyiv
+locale: en_US.UTF-8
+
+# ─── Base / SSH ─────────────────────────────────────────────────────────────
+# IP-allowlist для SSH (port 22). UFW дозволяє лише ці IP після першого provision.
+# Сам Ansible-runner має бути в цьому списку!
+ssh_allowed_ips:
+  - 0.0.0.0/0 # ПЛЕЙСХОЛДЕР — звузити до конкретних IP перед production!
+
+# Публічні SSH-ключі для deploy-юзера. Можна задавати кілька (yurii + бекап).
+deploy_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPt3ixCXQ/IsVI24VBMpJfzubkXxRhYkqByer5SWnFI0 mirohost-cloud"
+
+# ─── Swap (КРИТИЧНО для 4 GB RAM на MS21, ADR-011) ─────────────────────────
+swap_size_mb: 2048
+
+# ─── Backups ───────────────────────────────────────────────────────────────
+# Cron schedule (у форматі cron). 03:00 за app_user timezone.
+backup_cron_hour: "3"
+backup_cron_minute: "0"
+# Локальний retention перед заливкою у R2 (для recovery з shell). R2 lifecycle = 30d.
+backup_local_retention_days: 3
+
+# ─── Monitoring ────────────────────────────────────────────────────────────
+monitor_interval_minutes: 5
+monitor_disk_threshold_pct: 80
+# Щонеділі прибираємо старі docker images (старші 168h = 7д).
+docker_prune_cron_dayofweek: "0"
+docker_prune_cron_hour: "4"
