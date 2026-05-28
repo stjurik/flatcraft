@@ -61,6 +61,8 @@ docs
 
 # Інфра — Ansible, compose, Dockerfile-и; самі образи знають свою конфігурацію
 infra
+# ...окрім entrypoint api-образу — його треба COPY'нути у runner stage.
+!infra/docker/api-entrypoint.sh
 
 # Логи / кеші
 *.log

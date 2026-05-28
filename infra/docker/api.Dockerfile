@@ -37,6 +37,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 fastify
 COPY --from=builder --chown=fastify:nodejs /tmp/prod ./
+# Entrypoint застосовує міграції + seed перед стартом сервера (див. сам скрипт).
+COPY --chown=fastify:nodejs infra/docker/api-entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 ARG GIT_COMMIT=local
 ARG APP_VERSION=staging
@@ -49,4 +52,5 @@ LABEL org.opencontainers.image.source="https://github.com/stjurik/flatcraft" \
 
 USER fastify
 EXPOSE 4000
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "dist/server.js"]
