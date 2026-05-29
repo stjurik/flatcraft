@@ -194,6 +194,27 @@
 
 ---
 
+## R-11. Single-server staging/prod — збій хоста/диска/OOM = повний простій
+
+| Поле        | Значення         |
+| ----------- | ---------------- |
+| Ймовірність | 3                |
+| Вплив       | 4                |
+| Пріоритет   | 12 (MEDIUM-HIGH) |
+
+**Опис:** Весь стек (postgres/redis/cad-worker/api/web/caddy) живе на одному Mirohost MS21 (2 vCPU / 4 GB / 40 GB, ADR-011). HA немає: збій хоста, заповнення диска, OOM cad-worker'а (CadQuery важкий) або втрата SSH-ключа/vault-пароля → повний простій або заблокований deploy. Бекап раз/добу (pg_dump → R2), тож RPO до 24 год.
+
+**Mitigation:**
+
+1. Monitoring (Phase 5C): disk >80% + контейнер-health → Discord webhook (до OOM/full-disk).
+2. `mem_limits` у compose (cad-worker 1.5g) — важка CAD-операція не вбиває api/postgres.
+3. Backups cron 03:00 → age-encrypt → R2 (recovery — `docs/08_DEPLOYMENT.md` §5.5), локальний retention 3 дні.
+4. Deploy відтворюваний з git+vault (Ansible) — host перестворюється за runbook'ом ~30 хв.
+5. Vault-пароль + age-приватний ключ зберігаються **поза сервером** (інакше при втраті хоста втрачаємо і бекапи).
+6. Production (Roadmap 5.10): розглянути managed Postgres або окремий DB-вузол, якщо навантаження зросте.
+
+---
+
 ## Reviewing cadence
 
 - Огляд ризиків — наприкінці кожної Phase з Roadmap.
