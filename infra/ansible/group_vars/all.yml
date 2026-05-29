@@ -46,13 +46,17 @@ locale: en_US.UTF-8
 
 # ─── Base / SSH ─────────────────────────────────────────────────────────────
 # IP-allowlist для SSH (port 22). UFW дозволяє лише ці IP після першого provision.
-# Сам Ansible-runner має бути в цьому списку!
+# 0.0.0.0/0 — НАВМИСНО на staging: deploy крутиться у GitHub Actions з динамічних
+# IP runner'ів (allowlist'нути їх нереально), а auth — лише по ключу (password
+# disabled). Для production з фіксованого deploy-хоста звузити до його IP + CF.
 ssh_allowed_ips:
-  - 0.0.0.0/0 # ПЛЕЙСХОЛДЕР — звузити до конкретних IP перед production!
+  - 0.0.0.0/0
 
-# Публічні SSH-ключі для deploy-юзера. Можна задавати кілька (yurii + бекап).
+# Публічні SSH-ключі deploy-юзера (фактичні ключі на сервері — джерело істини).
+# authorized_key у base-ролі additive (state: present, без exclusive).
 deploy_authorized_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPt3ixCXQ/IsVI24VBMpJfzubkXxRhYkqByer5SWnFI0 mirohost-cloud"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICDkewciUnPi9vD7ZX7fTNXcIcOfiOXNSVOVTFxe2S8L deploy@flatcraft-staging"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEVDal5nb9fBDhdXMCbk+HaOoUfluiHEilkrpBX9CPd deploy@flatcraft-ci"
 
 # ─── Swap (КРИТИЧНО для 4 GB RAM на MS21, ADR-011) ─────────────────────────
 swap_size_mb: 2048
