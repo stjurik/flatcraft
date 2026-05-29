@@ -1,11 +1,14 @@
 name: Release images
 
 # Тригериться:
+#   - push у `main`        → пушить `staging`, `<sha>` (авто-чейн → deploy-staging)
 #   - push tags `v*.*.*`   → пушить `v<version>`, `latest`, `<sha>` теги в GHCR
 #   - workflow_dispatch    → manual run; з main пушить `staging`, `<sha>`;
 #                            з іншої гілки — лише `<sha>` (sandbox builds)
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
   workflow_dispatch:
@@ -71,7 +74,7 @@ jobs:
             type=sha,format=long
             type=ref,event=tag
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=staging,enable=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+            type=raw,value=staging,enable=${{ github.ref == 'refs/heads/main' }}
           # OCI labels — потрапляють в LABEL image config, доповнюючи ті, що в Dockerfile.
           labels: |
             org.opencontainers.image.title=flatcraft-${{ matrix.service }}

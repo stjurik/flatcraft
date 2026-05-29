@@ -1,8 +1,11 @@
 name: Deploy to staging
 
-# Manual-only: workflow_dispatch.
-# Прип'ято: ця воркфлоу НЕ збирає образи — release.yml має зробити це раніше.
-# Тут просто SSH у staging-сервер і викликаємо ansible-playbook --tags deploy.
+# Тригериться:
+#   - workflow_dispatch → ручний деплой довільного тегу (version input)
+#   - workflow_run      → авто-чейн: щойно "Release images" успішно зібрав
+#                         :staging образи на main, деплоїмо `staging`. Так кожна
+#                         UI-ітерація з merge у main сама їде на staging.
+# Ця воркфлоу НЕ збирає образи — release.yml має зробити це раніше.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +13,10 @@ on:
         description: "Image tag to deploy (sha-<full>, v0.5.0, staging, latest)"
         required: false
         default: "staging"
+  workflow_run:
+    workflows: ["Release images"]
+    types: [completed]
+    branches: [main]
 
 concurrency:
   # Деплоїти одночасно лише раз. Inflight deploy блокує наступні.
@@ -23,6 +30,9 @@ jobs:
   deploy:
     name: Ansible deploy to staging
     runs-on: ubuntu-latest
+    # workflow_run тригериться навіть коли release впав — деплоїмо лише на success.
+    # Ручний workflow_dispatch проходить завжди.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     environment:
       # GH Environments дають окремий набір secrets + ручний approval (якщо ввімкнено).
       name: staging
@@ -97,7 +107,7 @@ jobs:
             -i inventory.staging.ini \
             site.yml \
             --tags deploy \
-            --extra-vars "app_version=${{ github.event.inputs.version }}"
+            --extra-vars "app_version=${{ github.event.inputs.version || 'staging' }}"
 
       - name: Smoke-test staging public endpoints
         # Quick sanity-check post-deploy. Якщо CF DNS / firewall зламані —
