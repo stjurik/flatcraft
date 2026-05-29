@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { SpinningCube } from "../components/spinning-cube";
 
 export default function HomePage() {
@@ -14,6 +16,13 @@ export default function HomePage() {
         <p className="text-sm text-zinc-500" data-testid="phase-marker">
           Phase 0.5 hello-world · react-three-fiber
         </p>
+        <Link
+          href="/templates"
+          data-testid="cta-templates"
+          className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
+        >
+          Переглянути шаблони →
+        </Link>
       </header>
 
       <section

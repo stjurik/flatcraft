@@ -8,6 +8,15 @@ test.describe("Landing page (Phase 0.5 hello-world)", () => {
     await expect(page.getByTestId("viewport-frame")).toBeVisible();
   });
 
+  test("CTA веде на каталог шаблонів", async ({ page }) => {
+    await page.goto("/");
+    const cta = page.getByTestId("cta-templates");
+    await expect(cta).toHaveAttribute("href", "/templates");
+    await cta.click();
+    await expect(page).toHaveURL(/\/templates$/);
+    await expect(page.getByTestId("templates-page-title")).toBeVisible();
+  });
+
   test("react-three-fiber Canvas рендериться (наявний <canvas>)", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
