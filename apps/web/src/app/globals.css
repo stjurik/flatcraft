@@ -2,9 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+ * Design tokens — warm industrial, single light theme, mobile-first.
+ * Spec: docs/10_DESIGN_SYSTEM.md, ADR-016.
+ * Values are space-separated `L C H` so Tailwind can do
+ *   oklch(var(--color-x) / <alpha-value>).
+ * -------------------------------------------------------------------------- */
+:root {
+  /* — Surfaces ----------------------------------------------------------- */
+  /* Off-white з теплим відтінком — асоціація з креслярським папером;       */
+  /* уникаємо чисто-білого (#fff), щоб око не втомлювалось у студії.        */
+  --color-bg: 0.985 0.005 80;
+  /* Чистий білий — лише для cards, що «підіймаються» над bg.               */
+  --color-bg-elevated: 1 0 0;
+  /* Input/textarea фон: на пів-тон темніше bg → inputs читаються без border.*/
+  --color-surface-sunken: 0.965 0.008 80;
+  /* Table stripes, code-блоки.                                             */
+  --color-surface-muted: 0.945 0.01 80;
+  /* Dialog backdrop (споживач застосовує alpha сам, напр. / 0.6).          */
+  --color-overlay: 0.22 0.015 50;
+
+  /* — Brand -------------------------------------------------------------- */
+  /* Ember — амбра/розпечений метал, H=50 у warm-orange зоні.               */
+  --color-primary: 0.66 0.17 50;
+  /* −6% L для hover-зворотного зв'язку без яскравих стрибків.              */
+  --color-primary-hover: 0.6 0.18 48;
+  /* Білий text на primary дає контраст ~4.7:1 (AA для UI text).            */
+  --color-primary-fg: 1 0 0;
+
+  /* Стримане синьо-сіре для secondary CTA — контрастує з warm палітрою.    */
+  --color-accent: 0.55 0.08 220;
+  --color-accent-fg: 1 0 0;
+
+  /* — Foreground (теплий вугільний, не чорний) --------------------------- */
+  /* Body text — AAA-контраст до bg (~12:1).                                */
+  --color-fg: 0.22 0.015 50;
+  /* Secondary text, captions — ~7:1.                                       */
+  --color-fg-muted: 0.42 0.012 50;
+  /* Placeholders, disabled labels — ~4.5:1 (граничний AA).                 */
+  --color-fg-subtle: 0.55 0.01 50;
+
+  /* — Lines -------------------------------------------------------------- */
+  --color-border: 0.88 0.008 70;
+  --color-border-strong: 0.78 0.01 70;
+  --color-ring: 0.66 0.17 50; /* той же hue, що primary; alpha — на сайті */
+
+  /* — Feedback (state + surface для inline alerts) ----------------------- */
+  --color-success: 0.5 0.14 145;
+  --color-success-fg: 1 0 0;
+  --color-success-surface: 0.96 0.04 145;
+
+  /* warning світліший за норму → text на ньому = warm-charcoal, не білий */
+  --color-warning: 0.78 0.14 85;
+  --color-warning-fg: 0.22 0.015 50;
+  --color-warning-surface: 0.97 0.05 85;
+
+  --color-danger: 0.52 0.18 25;
+  --color-danger-fg: 1 0 0;
+  --color-danger-surface: 0.97 0.04 25;
+
+  --color-info: 0.5 0.11 240;
+  --color-info-fg: 1 0 0;
+  --color-info-surface: 0.96 0.03 240;
+
+  /* — Україна (точні sRGB hex, OKLCH-апроксимація неприйнятна) ---------- */
+  --color-ua-blue: #0057b7;
+  --color-ua-yellow: #ffd700;
+  --color-zsu-bg: #0057b7;
+  --color-zsu-bg-hover: #004a99; /* ∆L≈−4% */
+  --color-zsu-fg: #ffffff; /* контраст ~8.6:1 */
+
+  /* — Radii (industrial: помірковано-квадратні) -------------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* — Shadows (теплий sepia base, не сіро-чорний) ------------------------ */
+  --shadow-sm: 0 1px 2px oklch(0.22 0.015 50 / 0.08);
+  --shadow-md: 0 4px 12px oklch(0.22 0.015 50 / 0.1);
+  --shadow-lg: 0 12px 32px oklch(0.22 0.015 50 / 0.12);
+
+  /* — Motion ------------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --duration-fast: 120ms; /* hover, focus, press */
+  --duration-base: 200ms; /* dropdown/dialog */
+  --duration-slow: 400ms; /* page transitions, декоративні */
+
+  /* — Tap target (WCAG 2.5.5 Enhanced + Apple HIG) ----------------------- */
+  --tap-target-min: 44px;
+}
+
+/* Будь-яка декоративна анімація вимикається користувачами з
+   prefers-reduced-motion. Це наш default-respect, не opt-in. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @layer base {
   html,
   body {
-    @apply h-full bg-zinc-950 text-zinc-100 antialiased;
+    @apply bg-bg text-fg h-full font-sans antialiased;
+    /* Inter Display очікує feature settings для tabular nums при потребі. */
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Видимий focus-ring для всіх інтерактивних елементів — обов'язково
+     для keyboard navigation. Не приховуємо outline. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid oklch(var(--color-ring) / 0.6);
+    outline-offset: 2px;
   }
 }

@@ -76,6 +76,8 @@
 
 **Тести:** Playwright e2e — відкрити сторінку → змінити параметр → побачити оновлення 3D → клікнути Export → отримати DXF.
 
+- [x] **2.11.** Design system foundation (ADR-016, `docs/10_DESIGN_SYSTEM.md`). Warm-industrial OKLCH-токени у `globals.css` (38 шт, light theme only), Tailwind 3.4 mapping з mobile-first breakpoints (xs 360 → xl), self-hosted Inter + JetBrains Mono через next/font/google, primitive `<Button>` (CVA з варіантом `zsu`), composite `<Logo>` / `<UkraineStripe>` / `<Footer>` у `@flatcraft/ui`, `/styleguide` (dev-only, 12 секцій, contrast-table з обчисленим `contrastRatio()`). TDD `contrastRatio` (10 unit, OKLCH→sRGB→WCAG), 6 Playwright e2e (3 viewports без console-errors + UkraineStripe 2px інваріант + tap-target ≥44px + dev-gate). R-02 переписано на progressive enhancement → Phase 2.14. — 2026-05-30
+
 ---
 
 ## Phase 3. Auth & Limits (2 тижні)

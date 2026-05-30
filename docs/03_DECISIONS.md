@@ -347,6 +347,53 @@
 
 ---
 
+## ADR-016: Visual design system — warm industrial, single light theme, mobile-first
+
+**Статус:** Accepted (2026-05-30)
+
+**Контекст:** Phase 2 закрила 5 шаблонів end-to-end (`templates` + `studio`), але UI лишався на дефолтних Tailwind-класах (`bg-zinc-950 text-zinc-100`, `bg-emerald-700`) без власних токенів, шрифтів і брендингу. Перед Phase 3 (Auth & Limits) і подальшою адаптацією екранів потрібна **єдина дизайн-мова**: палітра, типографіка, motion, breakpoint-стратегія. Цільова аудиторія — DIY-люди у майстерні/гаражі, які часто заходять з телефону → mobile-first не «бонус», а інваріант (це переписує R-02 у `docs/04_RISKS.md`).
+
+**Рішення:**
+
+1. **Палітра** — **warm industrial**, OKLCH-токени у `apps/web/src/app/globals.css`:
+   - bg: off-white з теплим відтінком (`oklch(0.985 0.005 80)`) — «креслярський папір», не чисто-білий.
+   - fg: warm-charcoal (`oklch(0.22 0.015 50)`) — теплий, не чорний.
+   - primary: ember/амбра (`oklch(0.66 0.17 50)`) — асоціація з розпеченим металом.
+   - Окремо: surface-sunken/muted, accent (стримане синьо-сіре для secondary CTA), feedback (success/warning/danger/info × DEFAULT/foreground/surface), border/ring, UA-flag і ЗСУ-button (як hex, бо точність державних кольорів важлива).
+2. **Тема — тільки світла.** Без `.dark`, без перемикача. Цільовий контекст — майстерня зі змішаним освітленням, де light-on-bg працює стабільніше.
+3. **Типографіка** — Inter (sans + display через `tracking-tight`) + JetBrains Mono (code). Self-hosted через `next/font/google`, subset latin+cyrillic — без runtime-CDN, без CLS.
+4. **Mobile-first** — у `tailwind.config.ts` додано `xs: 360px` як baseline, дефолтні утиліти = small viewport, breakpoints `sm/md/lg/xl` розширюють. Tap target `--tap-target-min: 44px` (WCAG 2.5.5 Enhanced) застосовано до всіх інтерактивів через `<Button>` primitive.
+5. **Бренд** — wordmark `<Logo>` («hart» semibold + «.crimea.ua» 60% opacity, без іконки). 2px `<UkraineStripe>` над футером. `<Button variant="zsu">` лише для donate-CTA у `<Footer>`.
+6. **OKLCH у Tailwind 3.4** — формат токенів `L C H` (без обгортки) + helper `oklch(var(--token) / <alpha-value>)` у config. Перцептуально-рівномірний колір-простір дає **однаковий візуальний відскок** на hover для будь-якого відтінку.
+7. **/styleguide** — внутрішня сторінка (`apps/web/src/app/(dev)/styleguide/`), доступна лише з `NEXT_PUBLIC_ENV=dev` (інакше `notFound()`). 12 секцій + контраст-таблиця з обчисленим `contrastRatio()` для кожного токена. На production-build стає 404.
+8. **prefers-reduced-motion** — глобальний `@media` reset у `globals.css` знімає декоративні анімації; це default, не opt-in.
+
+**Тригери перегляду:**
+
+- Замовний бренд-логотип / повний візуальний ребрендинг.
+- Аналітика з реальних користувачів показує, що desktop важливіший за mobile (тоді переоцінюємо breakpoints і density).
+- Скарги на читання у темній обстановці (тоді відкриваємо dark mode як другу тему).
+
+**Наслідки:**
+
+- ✅ Єдиний фундамент для Phase 2.12+ (адаптація реальних екранів) і Phase 3 (Auth pages).
+- ✅ Контраст і tap-target перевіряються інваріантно у Playwright — регресії помічаються одразу.
+- ✅ `@flatcraft/ui` отримав `primitives/` (Button + Dialog re-export) і `components/` (Logo, UkraineStripe, Footer) — підготовка до Phase 2.15.
+- ✅ ADR-016 + `docs/10_DESIGN_SYSTEM.md` — повний документ, новий контриб'ютор підіймається за 30 хв.
+- ⚠ Існуючі екрани (`/`, `/templates`, `/templates/[slug]`) **тимчасово візуально неконсистентні** — досі використовують `zinc-950 emerald-700`. Свідомий PR-scope; адаптація — Phase 2.12+ окремими PR'ами.
+- ⚠ OKLCH рендериться у всіх сучасних браузерах (Safari 15.4+, Chrome 111+, Firefox 113+). У старіших — fallback до системних кольорів (зрозуміла деградація, не критична).
+- ❌ Жодного dark mode до тригера перегляду.
+
+**Альтернативи:**
+
+- **shadcn/ui дефолтні токени** — холодний сіро-синій zinc, не warm. Не передає industrial-характер.
+- **Dark mode як default** — частина DIY-аудиторії працює у яскравій майстерні; light-on-bg універсальніший.
+- **HSL замість OKLCH** — повсюди підтримується, але hover-shifts стають нерівномірними між відтінками (червоний темнішає сильніше, ніж жовтий при тому ж `−10% L`). OKLCH дає стабільнішу візуальну метрику.
+- **CSS-in-JS (Stitches, Vanilla Extract)** — overkill для статичної токен-системи; додає bundle і build-step.
+- **Окремий Storybook** — ще один тулчейн і CI-job; `/styleguide` всередині app робить те саме без витрат.
+
+---
+
 _Шаблон нової ADR:_
 
 ```
