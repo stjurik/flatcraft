@@ -41,6 +41,7 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from flatcraft_cad.export.fonts import register_fonts
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -54,6 +55,8 @@ from flatcraft_cad.unfold import (
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
+
+register_fonts()
 
 PAGE_WIDTH, PAGE_HEIGHT = landscape(A4)
 
@@ -72,7 +75,7 @@ def compute_bom(
     """Bill of materials для розгорнутого аркуша.
 
     Pure-функція, відокремлена від PDF-рендерингу — щоб числа можна
-    було перевіряти юніт-тестами без парсингу PDF (Cyrillic у Helvetica
+    було перевіряти юніт-тестами без парсингу PDF (Cyrillic у DejaVuSans
     PDF не екстрактується pypdf). Працює з будь-яким Unfolded* dataclass,
     що має length_mm/width_mm/thickness_mm fields (L, Z, U/wall_shelf).
     """
@@ -148,7 +151,7 @@ def _draw_unfold(
     c.restoreState()
 
     # Annotations: length / width / bend position.
-    c.setFont("Helvetica", 8)
+    c.setFont("DejaVuSans", 8)
     c.drawCentredString(x0 + (w * mm) / 2, y0 - 4 * mm, f"L = {unfolded.length_mm:.2f} мм")
     c.saveState()
     c.translate(x0 - 5 * mm, y0 + (h * mm) / 2)
@@ -172,7 +175,7 @@ def _draw_bend_table(
     origin_mm: tuple[float, float],
 ) -> None:
     ox, oy = origin_mm
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("DejaVuSans-Bold", 10)
     c.drawString(ox * mm, oy * mm, "Гиби")
     rows = [
         ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
@@ -192,9 +195,9 @@ def _draw_bend_table(
     for r_idx, row in enumerate(rows):
         cur_x_mm = ox
         if r_idx == 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("DejaVuSans-Bold", 8)
         else:
-            c.setFont("Helvetica", 9)
+            c.setFont("DejaVuSans", 9)
         for cell, w_mm in zip(row, col_widths_mm, strict=True):
             c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
             c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
@@ -214,9 +217,9 @@ def _draw_bom(
     ox, oy = origin_mm
     bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
 
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Bill of materials")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
     lines = [
         f"Матеріал: {material_label}",
         f"Товщина: {unfolded.thickness_mm:.2f} мм",
@@ -258,9 +261,9 @@ def export_l_bracket_pdf(
     c.setSubject(f"L-bracket {parameters.leg_a_mm}×{parameters.leg_b_mm}×{parameters.width_mm} мм")
 
     # Header.
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("DejaVuSans-Bold", 14)
     c.drawString(15 * mm, (210 - 15) * mm, "L-кронштейн")
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
         15 * mm,
@@ -299,7 +302,7 @@ def export_l_bracket_pdf(
         width=qr_size_mm * mm,
         height=qr_size_mm * mm,
     )
-    c.setFont("Helvetica", 7)
+    c.setFont("DejaVuSans", 7)
     c.drawString(
         (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
         12 * mm,
@@ -307,7 +310,7 @@ def export_l_bracket_pdf(
     )
 
     # Footer hint.
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
         15 * mm,
         15 * mm,
@@ -351,9 +354,9 @@ def export_z_bracket_pdf(
         f"{parameters.bottom_flange_mm}×{parameters.width_mm} мм",
     )
 
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("DejaVuSans-Bold", 14)
     c.drawString(15 * mm, (210 - 15) * mm, "Z-кронштейн")
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
         15 * mm,
@@ -384,9 +387,9 @@ def export_z_bracket_pdf(
     # BOM через generic.
     ox, oy = 175, 140
     bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Bill of materials")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
     for i, line in enumerate(
         [
             f"Матеріал: {material_label}",
@@ -409,14 +412,14 @@ def export_z_bracket_pdf(
         width=qr_size_mm * mm,
         height=qr_size_mm * mm,
     )
-    c.setFont("Helvetica", 7)
+    c.setFont("DejaVuSans", 7)
     c.drawString(
         (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
         12 * mm,
         f"QR: {qr_payload[:48]}",
     )
 
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
         15 * mm,
         15 * mm,
@@ -455,9 +458,9 @@ def export_corner_angle_pdf(
         f"Corner angle {parameters.leg_a_mm}×{parameters.leg_b_mm}×{parameters.width_mm} мм",
     )
 
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("DejaVuSans-Bold", 14)
     c.drawString(15 * mm, (210 - 15) * mm, "Кутник")
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
         15 * mm,
@@ -486,7 +489,7 @@ def export_corner_angle_pdf(
 
     # Bend table (1 рядок) — reuse L-bracket logic вручну (різні Params type).
     ox_t, oy_t = 175, 170
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("DejaVuSans-Bold", 10)
     c.drawString(ox_t * mm, oy_t * mm, "Гиби")
     rows = [
         ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
@@ -506,9 +509,9 @@ def export_corner_angle_pdf(
     for r_idx, row in enumerate(rows):
         cur_x_mm = ox_t
         if r_idx == 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("DejaVuSans-Bold", 8)
         else:
-            c.setFont("Helvetica", 9)
+            c.setFont("DejaVuSans", 9)
         for cell, w_mm in zip(row, col_widths_mm, strict=True):
             c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
             c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
@@ -518,9 +521,9 @@ def export_corner_angle_pdf(
     # BOM через generic.
     ox, oy = 175, 140
     bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Bill of materials")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
     for i, line in enumerate(
         [
             f"Матеріал: {material_label}",
@@ -543,14 +546,14 @@ def export_corner_angle_pdf(
         width=qr_size_mm * mm,
         height=qr_size_mm * mm,
     )
-    c.setFont("Helvetica", 7)
+    c.setFont("DejaVuSans", 7)
     c.drawString(
         (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
         12 * mm,
         f"QR: {qr_payload[:48]}",
     )
 
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
         15 * mm,
         15 * mm,
@@ -592,9 +595,9 @@ def export_wall_shelf_pdf(
         f"lip={parameters.front_lip_mm} W={parameters.width_mm} мм"
     )
 
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("DejaVuSans-Bold", 14)
     c.drawString(15 * mm, (210 - 15) * mm, "Полиця настінна")
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
         15 * mm,
@@ -621,7 +624,7 @@ def export_wall_shelf_pdf(
 
     # Bend table (1 або 2 рядки).
     ox_t, oy_t = 175, 170
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("DejaVuSans-Bold", 10)
     c.drawString(ox_t * mm, oy_t * mm, "Гиби")
     header = ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм")
     body_rows = [
@@ -643,9 +646,9 @@ def export_wall_shelf_pdf(
     for r_idx, row in enumerate(rows):
         cur_x_mm = ox_t
         if r_idx == 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("DejaVuSans-Bold", 8)
         else:
-            c.setFont("Helvetica", 9)
+            c.setFont("DejaVuSans", 9)
         for cell, w_mm in zip(row, col_widths_mm, strict=True):
             c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
             c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
@@ -655,9 +658,9 @@ def export_wall_shelf_pdf(
     # BOM.
     ox, oy = 175, 140
     bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Bill of materials")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
     for i, line in enumerate(
         [
             f"Матеріал: {material_label}",
@@ -679,14 +682,14 @@ def export_wall_shelf_pdf(
         width=qr_size_mm * mm,
         height=qr_size_mm * mm,
     )
-    c.setFont("Helvetica", 7)
+    c.setFont("DejaVuSans", 7)
     c.drawString(
         (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
         12 * mm,
         f"QR: {qr_payload[:48]}",
     )
 
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
         15 * mm,
         15 * mm,
@@ -727,9 +730,9 @@ def export_perforated_panel_pdf(
         f"{n_holes} holes Ø{parameters.hole_diameter_mm}"
     )
 
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("DejaVuSans-Bold", 14)
     c.drawString(15 * mm, (210 - 15) * mm, "Перфо-панель")
-    c.setFont("Helvetica", 10)
+    c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
         15 * mm,
@@ -757,9 +760,9 @@ def export_perforated_panel_pdf(
 
     # Без bend table — натомість grid summary.
     ox, oy = 175, 170
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Hole grid")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Сітка отворів")
+    c.setFont("DejaVuSans", 9)
     for i, line in enumerate(
         [
             f"Колонок (по X): {unfolded.grid_cols}",
@@ -775,9 +778,9 @@ def export_perforated_panel_pdf(
     # BOM.
     ox_b, oy_b = 175, 140
     bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(ox_b * mm, oy_b * mm, "Bill of materials")
-    c.setFont("Helvetica", 9)
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox_b * mm, oy_b * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
     for i, line in enumerate(
         [
             f"Матеріал: {material_label}",
@@ -798,14 +801,14 @@ def export_perforated_panel_pdf(
         width=qr_size_mm * mm,
         height=qr_size_mm * mm,
     )
-    c.setFont("Helvetica", 7)
+    c.setFont("DejaVuSans", 7)
     c.drawString(
         (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
         12 * mm,
         f"QR: {qr_payload[:48]}",
     )
 
-    c.setFont("Helvetica-Oblique", 8)
+    c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
         15 * mm,
         15 * mm,
@@ -849,7 +852,7 @@ def _draw_unfold_generic(
         c.line(x0 + bend_x * mm, y0, x0 + bend_x * mm, y0 + h * mm)
         c.restoreState()
         c.setFillColorRGB(0.2, 0.4, 0.8)
-        c.setFont("Helvetica", 7)
+        c.setFont("DejaVuSans", 7)
         c.drawCentredString(x0 + bend_x * mm, y0 + h * mm + 2 * mm, f"BEND @ {bend_mm:.1f}")
         c.setFillColorRGB(0, 0, 0)
 
@@ -864,7 +867,7 @@ def _draw_unfold_generic(
             c.circle(cx, cy, radius_pdf, stroke=1, fill=0)
         c.restoreState()
 
-    c.setFont("Helvetica", 8)
+    c.setFont("DejaVuSans", 8)
     c.drawCentredString(x0 + (w * mm) / 2, y0 - 4 * mm, f"L = {length_mm:.2f} мм")
     c.saveState()
     c.translate(x0 - 5 * mm, y0 + (h * mm) / 2)
@@ -881,7 +884,7 @@ def _draw_z_bracket_bend_table(
     origin_mm: tuple[float, float],
 ) -> None:
     ox, oy = origin_mm
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("DejaVuSans-Bold", 10)
     c.drawString(ox * mm, oy * mm, "Гиби")
     rows = [
         ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
@@ -909,9 +912,9 @@ def _draw_z_bracket_bend_table(
     for r_idx, row in enumerate(rows):
         cur_x_mm = ox
         if r_idx == 0:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("DejaVuSans-Bold", 8)
         else:
-            c.setFont("Helvetica", 9)
+            c.setFont("DejaVuSans", 9)
         for cell, w_mm in zip(row, col_widths_mm, strict=True):
             c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
             c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
