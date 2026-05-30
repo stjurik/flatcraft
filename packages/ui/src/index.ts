@@ -10,5 +10,9 @@
 export const UI_PACKAGE_VERSION = "0.0.0" as const;
 
 export * from "./3d-viewport/index.js";
+export * from "./components/index.js";
 export * from "./hooks/index.js";
+export * from "./icons.js";
+export * from "./lib/index.js";
 export * from "./parameter-form/index.js";
+export * from "./primitives/index.js";

@@ -27,7 +27,7 @@
 
 ---
 
-## R-02. OpenCascade.js падає на слабких пристроях
+## R-02. 3D-preview і студія на слабких / мобільних пристроях
 
 | Поле        | Значення   |
 | ----------- | ---------- |
@@ -35,14 +35,18 @@
 | Вплив       | 3          |
 | Пріоритет   | 9 (MEDIUM) |
 
-**Опис:** OpenCascade.js — wasm-bundle ~30 MB, parametric update може займати 500мс+ на старих ноутбуках/мобільних. Користувач закриє вкладку.
+**Опис:** Цільова аудиторія — DIY-люди у майстерні/гаражі, які часто заходять з телефону (рішення Phase 2.11, ADR-016). На mobile/слабких ноутбуках R3F-сцена (Phase 2.6, three.js Shape + ExtrudeGeometry — див. ADR-013) може гальмувати: великі parametric updates, дорогі shadows/HDR, недостатній touch-affordance у формах → користувач закриває вкладку.
 
-**Mitigation:**
+ADR-013 уже зняв ризик 30-МБ WASM bundle (OpenCascade.js відкладено), тож ризик тепер про **загальну якість UX** mobile-студії, а не про конкретну бібліотеку.
 
-1. Фічу `live update` обмежимо 30 fps debounce + Web Worker.
-2. Fallback на server-side preview: якщо клієнт повідомляє про повільність, переключаємося на серверний рендер mesh.
-3. Mobile detection: на маленьких екранах показуємо «desktop required for editing» (зменшуємо очікування).
-4. Performance budget — TTI < 3 c (документовано у `CLAUDE.md`).
+**Mitigation:** **Progressive enhancement** — мобільний клієнт отримує спрощену версію, десктоп — повну. Впровадження — **Phase 2.14**:
+
+1. **Спрощена 3D-сцена на mobile:** без HDR-env, без shadows, low-poly mesh, OrbitControls без zoom-on-pinch колізій з браузером. Detection через `matchMedia("(max-width: 767px)")`.
+2. **Touch-first форми:** усі інтерактиви ≥ 44×44px (`min-h-tap min-w-tap` — інваріант з Phase 2.11, перевіряється у Playwright). Sliders, селектори — повністю керовні пальцем.
+3. **Збільшений debounce на mobile:** 250мс (замість 100мс десктопу) на parametric update → економія CPU.
+4. **Mobile-first layout:** студія вертикально на телефоні (editor → viewport стек), 2-колонний grid на md+. **Без** "desktop required" — повноцінне редагування інваріант (Phase 2.11 ADR-016).
+5. **Performance budget** — TTI < 3 c, parametric update < 200мс (CLAUDE.md §9). Якщо реальна аналітика покаже регресію на mobile — Phase 2.14 переоцінюється.
+6. **Acceptance:** на iPhone SE / Galaxy A-series студія L-bracket має рендеритись + давати export ≤ 6 сек end-to-end.
 
 ---
 

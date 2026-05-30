@@ -40,9 +40,13 @@ export default defineConfig({
       command: "pnpm build && pnpm start",
       url: `http://localhost:${WEB_PORT}`,
       reuseExistingServer: !process.env["CI"],
-      timeout: 120_000,
+      // Cold next-build з шрифтами (next/font fetch) і dynamic-chunks
+      // часом тягнеться 2–3 хв; 4 хв — комфортна стеля.
+      timeout: 240_000,
       env: {
         API_BASE_URL: `http://localhost:${API_PORT}`,
+        // /styleguide доступна лише у dev-buildі (Phase 2.11).
+        NEXT_PUBLIC_ENV: "dev",
       },
     },
   ],
