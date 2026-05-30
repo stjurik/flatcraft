@@ -61,6 +61,24 @@ describe("WallShelfParametersSchema", () => {
     ).toThrow();
   });
 
+  it("приймає mount_hole_rows = 0 (без отворів)", () => {
+    expect(() =>
+      WallShelfParametersSchema.parse({
+        ...WALL_SHELF_DEFAULT_PARAMETERS,
+        mount_hole_rows: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("відхиляє mount_hole_rows < 0", () => {
+    expect(() =>
+      WallShelfParametersSchema.parse({
+        ...WALL_SHELF_DEFAULT_PARAMETERS,
+        mount_hole_rows: -1,
+      }),
+    ).toThrow();
+  });
+
   it("mount_hole_diameter < 3 відхиляє", () => {
     expect(() =>
       WallShelfParametersSchema.parse({

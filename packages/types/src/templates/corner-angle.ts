@@ -36,9 +36,9 @@ export const CornerAngleParametersSchema = z.object({
   /** Діаметр отворів, мм (один для всього grid). */
   hole_diameter_mm: z.number().min(3).max(20),
   /** Рядів отворів вздовж ширини (perpendicular to leg length). */
-  hole_rows: z.number().int().min(1).max(5),
+  hole_rows: z.number().int().min(0).max(5),
   /** Колонок отворів вздовж довжини полиці (parallel to leg length). */
-  hole_cols: z.number().int().min(1).max(5),
+  hole_cols: z.number().int().min(0).max(5),
   /** Мінімальна відстань від країв полиці до центра крайнього отвору, мм. */
   hole_margin_mm: z.number().min(5).max(50),
 });

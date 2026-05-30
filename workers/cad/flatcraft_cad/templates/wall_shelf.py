@@ -40,8 +40,8 @@ class WallShelfBuildParameters(BaseModel):
     width_mm: float = Field(ge=100, le=3000, description="Довжина полиці (= довжина гибу).")
     thickness_mm: float = Field(gt=0, le=10, description="Товщина листа.")
     mount_hole_diameter_mm: float = Field(ge=3, le=20, description="Діаметр mounting holes.")
-    mount_hole_rows: int = Field(ge=1, le=5, description="Рядів отворів вздовж ширини.")
-    mount_hole_cols: int = Field(ge=1, le=5, description="Колонок отворів уздовж back.")
+    mount_hole_rows: int = Field(ge=0, le=5, description="Рядів отворів вздовж ширини.")
+    mount_hole_cols: int = Field(ge=0, le=5, description="Колонок отворів уздовж back.")
     mount_hole_margin_mm: float = Field(ge=5, le=50, description="Відступ від країв back.")
 
     @field_validator("bend_radius_mm")

@@ -50,7 +50,7 @@ export type ExportRequest = z.infer<typeof ExportRequestSchema>;
 export const ExportArtifactSchema = z.object({
   url: z.string().url(),
   bytes: z.number().int().positive(),
-  expires_at: z.string().datetime(),
+  expires_at: z.string().datetime({ offset: true }),
   s3_key: z.string().min(1),
 });
 

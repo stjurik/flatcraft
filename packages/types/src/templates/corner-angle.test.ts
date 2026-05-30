@@ -67,6 +67,24 @@ describe("CornerAngleParametersSchema", () => {
     ).toThrow();
   });
 
+  it("приймає hole_rows = 0 (без отворів)", () => {
+    expect(() =>
+      CornerAngleParametersSchema.parse({
+        ...CORNER_ANGLE_DEFAULT_PARAMETERS,
+        hole_rows: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("відхиляє hole_rows < 0", () => {
+    expect(() =>
+      CornerAngleParametersSchema.parse({
+        ...CORNER_ANGLE_DEFAULT_PARAMETERS,
+        hole_rows: -1,
+      }),
+    ).toThrow();
+  });
+
   it("відхиляє hole_margin > 50", () => {
     expect(() =>
       CornerAngleParametersSchema.parse({

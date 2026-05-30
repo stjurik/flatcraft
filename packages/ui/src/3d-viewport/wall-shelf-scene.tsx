@@ -23,7 +23,8 @@ interface SceneProps {
  * розподіл grid вздовж back-секції з відступом hole_margin.
  */
 function linspace(n: number, lo: number, hi: number): number[] {
-  if (n <= 1) return [(lo + hi) / 2];
+  if (n <= 0) return [];
+  if (n === 1) return [(lo + hi) / 2];
   const step = (hi - lo) / (n - 1);
   return Array.from({ length: n }, (_, i) => lo + i * step);
 }

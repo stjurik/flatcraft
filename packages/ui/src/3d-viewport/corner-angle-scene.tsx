@@ -23,7 +23,8 @@ interface SceneProps {
  * Vertical flange A: x ∈ [0, t], y ∈ [0, a]. Cylinder axis ‖ X.
  */
 function linspace(n: number, lo: number, hi: number): number[] {
-  if (n <= 1) return [(lo + hi) / 2];
+  if (n <= 0) return [];
+  if (n === 1) return [(lo + hi) / 2];
   const step = (hi - lo) / (n - 1);
   return Array.from({ length: n }, (_, i) => lo + i * step);
 }

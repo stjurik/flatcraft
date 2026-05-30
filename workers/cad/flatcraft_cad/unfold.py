@@ -219,9 +219,12 @@ def unfold_z_bracket(params: ZBracketBuildParameters, k_factor: float) -> Unfold
 def _distribute(n: int, start: float, end: float, margin: float) -> tuple[float, ...]:
     """N точок, рівномірно розподілених у [start+margin, end-margin].
 
+    n=0 → повертає порожній кортеж.
     n=1 → одна точка у центрі сегмента (без margin). n>1 → рівні
     інтервали між крайніми точками з відступом margin від країв.
     """
+    if n <= 0:
+        return ()
     if n == 1:
         return ((start + end) / 2.0,)
     lo = start + margin

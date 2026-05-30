@@ -39,8 +39,8 @@ export const WallShelfParametersBaseSchema = z.object({
   bend_angle_deg: z.literal(90),
   width_mm: z.number().min(100).max(3000),
   mount_hole_diameter_mm: z.number().min(3).max(20),
-  mount_hole_rows: z.number().int().min(1).max(5),
-  mount_hole_cols: z.number().int().min(1).max(5),
+  mount_hole_rows: z.number().int().min(0).max(5),
+  mount_hole_cols: z.number().int().min(0).max(5),
   mount_hole_margin_mm: z.number().min(5).max(50),
 });
 
