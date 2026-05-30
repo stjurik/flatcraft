@@ -1,5 +1,7 @@
+import { Footer, Logo } from "@flatcraft/ui";
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import "./globals.css";
@@ -37,7 +39,20 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="uk" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="flex min-h-screen flex-col">
+        <header
+          data-testid="site-header"
+          className="bg-bg-elevated border-border xs:px-4 sticky top-0 z-30 flex h-14 items-center justify-between border-b md:px-6"
+        >
+          <Link href="/" aria-label="Перейти на головну" className="inline-flex items-center">
+            <Logo size="md" />
+          </Link>
+          {/* Праве місце — заповниться меню/auth-кнопками у Phase 3+. */}
+          <div aria-hidden="true" />
+        </header>
+        <main className="flex flex-1 flex-col">{children}</main>
+        <Footer />
+      </body>
     </html>
   );
 }
