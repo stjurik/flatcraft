@@ -1,40 +1,67 @@
 import type { TemplateSummary } from "@flatcraft/types";
+import { Button } from "@flatcraft/ui";
 import Link from "next/link";
+
+import { TemplateThumb } from "./template-thumb";
 
 interface TemplateCardProps {
   readonly template: TemplateSummary;
 }
 
+/**
+ * Шаблон-картка для каталогу `/templates`. Не клікабельна цілком —
+ * вкладені анкори ламали б a11y (HTML5 не дозволяє `<a>` в `<a>`).
+ * Замість того: окремий клікабельний `<h3>` (title) і явна CTA-Button.
+ * Hover на article додає `shadow-lg` і змінює тон thumb-іконки —
+ * через `group` пар.
+ */
 export function TemplateCard({ template }: TemplateCardProps) {
+  const href = `/templates/${template.slug}`;
   return (
-    <Link
-      href={`/templates/${template.slug}`}
+    <article
       data-testid="template-card"
       data-slug={template.slug}
-      className="group flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 transition hover:border-zinc-700 hover:bg-zinc-900/70"
+      className="bg-bg-elevated border-border hover:border-border-strong duration-base group flex flex-col overflow-hidden rounded-lg border shadow-md transition-shadow ease-out hover:shadow-lg"
     >
-      <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950/50 text-xs uppercase tracking-wider text-zinc-600">
+      <div className="bg-surface-sunken border-border text-fg-subtle group-hover:text-primary duration-base flex aspect-[4/3] items-center justify-center border-b transition-colors ease-out">
         {template.previewImageUrl ? (
           <img
             src={template.previewImageUrl}
             alt={template.nameUk}
-            className="h-full w-full rounded-lg object-cover"
+            className="h-full w-full object-cover"
           />
         ) : (
-          <span data-testid="template-card-preview-placeholder">Прев'ю — Phase 2.6</span>
+          <TemplateThumb slug={template.slug} />
         )}
       </div>
 
-      <header className="flex flex-col gap-1">
-        <h3 className="text-lg font-semibold text-zinc-100">{template.nameUk}</h3>
-        <p className="text-xs text-zinc-500" data-testid="template-card-slug">
-          {template.slug}
-        </p>
-      </header>
+      <div className="flex flex-col gap-2 p-5">
+        <h3 className="font-display text-fg text-xl font-semibold">
+          <Link
+            href={href}
+            prefetch
+            data-testid="template-card-title-link"
+            className="hover:text-primary duration-fast transition-colors ease-out"
+          >
+            {template.nameUk}
+          </Link>
+        </h3>
 
-      {template.descriptionUk ? (
-        <p className="text-sm text-zinc-400">{template.descriptionUk}</p>
-      ) : null}
-    </Link>
+        {template.descriptionUk ? (
+          <p className="text-fg-muted text-sm">{template.descriptionUk}</p>
+        ) : null}
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <Button asChild variant="default" size="md">
+            <Link href={href} prefetch data-testid="template-card-cta">
+              Налаштувати →
+            </Link>
+          </Button>
+          <span className="text-fg-subtle font-mono text-xs" data-testid="template-card-slug">
+            {template.slug}
+          </span>
+        </div>
+      </div>
+    </article>
   );
 }

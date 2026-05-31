@@ -10,7 +10,10 @@ test.describe("/templates/wall_shelf — Wall shelf studio (Phase 2.10.c)", () =
     });
 
     await page.goto("/templates");
-    await page.locator('[data-testid="template-card"][data-slug="wall_shelf"]').click();
+    await page
+      .locator('[data-testid="template-card"][data-slug="wall_shelf"]')
+      .getByTestId("template-card-cta")
+      .click();
 
     await expect(page).toHaveURL("/templates/wall_shelf");
     await expect(page.getByTestId("template-detail-title")).toHaveText("Полиця настінна");

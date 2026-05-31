@@ -8,7 +8,10 @@ test.describe("/templates/[slug] — L-bracket studio (Phase 2.2)", () => {
     });
 
     await page.goto("/templates");
-    await page.locator('[data-testid="template-card"][data-slug="l_bracket"]').click();
+    await page
+      .locator('[data-testid="template-card"][data-slug="l_bracket"]')
+      .getByTestId("template-card-cta")
+      .click();
 
     await expect(page).toHaveURL("/templates/l_bracket");
     await expect(page.getByTestId("template-detail-title")).toHaveText("L-кронштейн");

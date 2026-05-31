@@ -10,7 +10,10 @@ test.describe("/templates/corner_angle — Corner angle studio (Phase 2.10.b)", 
     });
 
     await page.goto("/templates");
-    await page.locator('[data-testid="template-card"][data-slug="corner_angle"]').click();
+    await page
+      .locator('[data-testid="template-card"][data-slug="corner_angle"]')
+      .getByTestId("template-card-cta")
+      .click();
 
     await expect(page).toHaveURL("/templates/corner_angle");
     await expect(page.getByTestId("template-detail-title")).toHaveText("Кутник");
