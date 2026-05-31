@@ -1,12 +1,7 @@
 "use client";
 
 import { ZBracketParametersSchema, type ZBracketParameters } from "@flatcraft/types";
-import {
-  AutoForm,
-  zodIssuesToFieldErrors,
-  type AutoFormLabels,
-  type FieldDescriptor,
-} from "@flatcraft/ui";
+import { AutoForm, zodIssuesToFieldErrors, type FieldDescriptor } from "@flatcraft/ui";
 import { useMemo } from "react";
 
 interface ZBracketEditorProps {
@@ -14,21 +9,13 @@ interface ZBracketEditorProps {
   readonly onChange: (next: ZBracketParameters) => void;
 }
 
-const LABELS: AutoFormLabels = {
-  top_flange_mm: "Верхня полиця, мм",
-  bottom_flange_mm: "Нижня полиця, мм",
-  offset_mm: "Offset (вертикальна секція), мм",
-  bend_radius_mm: "Внутрішній радіус гиба, мм",
-  bend_angle_deg: "Кут гиба, °",
-  width_mm: "Ширина (довжина гиба), мм",
-  holes: "Отвори",
-};
+const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
 function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNode | null {
   if (descriptor.name === "holes") {
     const count = Array.isArray(value) ? value.length : 0;
     return (
-      <p data-testid={`auto-form-holes-placeholder`} className="text-xs text-zinc-500">
+      <p data-testid={`auto-form-holes-placeholder`} className="text-fg-muted text-xs">
         Отвори ({count}) — редактор у Phase 2.7.
       </p>
     );
@@ -57,19 +44,14 @@ export function ZBracketEditor({ value, onChange }: ZBracketEditorProps) {
         schema={ZBracketParametersSchema}
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as ZBracketParameters)}
-        labels={LABELS}
         errors={fieldErrors}
         renderField={renderField}
       />
 
-      <p className="text-xs text-zinc-500" data-testid="bend-angle-info">
-        Z-кронштейн має 2 гиби по 90°. Інші кути — post-launch.
-      </p>
-
       {allErrors.length > 0 ? (
         <ul
           data-testid="validation-errors"
-          className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300"
+          className="border-danger/40 bg-danger-surface text-danger rounded-md border p-3 text-sm"
         >
           {allErrors.map((msg) => (
             <li key={msg}>{msg}</li>
@@ -78,21 +60,23 @@ export function ZBracketEditor({ value, onChange }: ZBracketEditorProps) {
       ) : (
         <p
           data-testid="validation-ok"
-          className="rounded-lg border border-emerald-900/50 bg-emerald-950/30 p-3 text-sm text-emerald-300"
+          className="border-success/40 bg-success-surface text-success rounded-md border p-3 text-sm"
         >
-          Параметри валідні. Експорт DXF/PDF — кнопка нижче.
+          Параметри валідні. Натискайте «Експортувати».
         </p>
       )}
 
-      <details className="text-xs text-zinc-500">
-        <summary className="cursor-pointer">Параметри (JSON)</summary>
-        <pre
-          data-testid="params-preview"
-          className="mt-2 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-zinc-300"
-        >
-          {JSON.stringify(value, null, 2)}
-        </pre>
-      </details>
+      {IS_DEV ? (
+        <details className="text-fg-subtle text-xs">
+          <summary className="cursor-pointer">Параметри (JSON · dev only)</summary>
+          <pre
+            data-testid="params-preview"
+            className="border-border bg-surface-muted text-fg mt-2 overflow-x-auto rounded-sm border p-3"
+          >
+            {JSON.stringify(value, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </form>
   );
 }

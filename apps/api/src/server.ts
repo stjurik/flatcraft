@@ -20,6 +20,7 @@ import { dbPlugin } from "./plugins/db.js";
 import { buildExportRoutes } from "./routes/exports.js";
 import type { JobStore } from "./lib/job-store.js";
 import { healthRoutes } from "./routes/health.js";
+import { materialRoutes } from "./routes/materials.js";
 import { templateRoutes } from "./routes/templates.js";
 
 export interface CreateServerOptions {
@@ -58,6 +59,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
   await app.register(healthRoutes);
   await app.register(templateRoutes);
+  await app.register(materialRoutes);
   await app.register(buildExportRoutes(options.jobStore ? { store: options.jobStore } : {}));
 
   return app;

@@ -10,11 +10,13 @@ import {
   ExportJobAcceptedSchema,
   ExportJobEventSchema,
   ExportRequestSchema,
+  MaterialListResponseSchema,
   TemplateDetailSchema,
   TemplateListResponseSchema,
   type ExportJobAccepted,
   type ExportJobEvent,
   type ExportRequest,
+  type MaterialChoice,
   type TemplateDetail,
   type TemplateSummary,
 } from "@flatcraft/types";
@@ -47,6 +49,17 @@ export async function fetchPublishedTemplates(): Promise<TemplateSummary[]> {
   const json = await res.json();
   const parsed = TemplateListResponseSchema.parse(json);
   return parsed.items;
+}
+
+export async function fetchMaterials(): Promise<MaterialChoice[]> {
+  const res = await fetch(`${SERVER_API_BASE_URL}/materials`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError(`Failed to fetch /materials: ${res.status}`, res.status);
+  }
+  return MaterialListResponseSchema.parse(await res.json()).items;
 }
 
 export async function fetchTemplate(slug: string): Promise<TemplateDetail | null> {

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ExportJobEvent, ExportRequest, ExportResponse } from "@flatcraft/types";
+import { Button } from "@flatcraft/ui";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
@@ -65,30 +66,27 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
 
   return (
     <div data-testid="export-button-section" className="flex flex-col gap-2">
-      <button
+      <Button
         type="button"
         data-testid="export-button"
         data-state={state.status}
+        variant="default"
+        size="lg"
         disabled={isDisabled}
         onClick={click}
-        className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-          isDisabled
-            ? "cursor-not-allowed bg-zinc-900 text-zinc-600"
-            : "bg-emerald-700 text-white hover:bg-emerald-600"
-        }`}
       >
         {isBusy ? `Експорт… ${progress}%` : "Експортувати DXF + PDF"}
-      </button>
+      </Button>
 
       {isBusy ? (
         <div
           data-testid="export-progress-bar"
-          className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+          className="bg-surface-muted h-1.5 w-full overflow-hidden rounded-full"
         >
           <div
             data-testid="export-progress-bar-fill"
             data-progress={progress}
-            className="h-full bg-emerald-500 transition-all"
+            className="bg-primary duration-base h-full transition-all ease-out"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -101,7 +99,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
             href={state.result.artifacts.dxf.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
+            className="text-primary hover:text-primary-hover underline"
           >
             Завантажити DXF ({Math.round(state.result.artifacts.dxf.bytes / 1024)} КБ)
           </a>
@@ -110,7 +108,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
             href={state.result.artifacts.pdf.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-emerald-300 underline hover:text-emerald-200"
+            className="text-primary hover:text-primary-hover underline"
           >
             Завантажити PDF ({Math.round(state.result.artifacts.pdf.bytes / 1024)} КБ)
           </a>
@@ -120,7 +118,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
       {state.status === "error" ? (
         <p
           data-testid="export-error"
-          className="rounded-md border border-red-900/50 bg-red-950/30 p-2 text-xs text-red-300"
+          className="border-danger/40 bg-danger-surface text-danger rounded-md border p-2 text-xs"
         >
           {state.message}
         </p>

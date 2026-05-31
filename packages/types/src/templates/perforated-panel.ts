@@ -18,17 +18,25 @@ import { z } from "zod";
 
 export const PerforatedPanelParametersSchema = z.object({
   /** Довжина листа, мм. */
-  length_mm: z.number().min(100).max(3000),
+  length_mm: z.number().min(100).max(3000).describe("group:Лист|label:Довжина листа (мм)"),
   /** Ширина листа, мм. */
-  width_mm: z.number().min(100).max(3000),
+  width_mm: z.number().min(100).max(3000).describe("group:Лист|label:Ширина листа (мм)"),
   /** Діаметр отворів, мм. */
-  hole_diameter_mm: z.number().min(3).max(30),
+  hole_diameter_mm: z
+    .number()
+    .min(3)
+    .max(30)
+    .describe("group:Сітка отворів|label:Діаметр отворів (мм)"),
   /** Крок між центрами отворів вздовж довжини, мм. */
-  pitch_x_mm: z.number().min(10).max(200),
+  pitch_x_mm: z.number().min(10).max(200).describe("group:Сітка отворів|label:Крок X (мм)"),
   /** Крок між центрами отворів вздовж ширини, мм. */
-  pitch_y_mm: z.number().min(10).max(200),
+  pitch_y_mm: z.number().min(10).max(200).describe("group:Сітка отворів|label:Крок Y (мм)"),
   /** Мінімальний відступ від країв до центра крайнього отвору, мм. */
-  margin_mm: z.number().min(5).max(100),
+  margin_mm: z
+    .number()
+    .min(5)
+    .max(100)
+    .describe("group:Сітка отворів|label:Відступ від країв (мм)"),
 });
 
 export type PerforatedPanelParameters = z.infer<typeof PerforatedPanelParametersSchema>;

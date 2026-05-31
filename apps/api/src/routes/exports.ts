@@ -26,6 +26,17 @@ const NotFoundSchema = z.object({ error: z.literal("job_not_found") });
 
 const PARAMS = z.object({ id: z.string().uuid() });
 
+/**
+ * Видаляє `material_code` з payload перед форвардом у cad-worker.
+ * Body уже провалідовано ExportRequestSchema (discriminatedUnion з обов'язковим
+ * material_code), тож типобезпека гарантується на rest-стороні.
+ */
+function stripMaterialCode(body: unknown): unknown {
+  if (body === null || typeof body !== "object") return body;
+  const { material_code: _unused, ...rest } = body as Record<string, unknown>;
+  return rest;
+}
+
 function toEvent(job: ExportJob) {
   const base = {
     id: job.id,
@@ -44,10 +55,14 @@ function toEvent(job: ExportJob) {
 async function runJob(store: JobStore, jobId: string, body: unknown): Promise<void> {
   store.update(jobId, { status: "running", progress: 10 });
   try {
+    // ADR-018: web→api приймає material_code, але cad-worker Pydantic має
+    // extra="forbid" — strip перед форвардом. material_code знадобиться при
+    // drafts-persistence (Phase 3+); поки лише доходить до API.
+    const cadBody = stripMaterialCode(body);
     const upstream = await fetch(`${env.CAD_WORKER_URL}/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(cadBody),
     });
     if (!upstream.ok) {
       const detail = (await upstream.text().catch(() => "")).slice(0, 256);

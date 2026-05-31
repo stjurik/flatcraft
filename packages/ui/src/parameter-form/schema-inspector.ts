@@ -8,10 +8,20 @@
  *   - ZodUnion з ZodLiteral-варіантів (number radio/select).
  * Решта (ZodArray, ZodObject) — `unsupported` дескриптор, AutoForm покаже
  * предупередження. Реальний holes-editor — окремий компонент (Phase 2.5).
+ *
+ * Phase 2.12 (ADR-017): кожне поле може отримати .group / .label з Zod
+ * `_def.description` у форматі `group:G|label:L`. Невідомі ключі — ігнор.
  */
 import { z } from "zod";
 
-export interface NumberField {
+interface CommonMeta {
+  /** Назва секції (fieldset/legend) у редакторі. */
+  readonly group?: string;
+  /** Лейбл поля (override до AutoFormLabels). */
+  readonly label?: string;
+}
+
+export interface NumberField extends CommonMeta {
   readonly kind: "number";
   readonly name: string;
   readonly min?: number;
@@ -20,26 +30,46 @@ export interface NumberField {
   readonly isInt: boolean;
 }
 
-export interface EnumField {
+export interface EnumField extends CommonMeta {
   readonly kind: "enum";
   readonly name: string;
   /** Список допустимих значень, у порядку оголошення. */
   readonly options: ReadonlyArray<number | string>;
 }
 
-export interface LiteralField {
+export interface LiteralField extends CommonMeta {
   readonly kind: "literal";
   readonly name: string;
   readonly value: number | string | boolean;
 }
 
-export interface UnsupportedField {
+export interface UnsupportedField extends CommonMeta {
   readonly kind: "unsupported";
   readonly name: string;
   readonly reason: string;
 }
 
 export type FieldDescriptor = NumberField | EnumField | LiteralField | UnsupportedField;
+
+/**
+ * Парсить `.describe("group:G|label:L")` у структуру. Невідомі ключі
+ * ігноруємо мовчки — це не валідаційний контракт, а метадані рендеру.
+ * Пробіли навколо `:` і `|` обрізаються; значення можуть містити пробіли.
+ */
+export function parseDescription(text: string | undefined): CommonMeta {
+  if (!text) return {};
+  const result: { group?: string; label?: string } = {};
+  for (const part of text.split("|")) {
+    const idx = part.indexOf(":");
+    if (idx < 0) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (!value) continue;
+    if (key === "group") result.group = value;
+    else if (key === "label") result.label = value;
+  }
+  return result;
+}
 
 interface NumberCheck {
   readonly kind: string;
@@ -79,7 +109,7 @@ function tryLiteralUnion(name: string, schema: z.ZodTypeAny): EnumField | null {
   return { kind: "enum", name, options: literals };
 }
 
-function describeField(name: string, schema: z.ZodTypeAny): FieldDescriptor {
+function describeFieldRaw(name: string, schema: z.ZodTypeAny): FieldDescriptor {
   if (schema instanceof z.ZodNumber) {
     return describeNumber(name, schema._def);
   }
@@ -96,7 +126,7 @@ function describeField(name: string, schema: z.ZodTypeAny): FieldDescriptor {
   const unionEnum = tryLiteralUnion(name, schema);
   if (unionEnum) return unionEnum;
   if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
-    return describeField(name, schema._def.innerType as z.ZodTypeAny);
+    return describeFieldRaw(name, schema._def.innerType as z.ZodTypeAny);
   }
   if (schema instanceof z.ZodArray) {
     return { kind: "unsupported", name, reason: "array fields rendered by dedicated editor" };
@@ -109,6 +139,17 @@ function describeField(name: string, schema: z.ZodTypeAny): FieldDescriptor {
     name,
     reason: `unhandled Zod type: ${schema._def.typeName ?? "?"}`,
   };
+}
+
+/**
+ * Wrapper що накладає group/label з `.describe(...)`. Description лежить
+ * на безпосередньому schema (а не у внутрішньому wrapped) — тому читаємо
+ * з `schema.description` ПЕРЕД рекурсією у innerType (optional/nullable).
+ */
+function describeField(name: string, schema: z.ZodTypeAny): FieldDescriptor {
+  const meta = parseDescription(schema.description);
+  const raw = describeFieldRaw(name, schema);
+  return { ...raw, ...meta } as FieldDescriptor;
 }
 
 /**

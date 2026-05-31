@@ -1,7 +1,11 @@
 "use client";
 
-import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
-import { useDebouncedValue } from "@flatcraft/ui";
+import {
+  LBracketParametersSchema,
+  type LBracketParameters,
+  type MaterialChoice,
+} from "@flatcraft/types";
+import { MaterialSection, useDebouncedValue, type MaterialSelection } from "@flatcraft/ui";
 import { useMemo, useState } from "react";
 
 import { ExportButton } from "./export-button";
@@ -10,25 +14,26 @@ import { LBracketViewport } from "./l-bracket-viewport";
 
 interface LBracketStudioProps {
   readonly initialParameters: LBracketParameters;
+  readonly materials: ReadonlyArray<MaterialChoice>;
 }
 
 const VIEWPORT_DEBOUNCE_MS = 100;
+const DEFAULT_MATERIAL_CODE = "cold_rolled_steel";
+const DEFAULT_THICKNESS_MM = 2.0;
 
 /**
- * Lift-state контейнер для L-bracket: редактор параметрів + 3D viewport
- * діляться одним state-ом.
+ * Lift-state контейнер для L-bracket: editor + viewport + material/thickness.
  *
- * Editor читає live-параметри (instant input feedback + live-валідація).
- * Viewport отримує debounced-копію — ExtrudeGeometry-rebuild не блокує
- * клавіш-події при швидкому скролі чисел. 100мс = CLAUDE.md §9 поріг.
- *
- * thickness — Phase 3 додасть UI-вибір через MaterialPicker; поки 2.0
- * (CLAUDE.md §7 — мінімум типового діапазону для L-bracket).
+ * Phase 2.12: material+thickness — controlled state у студії, передається
+ * у `<MaterialSection>` (зверху форми) і у ExportRequest (ADR-018).
  */
-export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
+export function LBracketStudio({ initialParameters, materials }: LBracketStudioProps) {
   const [parameters, setParameters] = useState<LBracketParameters>(initialParameters);
+  const [material, setMaterial] = useState<MaterialSelection>({
+    materialCode: DEFAULT_MATERIAL_CODE,
+    thicknessMm: DEFAULT_THICKNESS_MM,
+  });
   const debouncedParameters = useDebouncedValue(parameters, VIEWPORT_DEBOUNCE_MS);
-  const thicknessMm = 2.0;
 
   const isValid = useMemo(
     () => LBracketParametersSchema.safeParse(parameters).success,
@@ -38,20 +43,21 @@ export function LBracketStudio({ initialParameters }: LBracketStudioProps) {
   return (
     <div data-testid="l-bracket-studio" className="flex flex-col gap-4">
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-        <div className="flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-          <h2 className="text-lg font-semibold text-zinc-100">Параметри</h2>
+        <div className="flex flex-col gap-4">
+          <MaterialSection materials={materials} value={material} onChange={setMaterial} />
           <LBracketEditor value={parameters} onChange={setParameters} />
           <ExportButton
             request={{
               template_slug: "l_bracket",
               parameters,
-              thickness_mm: thicknessMm,
+              material_code: material.materialCode,
+              thickness_mm: material.thicknessMm,
             }}
             disabled={!isValid}
           />
         </div>
 
-        <LBracketViewport parameters={debouncedParameters} thicknessMm={thicknessMm} />
+        <LBracketViewport parameters={debouncedParameters} thicknessMm={material.thicknessMm} />
       </div>
     </div>
   );

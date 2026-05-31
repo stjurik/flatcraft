@@ -10,6 +10,11 @@ export interface AutoFormLabels {
   readonly [fieldName: string]: string;
 }
 
+export interface AutoFormGroups {
+  /** Назва групи для поля (override до Zod `.describe()`). */
+  readonly [fieldName: string]: string;
+}
+
 export interface AutoFormProps<TValues extends Record<string, unknown>> {
   readonly schema: z.ZodObject<z.ZodRawShape>;
   readonly value: TValues;
@@ -18,19 +23,37 @@ export interface AutoFormProps<TValues extends Record<string, unknown>> {
   readonly labels?: AutoFormLabels;
   /** Помилки на полях; ключ — name. Поля з помилками виділяються червоним. */
   readonly errors?: FieldErrors;
-  /** Перевизначити рендер для конкретного поля (наприклад, holes-editor). */
+  /** Override для рендеру конкретного поля (наприклад, holes-editor). */
   readonly renderField?: (descriptor: FieldDescriptor, value: unknown) => React.ReactNode | null;
+  /**
+   * Override назв груп per-field (fallback якщо у Zod `.describe()` group
+   * не вказано). Поля без group попадають у дефолтну «Загальне».
+   */
+  readonly groups?: AutoFormGroups;
+  /** Як називати дефолтну групу для незгрупованих полів. Default — «Загальне». */
+  readonly defaultGroupLabel?: string;
 }
 
-const INPUT_BASE = "rounded-md border bg-zinc-950 px-3 py-2 text-zinc-100 focus:outline-none";
-const INPUT_OK = "border-zinc-800 focus:border-zinc-600";
-const INPUT_ERR = "border-red-700 focus:border-red-500";
+// Phase 2.11 tokens — лише warm-industrial, без zinc/red hardcoded.
+const INPUT_BASE =
+  "min-h-tap w-full rounded-sm border border-border bg-surface-sunken px-3 py-2 text-sm text-fg " +
+  "placeholder:text-fg-subtle " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-border-strong " +
+  "disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-fg-subtle " +
+  "transition-colors duration-fast ease-out";
+const INPUT_INVALID = "border-danger ring-2 ring-danger/20";
+
+const FIELDSET_CLASS = "mb-6 rounded-md border border-border bg-bg-elevated p-4 space-y-3";
+const LEGEND_CLASS = "px-2 text-base font-semibold text-fg";
 
 /**
- * Generic auto-form: будує controlled-форму з Zod-схеми.
+ * Generic auto-form: будує controlled-форму з Zod-схеми. Phase 2.12
+ * рендерить поля згрупованими у `<fieldset>` за метаданими з Zod
+ * `.describe("group:G|label:L")` (див. ADR-017). Дефолтна група
+ * «Загальне» — внизу.
  *
  * Валідація — зовнішня (Studio контейнер передає `errors`). AutoForm
- * лише підсвічує поля з помилками (border-red + aria-invalid) і рендерить
+ * лише підсвічує поля з помилками (border-danger + aria-invalid) і рендерить
  * inline-message під полем.
  */
 export function AutoForm<TValues extends Record<string, unknown>>({
@@ -40,6 +63,8 @@ export function AutoForm<TValues extends Record<string, unknown>>({
   labels,
   errors,
   renderField,
+  groups,
+  defaultGroupLabel = "Загальне",
 }: AutoFormProps<TValues>) {
   const descriptors = useMemo(() => introspectSchema(schema), [schema]);
 
@@ -47,53 +72,87 @@ export function AutoForm<TValues extends Record<string, unknown>>({
     onChange({ ...value, [name]: next } as TValues);
   };
 
+  // Групуємо у Map зі стабільним порядком появи першого поля кожної групи;
+  // дефолтна група завжди йде останньою, незалежно від моменту появи.
+  const grouped = useMemo(() => {
+    const map = new Map<string, FieldDescriptor[]>();
+    for (const d of descriptors) {
+      const groupName = groups?.[d.name] ?? d.group ?? defaultGroupLabel;
+      const bucket = map.get(groupName);
+      if (bucket) bucket.push(d);
+      else map.set(groupName, [d]);
+    }
+    // Перенесемо defaultGroupLabel у кінець, якщо існує.
+    if (map.has(defaultGroupLabel) && map.size > 1) {
+      const tail = map.get(defaultGroupLabel)!;
+      map.delete(defaultGroupLabel);
+      map.set(defaultGroupLabel, tail);
+    }
+    return map;
+  }, [descriptors, groups, defaultGroupLabel]);
+
   return (
-    <div data-testid="auto-form" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {descriptors.map((d) => {
-        const fieldValue = value[d.name];
-        const fieldErrors = errors?.[d.name] ?? [];
-        const override = renderField?.(d, fieldValue);
-        if (override !== undefined) return <div key={d.name}>{override}</div>;
-
-        const label = labels?.[d.name] ?? d.name;
-
-        if (d.kind === "number") {
-          return (
-            <NumberInput
-              key={d.name}
-              descriptor={d}
-              label={label}
-              value={typeof fieldValue === "number" ? fieldValue : 0}
-              onChange={(v) => setField(d.name, v)}
-              errors={fieldErrors}
-            />
-          );
-        }
-        if (d.kind === "enum") {
-          return (
-            <EnumSelect
-              key={d.name}
-              descriptor={d}
-              label={label}
-              value={fieldValue as number | string}
-              onChange={(v) => setField(d.name, v)}
-              errors={fieldErrors}
-            />
-          );
-        }
-        if (d.kind === "literal") {
-          return <LiteralDisplay key={d.name} descriptor={d} label={label} />;
-        }
-        return (
-          <p
-            key={d.name}
-            data-testid={`auto-form-unsupported-${d.name}`}
-            className="text-xs text-zinc-500"
-          >
-            {label}: {d.reason}
-          </p>
-        );
-      })}
+    <div data-testid="auto-form" className="flex flex-col">
+      {Array.from(grouped.entries()).map(([groupName, fields]) => (
+        <fieldset
+          key={groupName}
+          data-testid={`auto-form-group-${groupName}`}
+          className={FIELDSET_CLASS}
+        >
+          <legend className={LEGEND_CLASS}>{groupName}</legend>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {fields.map((d) => {
+              const fieldValue = value[d.name];
+              const fieldErrors = errors?.[d.name] ?? [];
+              const override = renderField?.(d, fieldValue);
+              if (override !== undefined) {
+                return (
+                  <div key={d.name} className="sm:col-span-2">
+                    {override}
+                  </div>
+                );
+              }
+              const label = labels?.[d.name] ?? d.label ?? d.name;
+              if (d.kind === "number") {
+                return (
+                  <NumberInput
+                    key={d.name}
+                    descriptor={d}
+                    label={label}
+                    value={typeof fieldValue === "number" ? fieldValue : 0}
+                    onChange={(v) => setField(d.name, v)}
+                    errors={fieldErrors}
+                  />
+                );
+              }
+              if (d.kind === "enum") {
+                return (
+                  <EnumSelect
+                    key={d.name}
+                    descriptor={d}
+                    label={label}
+                    value={fieldValue as number | string}
+                    onChange={(v) => setField(d.name, v)}
+                    errors={fieldErrors}
+                  />
+                );
+              }
+              if (d.kind === "literal") {
+                return <LiteralDisplay key={d.name} descriptor={d} label={label} />;
+              }
+              return (
+                <p
+                  key={d.name}
+                  data-testid={`auto-form-unsupported-${d.name}`}
+                  className="text-fg-muted text-xs"
+                >
+                  {label}: {d.reason}
+                </p>
+              );
+            })}
+          </div>
+        </fieldset>
+      ))}
     </div>
   );
 }
@@ -109,18 +168,18 @@ function FieldShell({ name, label, errors, children }: FieldShellProps) {
   const hasError = errors.length > 0;
   return (
     <label
-      className="flex flex-col gap-1 text-sm"
+      className="flex flex-col gap-1.5 text-sm"
       htmlFor={`param-${name}`}
       data-testid={`field-${name}`}
       data-invalid={hasError ? "true" : "false"}
     >
-      <span className={hasError ? "text-red-300" : "text-zinc-400"}>{label}</span>
+      <span className="text-fg font-medium">{label}</span>
       {children}
       {hasError ? (
         <ul
           id={`param-${name}-error`}
           data-testid={`field-error-${name}`}
-          className="text-xs text-red-300"
+          className="text-danger text-xs"
         >
           {errors.map((msg) => (
             <li key={msg}>{msg}</li>
@@ -156,7 +215,7 @@ function NumberInput({ descriptor, label, value, onChange, errors }: NumberInput
         aria-invalid={hasError}
         aria-describedby={hasError ? `${id}-error` : undefined}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={`${INPUT_BASE} ${hasError ? INPUT_ERR : INPUT_OK}`}
+        className={`${INPUT_BASE} ${hasError ? INPUT_INVALID : ""}`}
       />
     </FieldShell>
   );
@@ -183,7 +242,7 @@ function EnumSelect({ descriptor, label, value, onChange, errors }: EnumSelectPr
         aria-invalid={hasError}
         aria-describedby={hasError ? `${id}-error` : undefined}
         onChange={(e) => onChange(numeric ? Number(e.target.value) : e.target.value)}
-        className={`${INPUT_BASE} ${hasError ? INPUT_ERR : INPUT_OK}`}
+        className={`${INPUT_BASE} ${hasError ? INPUT_INVALID : ""}`}
       >
         {descriptor.options.map((opt) => (
           <option key={String(opt)} value={String(opt)}>
@@ -202,9 +261,9 @@ interface LiteralDisplayProps {
 
 function LiteralDisplay({ descriptor, label }: LiteralDisplayProps) {
   return (
-    <div className="flex flex-col gap-1 text-sm" data-testid={`literal-${descriptor.name}`}>
-      <span className="text-zinc-400">{label}</span>
-      <span className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-500">
+    <div className="flex flex-col gap-1.5 text-sm" data-testid={`literal-${descriptor.name}`}>
+      <span className="text-fg font-medium">{label}</span>
+      <span className="min-h-tap border-border bg-surface-muted text-fg-subtle rounded-sm border px-3 py-2">
         {String(descriptor.value)}
       </span>
     </div>

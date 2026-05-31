@@ -23,6 +23,7 @@ const VALID_REQUEST = {
     width_mm: 100,
     holes: [],
   },
+  material_code: "cold_rolled_steel",
   thickness_mm: 2,
 };
 
@@ -148,6 +149,41 @@ describe("POST /exports — async flow", () => {
     });
     expect(res.statusCode).toBe(404);
     expect(res.json<{ error: string }>().error).toBe("job_not_found");
+  });
+
+  it("ADR-018: material_code приймається на /exports, але обрізається перед cad-worker", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const create = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: VALID_REQUEST,
+    });
+    expect(create.statusCode).toBe(202);
+    await flushAsync();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0];
+    const forwarded = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(forwarded.template_slug).toBe("l_bracket");
+    expect(forwarded.thickness_mm).toBe(2);
+    expect(forwarded.parameters).toBeDefined();
+    expect(forwarded).not.toHaveProperty("material_code");
+  });
+
+  it("400 коли material_code відсутній — нова обов'язковість (Phase 2.12)", async () => {
+    const { material_code: _omit, ...payloadWithoutMaterial } = VALID_REQUEST;
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: payloadWithoutMaterial,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("GET /exports/:id/events: для done job шле data-event і одразу закриває", async () => {

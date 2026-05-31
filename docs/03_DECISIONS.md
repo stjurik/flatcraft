@@ -394,6 +394,74 @@
 
 ---
 
+## ADR-017: Group metadata у Zod через `.describe("group:G|label:L")`
+
+**Статус:** Accepted (2026-05-30)
+
+**Контекст:** Phase 2.12 потребує згрупованих секцій у редакторі (Полиця A, Полиця B, Гиб, Отвори тощо) замість плоского grid'а. AutoForm (Phase 2.4) — generic, інтроспектує `ZodObject.shape` у плоский список `FieldDescriptor`. Треба домен-знання (яке поле в яку секцію) донести з пакета `@flatcraft/types` (де живуть схеми) до пакета `@flatcraft/ui` (де живе AutoForm), **не вводячи новий канал** і не дублюючи map на стороні UI.
+
+Розглянуті механізми:
+
+1. Окремий map у кожному `XEditor.tsx` (`groups: { legA_mm: "Полиця A", ... }`) — дублювання, легко розсинхронізувати з полями схеми.
+2. Розширити Zod-схему власною обгорткою (`groupedNumber(20, 500, "Полиця A")`) — нова DSL, ламає сумісність з generic `safeParse`.
+3. `.describe(text)` — нативний Zod API, зберігає метадані у `_def.description` і не впливає на валідацію. Парсимо як `key:value|key:value` (простий і недо-розширюваний формат).
+
+**Рішення:** `.describe("group:<Назва секції>|label:<Лейбл>")` на полях. `schema-inspector` парсить description через pure-helper `parseDescription` і кладе у `FieldDescriptor.group` / `.label`. AutoForm рендерить групи як `<fieldset><legend>...</legend>`, незгруповані поля потрапляють у дефолтну секцію «Загальне» внизу. Як fallback (для legacy / зовнішніх схем) залишаємо два props на AutoForm: `groups?: Record<name, string>` і `labels?: Record<name, string>`.
+
+**Тригер перегляду:** якщо групувань стане >3 рівнів вкладеності або потрібні умовні групи (наприклад, «приховати секцію X, якщо Y=0») — переходимо на JSON-schema annotations через `superRefine` або власну окрему `FieldRegistry` поза Zod. Phase 2.12 цього не потребує.
+
+**Наслідки:**
+
+- ✅ Метадані живуть **поряд з валідацією** — змінив `legA_mm` → одразу видно і обмеження, і групу/лейбл.
+- ✅ `parseDescription` — pure helper з 3 unit-тестами; інтегрується у `introspectSchema` без зміни сигнатури `AutoFormProps`.
+- ✅ Зворотна сумісність: схеми без `.describe()` рендеряться як раніше (поля → «Загальне»).
+- ⚠ Формат key:value — це наш стрінговий «протокол». Якщо забути крапку чи лапку — поле тихо опиниться у «Загальне». Перевірка — тест на parseDescription + e2e на наявність очікуваних legends.
+- ⚠ `_def.description` офіційно публічне API Zod 3.x; у Zod 4.x signature може помінятись — мігруємо разом з апгрейдом.
+- ❌ i18n: один опис = одна мова (українська). Для en-локалі — або другий describe-namespace, або вертатись до зовнішнього map (Phase post-MVP).
+
+**Альтернативи:**
+
+- `JSON-schema annotations`: важче, generic, але вимагає side-table maintenance.
+- Окремий `meta` ZodObject поряд із Schema: дублювання списку полів.
+- `superRefine` + symbol-keyed metadata: тонко, але невидимо у devtools і не серіалізується у zod-to-openapi (важливо post-MVP).
+
+---
+
+## ADR-018: `material_code` доставляється до API, але обрізається перед cad-worker'ом
+
+**Статус:** Accepted (2026-05-30)
+
+**Контекст:** Phase 2.12 додає селектор матеріалу до студії — користувач обирає матеріал перед експортом, і це значення має потрапити у потенційний `drafts`-store, історію експортів, ліміти за матеріалами тощо (Phase 3+). Поточний flow Phase 2.7–2.10: `web → POST /exports → cad-worker /export → DXF/PDF`, БЕЗ persistence draft'а. Python `ExportRequest` має `ConfigDict(extra="forbid")` — будь-яке нове поле = 400.
+
+Два сторони контракту:
+
+1. **Web ↔ API:** має бути повний payload з `material_code` — щоб API міг логувати, а пізніше зберігати у `model_drafts`/`usage_quota` (Phase 3+).
+2. **API ↔ cad-worker:** cad-worker малює геометрію, матеріал НЕ впливає на DXF (k-фактор та layer-структуру міняє тільки товщина; матеріал відображається лише у PDF header — Phase 2.9, але це поле не передається у поточному імплементі). Тож material_code тут лишній шум.
+
+**Рішення:**
+
+1. `ExportRequestSchema` (`packages/types/src/domain/export.ts`): додати **обов'язкове** `material_code: z.string().min(1)` до всіх 5 варіантів discriminatedUnion.
+2. `apps/api/src/routes/exports.ts:runJob`: destructure-нути `{ material_code: _materialCode, ...cadBody }` і форвардити cad-worker'у тільки `cadBody`. Pino-лог фіксує `material_code` (без PII-конфлікту — це довідник).
+3. Python cad-worker і його Pydantic `ExportRequest` лишаються незмінними (`extra="forbid"` зберігається).
+
+**Тригер перегляду:** коли з'явиться `drafts`-persistence (Phase 3+ — POST /v1/drafts створює запис, експорт стартує з draft_id) — material_code природньо переїде у `model_drafts`-таблицю, а ExportRequest до cad-worker'а може отримати materials.density для розрахунку маси у PDF (Phase 2.9 BOM). Тоді ADR-018 superseded.
+
+**Наслідки:**
+
+- ✅ Один цикл деплою: web-форма вже шле material_code; як тільки drafts з'являться, бекенд починає його зберігати без зміни клієнта.
+- ✅ Python untouched — нульовий ризик регресій у CAD-pipeline.
+- ✅ E2E може робити assert на тіло POST /exports (не лише на UI state).
+- ⚠ Поле здається «магічно зникаючим» між web і cad-worker. Документую коментарем у `runJob` і у `exports.ts`.
+- ⚠ Pino-лог пише `material_code` — не PII, але треба переконатись, що не у redact-list (за дефолтом не пише).
+- ❌ Невелика дисимметрія API/CAD-схем. Поки що економічно виправдано: уникаємо роботи у Python без use-case.
+
+**Альтернативи:**
+
+- **A. Pydantic `extra="allow"` або явне `material_code: str = ""`** — змушує мене лізти у workers/cad без причини; цей пакет — окремий пайплайн (uv/mypy/pytest), додатковий обхід CI.
+- **C. Не додавати у ExportRequest, а тримати лише у studio state** — e2e тоді перевіряє лише UI state, не request body; цінність тесту падає, а коли почнемо drafts — все одно треба буде розширити схему.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

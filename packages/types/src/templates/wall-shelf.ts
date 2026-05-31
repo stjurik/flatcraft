@@ -27,21 +27,43 @@ import { z } from "zod";
  */
 export const WallShelfParametersBaseSchema = z.object({
   /** Висота вертикальної back-стінки (на стіні), мм. */
-  back_height_mm: z.number().min(30).max(500),
+  back_height_mm: z
+    .number()
+    .min(30)
+    .max(500)
+    .describe("group:Задня полиця|label:Висота back-стінки (мм)"),
   /** Глибина горизонтальної shelf-площини, мм. */
-  shelf_depth_mm: z.number().min(50).max(500),
+  shelf_depth_mm: z.number().min(50).max(500).describe("group:Полиця|label:Глибина полиці (мм)"),
   /**
    * Висота переднього лопику, мм. Допустимі значення: 0 (без lip)
    * АБО проміжок [5, 100]. Cross-field constraint у refine нижче.
    */
-  front_lip_mm: z.number().min(0).max(100),
-  bend_radius_mm: z.union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)]),
-  bend_angle_deg: z.literal(90),
-  width_mm: z.number().min(100).max(3000),
-  mount_hole_diameter_mm: z.number().min(3).max(20),
-  mount_hole_rows: z.number().int().min(0).max(5),
-  mount_hole_cols: z.number().int().min(0).max(5),
-  mount_hole_margin_mm: z.number().min(5).max(50),
+  front_lip_mm: z
+    .number()
+    .min(0)
+    .max(100)
+    .describe("group:Фронт-губка|label:Висота губки (0 або ≥5 мм)"),
+  bend_radius_mm: z
+    .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
+    .describe("group:Гиби|label:Внутрішній радіус (мм)"),
+  bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
+  width_mm: z
+    .number()
+    .min(100)
+    .max(3000)
+    .describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
+  mount_hole_diameter_mm: z
+    .number()
+    .min(3)
+    .max(20)
+    .describe("group:Отвори монтажу|label:Діаметр (мм)"),
+  mount_hole_rows: z.number().int().min(0).max(5).describe("group:Отвори монтажу|label:Рядів"),
+  mount_hole_cols: z.number().int().min(0).max(5).describe("group:Отвори монтажу|label:Колонок"),
+  mount_hole_margin_mm: z
+    .number()
+    .min(5)
+    .max(50)
+    .describe("group:Отвори монтажу|label:Відступ від країв (мм)"),
 });
 
 /**

@@ -1,7 +1,11 @@
 "use client";
 
-import { WallShelfParametersSchema, type WallShelfParameters } from "@flatcraft/types";
-import { useDebouncedValue } from "@flatcraft/ui";
+import {
+  WallShelfParametersSchema,
+  type WallShelfParameters,
+  type MaterialChoice,
+} from "@flatcraft/types";
+import { MaterialSection, useDebouncedValue, type MaterialSelection } from "@flatcraft/ui";
 import { useMemo, useState } from "react";
 
 import { ExportButton } from "./export-button";
@@ -10,14 +14,20 @@ import { WallShelfViewport } from "./wall-shelf-viewport";
 
 interface WallShelfStudioProps {
   readonly initialParameters: WallShelfParameters;
+  readonly materials: ReadonlyArray<MaterialChoice>;
 }
 
 const VIEWPORT_DEBOUNCE_MS = 100;
+const DEFAULT_MATERIAL_CODE = "cold_rolled_steel";
+const DEFAULT_THICKNESS_MM = 2.0;
 
-export function WallShelfStudio({ initialParameters }: WallShelfStudioProps) {
+export function WallShelfStudio({ initialParameters, materials }: WallShelfStudioProps) {
   const [parameters, setParameters] = useState<WallShelfParameters>(initialParameters);
+  const [material, setMaterial] = useState<MaterialSelection>({
+    materialCode: DEFAULT_MATERIAL_CODE,
+    thicknessMm: DEFAULT_THICKNESS_MM,
+  });
   const debouncedParameters = useDebouncedValue(parameters, VIEWPORT_DEBOUNCE_MS);
-  const thicknessMm = 2.0;
 
   const isValid = useMemo(
     () => WallShelfParametersSchema.safeParse(parameters).success,
@@ -27,20 +37,21 @@ export function WallShelfStudio({ initialParameters }: WallShelfStudioProps) {
   return (
     <div data-testid="wall-shelf-studio" className="flex flex-col gap-4">
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-        <div className="flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-          <h2 className="text-lg font-semibold text-zinc-100">Параметри</h2>
+        <div className="flex flex-col gap-4">
+          <MaterialSection materials={materials} value={material} onChange={setMaterial} />
           <WallShelfEditor value={parameters} onChange={setParameters} />
           <ExportButton
             request={{
               template_slug: "wall_shelf",
               parameters,
-              thickness_mm: thicknessMm,
+              material_code: material.materialCode,
+              thickness_mm: material.thicknessMm,
             }}
             disabled={!isValid}
           />
         </div>
 
-        <WallShelfViewport parameters={debouncedParameters} thicknessMm={thicknessMm} />
+        <WallShelfViewport parameters={debouncedParameters} thicknessMm={material.thicknessMm} />
       </div>
     </div>
   );
