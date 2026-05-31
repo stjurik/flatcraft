@@ -4,6 +4,7 @@
  * shaking lucide-react: ESM-резолвер тягне рівно ці.
  */
 export {
+  Activity,
   AlertCircle,
   ArrowRight,
   Check,
@@ -11,14 +12,21 @@ export {
   Download,
   Edit3,
   FileDown,
+  Gift,
+  Github,
+  Heart,
   Info,
+  LayoutGrid,
   Minus,
   Plus,
   RotateCcw,
   Settings,
+  Sliders,
   Square,
   Trash2,
   Undo2,
   X,
   XCircle,
 } from "lucide-react";
+
+export type { LucideIcon } from "lucide-react";

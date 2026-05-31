@@ -4,6 +4,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { SiteLinks } from "../components/site-links";
 import "./globals.css";
 
 /**
@@ -26,8 +27,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "hart.crimea.ua — параметричний CAD для листового металу",
   description:
-    "Параметричний CAD для виробів з листового металу: DXF, PDF, STEP. " +
-    "Безкоштовно, без CAD-навичок. Соціальний проєкт на підтримку ЗСУ.",
+    "Креслення листового металу за 60 секунд. Без CAD-навичок. " +
+    "10 експортів/міс безкоштовно. Соціальний проєкт на підтримку ЗСУ.",
+  // TODO(Phase 2.16): додати /og-default.png (1200×630 з логотипом +
+  // headline) і прокинути сюди як openGraph.images. Поки не блокуємо
+  // лендінг — соцмережі показують default-preview без image.
 };
 
 export const viewport: Viewport = {
@@ -51,7 +55,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <div aria-hidden="true" />
         </header>
         <main className="flex flex-1 flex-col">{children}</main>
-        <Footer />
+        <Footer linksSlot={<SiteLinks />} />
       </body>
     </html>
   );
