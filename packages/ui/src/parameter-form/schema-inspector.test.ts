@@ -163,9 +163,11 @@ describe("introspectSchema — LBracketParametersSchema (real fixture)", () => {
   });
 
   it("bend_radius_mm — EnumField з [1, 2.5, 4, 5]", () => {
+    // toMatchObject — щоб group/label з `.describe()` (Phase 2.12) не ламали
+    // інваріант core-дескриптора (kind/name/options).
     const fields = introspectSchema(LBracketParametersSchema);
     const radius = fields.find((f) => f.name === "bend_radius_mm");
-    expect(radius).toEqual({
+    expect(radius).toMatchObject({
       kind: "enum",
       name: "bend_radius_mm",
       options: [1, 2.5, 4, 5],
@@ -175,7 +177,7 @@ describe("introspectSchema — LBracketParametersSchema (real fixture)", () => {
   it("bend_angle_deg — LiteralField(90)", () => {
     const fields = introspectSchema(LBracketParametersSchema);
     const angle = fields.find((f) => f.name === "bend_angle_deg");
-    expect(angle).toEqual({ kind: "literal", name: "bend_angle_deg", value: 90 });
+    expect(angle).toMatchObject({ kind: "literal", name: "bend_angle_deg", value: 90 });
   });
 
   it("holes — unsupported (буде окремий holes-editor у Phase 2.5)", () => {
