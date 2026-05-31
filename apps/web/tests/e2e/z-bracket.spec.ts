@@ -8,7 +8,10 @@ test.describe("/templates/z_bracket — Z-bracket studio (Phase 2.10)", () => {
     });
 
     await page.goto("/templates");
-    await page.locator('[data-testid="template-card"][data-slug="z_bracket"]').click();
+    await page
+      .locator('[data-testid="template-card"][data-slug="z_bracket"]')
+      .getByTestId("template-card-cta")
+      .click();
 
     await expect(page).toHaveURL("/templates/z_bracket");
     await expect(page.getByTestId("template-detail-title")).toHaveText("Z-кронштейн");

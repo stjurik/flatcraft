@@ -10,7 +10,10 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
     });
 
     await page.goto("/templates");
-    await page.locator('[data-testid="template-card"][data-slug="perforated_panel"]').click();
+    await page
+      .locator('[data-testid="template-card"][data-slug="perforated_panel"]')
+      .getByTestId("template-card-cta")
+      .click();
 
     await expect(page).toHaveURL("/templates/perforated_panel");
     await expect(page.getByTestId("template-detail-title")).toHaveText("Перфо-панель");
