@@ -9,6 +9,7 @@ import {
   WallShelfParametersSchema,
   ZBracketParametersSchema,
   Z_BRACKET_DEFAULT_PARAMETERS,
+  type MaterialChoice,
 } from "@flatcraft/types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -18,7 +19,7 @@ import { LBracketStudio } from "../../../components/l-bracket-studio";
 import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
 import { WallShelfStudio } from "../../../components/wall-shelf-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
-import { fetchTemplate } from "../../../lib/api";
+import { fetchMaterials, fetchTemplate } from "../../../lib/api";
 
 interface PageProps {
   readonly params: Promise<{ slug: string }>;
@@ -28,39 +29,44 @@ export async function generateMetadata({ params }: PageProps) {
   const { slug } = await params;
   const template = await fetchTemplate(slug).catch(() => null);
   return {
-    title: template ? `${template.nameUk} · flatcraft` : "Шаблон не знайдено · flatcraft",
+    title: template ? `${template.nameUk} · hart` : "Шаблон не знайдено · hart",
   };
 }
 
 export default async function TemplatePage({ params }: PageProps) {
   const { slug } = await params;
-  const template = await fetchTemplate(slug);
+  // Materials і template можна fetch'ити паралельно — обидва server-side.
+  const [template, materials] = await Promise.all([fetchTemplate(slug), fetchMaterials()]);
   if (!template) notFound();
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-12">
       <header className="flex flex-col gap-2">
-        <Link href="/templates" className="text-sm text-zinc-500 hover:text-zinc-300">
+        <Link href="/templates" className="text-fg-muted hover:text-fg text-sm">
           ← Усі шаблони
         </Link>
         <h1
-          className="text-4xl font-bold tracking-tight text-zinc-50"
+          className="font-display text-fg text-4xl font-semibold tracking-tight"
           data-testid="template-detail-title"
         >
           {template.nameUk}
         </h1>
         {template.descriptionUk ? (
-          <p className="max-w-2xl text-zinc-400">{template.descriptionUk}</p>
+          <p className="text-fg-muted max-w-2xl">{template.descriptionUk}</p>
         ) : null}
         <p
-          className="text-xs uppercase tracking-wider text-zinc-600"
+          className="text-fg-subtle text-xs uppercase tracking-wider"
           data-testid="template-detail-slug"
         >
           {template.slug}
         </p>
       </header>
 
-      <TemplateStudio slug={template.slug} defaults={template.defaultParameters} />
+      <TemplateStudio
+        slug={template.slug}
+        defaults={template.defaultParameters}
+        materials={materials}
+      />
     </main>
   );
 }
@@ -68,15 +74,18 @@ export default async function TemplatePage({ params }: PageProps) {
 function TemplateStudio({
   slug,
   defaults,
+  materials,
 }: {
   readonly slug: string;
   readonly defaults: Record<string, unknown>;
+  readonly materials: ReadonlyArray<MaterialChoice>;
 }) {
   if (slug === "l_bracket") {
     const parsed = LBracketParametersSchema.safeParse(defaults);
     return (
       <LBracketStudio
         initialParameters={parsed.success ? parsed.data : L_BRACKET_DEFAULT_PARAMETERS}
+        materials={materials}
       />
     );
   }
@@ -85,6 +94,7 @@ function TemplateStudio({
     return (
       <ZBracketStudio
         initialParameters={parsed.success ? parsed.data : Z_BRACKET_DEFAULT_PARAMETERS}
+        materials={materials}
       />
     );
   }
@@ -93,6 +103,7 @@ function TemplateStudio({
     return (
       <CornerAngleStudio
         initialParameters={parsed.success ? parsed.data : CORNER_ANGLE_DEFAULT_PARAMETERS}
+        materials={materials}
       />
     );
   }
@@ -101,6 +112,7 @@ function TemplateStudio({
     return (
       <WallShelfStudio
         initialParameters={parsed.success ? parsed.data : WALL_SHELF_DEFAULT_PARAMETERS}
+        materials={materials}
       />
     );
   }
@@ -109,11 +121,12 @@ function TemplateStudio({
     return (
       <PerforatedPanelStudio
         initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
+        materials={materials}
       />
     );
   }
   return (
-    <p data-testid="template-editor-unsupported" className="text-sm text-zinc-500">
+    <p data-testid="template-editor-unsupported" className="text-fg-muted text-sm">
       Студія для slug «{slug}» з'явиться у наступних фазах.
     </p>
   );

@@ -4,8 +4,10 @@
  * Phase 2.10: discriminated union на slug. Кожен шаблон має свою
  * Zod-схему параметрів. Якщо payload не пройде discriminator — 400.
  *
- * thickness_mm — окремо від parameters (Phase 3.5 додасть MaterialPicker;
- * поки web передає 2.0 за замовчуванням).
+ * Phase 2.12: додано `material_code` — обов'язкове на web→api контракті.
+ * cad-worker його НЕ бачить (api strip'ить перед форвардом, ADR-018);
+ * поки матеріал не впливає на DXF — лише на майбутній drafts-storage
+ * (Phase 3+) і PDF header (Phase 2.9 + i18n після MVP).
  */
 import { z } from "zod";
 
@@ -17,31 +19,39 @@ import { PerforatedPanelParametersSchema } from "../templates/perforated-panel.j
 import { WallShelfParametersBaseSchema } from "../templates/wall-shelf.js";
 import { ZBracketParametersSchema } from "../templates/z-bracket.js";
 
+const MaterialCodeSchema = z.string().min(1).max(64);
+const ThicknessMmSchema = z.number().positive().max(10);
+
 export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
   z.object({
     template_slug: z.literal("l_bracket"),
     parameters: LBracketParametersSchema,
-    thickness_mm: z.number().positive().max(10),
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
   }),
   z.object({
     template_slug: z.literal("z_bracket"),
     parameters: ZBracketParametersSchema,
-    thickness_mm: z.number().positive().max(10),
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
   }),
   z.object({
     template_slug: z.literal("corner_angle"),
     parameters: CornerAngleParametersSchema,
-    thickness_mm: z.number().positive().max(10),
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
   }),
   z.object({
     template_slug: z.literal("wall_shelf"),
     parameters: WallShelfParametersBaseSchema,
-    thickness_mm: z.number().positive().max(10),
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
   }),
   z.object({
     template_slug: z.literal("perforated_panel"),
     parameters: PerforatedPanelParametersSchema,
-    thickness_mm: z.number().positive().max(10),
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
   }),
 ]);
 

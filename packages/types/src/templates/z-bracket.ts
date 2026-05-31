@@ -26,18 +26,24 @@ const HoleSchema = z.object({
 
 export const ZBracketParametersSchema = z.object({
   /** Довжина верхньої полиці (горизонтальна), мм. */
-  top_flange_mm: z.number().min(20).max(500),
+  top_flange_mm: z.number().min(20).max(500).describe("group:Верхня полиця|label:Довжина (мм)"),
   /** Довжина нижньої полиці, мм. */
-  bottom_flange_mm: z.number().min(20).max(500),
+  bottom_flange_mm: z.number().min(20).max(500).describe("group:Нижня полиця|label:Довжина (мм)"),
   /** Вертикальний offset між полицями = довжина середньої вертикальної секції, мм. */
-  offset_mm: z.number().min(20).max(500),
+  offset_mm: z
+    .number()
+    .min(20)
+    .max(500)
+    .describe("group:Середня полиця|label:Вертикальний offset (мм)"),
   /** Внутрішній радіус гиба, мм. */
-  bend_radius_mm: z.union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)]),
+  bend_radius_mm: z
+    .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
+    .describe("group:Гиби|label:Внутрішній радіус (мм)"),
   /** MVP: лише 90°. */
-  bend_angle_deg: z.literal(90),
+  bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
   /** Ширина (довжина гиба), мм. */
-  width_mm: z.number().min(20).max(3000),
-  holes: z.array(HoleSchema).max(20),
+  width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
+  holes: z.array(HoleSchema).max(20).describe("group:Отвори|label:Отвори"),
 });
 
 export type ZBracketParameters = z.infer<typeof ZBracketParametersSchema>;

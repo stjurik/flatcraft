@@ -26,16 +26,18 @@ const HoleSchema = z.object({
 
 export const LBracketParametersSchema = z.object({
   /** Висота вертикальної полиці, мм. */
-  legA_mm: z.number().min(20).max(500),
+  legA_mm: z.number().min(20).max(500).describe("group:Полиця A|label:Висота полиці A (мм)"),
   /** Глибина горизонтальної полиці, мм. */
-  legB_mm: z.number().min(20).max(500),
+  legB_mm: z.number().min(20).max(500).describe("group:Полиця B|label:Глибина полиці B (мм)"),
   /** Внутрішній радіус гиба, мм. Відповідає allowed_inner_radius_mm у bend-machine spec. */
-  bend_radius_mm: z.union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)]),
+  bend_radius_mm: z
+    .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
+    .describe("group:Гиб|label:Внутрішній радіус гиба (мм)"),
   /** MVP: лише 90°. Інші кути додамо post-launch. */
-  bend_angle_deg: z.literal(90),
+  bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
   /** Ширина L-кронштейна (довжина лінії гиба), мм. */
-  width_mm: z.number().min(20).max(3000),
-  holes: z.array(HoleSchema).max(20),
+  width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
+  holes: z.array(HoleSchema).max(20).describe("group:Отвори|label:Отвори"),
 });
 
 export type LBracketParameters = z.infer<typeof LBracketParametersSchema>;

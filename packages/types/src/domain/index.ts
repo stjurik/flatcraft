@@ -21,3 +21,12 @@ export {
   type ExportResponse,
   type JobStatus,
 } from "./export.js";
+
+export {
+  MaterialCategorySchema,
+  MaterialChoiceSchema,
+  MaterialListResponseSchema,
+  type MaterialCategory,
+  type MaterialChoice,
+  type MaterialListResponse,
+} from "./materials.js";

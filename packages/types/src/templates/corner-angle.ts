@@ -24,23 +24,33 @@ import { z } from "zod";
 
 export const CornerAngleParametersSchema = z.object({
   /** Висота вертикальної полиці, мм. */
-  legA_mm: z.number().min(20).max(500),
+  legA_mm: z.number().min(20).max(500).describe("group:Полиця A|label:Висота полиці A (мм)"),
   /** Глибина горизонтальної полиці, мм. */
-  legB_mm: z.number().min(20).max(500),
+  legB_mm: z.number().min(20).max(500).describe("group:Полиця B|label:Глибина полиці B (мм)"),
   /** Внутрішній радіус гиба, мм. */
-  bend_radius_mm: z.union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)]),
+  bend_radius_mm: z
+    .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
+    .describe("group:Гиб|label:Внутрішній радіус (мм)"),
   /** MVP: лише 90°. */
-  bend_angle_deg: z.literal(90),
+  bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
   /** Ширина (довжина гиба), мм. */
-  width_mm: z.number().min(20).max(3000),
+  width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
   /** Діаметр отворів, мм (один для всього grid). */
-  hole_diameter_mm: z.number().min(3).max(20),
+  hole_diameter_mm: z
+    .number()
+    .min(3)
+    .max(20)
+    .describe("group:Сітка отворів|label:Діаметр отвору (мм)"),
   /** Рядів отворів вздовж ширини (perpendicular to leg length). */
-  hole_rows: z.number().int().min(0).max(5),
+  hole_rows: z.number().int().min(0).max(5).describe("group:Сітка отворів|label:Рядів отворів"),
   /** Колонок отворів вздовж довжини полиці (parallel to leg length). */
-  hole_cols: z.number().int().min(0).max(5),
+  hole_cols: z.number().int().min(0).max(5).describe("group:Сітка отворів|label:Колонок отворів"),
   /** Мінімальна відстань від країв полиці до центра крайнього отвору, мм. */
-  hole_margin_mm: z.number().min(5).max(50),
+  hole_margin_mm: z
+    .number()
+    .min(5)
+    .max(50)
+    .describe("group:Сітка отворів|label:Відступ від країв (мм)"),
 });
 
 export type CornerAngleParameters = z.infer<typeof CornerAngleParametersSchema>;

@@ -79,6 +79,69 @@ describe("introspectSchema — атомарні випадки", () => {
   });
 });
 
+describe("group/label metadata (Phase 2.12)", () => {
+  it(".describe('group:G|label:L') → FieldDescriptor.group + .label", () => {
+    const schema = z.object({
+      legA_mm: z.number().min(20).describe("group:Полиця A|label:Висота (мм)"),
+    });
+    const [field] = introspectSchema(schema);
+    expect(field).toMatchObject({
+      kind: "number",
+      name: "legA_mm",
+      min: 20,
+      group: "Полиця A",
+      label: "Висота (мм)",
+    });
+  });
+
+  it("describe тільки з group — label лишається undefined (fallback на name)", () => {
+    const schema = z.object({
+      width_mm: z.number().describe("group:Загальне"),
+    });
+    const [field] = introspectSchema(schema);
+    expect(field?.group).toBe("Загальне");
+    expect(field?.label).toBeUndefined();
+  });
+
+  it("schema без .describe() → group/label undefined (legacy behaviour)", () => {
+    const schema = z.object({
+      width_mm: z.number().min(20),
+      holes: z.array(z.string()),
+    });
+    const fields = introspectSchema(schema);
+    expect(fields.every((f) => f.group === undefined && f.label === undefined)).toBe(true);
+  });
+
+  it("describe на array працює — unsupported field теж отримує group", () => {
+    const schema = z.object({
+      holes: z.array(z.string()).describe("group:Отвори|label:Отвори"),
+    });
+    const [field] = introspectSchema(schema);
+    expect(field).toMatchObject({
+      kind: "unsupported",
+      name: "holes",
+      group: "Отвори",
+      label: "Отвори",
+    });
+  });
+
+  it("describe на union літералів — group/label осідають на EnumField", () => {
+    const schema = z.object({
+      bend_radius_mm: z
+        .union([z.literal(1), z.literal(2.5)])
+        .describe("group:Гиб|label:Внутрішній радіус (мм)"),
+    });
+    const [field] = introspectSchema(schema);
+    expect(field).toMatchObject({
+      kind: "enum",
+      name: "bend_radius_mm",
+      options: [1, 2.5],
+      group: "Гиб",
+      label: "Внутрішній радіус (мм)",
+    });
+  });
+});
+
 describe("introspectSchema — LBracketParametersSchema (real fixture)", () => {
   it("повертає поля у порядку оголошення схеми", () => {
     const fields = introspectSchema(LBracketParametersSchema);
