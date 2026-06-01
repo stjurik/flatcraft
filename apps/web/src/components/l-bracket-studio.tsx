@@ -5,27 +5,34 @@ import {
   type LBracketParameters,
   type MaterialChoice,
 } from "@flatcraft/types";
-import { MaterialSection, useDebouncedValue, type MaterialSelection } from "@flatcraft/ui";
+import {
+  MaterialSection,
+  useDebouncedValue,
+  useIsMobile,
+  useReducedMotion,
+  viewportQuality,
+  type MaterialSelection,
+} from "@flatcraft/ui";
 import { useMemo, useState } from "react";
 
 import { ExportButton } from "./export-button";
 import { LBracketEditor } from "./l-bracket-editor";
 import { LBracketViewport } from "./l-bracket-viewport";
+import { StudioPreviewAnchor } from "./studio-preview-anchor";
 
 interface LBracketStudioProps {
   readonly initialParameters: LBracketParameters;
   readonly materials: ReadonlyArray<MaterialChoice>;
 }
 
-const VIEWPORT_DEBOUNCE_MS = 100;
 const DEFAULT_MATERIAL_CODE = "cold_rolled_steel";
 const DEFAULT_THICKNESS_MM = 2.0;
 
 /**
  * Lift-state контейнер для L-bracket: editor + viewport + material/thickness.
  *
- * Phase 2.12: material+thickness — controlled state у студії, передається
- * у `<MaterialSection>` (зверху форми) і у ExportRequest (ADR-018).
+ * Phase 2.14.a: debounce читається з `viewportQuality` — на mobile 250мс
+ * (зменшує rebuild-rate у 2.5×), на desktop 100мс, при reduced-motion 400мс.
  */
 export function LBracketStudio({ initialParameters, materials }: LBracketStudioProps) {
   const [parameters, setParameters] = useState<LBracketParameters>(initialParameters);
@@ -33,7 +40,10 @@ export function LBracketStudio({ initialParameters, materials }: LBracketStudioP
     materialCode: DEFAULT_MATERIAL_CODE,
     thicknessMm: DEFAULT_THICKNESS_MM,
   });
-  const debouncedParameters = useDebouncedValue(parameters, VIEWPORT_DEBOUNCE_MS);
+  const isMobile = useIsMobile();
+  const reduced = useReducedMotion();
+  const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
+  const debouncedParameters = useDebouncedValue(parameters, quality.debounceMs);
 
   const isValid = useMemo(
     () => LBracketParametersSchema.safeParse(parameters).success,
@@ -45,6 +55,7 @@ export function LBracketStudio({ initialParameters, materials }: LBracketStudioP
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
         <div className="flex flex-col gap-4">
           <MaterialSection materials={materials} value={material} onChange={setMaterial} />
+          <StudioPreviewAnchor />
           <LBracketEditor value={parameters} onChange={setParameters} />
           <ExportButton
             request={{

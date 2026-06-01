@@ -6,6 +6,9 @@ import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
 import { CylinderGeometry, ExtrudeGeometry, Shape } from "three";
 
+import { useIsMobile } from "../hooks/use-is-mobile.js";
+import { useReducedMotion } from "../hooks/use-reduced-motion.js";
+import { viewportQuality } from "../lib/viewport-quality.js";
 import { buildLBracketShapeCommands } from "./geometry.js";
 
 interface SceneProps {
@@ -141,17 +144,26 @@ function CornerAngle({ parameters, thicknessMm }: SceneProps) {
 }
 
 export function CornerAngleScene({ parameters, thicknessMm }: SceneProps) {
+  const isMobile = useIsMobile();
+  const reduced = useReducedMotion();
+  const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
+
   const maxDim = Math.max(parameters.legA_mm, parameters.legB_mm, parameters.width_mm);
   const camDist = maxDim * 1.8;
   return (
     <Canvas
+      dpr={[...quality.dpr]}
       camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
       data-testid="corner-angle-canvas"
     >
       <ambientLight intensity={0.55} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
       <CornerAngle parameters={parameters} thicknessMm={thicknessMm} />
-      <OrbitControls enablePan={false} />
+      <OrbitControls
+        enablePan={false}
+        enableZoom={quality.enableZoom}
+        enableRotate={quality.enableRotate}
+      />
     </Canvas>
   );
 }

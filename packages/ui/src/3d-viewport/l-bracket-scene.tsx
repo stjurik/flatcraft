@@ -6,6 +6,9 @@ import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
 import { ExtrudeGeometry, Shape } from "three";
 
+import { useIsMobile } from "../hooks/use-is-mobile.js";
+import { useReducedMotion } from "../hooks/use-reduced-motion.js";
+import { viewportQuality } from "../lib/viewport-quality.js";
 import { buildLBracketShapeCommands } from "./geometry.js";
 
 interface SceneProps {
@@ -36,14 +39,19 @@ function compileShape(parameters: LBracketParameters, thicknessMm: number): Shap
   return shape;
 }
 
-function Bracket({ parameters, thicknessMm }: SceneProps) {
+interface BracketProps extends SceneProps {
+  readonly curveSegments: number;
+}
+
+function Bracket({ parameters, thicknessMm, curveSegments }: BracketProps) {
   const geometry = useMemo(() => {
     const shape = compileShape(parameters, thicknessMm);
     return new ExtrudeGeometry(shape, {
       depth: parameters.width_mm,
       bevelEnabled: false,
+      curveSegments,
     });
-  }, [parameters, thicknessMm]);
+  }, [parameters, thicknessMm, curveSegments]);
 
   geometry.computeBoundingBox();
   const bb = geometry.boundingBox;
@@ -59,17 +67,30 @@ function Bracket({ parameters, thicknessMm }: SceneProps) {
 }
 
 export function LBracketScene({ parameters, thicknessMm }: SceneProps) {
+  const isMobile = useIsMobile();
+  const reduced = useReducedMotion();
+  const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
+
   const maxDim = Math.max(parameters.legA_mm, parameters.legB_mm, parameters.width_mm);
   const camDist = maxDim * 1.8;
   return (
     <Canvas
+      dpr={[...quality.dpr]}
       camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
       data-testid="l-bracket-canvas"
     >
       <ambientLight intensity={0.55} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
-      <Bracket parameters={parameters} thicknessMm={thicknessMm} />
-      <OrbitControls enablePan={false} />
+      <Bracket
+        parameters={parameters}
+        thicknessMm={thicknessMm}
+        curveSegments={quality.curveSegments}
+      />
+      <OrbitControls
+        enablePan={false}
+        enableZoom={quality.enableZoom}
+        enableRotate={quality.enableRotate}
+      />
     </Canvas>
   );
 }

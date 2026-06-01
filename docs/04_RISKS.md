@@ -39,14 +39,26 @@
 
 ADR-013 уже зняв ризик 30-МБ WASM bundle (OpenCascade.js відкладено), тож ризик тепер про **загальну якість UX** mobile-студії, а не про конкретну бібліотеку.
 
-**Mitigation:** **Progressive enhancement** — мобільний клієнт отримує спрощену версію, десктоп — повну. Впровадження — **Phase 2.14**:
+**Mitigation:** **Progressive enhancement** — мобільний клієнт отримує спрощену версію, десктоп — повну. **Впроваджено у Phase 2.14.a** через pure `viewportQuality({isMobile, reduced})` helper у `@flatcraft/ui` (5 unit) + `useIsMobile`/`useReducedMotion` хуки. Адаптивна матриця:
 
-1. **Спрощена 3D-сцена на mobile:** без HDR-env, без shadows, low-poly mesh, OrbitControls без zoom-on-pinch колізій з браузером. Detection через `matchMedia("(max-width: 767px)")`.
-2. **Touch-first форми:** усі інтерактиви ≥ 44×44px (`min-h-tap min-w-tap` — інваріант з Phase 2.11, перевіряється у Playwright). Sliders, селектори — повністю керовні пальцем.
-3. **Збільшений debounce на mobile:** 250мс (замість 100мс десктопу) на parametric update → економія CPU.
-4. **Mobile-first layout:** студія вертикально на телефоні (editor → viewport стек), 2-колонний grid на md+. **Без** "desktop required" — повноцінне редагування інваріант (Phase 2.11 ADR-016).
-5. **Performance budget** — TTI < 3 c, parametric update < 200мс (CLAUDE.md §9). Якщо реальна аналітика покаже регресію на mobile — Phase 2.14 переоцінюється.
-6. **Acceptance:** на iPhone SE / Galaxy A-series студія L-bracket має рендеритись + давати export ≤ 6 сек end-to-end.
+|                                             | desktop  | mobile (≤767px)        | reduced-motion |
+| ------------------------------------------- | -------- | ---------------------- | -------------- |
+| Canvas `dpr`                                | `[1, 2]` | `[1, 1.5]`             | `[1, 1]`       |
+| OrbitControls `enableZoom`                  | true     | false (pinch conflict) | false          |
+| OrbitControls `enableRotate`                | true     | true                   | false          |
+| `useDebouncedValue` ms                      | 100      | 250                    | 400            |
+| `ExtrudeGeometry.curveSegments` (L-bracket) | 12       | 8                      | 6              |
+
+Застосовано до всіх 5 scenes + 5 studios. Тапи ≥ 44×44 — інваріант з Phase 2.11/2.12.a (перевіряється у Playwright). Mobile-first layout (editor→viewport стек на xs/sm/md, 2-кол на lg+) + anchor «↓ Подивитися 3D-прев'ю» (`apps/web/src/components/studio-preview-anchor.tsx`, `lg:hidden`) для швидкого скролу до canvas.
+
+**Скоуп Phase 2.14.a не покриває:**
+
+- HDR-env / shadows — їх ніколи й не було (легка економія, виявилась преждевременной).
+- Round bend cross-section на 4 box-based scenes (Z, corner_angle, wall_shelf — рендеряться як BoxGeometry з прямими стиками) → **Phase 2.14.b** (ExtrudeGeometry-rewrite з proper arcs).
+
+**Performance budget** — TTI < 3 c, parametric update < 200мс (CLAUDE.md §9). Якщо реальна аналітика покаже регресію на mobile — переоцінюємо матрицю.
+
+**Acceptance:** на iPhone SE / Galaxy A-series студія L-bracket має рендеритись + давати export ≤ 6 сек end-to-end (валідація — реальний user feedback, не CI).
 
 ---
 

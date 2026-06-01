@@ -11,7 +11,7 @@ const Scene = dynamic(() => import("@flatcraft/ui").then((m) => m.LBracketScene)
   loading: () => (
     <div
       data-testid="l-bracket-viewport-loading"
-      className="flex h-full w-full items-center justify-center text-sm text-zinc-500"
+      className="text-fg-muted flex h-full w-full items-center justify-center text-sm"
     >
       Завантаження 3D…
     </div>
@@ -26,8 +26,9 @@ interface LBracketViewportProps {
 export function LBracketViewport(props: LBracketViewportProps) {
   return (
     <div
+      id="studio-viewport"
       data-testid="l-bracket-viewport"
-      className="aspect-video w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/60"
+      className="border-border bg-surface-sunken aspect-video w-full scroll-mt-20 overflow-hidden rounded-md border"
     >
       <Scene {...props} />
     </div>
