@@ -6,6 +6,10 @@ import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
 import { BoxGeometry } from "three";
 
+import { useIsMobile } from "../hooks/use-is-mobile.js";
+import { useReducedMotion } from "../hooks/use-reduced-motion.js";
+import { viewportQuality } from "../lib/viewport-quality.js";
+
 interface SceneProps {
   readonly parameters: ZBracketParameters;
   readonly thicknessMm: number;
@@ -67,6 +71,10 @@ function Bracket({ parameters, thicknessMm }: SceneProps) {
 }
 
 export function ZBracketScene({ parameters, thicknessMm }: SceneProps) {
+  const isMobile = useIsMobile();
+  const reduced = useReducedMotion();
+  const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
+
   const maxDim = Math.max(
     parameters.bottom_flange_mm + parameters.top_flange_mm,
     parameters.offset_mm,
@@ -75,13 +83,18 @@ export function ZBracketScene({ parameters, thicknessMm }: SceneProps) {
   const camDist = maxDim * 1.5;
   return (
     <Canvas
+      dpr={[...quality.dpr]}
       camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
       data-testid="z-bracket-canvas"
     >
       <ambientLight intensity={0.55} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
       <Bracket parameters={parameters} thicknessMm={thicknessMm} />
-      <OrbitControls enablePan={false} />
+      <OrbitControls
+        enablePan={false}
+        enableZoom={quality.enableZoom}
+        enableRotate={quality.enableRotate}
+      />
     </Canvas>
   );
 }
