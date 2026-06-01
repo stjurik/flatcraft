@@ -316,7 +316,7 @@ R-02 mitigation реалізована через **pure helper** `viewportQuali
 - **`Canvas dpr={[...quality.dpr]}`** — обмежує `pixelRatio` згори; на retina mobile без cap'a отримуємо 9× pixel-load.
 - **`OrbitControls enableZoom={quality.enableZoom}`** — на mobile вимикаємо, бо pinch-zoom 3D-сцени конфліктує з pinch-zoom сторінки iOS Safari (canvas-area стає недоступна для зум-сторінки).
 - **`useDebouncedValue(parameters, quality.debounceMs)`** у студіях замість раніше hardcoded `100`.
-- **`ExtrudeGeometry({ curveSegments })`** — поки тільки L-bracket (інші 4 scenes на BoxGeometry без arcs; round-bend rewrite — Phase 2.14.b).
+- **`ExtrudeGeometry({ curveSegments })`** — застосовується до всіх 3 scenes з гибами: L-bracket (1 absarc), Z-bracket (2 absarc, Phase 2.14.b), wall_shelf (1-2 absarc, Phase 2.14.b). corner_angle reuse'є L-bracket builder; perforated_panel — плоский лист без гибів.
 
 ### Mobile UX shortcut
 
@@ -338,7 +338,7 @@ Phase 2.11 створила фундамент. Phase 2.12+ розбита на 
 - ✅ **Phase 2.12.b** — landing redesign (hero + loop-demo + how-it-works + trust + SiteLinks).
 - ✅ **Phase 2.13** — каталог `/templates` з токенізованими cards (shadow-md, primary CTA, SVG-thumbs).
 - ✅ **Phase 2.14.a** — mobile-friendly studio + progressive 3D (viewportQuality, anchor, R-02 mitigation).
-- **Phase 2.14.b** — round-bend geometry для Z/corner_angle/wall_shelf scenes (ExtrudeGeometry rewrite).
+- ✅ **Phase 2.14.b** — round-bend геометрія для Z-bracket і wall_shelf scenes (ExtrudeGeometry+Shape з absarc).
 - **Phase 2.15** — Logo + Footer вписуються у layout root (зроблено у Phase 2.11 hotfix).
 - **Phase 2.16** — `og-default.png` + Open Graph metadata + реальні preview-PNG для каталога.
 

@@ -4,11 +4,12 @@ import type { ZBracketParameters } from "@flatcraft/types";
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
-import { BoxGeometry } from "three";
+import { ExtrudeGeometry, Shape } from "three";
 
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { buildZBracketShapeCommands } from "./geometry.js";
 
 interface SceneProps {
   readonly parameters: ZBracketParameters;
@@ -16,57 +17,56 @@ interface SceneProps {
 }
 
 /**
- * 3D-mesh Z-bracket — три плити union'ані координатно (бо three.js
- * не має готового boolean без CSG-бібліотеки; для preview overlap не
- * критичний). Точна геометрія для DXF — server-side через CadQuery.
- *
- *       ─────────────  ← top_flange (y = offset)
- *                   │
- *                   │  ← vertical middle
- *                   │
- *                   ─────────────  ← bottom_flange (y = 0)
+ * 3D Z-bracket — один ExtrudeGeometry з Shape, що має два round inner bends.
+ * Phase 2.14.b замінив попередню реалізацію (3 union'ані BoxGeometry з
+ * прямими стиками) — щоб гиби виглядали реалістично у перерізі.
  */
-function Bracket({ parameters, thicknessMm }: SceneProps) {
-  const meshes = useMemo(() => {
-    const t = thicknessMm;
-    const bf = parameters.bottom_flange_mm;
-    const tf = parameters.top_flange_mm;
-    const off = parameters.offset_mm;
-    const w = parameters.width_mm;
+function compileShape(parameters: ZBracketParameters, thicknessMm: number): Shape {
+  const cmds = buildZBracketShapeCommands({ parameters, thicknessMm });
+  const shape = new Shape();
+  for (const cmd of cmds) {
+    switch (cmd.kind) {
+      case "moveTo":
+        shape.moveTo(cmd.x, cmd.y);
+        break;
+      case "lineTo":
+        shape.lineTo(cmd.x, cmd.y);
+        break;
+      case "absarc":
+        shape.absarc(cmd.cx, cmd.cy, cmd.radius, cmd.startAngleRad, cmd.endAngleRad, cmd.clockwise);
+        break;
+      case "closePath":
+        shape.closePath();
+        break;
+    }
+  }
+  return shape;
+}
 
-    // BoxGeometry центрується в origin → translate'имо через position.
-    return {
-      bottom: {
-        geom: new BoxGeometry(bf, t, w),
-        pos: [bf / 2, t / 2, 0] as const,
-      },
-      middle: {
-        geom: new BoxGeometry(t, off + t, w),
-        pos: [bf - t / 2, (off + t) / 2, 0] as const,
-      },
-      top: {
-        geom: new BoxGeometry(tf, t, w),
-        pos: [bf - t + tf / 2, off + t / 2, 0] as const,
-      },
-    };
-  }, [parameters, thicknessMm]);
+interface BracketProps extends SceneProps {
+  readonly curveSegments: number;
+}
 
-  // Центруємо bracket навколо origin для приємного огляду.
-  const cx = -(parameters.bottom_flange_mm - thicknessMm + parameters.top_flange_mm) / 2;
-  const cy = -(parameters.offset_mm + thicknessMm) / 2;
+function Bracket({ parameters, thicknessMm, curveSegments }: BracketProps) {
+  const geometry = useMemo(() => {
+    const shape = compileShape(parameters, thicknessMm);
+    return new ExtrudeGeometry(shape, {
+      depth: parameters.width_mm,
+      bevelEnabled: false,
+      curveSegments,
+    });
+  }, [parameters, thicknessMm, curveSegments]);
+
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const cx = bb ? -((bb.max.x + bb.min.x) / 2) : 0;
+  const cy = bb ? -((bb.max.y + bb.min.y) / 2) : 0;
+  const cz = bb ? -((bb.max.z + bb.min.z) / 2) : 0;
 
   return (
-    <group position={[cx, cy, 0]}>
-      <mesh geometry={meshes.bottom.geom} position={meshes.bottom.pos}>
-        <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
-      </mesh>
-      <mesh geometry={meshes.middle.geom} position={meshes.middle.pos}>
-        <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
-      </mesh>
-      <mesh geometry={meshes.top.geom} position={meshes.top.pos}>
-        <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
-      </mesh>
-    </group>
+    <mesh geometry={geometry} position={[cx, cy, cz]}>
+      <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
+    </mesh>
   );
 }
 
@@ -89,7 +89,11 @@ export function ZBracketScene({ parameters, thicknessMm }: SceneProps) {
     >
       <ambientLight intensity={0.55} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
-      <Bracket parameters={parameters} thicknessMm={thicknessMm} />
+      <Bracket
+        parameters={parameters}
+        thicknessMm={thicknessMm}
+        curveSegments={quality.curveSegments}
+      />
       <OrbitControls
         enablePan={false}
         enableZoom={quality.enableZoom}
