@@ -4,11 +4,12 @@ import type { WallShelfParameters } from "@flatcraft/types";
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
-import { BoxGeometry, CylinderGeometry } from "three";
+import { CylinderGeometry, ExtrudeGeometry, Shape } from "three";
 
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { buildWallShelfShapeCommands } from "./geometry.js";
 
 interface SceneProps {
   readonly parameters: WallShelfParameters;
@@ -16,15 +17,16 @@ interface SceneProps {
 }
 
 /**
- * Wall shelf 3D — 2-3 box union'и + cylinder отвори на back.
+ * Wall-shelf 3D — один ExtrudeGeometry з Shape, що має 1 або 2 round inner
+ * bends (back→shelf завжди; shelf→lip опційно при front_lip>0). Phase 2.14.b
+ * замінив попередню реалізацію з 3 BoxGeometry на профіль з округлими
+ * гибами у перерізі. Mount-holes на back-секції лишаються як CylinderGeometry.
  *
- * Coord convention (XY profile, extrude по Z = width):
- *   - Back: x ∈ [0, t], y ∈ [0, back_height], z ∈ [0, width]
- *   - Shelf: x ∈ [0, shelf_depth], y ∈ [0, t]
- *   - Lip (if > 0): x ∈ [shelf_depth - t, shelf_depth], y ∈ [0, front_lip]
- *
- * Mount holes: cylinder axis ‖ X (perpendicular to back face),
- * розподіл grid вздовж back-секції з відступом hole_margin.
+ * Координати profile (XY, extrude по Z = width_mm):
+ *   - Back:  X ∈ [0, t],   Y ∈ [0, back_height]
+ *   - Shelf: X ∈ [0, sd],  Y ∈ [0, t]
+ *   - Lip (if>0): X ∈ [sd-t, sd], Y ∈ [0, front_lip]
+ * Mount-holes axis ‖ X (нормаль до back-стінки), розподіл grid вздовж y-z.
  */
 function linspace(n: number, lo: number, hi: number): number[] {
   if (n <= 0) return [];
@@ -33,35 +35,45 @@ function linspace(n: number, lo: number, hi: number): number[] {
   return Array.from({ length: n }, (_, i) => lo + i * step);
 }
 
-function WallShelf({ parameters, thicknessMm }: SceneProps) {
-  const { boxes, holes } = useMemo(() => {
+function compileShape(parameters: WallShelfParameters, thicknessMm: number): Shape {
+  const cmds = buildWallShelfShapeCommands({ parameters, thicknessMm });
+  const shape = new Shape();
+  for (const cmd of cmds) {
+    switch (cmd.kind) {
+      case "moveTo":
+        shape.moveTo(cmd.x, cmd.y);
+        break;
+      case "lineTo":
+        shape.lineTo(cmd.x, cmd.y);
+        break;
+      case "absarc":
+        shape.absarc(cmd.cx, cmd.cy, cmd.radius, cmd.startAngleRad, cmd.endAngleRad, cmd.clockwise);
+        break;
+      case "closePath":
+        shape.closePath();
+        break;
+    }
+  }
+  return shape;
+}
+
+interface WallShelfBodyProps extends SceneProps {
+  readonly curveSegments: number;
+}
+
+function WallShelf({ parameters, thicknessMm, curveSegments }: WallShelfBodyProps) {
+  const { geometry, holes } = useMemo(() => {
+    const shape = compileShape(parameters, thicknessMm);
+    const geom = new ExtrudeGeometry(shape, {
+      depth: parameters.width_mm,
+      bevelEnabled: false,
+      curveSegments,
+    });
+
     const t = thicknessMm;
     const r = parameters.bend_radius_mm;
     const bh = parameters.back_height_mm;
-    const sd = parameters.shelf_depth_mm;
-    const lip = parameters.front_lip_mm;
     const w = parameters.width_mm;
-
-    const back = {
-      geom: new BoxGeometry(t, bh, w),
-      pos: [t / 2, bh / 2, 0] as const,
-    };
-    const shelf = {
-      geom: new BoxGeometry(sd, t, w),
-      pos: [sd / 2, t / 2, 0] as const,
-    };
-    const boxes: Array<{ geom: BoxGeometry; pos: readonly [number, number, number] }> = [
-      back,
-      shelf,
-    ];
-    if (lip > 0) {
-      boxes.push({
-        geom: new BoxGeometry(t, lip, w),
-        pos: [sd - t / 2, lip / 2, 0] as const,
-      });
-    }
-
-    // Mount holes на back: розподіл уздовж y (висота) і z (ширина).
     const m = parameters.mount_hole_margin_mm;
     const flatBack = bh - t - r;
     const ys = linspace(parameters.mount_hole_cols, t + r + m, bh - m);
@@ -70,15 +82,23 @@ function WallShelf({ parameters, thicknessMm }: SceneProps) {
     if (flatBack > 0) {
       for (const y of ys) {
         for (const z of zs) {
-          holes.push({ pos: [t / 2, y, z] as const });
+          // Hole-center розташовуємо у середині товщини back (x=t/2).
+          // Після центрування geom (translate за boundingBox.center), всі
+          // позиції живуть у тій же системі координат — group-position
+          // компенсує зсув.
+          holes.push({ pos: [t / 2, y, w / 2 + z] as const });
         }
       }
     }
+    return { geometry: geom, holes };
+  }, [parameters, thicknessMm, curveSegments]);
 
-    return { boxes, holes };
-  }, [parameters, thicknessMm]);
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const cx = bb ? -((bb.max.x + bb.min.x) / 2) : 0;
+  const cy = bb ? -((bb.max.y + bb.min.y) / 2) : 0;
+  const cz = bb ? -((bb.max.z + bb.min.z) / 2) : 0;
 
-  // Cylinder для всіх отворів (axis ‖ X після rotation Z).
   const cylRadius = parameters.mount_hole_diameter_mm / 2;
   const cylLen = thicknessMm * 1.5;
   const cylGeom = useMemo(
@@ -86,17 +106,11 @@ function WallShelf({ parameters, thicknessMm }: SceneProps) {
     [cylRadius, cylLen],
   );
 
-  // Центрування навколо origin для зручного огляду.
-  const cx = -parameters.shelf_depth_mm / 2;
-  const cy = -Math.max(parameters.back_height_mm, parameters.front_lip_mm) / 2;
-
   return (
-    <group position={[cx, cy, 0]}>
-      {boxes.map((b, i) => (
-        <mesh key={i} geometry={b.geom} position={b.pos}>
-          <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
-        </mesh>
-      ))}
+    <group position={[cx, cy, cz]}>
+      <mesh geometry={geometry}>
+        <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
+      </mesh>
       {holes.map((h, i) => (
         <mesh key={`h${i}`} geometry={cylGeom} position={h.pos} rotation={[0, 0, Math.PI / 2]}>
           <meshStandardMaterial color="#fb923c" />
@@ -125,7 +139,11 @@ export function WallShelfScene({ parameters, thicknessMm }: SceneProps) {
     >
       <ambientLight intensity={0.55} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.2} />
-      <WallShelf parameters={parameters} thicknessMm={thicknessMm} />
+      <WallShelf
+        parameters={parameters}
+        thicknessMm={thicknessMm}
+        curveSegments={quality.curveSegments}
+      />
       <OrbitControls
         enablePan={false}
         enableZoom={quality.enableZoom}
