@@ -24,14 +24,32 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
+const SITE_URL = "https://hart.crimea.ua";
+const SITE_TITLE = "hart.crimea.ua — параметричний CAD для листового металу";
+const SITE_DESCRIPTION =
+  "Креслення листового металу за 60 секунд. Без CAD-навичок. " +
+  "10 експортів/міс безкоштовно. Соціальний проєкт на підтримку ЗСУ.";
+
 export const metadata: Metadata = {
-  title: "hart.crimea.ua — параметричний CAD для листового металу",
-  description:
-    "Креслення листового металу за 60 секунд. Без CAD-навичок. " +
-    "10 експортів/міс безкоштовно. Соціальний проєкт на підтримку ЗСУ.",
-  // TODO(Phase 2.16): додати /og-default.png (1200×630 з логотипом +
-  // headline) і прокинути сюди як openGraph.images. Поки не блокуємо
-  // лендінг — соцмережі показують default-preview без image.
+  metadataBase: new URL(SITE_URL),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  // OG image живе як `app/opengraph-image.tsx` (Next App Router convention).
+  // Next автоматично резолвить URL і додає у `<meta property="og:image">`,
+  // тому `openGraph.images` тут НЕ задаємо — інакше було б дублювання.
+  openGraph: {
+    type: "website",
+    locale: "uk_UA",
+    url: SITE_URL,
+    siteName: "hart.crimea.ua",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export const viewport: Viewport = {
