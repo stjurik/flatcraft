@@ -11,6 +11,14 @@ on:
       - main
     tags:
       - "v*.*.*"
+    # Docs-only зміни не міняють образи → не запускаємо білд+авто-деплой.
+    # Увага: paths-ignore у GitHub діє на ВЕСЬ push-тригер (і branches, і tags),
+    # тож docs-only `v*.*.*` тег теж буде пропущено. На практиці release-тег
+    # завжди вказує на коміт із кодом, тож edge-case некритичний; за потреби
+    # форсувати реліз — workflow_dispatch ігнорує paths-ignore.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       reason:
