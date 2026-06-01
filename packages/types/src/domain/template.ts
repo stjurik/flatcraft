@@ -15,7 +15,10 @@ export const TemplateSummarySchema = z.object({
   descriptionUk: z.string().nullable(),
   descriptionEn: z.string().nullable(),
   version: z.number().int().positive(),
-  previewImageUrl: z.string().url().nullable(),
+  // Phase 2.16.b: дозволяємо також relative paths типу
+  // `/template-previews/<slug>.png`, які лежать у `apps/web/public/`. URL
+  // validation залишимо для майбутнього CDN/R2 (з повним https://).
+  previewImageUrl: z.string().min(1).nullable(),
   isPublished: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

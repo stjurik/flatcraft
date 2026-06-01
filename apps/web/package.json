@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "preview:generate": "cd ../.. && tsx tools/scripts/generate-template-previews.ts"
   },
   "dependencies": {
     "@flatcraft/cad-engine": "workspace:*",

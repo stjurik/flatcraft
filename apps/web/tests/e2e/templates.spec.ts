@@ -28,9 +28,10 @@ test.describe("Каталог /templates (Phase 2.13)", () => {
       const card = page.locator(`[data-testid="template-card"][data-slug="${slug}"]`);
       await expect(card).toBeVisible();
       await expect(card).toContainText(name);
-      // SVG thumb або img — у будь-якому випадку <svg> з відповідним testId
-      // (за відсутності previewImageUrl, що поки правда для всіх 5 seed-row).
-      await expect(card.locator(`[data-testid="template-thumb-${slug}"]`)).toBeVisible();
+      // Phase 2.16.b: previewImageUrl задано → рендериться <img>, не SVG-thumb.
+      const img = card.locator("img");
+      await expect(img).toBeVisible();
+      await expect(img).toHaveAttribute("src", new RegExp(`/template-previews/${slug}\\.png$`));
     }
 
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);

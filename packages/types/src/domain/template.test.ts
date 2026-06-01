@@ -49,10 +49,19 @@ describe("TemplateSummarySchema", () => {
     expect(() => TemplateSummarySchema.parse({ ...validTemplate, version: -1 })).toThrow();
   });
 
-  it("відхиляє невалідний preview URL", () => {
+  it("відхиляє порожній preview URL", () => {
+    // Phase 2.16.b: схема релаксована до min(1) (дозволяє relative paths),
+    // тож валідним лишається будь-який непорожній рядок, а порожній — ні.
+    expect(() => TemplateSummarySchema.parse({ ...validTemplate, previewImageUrl: "" })).toThrow();
+  });
+
+  it("приймає relative preview URL (/template-previews/*.png)", () => {
     expect(() =>
-      TemplateSummarySchema.parse({ ...validTemplate, previewImageUrl: "not a url" }),
-    ).toThrow();
+      TemplateSummarySchema.parse({
+        ...validTemplate,
+        previewImageUrl: "/template-previews/l_bracket.png",
+      }),
+    ).not.toThrow();
   });
 
   it("приймає валідний preview URL", () => {

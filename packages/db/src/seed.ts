@@ -104,6 +104,12 @@ export interface TemplateSeed {
   readonly isPublished: boolean;
   /** Стартові значення параметрів — підвантажуються у редактор при відкритті. */
   readonly defaultParameters: Readonly<Record<string, unknown>>;
+  /**
+   * Phase 2.16.b: preview-PNG (3D-snapshot) для каталога. Шлях
+   * відносний до web `/public/`. null → fallback на inline SVG-thumb
+   * (Phase 2.13).
+   */
+  readonly previewImageUrl: string | null;
 }
 
 export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
@@ -116,6 +122,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // Phase 1.5 — CadQuery-builder готовий, шаблон публікуємо.
     isPublished: true,
     defaultParameters: L_BRACKET_DEFAULT_PARAMETERS,
+    previewImageUrl: "/template-previews/l_bracket.png",
   },
   {
     slug: "z_bracket",
@@ -126,6 +133,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // Phase 2.10 — CadQuery-builder і CAD-pipeline готові.
     isPublished: true,
     defaultParameters: Z_BRACKET_DEFAULT_PARAMETERS,
+    previewImageUrl: "/template-previews/z_bracket.png",
   },
   {
     slug: "corner_angle",
@@ -136,6 +144,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // Phase 2.10.b — CadQuery-builder і auto-grid hole pattern готові.
     isPublished: true,
     defaultParameters: CORNER_ANGLE_DEFAULT_PARAMETERS,
+    previewImageUrl: "/template-previews/corner_angle.png",
   },
   {
     slug: "wall_shelf",
@@ -146,6 +155,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // Phase 2.10.c — CadQuery-builder + 1/2 bends + auto-grid mount holes.
     isPublished: true,
     defaultParameters: WALL_SHELF_DEFAULT_PARAMETERS,
+    previewImageUrl: "/template-previews/wall_shelf.png",
   },
   {
     slug: "perforated_panel",
@@ -156,6 +166,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // Phase 2.10.d — Phase 2.10 повністю закрита.
     isPublished: true,
     defaultParameters: PERFORATED_PANEL_DEFAULT_PARAMETERS,
+    previewImageUrl: "/template-previews/perforated_panel.png",
   },
 ];
 
@@ -222,6 +233,7 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
         descriptionEn: t.descriptionEn,
         parametersSchema: {},
         defaultParameters: t.defaultParameters,
+        previewImageUrl: t.previewImageUrl,
         isPublished: t.isPublished,
       })
       .onConflictDoUpdate({
@@ -232,6 +244,7 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
           descriptionUk: t.descriptionUk,
           descriptionEn: t.descriptionEn,
           defaultParameters: t.defaultParameters,
+          previewImageUrl: t.previewImageUrl,
           isPublished: t.isPublished,
         },
       });
