@@ -53,6 +53,9 @@ importers:
       '@fastify/swagger':
         specifier: ^9.1.0
         version: 9.7.0
+      '@flatcraft/cad-engine':
+        specifier: workspace:*
+        version: link:../../packages/cad-engine
       '@flatcraft/db':
         specifier: workspace:*
         version: link:../../packages/db
