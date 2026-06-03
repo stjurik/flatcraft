@@ -296,6 +296,7 @@ export const LBracketParameters = z.object({
   legB_mm: z.number().min(20).max(500), // горизонтальна полиця
   bend_radius_mm: z.union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)]),
   bend_angle_deg: z.literal(90), // MVP — тільки 90°
+  bend_direction: z.enum(["up", "down"]).default("down"), // Hotfix 2.10.e — напрям згину
   width_mm: z.number().min(20).max(3000), // довжина гиба
   // отвори (опційно)
   holes: z
@@ -310,6 +311,20 @@ export const LBracketParameters = z.object({
     .max(20),
 });
 ```
+
+### Напрям згину (Hotfix 2.10.e)
+
+Кожен гиб має обов'язковий напрям (UP/DOWN), дефолт `down`. Single-bend шаблони (`l_bracket`, `corner_angle`) — скалярне поле `bend_direction: z.enum(["up","down"]).default("down")`. Multi-bend (`z_bracket`, `wall_shelf`) — масив `bends`, по одному запису на гиб:
+
+```ts
+const BendSpec = z.object({ direction: z.enum(["up", "down"]).default("down") });
+// z_bracket:  bends: z.array(BendSpec).length(2).default([{direction:"down"},{direction:"down"}])
+//             // [0] bottom→middle, [1] middle→top
+// wall_shelf: bends: z.array(BendSpec).min(1).max(2).default([{direction:"down"},{direction:"down"}])
+//             // [0] back→shelf, [1] shelf→lip (за наявності front_lip)
+```
+
+`perforated_panel` гибів не має — поля напряму не отримує. Напрям не впливає на геометрію розгортки, лише на анотацію креслення (стрілка ↓/↑ у bend-table і callout; `DOWN/UP` у DXF). Pydantic у `workers/cad` дзеркалить ці схеми (`BendSpec` у `templates/base.py`).
 
 ### Z-кронштейн, кутник, полиця настінна, перфо-панель
 
