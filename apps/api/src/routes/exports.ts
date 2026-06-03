@@ -21,6 +21,7 @@ import { z } from "zod";
 import { env } from "../env.js";
 import type { ExportJob } from "../lib/job-store.js";
 import { JobStore } from "../lib/job-store.js";
+import { EXPORT_RATE_LIMIT } from "../plugins/rate-limit.js";
 import {
   buildProblem,
   getBendSpec,
@@ -103,6 +104,9 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
     app.post(
       "/exports",
       {
+        // Phase X.1 A (ADR-020): IP-based 30/год + burst-ban. Override
+        // глобального 100/хв для саме цього маршруту.
+        config: { rateLimit: EXPORT_RATE_LIMIT },
         schema: {
           description: "Async export: створює job, виконує у фоні, returns 202 + jobId.",
           tags: ["exports"],

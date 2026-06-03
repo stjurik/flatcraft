@@ -251,6 +251,39 @@ describe("POST /exports — async flow", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("Phase X.1 A: 30 експортів з одного IP проходять, 31й → 429 RFC 9457", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    // 30 валідних експортів з однієї IP (inject → 127.0.0.1) → усі 202.
+    for (let i = 0; i < 30; i++) {
+      const ok = await app.inject({ method: "POST", url: "/exports", payload: VALID_REQUEST });
+      expect(ok.statusCode).toBe(202);
+    }
+
+    // 31й — перевищення ліміту.
+    const limited = await app.inject({ method: "POST", url: "/exports", payload: VALID_REQUEST });
+    expect(limited.statusCode).toBe(429);
+    const problem = limited.json<{
+      type: string;
+      title: string;
+      status: number;
+      detail: string;
+      instance: string;
+    }>();
+    expect(problem.status).toBe(429);
+    expect(problem.title).toBe("Rate limit exceeded");
+    expect(problem.type).toMatch(/rate-limit/);
+    expect(problem.instance).toBe("/exports");
+    expect(problem.detail).toMatch(/30 експортів на годину/);
+    // Заголовок retry-after присутній (стандарт rate-limit).
+    expect(limited.headers["retry-after"]).toBeDefined();
+  });
+
   it("GET /exports/:id/events: для done job шле data-event і одразу закриває", async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify(UPSTREAM_OK_BODY), {
