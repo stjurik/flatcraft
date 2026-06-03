@@ -15,6 +15,9 @@ interface WallShelfEditorProps {
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
+// Hotfix 2.10.e: bends (напрями 1-2 гибів, дефолт 'down') у моделі, приховано від UI.
+const FORM_SCHEMA = WallShelfParametersBaseSchema.omit({ bends: true });
+
 export function WallShelfEditor({ value, onChange }: WallShelfEditorProps) {
   const validation = useMemo(() => WallShelfParametersSchema.safeParse(value), [value]);
   const fieldErrors = useMemo(
@@ -39,7 +42,7 @@ export function WallShelfEditor({ value, onChange }: WallShelfEditorProps) {
       onSubmit={(e) => e.preventDefault()}
     >
       <AutoForm
-        schema={WallShelfParametersBaseSchema}
+        schema={FORM_SCHEMA}
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as WallShelfParameters)}
         errors={fieldErrors}

@@ -22,6 +22,8 @@
  */
 import { z } from "zod";
 
+import { BendDirectionSchema } from "./bends.js";
+
 export const CornerAngleParametersSchema = z.object({
   /** Висота вертикальної полиці, мм. */
   legA_mm: z.number().min(20).max(500).describe("group:Полиця A|label:Висота полиці A (мм)"),
@@ -33,6 +35,8 @@ export const CornerAngleParametersSchema = z.object({
     .describe("group:Гиб|label:Внутрішній радіус (мм)"),
   /** MVP: лише 90°. */
   bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
+  /** Напрям згину (Hotfix 2.10.e). Дефолт 'down'. */
+  bend_direction: BendDirectionSchema.default("down").describe("group:Гиб|label:Напрям згину"),
   /** Ширина (довжина гиба), мм. */
   width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
   /** Діаметр отворів, мм (один для всього grid). */
@@ -60,6 +64,7 @@ export const CORNER_ANGLE_DEFAULT_PARAMETERS: CornerAngleParameters = {
   legB_mm: 50,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bend_direction: "down",
   width_mm: 80,
   hole_diameter_mm: 5,
   hole_rows: 1,

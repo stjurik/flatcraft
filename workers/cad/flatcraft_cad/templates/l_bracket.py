@@ -25,7 +25,7 @@ from typing import Literal
 import cadquery as cq
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from flatcraft_cad.templates.base import Template
+from flatcraft_cad.templates.base import BendDirection, Template
 
 # Допустимі внутрішні радіуси з bend-machine spec (data/bend-machine-esi.yaml).
 # Збігається з union у packages/types/src/templates/l-bracket.ts.
@@ -55,6 +55,9 @@ class LBracketBuildParameters(BaseModel):
     )
     bend_radius_mm: float = Field(description="Внутрішній радіус гиба.")
     bend_angle_deg: Literal[90] = Field(default=90, description="MVP: тільки 90°.")
+    bend_direction: BendDirection = Field(
+        default="down", description="Напрям згину (Hotfix 2.10.e)."
+    )
     width_mm: float = Field(ge=20, le=3000, description="Довжина лінії гиба.")
     thickness_mm: float = Field(gt=0, le=10, description="Товщина листа.")
 

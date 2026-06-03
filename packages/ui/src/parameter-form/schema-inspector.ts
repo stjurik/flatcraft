@@ -125,7 +125,13 @@ function describeFieldRaw(name: string, schema: z.ZodTypeAny): FieldDescriptor {
   }
   const unionEnum = tryLiteralUnion(name, schema);
   if (unionEnum) return unionEnum;
-  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    // ZodDefault — обгортка з дефолтом (Hotfix 2.10.e: bend_direction/bends).
+    // Розгортаємо у innerType, щоб тип поля визначався по суті, не по обгортці.
+    schema instanceof z.ZodDefault
+  ) {
     return describeFieldRaw(name, schema._def.innerType as z.ZodTypeAny);
   }
   if (schema instanceof z.ZodArray) {

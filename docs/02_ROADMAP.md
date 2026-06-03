@@ -71,6 +71,7 @@
   - [x] **2.10.b.** Кутник (corner_angle) — auto-grid отворів (rows × cols × 2 полиці) замість ручних координат L-bracket. `_distribute` pure-функція, `Hole2D` додано до unfold, DXF/PDF малюють CIRCLE на INNER_CUTS, R3F рендерить cylinder-отвори для preview. 97 pytest (99% cov), 32 db tests, 4 нових e2e (19 разом). — 2026-05-18
   - [x] **2.10.c.** Полиця настінна (wall_shelf) — U-channel back+shelf+(optional)lip. front_lip=0 → 2 сегменти/1 гиб, ≥5 → 3 сегменти/2 гиби. Auto-grid mounting holes на back. Cross-field constraint "0 або ≥5" через `WallShelfParametersBaseSchema` + refine wrapper (base використовується у discriminatedUnion). 118 pytest (99% cov), 33 db tests, 4 нові e2e (23 разом). — 2026-05-18
   - [x] **2.10.d.** Перфо-панель (perforated_panel) — плоский лист без гибів, centered grid отворів за pitch_x/pitch_y/margin. Layout автоматичний: `n_cols = floor((length - 2*margin)/pitch) + 1`, eff_margin перераховується для симетрії. Reuse `_export_flat_dxf(holes, bend_lines=())` без модифікацій. Окремий PDF без bend table — натомість Hole grid summary. 137 pytest (99% cov), 34 db tests, 4 нові e2e (27 разом). — 2026-05-18
+  - [x] **2.10.e (Hotfix).** Validator-bypass у export-pipeline + напрям згину. **P0:** Z-bracket t=5/R=2.5 проскочив експорт (матриця t=5 → R∈{4.0,5.0}), порушено CLAUDE.md §7 п.2. Root cause H1+H2: `validateBend` коректний, але викликався лише браузер-side; Fastify-export форвардив без matrix-перевірки, Python перевіряв радіус проти глобального набору. Фікс: серверний gate `apps/api` (ADR-019, 422 RFC 9457 `RADIUS_NOT_ALLOWED`) + Python parity-валідатор (`flatcraft_cad/validate`, той самий YAML). Property-based парітет fast-check+hypothesis ×1000. Напрям згину (`bend_direction`/`bends[]`, дефолт `down`) у моделі + PDF bend-table колонка ↓/↑ + DXF text + 30мм overlap-fix; редактори приховують поле (no UI/UX). ADR-019, R-12. 145 pytest, 254 TS unit. Гілка `hotfix/2-10-e-validator-and-bend-direction`. — 2026-06-03
 
 **Phase 2 повністю закрита: 5 шаблонів end-to-end (web → api → cad-worker → S3).**
 
@@ -127,7 +128,7 @@
 
 ## Phase 5. Hardening + Launch (2 тижні)
 
-**Definition of Done:** домен `flatcraft.io` (або обраний), SSL через Cloudflare, GDPR-compliance, Privacy/ToS опубліковані, Sentry прокладено, перші 10 живих юзерів.
+**Definition of Done:** домен `hart.crimea.ua`, SSL через Cloudflare, GDPR-compliance, Privacy/ToS опубліковані, Sentry прокладено, перші 10 живих юзерів.
 
 - [ ] **5.1.** Sentry SDK у web + api + worker; `beforeSend` фільтр PII
 - [ ] **5.2.** Plausible/Umami self-hosted або хмарний акаунт

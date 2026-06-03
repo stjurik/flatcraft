@@ -13,6 +13,7 @@ const baseParams: LBracketParameters = {
   legB_mm: 60,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bend_direction: "down",
   width_mm: 100,
   holes: [],
 };
@@ -99,6 +100,7 @@ const baseZ: ZBracketParameters = {
   offset_mm: 40,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bends: [{ direction: "down" }, { direction: "down" }],
   width_mm: 100,
   holes: [],
 };
@@ -195,6 +197,7 @@ const baseShelf: WallShelfParameters = {
   front_lip_mm: 20,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bends: [{ direction: "down" }, { direction: "down" }],
   width_mm: 300,
   mount_hole_diameter_mm: 6,
   mount_hole_rows: 2,

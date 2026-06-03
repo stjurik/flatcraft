@@ -462,6 +462,34 @@
 
 ---
 
+## ADR-019: Server-side validation як інваріант export-pipeline
+
+**Контекст:** Hotfix 2.10.e. Клієнтська валідація (`cad-engine validateBend` у браузері) — це **лише UX**: підсвічення невалідних полів у редакторі. Вона тривіально обходиться (вимкнений JS, прямий `curl` до API, майбутній BullMQ-producer). До фіксу серверний шлях експорту НЕ викликав жодного matrix-валідатора: Fastify `POST /exports` перевіряв тільки Zod-shape і форвардив у cad-worker; Python перевіряв радіус проти глобального набору, не проти thickness-матриці. Результат — R-12: Z-bracket t=5/R=2.5 експортувався попри заборону матриці.
+
+**Рішення:** Валідація гиба проти `bend-machine-esi.yaml` стає **обов'язковим серверним інваріантом на двох рівнях**:
+
+1. **Fastify gate** (`apps/api/src/lib/validate-export.ts`, `validateExportBends`) — викликає той самий cad-engine `validateBend` ПЕРЕД створенням job / forward у воркер. Помилки → `422` RFC 9457 з `errors[].code` (`RADIUS_NOT_ALLOWED` тощо). Жоден артефакт не створюється, quota не витрачається.
+2. **Python parity** (`workers/cad/flatcraft_cad/validate/bend.py`) — читає той самий YAML і відмовляє на старті `/export`-handler ДО будь-якої CAD-операції. Остання лінія оборони (defense-in-depth), якщо API-gate обійдено.
+
+Паритет TS+Python гарантується property-based тестами (fast-check + hypothesis, 1000 ітерацій, спільний oracle, один YAML).
+
+**Тригер перегляду:** коли експорт стане BullMQ-distributed (Phase 5+) — основна валідація має жити **в API** (fail-fast перед чергою), а не лише у воркері, інакше invalid-jobs їдять quota і ресурси worker'а. Python-валідатор лишається як safety-net.
+
+**Наслідки:**
+
+- ✅ Інваріант безпеки відновлено: неможливі деталі не можна експортувати через будь-який серверний шлях.
+- ✅ `apps/api` тепер залежить від `@flatcraft/cad-engine` (workspace) — спільне джерело істини TS-валідації.
+- ✅ Помилки у форматі RFC 9457 (`docs/06 §0`) — клієнт може показати конкретне поле/код.
+- ⚠ Подвійна валідація (API + worker) — навмисна (defense-in-depth), не дублювання-помилка.
+- ⚠ Python воркер не має `material_code` (ADR-018 strip) — material-group перевірка лишається в API-gate; воркер валідує матеріало-незалежні radius/thickness/angle.
+
+**Альтернативи:**
+
+- **Тільки клієнт** — статус-кво, що й спричинив P0-баг. Відхилено.
+- **Тільки worker** — воркер не має контексту quota і стартує важку CAD-операцію перш ніж відмовити; бажано fail-fast в API. Worker лишається додатковою лінією, не єдиною.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

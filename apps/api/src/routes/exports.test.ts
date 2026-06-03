@@ -142,6 +142,38 @@ describe("POST /exports — async flow", () => {
     expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
   });
 
+  it("Hotfix 2.10.e: z_bracket t=5/R=2.5 → 422 RADIUS_NOT_ALLOWED, артефакт не створюється", async () => {
+    const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "z_bracket",
+        parameters: {
+          top_flange_mm: 60,
+          bottom_flange_mm: 60,
+          offset_mm: 40,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
+          width_mm: 100,
+          holes: [],
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 5,
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const problem = res.json<{
+      status: number;
+      errors: { field: string; code: string; allowed?: number[]; value?: number }[];
+    }>();
+    expect(problem.status).toBe(422);
+    expect(problem.errors.some((e) => e.code === "RADIUS_NOT_ALLOWED")).toBe(true);
+    // Жодного forward до cad-worker → жодного артефакта у R2.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
+  });
+
   it("GET /exports/:id для неіснуючого → 404", async () => {
     const res = await app.inject({
       method: "GET",

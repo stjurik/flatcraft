@@ -27,7 +27,9 @@ export type ShapeCommand =
   | { readonly kind: "closePath" };
 
 export interface LBracketGeometryInputs {
-  readonly parameters: LBracketParameters;
+  // Геометрія не залежить від bend_direction (рендериться лише на креслі) —
+  // Omit дозволяє синтетичним preview-об'єктам не нести напрям (Hotfix 2.10.e).
+  readonly parameters: Omit<LBracketParameters, "bend_direction">;
   readonly thicknessMm: number;
 }
 
@@ -88,7 +90,7 @@ export function buildLBracketShapeCommands(inputs: LBracketGeometryInputs): Shap
  * preview. Точна геометрія для DXF — у CadQuery server-side.
  */
 export interface ZBracketGeometryInputs {
-  readonly parameters: ZBracketParameters;
+  readonly parameters: Omit<ZBracketParameters, "bends">;
   readonly thicknessMm: number;
 }
 
@@ -169,7 +171,7 @@ export function buildZBracketShapeCommands(inputs: ZBracketGeometryInputs): Shap
  * При front_lip=0 виходить L-shape (back + shelf без переднього губу).
  */
 export interface WallShelfGeometryInputs {
-  readonly parameters: WallShelfParameters;
+  readonly parameters: Omit<WallShelfParameters, "bends">;
   readonly thicknessMm: number;
 }
 

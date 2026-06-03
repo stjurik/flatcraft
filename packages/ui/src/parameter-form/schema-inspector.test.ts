@@ -151,9 +151,16 @@ describe("introspectSchema — LBracketParametersSchema (real fixture)", () => {
       "legB_mm",
       "bend_radius_mm",
       "bend_angle_deg",
+      "bend_direction",
       "width_mm",
       "holes",
     ]);
+  });
+
+  it("bend_direction — EnumField up/down (ZodDefault розгортається; Hotfix 2.10.e)", () => {
+    const fields = introspectSchema(LBracketParametersSchema);
+    const dir = fields.find((f) => f.name === "bend_direction");
+    expect(dir).toMatchObject({ kind: "enum", name: "bend_direction", options: ["up", "down"] });
   });
 
   it("legA_mm — NumberField з межами 20..500", () => {

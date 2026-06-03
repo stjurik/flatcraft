@@ -14,6 +14,8 @@
  */
 import { z } from "zod";
 
+import { BendDirectionSchema } from "./bends.js";
+
 const HoleSchema = z.object({
   /** На якій полиці отвір: A — вертикальна, B — горизонтальна. */
   leg: z.enum(["A", "B"]),
@@ -35,6 +37,8 @@ export const LBracketParametersSchema = z.object({
     .describe("group:Гиб|label:Внутрішній радіус гиба (мм)"),
   /** MVP: лише 90°. Інші кути додамо post-launch. */
   bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
+  /** Напрям згину (Hotfix 2.10.e). Дефолт 'down'. */
+  bend_direction: BendDirectionSchema.default("down").describe("group:Гиб|label:Напрям згину"),
   /** Ширина L-кронштейна (довжина лінії гиба), мм. */
   width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
   holes: z.array(HoleSchema).max(20).describe("group:Отвори|label:Отвори"),
@@ -53,6 +57,7 @@ export const L_BRACKET_DEFAULT_PARAMETERS: LBracketParameters = {
   legB_mm: 60,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bend_direction: "down",
   width_mm: 100,
   holes: [],
 };

@@ -74,6 +74,11 @@ def _make_deterministic(doc: Drawing) -> None:
     doc.header["$VERSIONGUID"] = _FROZEN_VERSION_GUID
 
 
+def _bend_label(direction: str) -> str:
+    """ASCII-мітка напряму для DXF (↓/↑ Unicode не гарантовано у всіх в'юверах)."""
+    return "UP" if direction == "up" else "DOWN"
+
+
 def _export_flat_dxf(
     *,
     length_mm: float,
@@ -83,6 +88,7 @@ def _export_flat_dxf(
     bend_angle_deg: float,
     output_path: Path,
     holes: tuple[Hole2D, ...] = (),
+    bend_directions: tuple[str, ...] = (),
 ) -> Path:
     """Базовий exporter: прямокутна заготовка length × width + bend lines
     на вказаних позиціях + опціональні внутрішні отвори.
@@ -106,14 +112,17 @@ def _export_flat_dxf(
         dxfattribs={"layer": "LASER_CUT"},
     )
 
-    for bend_x in bend_lines_mm:
+    for n, bend_x in enumerate(bend_lines_mm):
+        direction = bend_directions[n] if n < len(bend_directions) else "down"
         msp.add_line(
             start=(bend_x, 0),
             end=(bend_x, width_mm),
             dxfattribs={"layer": "BEND_LINES"},
         )
+        # Префікс "BEND {angle}°" збережено навмисно (Hotfix 2.10.e): додаємо
+        # напрям (DOWN/UP) і номер гибу #{n}, не ламаючи існуючих перевірок.
         msp.add_text(
-            f"BEND {bend_angle_deg:g}° UP R{bend_radius_mm:g}",
+            f"BEND {bend_angle_deg:g}° {_bend_label(direction)} R{bend_radius_mm:g} #{n + 1}",
             dxfattribs={
                 "layer": "BEND_TEXT",
                 "height": _BEND_TEXT_HEIGHT_MM,
@@ -139,6 +148,7 @@ def export_l_bracket_dxf(
     *,
     bend_radius_mm: float,
     bend_angle_deg: float = 90.0,
+    bend_direction: str = "down",
 ) -> Path:
     """L-bracket DXF: один гиб у центрі."""
     return _export_flat_dxf(
@@ -148,6 +158,7 @@ def export_l_bracket_dxf(
         bend_radius_mm=bend_radius_mm,
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,
+        bend_directions=(bend_direction,),
     )
 
 
@@ -157,6 +168,7 @@ def export_z_bracket_dxf(
     *,
     bend_radius_mm: float,
     bend_angle_deg: float = 90.0,
+    bend_directions: tuple[str, ...] = (),
 ) -> Path:
     """Z-bracket DXF: два паралельні гиби."""
     return _export_flat_dxf(
@@ -166,6 +178,7 @@ def export_z_bracket_dxf(
         bend_radius_mm=bend_radius_mm,
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,
+        bend_directions=bend_directions,
     )
 
 
@@ -175,6 +188,7 @@ def export_corner_angle_dxf(
     *,
     bend_radius_mm: float,
     bend_angle_deg: float = 90.0,
+    bend_direction: str = "down",
 ) -> Path:
     """Corner_angle DXF: один гиб + grid отворів на INNER_CUTS layer."""
     return _export_flat_dxf(
@@ -185,6 +199,7 @@ def export_corner_angle_dxf(
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,
         holes=unfolded.holes,
+        bend_directions=(bend_direction,),
     )
 
 
@@ -194,6 +209,7 @@ def export_wall_shelf_dxf(
     *,
     bend_radius_mm: float,
     bend_angle_deg: float = 90.0,
+    bend_directions: tuple[str, ...] = (),
 ) -> Path:
     """Wall_shelf DXF: 1 або 2 bends + mount holes на back-секції."""
     return _export_flat_dxf(
@@ -204,6 +220,7 @@ def export_wall_shelf_dxf(
         bend_angle_deg=bend_angle_deg,
         output_path=output_path,
         holes=unfolded.holes,
+        bend_directions=bend_directions,
     )
 
 

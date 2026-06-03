@@ -78,6 +78,25 @@ describe("LBracketParametersSchema", () => {
     ).toThrow();
   });
 
+  it("bend_direction: дефолт 'down' коли відсутній (Hotfix 2.10.e)", () => {
+    const { bend_direction: _omit, ...withoutDir } = L_BRACKET_DEFAULT_PARAMETERS;
+    const parsed = LBracketParametersSchema.parse(withoutDir);
+    expect(parsed.bend_direction).toBe("down");
+  });
+
+  it("bend_direction: приймає 'up', відхиляє інше", () => {
+    expect(
+      LBracketParametersSchema.parse({ ...L_BRACKET_DEFAULT_PARAMETERS, bend_direction: "up" })
+        .bend_direction,
+    ).toBe("up");
+    expect(() =>
+      LBracketParametersSchema.parse({
+        ...L_BRACKET_DEFAULT_PARAMETERS,
+        bend_direction: "sideways",
+      }),
+    ).toThrow();
+  });
+
   it("отвір: leg тільки A або B", () => {
     expect(() =>
       LBracketParametersSchema.parse({

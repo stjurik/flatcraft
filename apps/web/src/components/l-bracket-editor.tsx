@@ -11,6 +11,11 @@ interface LBracketEditorProps {
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
+// Hotfix 2.10.e: bend_direction — частина моделі (дефолт 'down'), але редактор
+// його не показує (no UI/UX зміни). Omit лишає поле у state (AutoForm.setField
+// робить {...value}), тож напрям доходить до export незмінним.
+const FORM_SCHEMA = LBracketParametersSchema.omit({ bend_direction: true });
+
 /**
  * Holes (z.array(...)) поки рендериться окремим editor'ом — Phase 2.7.
  * Поки приховуємо як info-rebra: "0 отворів — додамо у наступній фазі".
@@ -49,7 +54,7 @@ export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
       onSubmit={(e) => e.preventDefault()}
     >
       <AutoForm
-        schema={LBracketParametersSchema}
+        schema={FORM_SCHEMA}
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as LBracketParameters)}
         errors={fieldErrors}

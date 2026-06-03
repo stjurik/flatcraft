@@ -40,6 +40,27 @@ describe("validateBend", () => {
     }
   });
 
+  it("rejects t=5mm + R=2.5mm (Hotfix 2.10.e: матриця, не глобальний набір)", () => {
+    // Для t=5 allowed = [4.0, 5.0]; R=2.5 заборонений саме для цієї товщини,
+    // хоча 2.5 ∈ глобального набору {1,2.5,4,5}. Це той самий клас багу, що
+    // обходився серверним export-pipeline (Z-bracket t=5/R=2.5 проскочив).
+    const result = validateBend(
+      {
+        materialCode: "cold_rolled_steel",
+        thicknessMm: 5.0,
+        innerRadiusMm: 2.5,
+        angleDeg: 90,
+        flangeMm: 30,
+        bendLengthMm: 200,
+      },
+      spec,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.code === "bend.inner_radius_not_allowed")).toBe(true);
+    }
+  });
+
   it("відхиляє кут не з allowed_angles_deg", () => {
     const result = validateBend(
       {

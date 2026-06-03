@@ -21,6 +21,12 @@ import { z } from "zod";
 import { env } from "../env.js";
 import type { ExportJob } from "../lib/job-store.js";
 import { JobStore } from "../lib/job-store.js";
+import {
+  buildProblem,
+  getBendSpec,
+  ProblemDetailsSchema,
+  validateExportBends,
+} from "../lib/validate-export.js";
 
 const NotFoundSchema = z.object({ error: z.literal("job_not_found") });
 
@@ -101,10 +107,17 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
           description: "Async export: створює job, виконує у фоні, returns 202 + jobId.",
           tags: ["exports"],
           body: ExportRequestSchema,
-          response: { 202: ExportJobAcceptedSchema },
+          response: { 202: ExportJobAcceptedSchema, 422: ProblemDetailsSchema },
         },
       },
       async (req, reply) => {
+        // ADR-019: серверний gate ПЕРЕД створенням job/forward. Невалідний гиб
+        // (напр. R недопустимий для товщини) → 422 RFC 9457, жодного артефакта.
+        const spec = await getBendSpec();
+        const bendErrors = validateExportBends(req.body, spec);
+        if (bendErrors.length > 0) {
+          return reply.code(422).send(buildProblem(bendErrors, "/exports"));
+        }
         const job = store.create();
         // background: не await — щоб клієнт одразу отримав jobId.
         void runJob(store, job.id, req.body);

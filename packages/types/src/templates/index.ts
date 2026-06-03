@@ -1,3 +1,5 @@
+export { BendDirectionSchema, BendSpecSchema, type BendDirection, type BendSpec } from "./bends.js";
+
 export {
   L_BRACKET_DEFAULT_PARAMETERS,
   LBracketParametersSchema,

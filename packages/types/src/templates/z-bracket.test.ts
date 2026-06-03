@@ -48,6 +48,33 @@ describe("ZBracketParametersSchema", () => {
     ).toThrow();
   });
 
+  it("bends: дефолт 2×'down' коли відсутній (Hotfix 2.10.e)", () => {
+    const { bends: _omit, ...withoutBends } = Z_BRACKET_DEFAULT_PARAMETERS;
+    const parsed = ZBracketParametersSchema.parse(withoutBends);
+    expect(parsed.bends).toEqual([{ direction: "down" }, { direction: "down" }]);
+  });
+
+  it("bends: приймає mixed up/down, відхиляє довжину ≠ 2 та невідомий напрям", () => {
+    expect(
+      ZBracketParametersSchema.parse({
+        ...Z_BRACKET_DEFAULT_PARAMETERS,
+        bends: [{ direction: "up" }, { direction: "down" }],
+      }).bends,
+    ).toEqual([{ direction: "up" }, { direction: "down" }]);
+    expect(() =>
+      ZBracketParametersSchema.parse({
+        ...Z_BRACKET_DEFAULT_PARAMETERS,
+        bends: [{ direction: "down" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      ZBracketParametersSchema.parse({
+        ...Z_BRACKET_DEFAULT_PARAMETERS,
+        bends: [{ direction: "down" }, { direction: "left" }],
+      }),
+    ).toThrow();
+  });
+
   it("отвір: segment лише T/M/B", () => {
     expect(() =>
       ZBracketParametersSchema.parse({

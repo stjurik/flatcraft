@@ -7,9 +7,24 @@
 """
 
 from abc import ABC, abstractmethod
+from typing import Literal
 
 import cadquery as cq
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+BendDirection = Literal["up", "down"]
+
+
+class BendSpec(BaseModel):
+    """Напрям одного гибу (Hotfix 2.10.e). Дзеркало TS `BendSpecSchema`.
+
+    Дефолт 'down' за рішенням замовника. Напрям не впливає на геометрію
+    розгортки (довжину/позиції гибів) — лише на рендер стрілки у DXF/PDF.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    direction: BendDirection = Field(default="down", description="Напрям згину: up/down.")
 
 
 class Template[ParamsT: BaseModel](ABC):
