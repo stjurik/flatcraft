@@ -74,9 +74,9 @@ _BEND_TABLE_HEADER: Final[tuple[str, ...]] = (
 _BEND_TABLE_COL_WIDTHS_MM: Final[tuple[float, ...]] = (8, 16, 18, 22, 13, 18, 18)
 
 
-def _arrow(direction: str) -> str:
-    """Стрілка напряму згину для PDF (DejaVuSans підтримує ↓/↑)."""
-    return "↑" if direction == "up" else "↓"
+def _direction_label(direction: str) -> str:
+    """Текстова позначка напряму згину для PDF: UP / DOWN (без стрілок ↓/↑)."""
+    return "UP" if direction == "up" else "DOWN"
 
 
 def _draw_bend_table_rows(
@@ -206,11 +206,9 @@ def _draw_unfold(
     c.drawCentredString(0, 0, f"W = {unfolded.width_mm:.2f} мм")
     c.restoreState()
     c.setFillColorRGB(0.2, 0.4, 0.8)
-    c.drawCentredString(
-        x0 + bend_x * mm,
-        y0 + h * mm + 2 * mm,
-        f"BEND #1 {_arrow(bend_direction)} R{bend_radius_mm:g} d={unfolded.bend_position_mm:.1f}мм",
-    )
+    label = _direction_label(bend_direction)
+    callout = f"BEND #1 {label} R{bend_radius_mm:g} d={unfolded.bend_position_mm:.1f}мм"
+    c.drawCentredString(x0 + bend_x * mm, y0 + h * mm + 2 * mm, callout)
     c.setFillColorRGB(0, 0, 0)
 
 
@@ -229,7 +227,7 @@ def _draw_bend_table(
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
-            _arrow(parameters.bend_direction),
+            _direction_label(parameters.bend_direction),
         ),
     ]
     _draw_bend_table_rows(c, body_rows, origin_mm=origin_mm)
@@ -539,7 +537,7 @@ def export_corner_angle_pdf(
                 f"{parameters.width_mm:.1f}",
                 "0.40",
                 f"{unfolded.bend_allowance_mm:.2f}",
-                _arrow(parameters.bend_direction),
+                _direction_label(parameters.bend_direction),
             )
         ],
         origin_mm=(175, 170),
@@ -660,7 +658,9 @@ def export_wall_shelf_pdf(
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
-            _arrow(parameters.bends[i].direction if i < len(parameters.bends) else "down"),
+            _direction_label(
+                parameters.bends[i].direction if i < len(parameters.bends) else "down"
+            ),
         )
         for i in range(n_bends)
     ]
@@ -878,7 +878,7 @@ def _draw_unfold_generic(
         c.drawCentredString(
             x0 + bend_x * mm,
             y0 + h * mm + 2 * mm + extra_y,
-            f"BEND #{n + 1} {_arrow(direction)} R{bend_radius_mm:g} d={bend_mm:.1f}мм",
+            f"BEND #{n + 1} {_direction_label(direction)} R{bend_radius_mm:g} d={bend_mm:.1f}мм",
         )
         c.setFillColorRGB(0, 0, 0)
         prev_pos_mm = bend_mm
@@ -918,7 +918,7 @@ def _draw_z_bracket_bend_table(
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
-            _arrow(parameters.bends[i].direction),
+            _direction_label(parameters.bends[i].direction),
         )
         for i in range(2)
     ]

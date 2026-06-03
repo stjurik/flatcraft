@@ -48,10 +48,10 @@ describe("ZBracketParametersSchema", () => {
     ).toThrow();
   });
 
-  it("bends: дефолт 2×'down' коли відсутній (Hotfix 2.10.e)", () => {
+  it("bends: дефолт [down, up] коли відсутній (Z гнеться у протилежні боки)", () => {
     const { bends: _omit, ...withoutBends } = Z_BRACKET_DEFAULT_PARAMETERS;
     const parsed = ZBracketParametersSchema.parse(withoutBends);
-    expect(parsed.bends).toEqual([{ direction: "down" }, { direction: "down" }]);
+    expect(parsed.bends).toEqual([{ direction: "down" }, { direction: "up" }]);
   });
 
   it("bends: приймає mixed up/down, відхиляє довжину ≠ 2 та невідомий напрям", () => {
