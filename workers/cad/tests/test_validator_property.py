@@ -18,9 +18,7 @@ from flatcraft_cad.validate.bend import load_spec, validate_bend
 
 _SPEC: dict[str, Any] = load_spec()
 
-_KNOWN_MATERIALS = sorted(
-    {m for g in _SPEC["material_groups"].values() for m in g["members"]}
-)
+_KNOWN_MATERIALS = sorted({m for g in _SPEC["material_groups"].values() for m in g["members"]})
 _MATERIALS = [*_KNOWN_MATERIALS, "unobtanium", ""]
 _KNOWN_THICKNESSES = [r["thickness_mm"] for r in _SPEC["capability_matrix"]]
 _THICKNESSES = [*_KNOWN_THICKNESSES, 7.0, 3.5, 0.7]
