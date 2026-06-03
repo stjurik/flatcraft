@@ -58,6 +58,24 @@ def load_spec() -> dict[str, Any]:
     return spec
 
 
+def _radius_hint(got: float, allowed: list[float], thickness_mm: float) -> str:
+    """Дружня підказка для недопустимого радіуса (паритет з API-gate)."""
+    ordered = sorted(allowed)
+    lo, hi = ordered[0], ordered[-1]
+    listed = ", ".join(f"{r:g}" for r in ordered)
+    if got < lo:
+        return (
+            f"Збільшіть радіус гибки: для товщини {thickness_mm:g} мм мінімальний "
+            f"радіус {lo:g} мм (дозволено: {listed} мм)."
+        )
+    if got > hi:
+        return (
+            f"Зменшіть радіус гибки: для товщини {thickness_mm:g} мм максимальний "
+            f"радіус {hi:g} мм (дозволено: {listed} мм)."
+        )
+    return f"Оберіть дозволений радіус гибки для товщини {thickness_mm:g} мм: {listed} мм."
+
+
 def validate_bend(
     *,
     material_code: str | None,
@@ -108,10 +126,7 @@ def validate_bend(
             BendError(
                 code="RADIUS_NOT_ALLOWED",
                 field="bend_radius_mm",
-                detail=(
-                    f"Радіус {inner_radius_mm} мм недопустимий для товщини "
-                    f"{thickness_mm} мм. Дозволено: {allowed_radii}."
-                ),
+                detail=_radius_hint(inner_radius_mm, allowed_radii, thickness_mm),
             )
         )
 

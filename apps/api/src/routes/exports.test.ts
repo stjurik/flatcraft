@@ -174,6 +174,39 @@ describe("POST /exports — async flow", () => {
     expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
   });
 
+  it("422 radius: дружнє повідомлення підказує збільшити радіус", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "z_bracket",
+        parameters: {
+          top_flange_mm: 60,
+          bottom_flange_mm: 60,
+          offset_mm: 40,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
+          width_mm: 100,
+          holes: [],
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 5,
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const problem = res.json<{
+      detail: string;
+      errors: { code: string; message?: string }[];
+    }>();
+    // detail (RFC 9457 human-readable) і message поля — україномовна підказка
+    // «збільшіть радіус» (для t=5 дозволено {4,5}, а 2.5 < min).
+    expect(problem.detail).toMatch(/збільш/i);
+    const rad = problem.errors.find((e) => e.code === "RADIUS_NOT_ALLOWED");
+    expect(rad?.message).toBeTruthy();
+    expect(rad?.message).toMatch(/збільш/i);
+    expect(rad?.message).toMatch(/радіус/i);
+  });
+
   it("GET /exports/:id для неіснуючого → 404", async () => {
     const res = await app.inject({
       method: "GET",

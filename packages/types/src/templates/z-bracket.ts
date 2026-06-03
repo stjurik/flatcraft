@@ -44,13 +44,13 @@ export const ZBracketParametersSchema = z.object({
   /** MVP: лише 90°. */
   bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
   /**
-   * Напрям кожного з 2 гибів (Hotfix 2.10.e). Дефолт обидва 'down'.
-   * bends[0] — гиб bottom→middle, bends[1] — middle→top.
+   * Напрям кожного з 2 гибів. Дефолт [down, up]: Z-профіль фізично гнеться
+   * у протилежні боки. bends[0] — гиб bottom→middle, bends[1] — middle→top.
    */
   bends: z
     .array(BendSpecSchema)
     .length(2)
-    .default([{ direction: "down" }, { direction: "down" }])
+    .default([{ direction: "down" }, { direction: "up" }])
     .describe("group:Гиби|label:Напрями згину"),
   /** Ширина (довжина гиба), мм. */
   width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
@@ -66,7 +66,7 @@ export const Z_BRACKET_DEFAULT_PARAMETERS: ZBracketParameters = {
   offset_mm: 40,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
-  bends: [{ direction: "down" }, { direction: "down" }],
+  bends: [{ direction: "down" }, { direction: "up" }],
   width_mm: 100,
   holes: [],
 };

@@ -318,8 +318,8 @@ export const LBracketParameters = z.object({
 
 ```ts
 const BendSpec = z.object({ direction: z.enum(["up", "down"]).default("down") });
-// z_bracket:  bends: z.array(BendSpec).length(2).default([{direction:"down"},{direction:"down"}])
-//             // [0] bottom→middle, [1] middle→top
+// z_bracket:  bends: z.array(BendSpec).length(2).default([{direction:"down"},{direction:"up"}])
+//             // [0] bottom→middle, [1] middle→top (Z гнеться у протилежні боки)
 // wall_shelf: bends: z.array(BendSpec).min(1).max(2).default([{direction:"down"},{direction:"down"}])
 //             // [0] back→shelf, [1] shelf→lip (за наявності front_lip)
 ```

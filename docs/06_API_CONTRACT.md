@@ -35,12 +35,14 @@
 
 **Коди валідації гиба (`POST /exports`, серверний gate — ADR-019).** Серверна валідація проти `bend-machine-esi.yaml` обов'язкова (клієнтська — лише UX). Невалідний гиб → `422` з RFC 9457, **жоден артефакт не створюється**:
 
-| `code`                    | Поле             | Додаткові поля                                      | Коли                                                   |
-| ------------------------- | ---------------- | --------------------------------------------------- | ------------------------------------------------------ |
-| `RADIUS_NOT_ALLOWED`      | `bend_radius_mm` | `allowed: number[]`, `got`, `thickness`, `material` | R недопустимий для (товщина) за матрицею               |
-| `THICKNESS_NOT_SUPPORTED` | `thickness_mm`   | `value`                                             | Товщини немає у матриці                                |
-| `MATERIAL_NOT_ALLOWED`    | `material_code`  | `value`                                             | Матеріал не в групі для цієї товщини (напр. нерж 10мм) |
-| `ANGLE_NOT_ALLOWED`       | `bend_angle_deg` | `value`                                             | Кут не з `allowed_angles_deg`                          |
+Кожен запис `errors[]` має `message` — дружню україномовну підказку (для радіуса: «Збільшіть / Зменшіть радіус гибки…»); `detail` дублює `message` першої помилки.
+
+| `code`                    | Поле             | Додаткові поля                                                   | Коли                                                   |
+| ------------------------- | ---------------- | ---------------------------------------------------------------- | ------------------------------------------------------ |
+| `RADIUS_NOT_ALLOWED`      | `bend_radius_mm` | `message`, `allowed: number[]`, `value`, `thickness`, `material` | R недопустимий для (товщина) за матрицею               |
+| `THICKNESS_NOT_SUPPORTED` | `thickness_mm`   | `message`, `value`                                               | Товщини немає у матриці                                |
+| `MATERIAL_NOT_ALLOWED`    | `material_code`  | `message`, `value`                                               | Матеріал не в групі для цієї товщини (напр. нерж 10мм) |
+| `ANGLE_NOT_ALLOWED`       | `bend_angle_deg` | `message`, `value`                                               | Кут не з `allowed_angles_deg`                          |
 
 Приклад для Z-bracket t=5 / R=2.5 (для t=5 матриця дозволяє лише {4.0, 5.0}):
 
@@ -49,13 +51,14 @@
   "type": "https://flatcraft.io/errors/validation",
   "title": "Validation failed",
   "status": 422,
-  "detail": "Гиб не відповідає обмеженням машини (RADIUS_NOT_ALLOWED).",
+  "detail": "Збільшіть радіус гибки: для товщини 5 мм мінімальний радіус 4 мм (дозволено: 4, 5 мм).",
   "instance": "/exports",
   "errors": [
     {
       "field": "bend_radius_mm",
       "code": "RADIUS_NOT_ALLOWED",
       "value": 2.5,
+      "message": "Збільшіть радіус гибки: для товщини 5 мм мінімальний радіус 4 мм (дозволено: 4, 5 мм).",
       "allowed": [4.0, 5.0],
       "thickness": 5.0,
       "material": "cold_rolled_steel"

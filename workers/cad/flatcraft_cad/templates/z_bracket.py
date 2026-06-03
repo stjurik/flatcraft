@@ -36,8 +36,8 @@ class ZBracketBuildParameters(BaseModel):
     bend_radius_mm: float = Field(description="Внутрішній радіус гиба.")
     bend_angle_deg: Literal[90] = Field(default=90, description="MVP: тільки 90°.")
     bends: tuple[BendSpec, BendSpec] = Field(
-        default=(BendSpec(), BendSpec()),
-        description="Напрям 2 гибів (Hotfix 2.10.e): [bottom→middle, middle→top].",
+        default=(BendSpec(direction="down"), BendSpec(direction="up")),
+        description="Напрям 2 гибів [bottom→middle, middle→top]; дефолт [down, up] (Z-профіль).",
     )
     width_mm: float = Field(ge=20, le=3000, description="Довжина гиба (extrude).")
     thickness_mm: float = Field(gt=0, le=10, description="Товщина листа.")
