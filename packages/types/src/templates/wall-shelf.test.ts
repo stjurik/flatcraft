@@ -87,4 +87,30 @@ describe("WallShelfParametersSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("bends: дефолт 2×'down', приймає 1-2 елементи, відхиляє 3 та невідомий напрям (Hotfix 2.10.e)", () => {
+    const { bends: _omit, ...withoutBends } = WALL_SHELF_DEFAULT_PARAMETERS;
+    expect(WallShelfParametersSchema.parse(withoutBends).bends).toEqual([
+      { direction: "down" },
+      { direction: "down" },
+    ]);
+    expect(
+      WallShelfParametersSchema.parse({
+        ...WALL_SHELF_DEFAULT_PARAMETERS,
+        bends: [{ direction: "up" }],
+      }).bends,
+    ).toEqual([{ direction: "up" }]);
+    expect(() =>
+      WallShelfParametersSchema.parse({
+        ...WALL_SHELF_DEFAULT_PARAMETERS,
+        bends: [{ direction: "down" }, { direction: "down" }, { direction: "down" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      WallShelfParametersSchema.parse({
+        ...WALL_SHELF_DEFAULT_PARAMETERS,
+        bends: [{ direction: "diagonal" }],
+      }),
+    ).toThrow();
+  });
 });

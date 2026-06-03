@@ -14,6 +14,8 @@
  */
 import { z } from "zod";
 
+import { BendSpecSchema } from "./bends.js";
+
 const HoleSchema = z.object({
   /** На якій секції отвір: T — top, M — middle (вертикальна), B — bottom. */
   segment: z.enum(["T", "M", "B"]),
@@ -41,6 +43,15 @@ export const ZBracketParametersSchema = z.object({
     .describe("group:Гиби|label:Внутрішній радіус (мм)"),
   /** MVP: лише 90°. */
   bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
+  /**
+   * Напрям кожного з 2 гибів (Hotfix 2.10.e). Дефолт обидва 'down'.
+   * bends[0] — гиб bottom→middle, bends[1] — middle→top.
+   */
+  bends: z
+    .array(BendSpecSchema)
+    .length(2)
+    .default([{ direction: "down" }, { direction: "down" }])
+    .describe("group:Гиби|label:Напрями згину"),
   /** Ширина (довжина гиба), мм. */
   width_mm: z.number().min(20).max(3000).describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
   holes: z.array(HoleSchema).max(20).describe("group:Отвори|label:Отвори"),
@@ -55,6 +66,7 @@ export const Z_BRACKET_DEFAULT_PARAMETERS: ZBracketParameters = {
   offset_mm: 40,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bends: [{ direction: "down" }, { direction: "down" }],
   width_mm: 100,
   holes: [],
 };

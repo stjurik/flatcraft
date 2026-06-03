@@ -21,6 +21,8 @@
  */
 import { z } from "zod";
 
+import { BendSpecSchema } from "./bends.js";
+
 /**
  * Plain ZodObject — споживається у `ExportRequestSchema.discriminatedUnion`,
  * який вимагає ZodObject members (а не ZodEffects від refine).
@@ -47,6 +49,16 @@ export const WallShelfParametersBaseSchema = z.object({
     .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
     .describe("group:Гиби|label:Внутрішній радіус (мм)"),
   bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
+  /**
+   * Напрям згину на кожен гиб (Hotfix 2.10.e). 1 або 2 гиби залежно від
+   * front_lip. Дефолт обидва 'down'. bends[0] — back→shelf, bends[1] — shelf→lip.
+   */
+  bends: z
+    .array(BendSpecSchema)
+    .min(1)
+    .max(2)
+    .default([{ direction: "down" }, { direction: "down" }])
+    .describe("group:Гиби|label:Напрями згину"),
   width_mm: z
     .number()
     .min(100)
@@ -86,6 +98,7 @@ export const WALL_SHELF_DEFAULT_PARAMETERS: WallShelfParameters = {
   front_lip_mm: 20,
   bend_radius_mm: 2.5,
   bend_angle_deg: 90,
+  bends: [{ direction: "down" }, { direction: "down" }],
   width_mm: 300,
   mount_hole_diameter_mm: 6,
   mount_hole_rows: 2,

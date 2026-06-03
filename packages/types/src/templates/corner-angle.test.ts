@@ -93,4 +93,21 @@ describe("CornerAngleParametersSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("bend_direction: дефолт 'down', приймає 'up', відхиляє інше (Hotfix 2.10.e)", () => {
+    const { bend_direction: _omit, ...withoutDir } = CORNER_ANGLE_DEFAULT_PARAMETERS;
+    expect(CornerAngleParametersSchema.parse(withoutDir).bend_direction).toBe("down");
+    expect(
+      CornerAngleParametersSchema.parse({
+        ...CORNER_ANGLE_DEFAULT_PARAMETERS,
+        bend_direction: "up",
+      }).bend_direction,
+    ).toBe("up");
+    expect(() =>
+      CornerAngleParametersSchema.parse({
+        ...CORNER_ANGLE_DEFAULT_PARAMETERS,
+        bend_direction: "nope",
+      }),
+    ).toThrow();
+  });
 });

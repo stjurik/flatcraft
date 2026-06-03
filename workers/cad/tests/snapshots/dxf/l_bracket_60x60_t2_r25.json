@@ -42,7 +42,7 @@
         101.0
       ],
       "layer": "BEND_TEXT",
-      "text": "BEND 90° UP R2.5",
+      "text": "BEND 90° DOWN R2.5 #1",
       "type": "TEXT"
     }
   ],

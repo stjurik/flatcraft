@@ -20,7 +20,7 @@ from typing import Literal
 import cadquery as cq
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from flatcraft_cad.templates.base import Template
+from flatcraft_cad.templates.base import BendSpec, Template
 
 ALLOWED_INNER_RADIUS_MM: tuple[float, ...] = (1.0, 2.5, 4.0, 5.0)
 
@@ -35,6 +35,10 @@ class ZBracketBuildParameters(BaseModel):
     offset_mm: float = Field(ge=20, le=500, description="Вертикальний offset = середня секція.")
     bend_radius_mm: float = Field(description="Внутрішній радіус гиба.")
     bend_angle_deg: Literal[90] = Field(default=90, description="MVP: тільки 90°.")
+    bends: tuple[BendSpec, BendSpec] = Field(
+        default=(BendSpec(), BendSpec()),
+        description="Напрям 2 гибів (Hotfix 2.10.e): [bottom→middle, middle→top].",
+    )
     width_mm: float = Field(ge=20, le=3000, description="Довжина гиба (extrude).")
     thickness_mm: float = Field(gt=0, le=10, description="Товщина листа.")
 

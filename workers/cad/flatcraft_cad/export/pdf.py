@@ -60,6 +60,51 @@ register_fonts()
 
 PAGE_WIDTH, PAGE_HEIGHT = landscape(A4)
 
+# Спільний layout bend-table (7 колонок з «Напрям»). Сума = 113 мм, при
+# origin x=175 → 288 < 297 (landscape A4), вміщається без overflow.
+_BEND_TABLE_HEADER: Final[tuple[str, ...]] = (
+    "#",
+    "Кут,°",
+    "R,мм",
+    "Довж,мм",
+    "K",
+    "BA,мм",
+    "Напрям",
+)
+_BEND_TABLE_COL_WIDTHS_MM: Final[tuple[float, ...]] = (8, 16, 18, 22, 13, 18, 18)
+
+
+def _arrow(direction: str) -> str:
+    """Стрілка напряму згину для PDF (DejaVuSans підтримує ↓/↑)."""
+    return "↑" if direction == "up" else "↓"
+
+
+def _draw_bend_table_rows(
+    c: pdfcanvas.Canvas,
+    body_rows: list[tuple[str, ...]],
+    *,
+    origin_mm: tuple[float, float],
+) -> None:
+    """Малює таблицю гибів (header + рядки) зі спільним layout'ом."""
+    ox, oy = origin_mm
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Гиби")
+    rows: list[tuple[str, ...]] = [_BEND_TABLE_HEADER, *body_rows]
+    row_h_mm = 6
+    cur_y_mm = oy - 7
+    c.setLineWidth(0.4)
+    for r_idx, row in enumerate(rows):
+        cur_x_mm = ox
+        if r_idx == 0:
+            c.setFont("DejaVuSans-Bold", 8)
+        else:
+            c.setFont("DejaVuSans", 9)
+        for cell, w_mm in zip(row, _BEND_TABLE_COL_WIDTHS_MM, strict=True):
+            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
+            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
+            cur_x_mm += w_mm
+        cur_y_mm -= row_h_mm
+
 
 def compute_bom(
     unfolded: (
@@ -127,6 +172,8 @@ def _draw_unfold(
     *,
     origin_mm: tuple[float, float],
     canvas_size_mm: tuple[float, float],
+    bend_radius_mm: float = 0.0,
+    bend_direction: str = "down",
 ) -> None:
     """Малює розгортку у канвасі. Координати у мм від origin (lower-left)."""
     ox_mm, oy_mm = origin_mm
@@ -162,7 +209,7 @@ def _draw_unfold(
     c.drawCentredString(
         x0 + bend_x * mm,
         y0 + h * mm + 2 * mm,
-        f"BEND @ {unfolded.bend_position_mm:.2f} мм",
+        f"BEND #1 {_arrow(bend_direction)} R{bend_radius_mm:g} d={unfolded.bend_position_mm:.1f}мм",
     )
     c.setFillColorRGB(0, 0, 0)
 
@@ -174,11 +221,7 @@ def _draw_bend_table(
     *,
     origin_mm: tuple[float, float],
 ) -> None:
-    ox, oy = origin_mm
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Гиби")
-    rows = [
-        ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
+    body_rows: list[tuple[str, ...]] = [
         (
             "1",
             f"{parameters.bend_angle_deg}",
@@ -186,23 +229,10 @@ def _draw_bend_table(
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
+            _arrow(parameters.bend_direction),
         ),
     ]
-    col_widths_mm = [10, 18, 22, 25, 22, 22]
-    row_h_mm = 6
-    cur_y_mm = oy - 7
-    c.setLineWidth(0.4)
-    for r_idx, row in enumerate(rows):
-        cur_x_mm = ox
-        if r_idx == 0:
-            c.setFont("DejaVuSans-Bold", 8)
-        else:
-            c.setFont("DejaVuSans", 9)
-        for cell, w_mm in zip(row, col_widths_mm, strict=True):
-            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
-            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
-            cur_x_mm += w_mm
-        cur_y_mm -= row_h_mm
+    _draw_bend_table_rows(c, body_rows, origin_mm=origin_mm)
 
 
 def _draw_bom(
@@ -279,7 +309,14 @@ def export_l_bracket_pdf(
 
     # Layout.
     # Розгортка ліворуч (~150×110 мм), таблиці/BOM/QR праворуч.
-    _draw_unfold(c, unfolded, origin_mm=(15, 70), canvas_size_mm=(150, 100))
+    _draw_unfold(
+        c,
+        unfolded,
+        origin_mm=(15, 70),
+        canvas_size_mm=(150, 100),
+        bend_radius_mm=parameters.bend_radius_mm,
+        bend_direction=parameters.bend_direction,
+    )
     _draw_bend_table(c, parameters, unfolded, origin_mm=(175, 170))
     _draw_bom(
         c,
@@ -379,6 +416,8 @@ def export_z_bracket_pdf(
         bend_positions_mm=unfolded.bend_positions_mm,
         origin_mm=(15, 70),
         canvas_size_mm=(150, 100),
+        bend_radius_mm=parameters.bend_radius_mm,
+        bend_directions=tuple(b.direction for b in parameters.bends),
     )
 
     # Bend table з двома рядками.
@@ -485,38 +524,26 @@ def export_corner_angle_pdf(
         origin_mm=(15, 70),
         canvas_size_mm=(150, 100),
         holes=unfolded.holes,
+        bend_radius_mm=parameters.bend_radius_mm,
+        bend_directions=(parameters.bend_direction,),
     )
 
-    # Bend table (1 рядок) — reuse L-bracket logic вручну (різні Params type).
-    ox_t, oy_t = 175, 170
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox_t * mm, oy_t * mm, "Гиби")
-    rows = [
-        ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
-        (
-            "1",
-            f"{parameters.bend_angle_deg}",
-            f"{parameters.bend_radius_mm}",
-            f"{parameters.width_mm:.1f}",
-            "0.40",
-            f"{unfolded.bend_allowance_mm:.2f}",
-        ),
-    ]
-    col_widths_mm = [10, 18, 22, 25, 22, 22]
-    row_h_mm = 6
-    cur_y_mm = oy_t - 7
-    c.setLineWidth(0.4)
-    for r_idx, row in enumerate(rows):
-        cur_x_mm = ox_t
-        if r_idx == 0:
-            c.setFont("DejaVuSans-Bold", 8)
-        else:
-            c.setFont("DejaVuSans", 9)
-        for cell, w_mm in zip(row, col_widths_mm, strict=True):
-            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
-            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
-            cur_x_mm += w_mm
-        cur_y_mm -= row_h_mm
+    # Bend table (1 рядок).
+    _draw_bend_table_rows(
+        c,
+        [
+            (
+                "1",
+                f"{parameters.bend_angle_deg}",
+                f"{parameters.bend_radius_mm}",
+                f"{parameters.width_mm:.1f}",
+                "0.40",
+                f"{unfolded.bend_allowance_mm:.2f}",
+                _arrow(parameters.bend_direction),
+            )
+        ],
+        origin_mm=(175, 170),
+    )
 
     # BOM через generic.
     ox, oy = 175, 140
@@ -620,14 +647,12 @@ def export_wall_shelf_pdf(
         origin_mm=(15, 70),
         canvas_size_mm=(150, 100),
         holes=unfolded.holes,
+        bend_radius_mm=parameters.bend_radius_mm,
+        bend_directions=tuple(b.direction for b in parameters.bends),
     )
 
     # Bend table (1 або 2 рядки).
-    ox_t, oy_t = 175, 170
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox_t * mm, oy_t * mm, "Гиби")
-    header = ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм")
-    body_rows = [
+    body_rows: list[tuple[str, ...]] = [
         (
             str(i + 1),
             f"{parameters.bend_angle_deg}",
@@ -635,25 +660,11 @@ def export_wall_shelf_pdf(
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
+            _arrow(parameters.bends[i].direction if i < len(parameters.bends) else "down"),
         )
         for i in range(n_bends)
     ]
-    rows: list[tuple[str, ...]] = [header, *body_rows]
-    col_widths_mm = [10, 18, 22, 25, 22, 22]
-    row_h_mm = 6
-    cur_y_mm = oy_t - 7
-    c.setLineWidth(0.4)
-    for r_idx, row in enumerate(rows):
-        cur_x_mm = ox_t
-        if r_idx == 0:
-            c.setFont("DejaVuSans-Bold", 8)
-        else:
-            c.setFont("DejaVuSans", 9)
-        for cell, w_mm in zip(row, col_widths_mm, strict=True):
-            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
-            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
-            cur_x_mm += w_mm
-        cur_y_mm -= row_h_mm
+    _draw_bend_table_rows(c, body_rows, origin_mm=(175, 170))
 
     # BOM.
     ox, oy = 175, 140
@@ -830,8 +841,15 @@ def _draw_unfold_generic(
     origin_mm: tuple[float, float],
     canvas_size_mm: tuple[float, float],
     holes: tuple[Hole2D, ...] = (),
+    bend_radius_mm: float = 0.0,
+    bend_directions: tuple[str, ...] = (),
 ) -> None:
-    """Generic-варіант _draw_unfold для довільної кількості bend lines і отворів."""
+    """Generic-варіант _draw_unfold для довільної кількості bend lines і отворів.
+
+    Callout кожного гибу: `BEND #{n} {arrow} R{radius} d={distance}мм`.
+    Overlap-fix: якщо два callouts ближче за 30мм по X (model space) — другий
+    зсувається на +12pt по Y, щоб не накладались.
+    """
     ox_mm, oy_mm = origin_mm
     canvas_w, canvas_h = canvas_size_mm
     scale = min(canvas_w / max(length_mm, 1), canvas_h / max(width_mm, 1))
@@ -844,17 +862,26 @@ def _draw_unfold_generic(
     c.setLineWidth(1.0)
     c.rect(x0, y0, w * mm, h * mm, stroke=1, fill=0)
 
-    for bend_mm in bend_positions_mm:
+    prev_pos_mm: float | None = None
+    for n, bend_mm in enumerate(bend_positions_mm):
         bend_x = bend_mm * scale
+        direction = bend_directions[n] if n < len(bend_directions) else "down"
         c.saveState()
         c.setDash(4, 3)
         c.setStrokeColorRGB(0.2, 0.4, 0.8)
         c.line(x0 + bend_x * mm, y0, x0 + bend_x * mm, y0 + h * mm)
         c.restoreState()
+        # Overlap-fix: callouts ближче за 30мм по X → зсув +12pt по Y.
+        extra_y = 12.0 if prev_pos_mm is not None and (bend_mm - prev_pos_mm) < 30.0 else 0.0
         c.setFillColorRGB(0.2, 0.4, 0.8)
         c.setFont("DejaVuSans", 7)
-        c.drawCentredString(x0 + bend_x * mm, y0 + h * mm + 2 * mm, f"BEND @ {bend_mm:.1f}")
+        c.drawCentredString(
+            x0 + bend_x * mm,
+            y0 + h * mm + 2 * mm + extra_y,
+            f"BEND #{n + 1} {_arrow(direction)} R{bend_radius_mm:g} d={bend_mm:.1f}мм",
+        )
         c.setFillColorRGB(0, 0, 0)
+        prev_pos_mm = bend_mm
 
     if holes:
         c.saveState()
@@ -883,43 +910,19 @@ def _draw_z_bracket_bend_table(
     *,
     origin_mm: tuple[float, float],
 ) -> None:
-    ox, oy = origin_mm
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Гиби")
-    rows = [
-        ("#", "Кут, °", "R вн., мм", "Довжина, мм", "K-фактор", "BA, мм"),
+    body_rows: list[tuple[str, ...]] = [
         (
-            "1",
+            str(i + 1),
             f"{parameters.bend_angle_deg}",
             f"{parameters.bend_radius_mm}",
             f"{parameters.width_mm:.1f}",
             "0.40",
             f"{unfolded.bend_allowance_mm:.2f}",
-        ),
-        (
-            "2",
-            f"{parameters.bend_angle_deg}",
-            f"{parameters.bend_radius_mm}",
-            f"{parameters.width_mm:.1f}",
-            "0.40",
-            f"{unfolded.bend_allowance_mm:.2f}",
-        ),
+            _arrow(parameters.bends[i].direction),
+        )
+        for i in range(2)
     ]
-    col_widths_mm = [10, 18, 22, 25, 22, 22]
-    row_h_mm = 6
-    cur_y_mm = oy - 7
-    c.setLineWidth(0.4)
-    for r_idx, row in enumerate(rows):
-        cur_x_mm = ox
-        if r_idx == 0:
-            c.setFont("DejaVuSans-Bold", 8)
-        else:
-            c.setFont("DejaVuSans", 9)
-        for cell, w_mm in zip(row, col_widths_mm, strict=True):
-            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
-            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
-            cur_x_mm += w_mm
-        cur_y_mm -= row_h_mm
+    _draw_bend_table_rows(c, body_rows, origin_mm=origin_mm)
 
 
 # ReportLab ImageReader лише для readability — окремий імпорт щоб mypy

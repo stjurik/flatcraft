@@ -11,6 +11,9 @@ interface CornerAngleEditorProps {
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
+// Hotfix 2.10.e: bend_direction у моделі (дефолт 'down'), приховано від UI.
+const FORM_SCHEMA = CornerAngleParametersSchema.omit({ bend_direction: true });
+
 export function CornerAngleEditor({ value, onChange }: CornerAngleEditorProps) {
   const validation = useMemo(() => CornerAngleParametersSchema.safeParse(value), [value]);
   const fieldErrors = useMemo(
@@ -31,7 +34,7 @@ export function CornerAngleEditor({ value, onChange }: CornerAngleEditorProps) {
       onSubmit={(e) => e.preventDefault()}
     >
       <AutoForm
-        schema={CornerAngleParametersSchema}
+        schema={FORM_SCHEMA}
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as CornerAngleParameters)}
         errors={fieldErrors}

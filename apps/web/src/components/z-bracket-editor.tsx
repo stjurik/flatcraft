@@ -11,6 +11,9 @@ interface ZBracketEditorProps {
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
+// Hotfix 2.10.e: bends (напрями 2 гибів, дефолт 'down') у моделі, приховано від UI.
+const FORM_SCHEMA = ZBracketParametersSchema.omit({ bends: true });
+
 function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNode | null {
   if (descriptor.name === "holes") {
     const count = Array.isArray(value) ? value.length : 0;
@@ -41,7 +44,7 @@ export function ZBracketEditor({ value, onChange }: ZBracketEditorProps) {
       onSubmit={(e) => e.preventDefault()}
     >
       <AutoForm
-        schema={ZBracketParametersSchema}
+        schema={FORM_SCHEMA}
         value={value as unknown as Record<string, unknown>}
         onChange={(next) => onChange(next as unknown as ZBracketParameters)}
         errors={fieldErrors}
