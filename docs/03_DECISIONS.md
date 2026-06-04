@@ -490,6 +490,39 @@
 
 ---
 
+## ADR-020: Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)
+
+**Статус:** Accepted (2026-06-04)
+
+**Контекст:** Phase 3 (Auth) і Phase 4 (Donations) — це ~3 тижні роботи на автентифікацію (Auth.js, JWT, OAuth, quota) і монетизацію (donation-claims, unlock-flow). Product-market fit ще не валідовано: жоден реальний користувач не пройшов повний цикл. Будувати персоналізацію й anti-abuse-інфраструктуру перед першим зовнішнім фідбеком — це інвестиція наосліп.
+
+**Рішення:** Пропускаємо Phase 3 і Phase 4 у MVP-релізі. Замість них — **Phase X.1 (1–2 дні)**, що готує продукт до публічного soft-launch'у без auth:
+
+1. **IP-based rate-limit** на `POST /exports` — 30/год/IP + burst-ban (50). Захист від abuse, толерантний до NAT. Плагін `global: false` (точково, лише browser-direct маршрути): глобальний per-IP ліміт несумісний із SSR (web робить server-side fetch до API з однієї IP контейнера → throttl'ив би усіх). Глобальний flood-захист — на Cloudflare WAF.
+2. **PDF watermark «BETA»** — footer кожної сторінки, знижує репутаційний ризик ранніх геометричних помилок.
+3. **Post-export ЗСУ-CTA** — ненав'язливе нагадування про підтримку ЗСУ у success-стані експорту (без блокування).
+4. **Справжня `/about`** — оголошення моделі: BETA, безкоштовно для всіх, донати на ЗСУ — почесна система.
+
+Модель: «безкоштовно для всіх, донати на ЗСУ — почесна система, без блокування експорту».
+
+**Наслідки:**
+
+- ✅ Швидший public launch (днів замість тижнів).
+- ✅ Сильніший меседж «безкоштовно для всіх» — без paywall, без реєстрації.
+- ✗ Нема персоналізації (нема «моїх чернеток»; drafts поки не зберігаються).
+- ✗ Нема quota → потенційний abuse. Mitigation: IP rate-limit (цей ADR) + Cloudflare WAF (country block + CF rate-limit як другий рубіж, керується у dashboard).
+- ⚠ Endpoints `/v1/auth/*`, `/v1/account/*`, `/v1/donations/*`, `/v1/admin/*` і таблиці `users`/`oauth_accounts`/`sessions`/`donation_claims`/`usage_quota` лишаються у `docs/06_API_CONTRACT.md` / `docs/05_DATA_MODEL.md` як `v1.1+ planned` — не реалізовані, але спроєктовані.
+
+**Тригери перегляду (активують Phase 3/4 з v1.1):**
+
+- **>5 ботів/тиждень** на Cloudflare WAF Analytics → Phase 3 (auth для quota).
+- **Discord/email-фідбек «хочу зберегти свій draft»** від >3 unique users → Phase 3.
+- **>$50/міс** приходить на ЗСУ через банку → Phase 4 (auto-acknowledge donate-flow).
+
+**Альтернативи:** повна Phase 3+4 одразу — відхилено як overinvestment перед PMF.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

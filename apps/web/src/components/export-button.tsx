@@ -5,6 +5,7 @@ import { Button } from "@flatcraft/ui";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
+import { PostExportDonateNudge } from "./post-export-donate-nudge";
 
 type ExportState =
   | { readonly status: "idle" }
@@ -93,26 +94,30 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
       ) : null}
 
       {state.status === "done" ? (
-        <div className="flex flex-col gap-1 text-sm">
-          <a
-            data-testid="export-download-link"
-            href={state.result.artifacts.dxf.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:text-primary-hover underline"
-          >
-            Завантажити DXF ({Math.round(state.result.artifacts.dxf.bytes / 1024)} КБ)
-          </a>
-          <a
-            data-testid="export-download-link-pdf"
-            href={state.result.artifacts.pdf.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:text-primary-hover underline"
-          >
-            Завантажити PDF ({Math.round(state.result.artifacts.pdf.bytes / 1024)} КБ)
-          </a>
-        </div>
+        <>
+          <div className="flex flex-col gap-1 text-sm">
+            <a
+              data-testid="export-download-link"
+              href={state.result.artifacts.dxf.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:text-primary-hover underline"
+            >
+              Завантажити DXF ({Math.round(state.result.artifacts.dxf.bytes / 1024)} КБ)
+            </a>
+            <a
+              data-testid="export-download-link-pdf"
+              href={state.result.artifacts.pdf.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:text-primary-hover underline"
+            >
+              Завантажити PDF ({Math.round(state.result.artifacts.pdf.bytes / 1024)} КБ)
+            </a>
+          </div>
+          {/* Phase X.1 C: ненав'язливе ЗСУ-нагадування ПІД download-лінками. */}
+          <PostExportDonateNudge />
+        </>
       ) : null}
 
       {state.status === "error" ? (

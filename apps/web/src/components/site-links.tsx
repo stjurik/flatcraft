@@ -18,7 +18,7 @@ const COLUMNS: ReadonlyArray<ColumnDef> = [
     title: "Продукт",
     items: [
       { label: "Шаблони", href: "/templates" },
-      { label: "Про проєкт", href: "/soon" },
+      { label: "Про проєкт", href: "/about" },
       { label: "Розблокувати", href: "/soon" },
     ],
   },

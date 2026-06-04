@@ -60,6 +60,16 @@ register_fonts()
 
 PAGE_WIDTH, PAGE_HEIGHT = landscape(A4)
 
+# Phase X.1 B (ADR-020): soft-launch watermark «BETA» у footer кожної сторінки.
+# Прапор модуль-level — щоб вимкнути одним рядком при v1.0-релізі.
+BETA_WATERMARK = True
+FEEDBACK_EMAIL = "feedback@hart.crimea.ua"
+# Текст водяного знака: курсивний subtle-рядок над нижнім краєм. Реальний
+# email + публічний GitHub (без dead-link на Discord, якого ще нема).
+_BETA_WATERMARK_TEXT: Final[str] = (
+    f"BETA · Знайшли помилку? {FEEDBACK_EMAIL} · спільнота: github.com/stjurik/flatcraft"
+)
+
 # Спільний layout bend-table (7 колонок з «Напрям»). Сума = 113 мм, при
 # origin x=175 → 288 < 297 (landscape A4), вміщається без overflow.
 _BEND_TABLE_HEADER: Final[tuple[str, ...]] = (
@@ -77,6 +87,28 @@ _BEND_TABLE_COL_WIDTHS_MM: Final[tuple[float, ...]] = (8, 16, 18, 22, 13, 18, 18
 def _direction_label(direction: str) -> str:
     """Текстова позначка напряму згину для PDF: UP / DOWN (без стрілок ↓/↑)."""
     return "UP" if direction == "up" else "DOWN"
+
+
+def _draw_beta_watermark(
+    c: pdfcanvas.Canvas,
+    page_width: float,
+    page_height: float,
+) -> None:
+    """Центрований subtle-watermark «BETA · feedback» унизу сторінки.
+
+    Pure-рендер: 7pt курсив, сірий #707070, 18pt від нижнього краю — нижче
+    реального контенту (footer-hint на 15мм, QR на 12мм), тож не перекриває.
+    `page_height` приймається для повноти сигнатури (footer-anchor — від низу).
+    Керується прапором BETA_WATERMARK (вимкнення при v1.0).
+    """
+    if not BETA_WATERMARK:
+        return
+    _ = page_height
+    c.saveState()
+    c.setFont("DejaVuSans-Oblique", 7)
+    c.setFillColorRGB(0x70 / 255, 0x70 / 255, 0x70 / 255)
+    c.drawCentredString(page_width / 2, 18, _BETA_WATERMARK_TEXT)
+    c.restoreState()
 
 
 def _draw_bend_table_rows(
@@ -352,6 +384,7 @@ def export_l_bracket_pdf(
         "DXF для лазерного різання · BEND-LINES = лінія гиба (не різати)",
     )
 
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
     c.showPage()
     c.save()
 
@@ -463,6 +496,7 @@ def export_z_bracket_pdf(
         "DXF для лазерного різання · BEND-LINES = лінії гибу (не різати)",
     )
 
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
     c.showPage()
     c.save()
     _normalize_pdf_bytes(output_path)
@@ -585,6 +619,7 @@ def export_corner_angle_pdf(
         "DXF для лазерного різання · BEND-LINE = лінія гиба · INNER_CUTS = отвори",
     )
 
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
     c.showPage()
     c.save()
     _normalize_pdf_bytes(output_path)
@@ -707,6 +742,7 @@ def export_wall_shelf_pdf(
         "DXF для лазерного різання · BEND-LINES = гиби · INNER_CUTS = mounting holes",
     )
 
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
     c.showPage()
     c.save()
     _normalize_pdf_bytes(output_path)
@@ -826,6 +862,7 @@ def export_perforated_panel_pdf(
         "DXF для лазерного різання · INNER_CUTS = отвори · BEND операцій немає",
     )
 
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
     c.showPage()
     c.save()
     _normalize_pdf_bytes(output_path)

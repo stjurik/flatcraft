@@ -17,6 +17,7 @@ import {
 import { env } from "./env.js";
 import { createLoggerOptions } from "./logger.js";
 import { dbPlugin } from "./plugins/db.js";
+import rateLimitPlugin from "./plugins/rate-limit.js";
 import { buildExportRoutes } from "./routes/exports.js";
 import type { JobStore } from "./lib/job-store.js";
 import { healthRoutes } from "./routes/health.js";
@@ -56,6 +57,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     ...(options.dbClient ? { client: options.dbClient } : {}),
     ...(options.dbUrl ? { url: options.dbUrl } : {}),
   });
+
+  // Rate-limit (Phase X.1 A): глобальний 100/хв + per-route 30/год на /exports.
+  // Реєструємо ДО маршрутів, щоб route-level `config.rateLimit` бачив плагін.
+  await app.register(rateLimitPlugin);
 
   await app.register(healthRoutes);
   await app.register(templateRoutes);
