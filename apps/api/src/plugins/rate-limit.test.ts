@@ -6,12 +6,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { EXPORT_RATE_LIMIT, GLOBAL_RATE_LIMIT } from "./rate-limit.js";
+import { EXPORT_RATE_LIMIT, RATE_LIMIT_PLUGIN_OPTIONS } from "./rate-limit.js";
 
 describe("rate-limit config", () => {
-  it("глобальний ліміт лишається 100/хв", () => {
-    expect(GLOBAL_RATE_LIMIT.max).toBe(100);
-    expect(GLOBAL_RATE_LIMIT.timeWindow).toBe("1 minute");
+  it("плагін реєструється opt-in (global:false) — SSR-fetch не throttl'иться", () => {
+    // global:false критично: web SSR робить server-side fetch з однієї IP;
+    // глобальний per-IP ліміт миттєво throttl'ив би усіх (ловило CI на /materials).
+    expect(RATE_LIMIT_PLUGIN_OPTIONS.global).toBe(false);
   });
 
   it("export-ліміт: 30 на годину з ban=50", () => {

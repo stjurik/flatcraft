@@ -3,22 +3,32 @@
  *
  * Soft-launch без auth: захист від abuse — лише IP-based (толерантний до NAT).
  *
- * - Глобально: 100 req/min/IP (як було) — захист усього API від флуду.
+ * ВАЖЛИВО — `global: false`. Глобальний per-IP ліміт несумісний із SSR: web
+ * (Next.js) робить server-side fetch до API (`/templates`, `/materials`) з ОДНІЄЇ
+ * IP-адреси контейнера. Глобальний ліміт миттєво throttl'ив би усі SSR-запити
+ * усіх користувачів під спільним ключем (саме це й зловило CI — 429 на
+ * `/materials` під час e2e). Тому ліміт вмикається ТОЧКОВО, лише на browser-
+ * direct маршрутах (POST /exports), через `config.rateLimit`. Глобальний
+ * flood-захист живе на рівні Cloudflare WAF (ADR-020), де ключем є реальна
+ * клієнтська IP, а не web-контейнер.
+ *
  * - POST /exports: 30 експортів/год/IP + burst-ban після 50 (через `ban`).
  *   Аргумент за 30/год: DIY-користувач за день не зробить >30 експортів;
  *   офіс за NAT з ~10 людьми теж укладеться; бот блокується після 30 спроб.
- *
- * Per-route override вмикається через `config.rateLimit` у самому маршруті
- * (див. routes/exports.ts) — цей модуль лише реєструє плагін глобально й
- * експортує готовий конфіг для export-маршруту, щоб його можна було тестувати
- * ізольовано (unit) і застосувати в одному місці.
+ *   Цей маршрут б'ється з браузера напряму, тож req.ip = реальна клієнтська IP
+ *   (у prod через trustProxy + X-Forwarded-For від Caddy/CF).
  */
 import rateLimit, { type RateLimitOptions, type RateLimitPluginOptions } from "@fastify/rate-limit";
 import type { FastifyInstance } from "fastify";
 import fp from "fastify-plugin";
 
-/** Глобальний ліміт (як був до Phase X.1): 100 req/хв/IP. */
-export const GLOBAL_RATE_LIMIT: RateLimitPluginOptions = {
+/**
+ * Опції реєстрації плагіна. `global: false` — жоден маршрут не лімітується за
+ * замовчуванням; ліміт застосовується лише там, де є `config.rateLimit`.
+ * `max`/`timeWindow` — лише дефолти для opted-in маршрутів без власних чисел.
+ */
+export const RATE_LIMIT_PLUGIN_OPTIONS: RateLimitPluginOptions = {
+  global: false,
   max: 100,
   timeWindow: "1 minute",
 };
@@ -56,7 +66,7 @@ export const EXPORT_RATE_LIMIT: RateLimitOptions = {
 };
 
 async function rateLimitPlugin(app: FastifyInstance): Promise<void> {
-  await app.register(rateLimit, GLOBAL_RATE_LIMIT);
+  await app.register(rateLimit, RATE_LIMIT_PLUGIN_OPTIONS);
 }
 
 /**

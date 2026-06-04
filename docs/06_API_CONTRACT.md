@@ -69,8 +69,8 @@
 
 ### Rate limit
 
-- Глобально: 100 req/min/IP.
-- `/exports` POST: **30/год/IP** + burst-ban (>50 у вікні → тимчасовий 403). Soft-launch без auth, тож ключ — IP, не user (ADR-020, Phase X.1). Перевищення → `429` RFC 9457 (`type: .../errors/rate-limit`) з україномовним `detail`.
+- Глобальний flood-захист — на рівні **Cloudflare WAF** (edge), а НЕ у Fastify. Fastify-плагін реєструється `global: false` навмисно: web (SSR) робить server-side fetch до API з однієї IP контейнера, тож глобальний per-IP ліміт throttl'ив би усі SSR-запити під спільним ключем. Точковий ліміт — лише на browser-direct маршрутах.
+- `/exports` POST: **30/год/IP** + burst-ban (>50 у вікні → тимчасовий 403). Soft-launch без auth, тож ключ — IP, не user (ADR-020, Phase X.1). Перевищення → `429` RFC 9457 (`type: .../errors/rate-limit`) з україномовним `detail`. У prod req.ip = реальна клієнтська IP (trustProxy + X-Forwarded-For від Caddy/CF).
 - `/auth/login`, `/auth/register`: 10/год/IP. _(🚧 v1.1+ — auth ще не реалізовано, див. ADR-020.)_
 
 Заголовки відповіді: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After` (при 429).

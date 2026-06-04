@@ -284,6 +284,19 @@ describe("POST /exports — async flow", () => {
     expect(limited.headers["retry-after"]).toBeDefined();
   });
 
+  it("Phase X.1 A: інші маршрути НЕ throttl'яться (global:false — SSR-safe)", async () => {
+    // Регресія на CI-баг: глобальний per-IP ліміт throttl'ив SSR-fetch
+    // (/templates, /materials з одного web-контейнера). 120 GET на не-export
+    // маршрут з однієї IP → жодного 429.
+    for (let i = 0; i < 120; i++) {
+      const res = await app.inject({
+        method: "GET",
+        url: "/exports/00000000-0000-0000-0000-000000000000",
+      });
+      expect(res.statusCode).toBe(404);
+    }
+  });
+
   it("GET /exports/:id/events: для done job шле data-event і одразу закриває", async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify(UPSTREAM_OK_BODY), {
