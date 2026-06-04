@@ -70,14 +70,18 @@
 ### Rate limit
 
 - Глобально: 100 req/min/IP.
-- `/exports` POST: 5/хв на користувача.
-- `/auth/login`, `/auth/register`: 10/год/IP.
+- `/exports` POST: **30/год/IP** + burst-ban (>50 у вікні → тимчасовий 403). Soft-launch без auth, тож ключ — IP, не user (ADR-020, Phase X.1). Перевищення → `429` RFC 9457 (`type: .../errors/rate-limit`) з україномовним `detail`.
+- `/auth/login`, `/auth/register`: 10/год/IP. _(🚧 v1.1+ — auth ще не реалізовано, див. ADR-020.)_
 
-Заголовки відповіді: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
+Заголовки відповіді: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After` (при 429).
+
+> Реалізовано: `apps/api/src/plugins/rate-limit.ts`. Маршрути нижче без `🚧`-позначки — наявні у MVP; з `🚧 v1.1+` — лише спроєктовані (ADR-020).
 
 ---
 
 ## 1. Auth
+
+> 🚧 **v1.1+ planned — не реалізовано у MVP.** Soft-launch без auth (ADR-020). Endpoints нижче спроєктовані, але не існують у поточному API; активуються при тригерах ADR-020.
 
 ### POST /v1/auth/register
 
@@ -132,6 +136,8 @@ errors: 401 INVALID_CREDENTIALS
 ---
 
 ## 2. Account
+
+> 🚧 **v1.1+ planned — не реалізовано у MVP.** Потребує auth (ADR-020). Без облікових записів немає `/account/*`, quota чи GDPR-self-service.
 
 ### GET /v1/account/me
 
@@ -304,6 +310,8 @@ errors:
 
 ## 6. Donations
 
+> 🚧 **v1.1+ planned — не реалізовано у MVP.** У soft-launch донати на ЗСУ — почесна система: прямі лінки (Monobank банка, UNITED24) у post-export CTA і на `/about`, без `donation_claims`/unlock-flow. Активується при тригері ADR-020 (>$50/міс). `/v1/uploads` (proof) також лишається v1.1+.
+
 ### GET /v1/donations/channels
 
 - Перелік активних каналів і їхніх параметрів (банка-лінк, USDT-адреса, UNITED24-лінк).
@@ -326,6 +334,8 @@ response 201:
 ---
 
 ## 7. Admin
+
+> 🚧 **v1.1+ planned — не реалізовано у MVP.** Потребує auth + ролі (ADR-020).
 
 Усі під префіксом `/v1/admin/...`, потребують `role = admin`.
 

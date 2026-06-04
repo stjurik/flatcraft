@@ -5,15 +5,16 @@
 
 ## Стадії
 
-| Стадія                          | Терміни (соло-розробник, junior + Claude Code) | Мета                                                                    |
-| ------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| **Phase 0. Setup**              | 1 тиждень                                      | Локальне середовище, CI, перший «hello world» end-to-end                |
-| **Phase 1. CAD core**           | 3 тижні                                        | Валідатор гибки + розгортка + експорт DXF одного шаблону (L-кронштейн)  |
-| **Phase 2. UX MVP**             | 3 тижні                                        | 3D-редактор + форма параметрів + експорт DXF/PDF + 5 шаблонів           |
-| **Phase 3. Auth & Limits**      | 2 тижні                                        | Реєстрація, лічильник 10 безкоштовних, гість-режим (без експорту)       |
-| **Phase 4. Donations**          | 1 тиждень                                      | Monobank Banka link + ручне підтвердження + продовження ліміту          |
-| **Phase 5. Hardening + Launch** | 2 тижні                                        | GDPR, Privacy Policy, Sentry, prod-deploy на Mirohost Cloud, домен, SSL |
-| **Total**                       | ≈ 12 тижнів                                    | Public MVP                                                              |
+| Стадія                                           | Терміни (соло-розробник, junior + Claude Code) | Мета                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Phase 0. Setup**                               | 1 тиждень                                      | Локальне середовище, CI, перший «hello world» end-to-end                                                   |
+| **Phase 1. CAD core**                            | 3 тижні                                        | Валідатор гибки + розгортка + експорт DXF одного шаблону (L-кронштейн)                                     |
+| **Phase 2. UX MVP**                              | 3 тижні                                        | 3D-редактор + форма параметрів + експорт DXF/PDF + 5 шаблонів                                              |
+| **Phase X.1. Beta-mode tweaks**                  | 1–2 дні ✅                                     | IP rate-limit + PDF «BETA» watermark + post-export ЗСУ-CTA + /about (ADR-020)                              |
+| **Phase 3. Auth & Limits** _(v1.1, conditional)_ | 2 тижні                                        | Реєстрація, лічильник 10 безкоштовних, гість-режим — **активується лише при тригерах ADR-020**             |
+| **Phase 4. Donations** _(v1.1, conditional)_     | 1 тиждень                                      | Monobank Banka link + ручне підтвердження + продовження ліміту — **активується лише при тригерах ADR-020** |
+| **Phase 5. Hardening + Launch**                  | 2 тижні                                        | GDPR, Privacy Policy, Sentry, prod-deploy на Mirohost Cloud, домен, SSL                                    |
+| **Total**                                        | ≈ 12 тижнів                                    | Public MVP                                                                                                 |
 
 Після MVP — окремий roadmap у `docs/02_ROADMAP_v1.md` (поки не створюємо).
 
@@ -95,7 +96,21 @@
 
 ---
 
-## Phase 3. Auth & Limits (2 тижні)
+## Phase X.1. Beta-mode tweaks (завершено 2026-06-04)
+
+**Контекст:** soft-launch без auth/donations (ADR-020). Готує продукт до публічного релізу за 1–2 дні замість 3 тижнів Phase 3+4.
+
+- [x] **X.1.A.** IP-based rate-limit на `POST /exports`: 30/год/IP + burst-ban (50), глобально 100/хв лишається. 429 RFC 9457 з україномовним detail. `apps/api/src/plugins/rate-limit.ts`. Unit (config/builder) + integration (30 → 202, 31й → 429). — 2026-06-04
+- [x] **X.1.B.** PDF footer watermark «BETA · feedback@hart.crimea.ua» на всіх 5 шаблонах. `_draw_beta_watermark` (7pt курсив #707070, 18pt від низу), прапор `BETA_WATERMARK` для вимкнення при v1.0. +3 pytest. — 2026-06-04
+- [x] **X.1.C.** Post-export ЗСУ-CTA (`PostExportDonateNudge`) у success-стані ExportButton: Monobank банка + UNITED24, без auto-redirect/modal. 5 Playwright e2e. — 2026-06-04
+- [x] **X.1.D.** Справжня `/about` (4 секції: hero, що це, безкоштовно-чому, підтримати ЗСУ, фідбек) замість `/soon`-заглушки. SiteLinks «Про проєкт» → /about. 6 Playwright e2e. — 2026-06-04
+- [x] **X.1.E.** Документація: ADR-020, API contract §0 rate-limit + 🚧 v1.1-маркери на Auth/Account/Donations/Admin, Roadmap re-sequence, RISKS R-03. — 2026-06-04
+
+---
+
+## Phase 3. Auth & Limits (v1.1, conditional) — 2 тижні
+
+> ⏸ **Відкладено (ADR-020).** Активується лише коли спрацюють тригери: >5 ботів/тиждень на CF WAF, або >3 unique users просять «зберегти draft». До того — soft-launch (Phase X.1).
 
 **Definition of Done:** новий користувач реєструється email/Google, бачить лічильник «X з 10 безкоштовних на цей місяць», після ліміту — кнопка «розблокувати донатом».
 
@@ -112,7 +127,9 @@
 
 ---
 
-## Phase 4. Donations (1 тиждень)
+## Phase 4. Donations (v1.1, conditional) — 1 тиждень
+
+> ⏸ **Відкладено (ADR-020).** Активується коли >$50/міс приходить на ЗСУ через банку. До того — почесна система: прямі лінки у post-export CTA і на /about, без unlock-flow.
 
 **Definition of Done:** після ліміту користувач бачить кнопку «Розблокувати на місяць → 200 грн на ЗСУ», клікає → переходить на банку Monobank → завантажує квитанцію → адмін підтверджує → ліміт продовжено.
 
