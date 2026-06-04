@@ -7,9 +7,14 @@ from typing import Any
 
 from pypdf import PdfReader
 
-from flatcraft_cad.export.pdf import compute_bom, export_l_bracket_pdf
+from flatcraft_cad.export.pdf import (
+    compute_bom,
+    export_l_bracket_pdf,
+    export_z_bracket_pdf,
+)
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.unfold import unfold_l_bracket
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
+from flatcraft_cad.unfold import unfold_l_bracket, unfold_z_bracket
 
 
 def _params(**overrides: Any) -> LBracketBuildParameters:
@@ -29,6 +34,45 @@ def _generate(tmp_path: Path, *, name: str = "out.pdf", **overrides: Any) -> Pat
     params = _params(**overrides)
     unf = unfold_l_bracket(params, k_factor=0.4)
     return export_l_bracket_pdf(params, unf, tmp_path / name)
+
+
+class TestBetaWatermark:
+    """Phase X.1 B: footer watermark «BETA · feedback» на кожній сторінці."""
+
+    def test_l_bracket_pdf_містить_beta_watermark(self, tmp_path: Path) -> None:
+        out = _generate(tmp_path)
+        text = PdfReader(str(out)).pages[0].extract_text() or ""
+        assert "BETA" in text
+        assert "feedback@hart.crimea.ua" in text
+
+    def test_z_bracket_max_params_не_ламає_watermark(self, tmp_path: Path) -> None:
+        # Найдовша деталь (max полиці/offset/width) — watermark все одно у footer.
+        params = ZBracketBuildParameters.model_validate(
+            {
+                "top_flange_mm": 500,
+                "bottom_flange_mm": 500,
+                "offset_mm": 500,
+                "bend_radius_mm": 2.5,
+                "width_mm": 3000,
+                "thickness_mm": 2.0,
+            }
+        )
+        unf = unfold_z_bracket(params, k_factor=0.4)
+        out = export_z_bracket_pdf(params, unf, tmp_path / "z-max.pdf")
+        text = PdfReader(str(out)).pages[0].extract_text() or ""
+        assert "BETA" in text
+
+    def test_watermark_прапор_вимикається(self, tmp_path: Path) -> None:
+        import flatcraft_cad.export.pdf as pdf_mod
+
+        original = pdf_mod.BETA_WATERMARK
+        try:
+            pdf_mod.BETA_WATERMARK = False
+            out = _generate(tmp_path, name="no-beta.pdf")
+            text = PdfReader(str(out)).pages[0].extract_text() or ""
+            assert "feedback@hart.crimea.ua" not in text
+        finally:
+            pdf_mod.BETA_WATERMARK = original
 
 
 class TestStructure:
