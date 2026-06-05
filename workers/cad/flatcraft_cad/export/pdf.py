@@ -53,6 +53,12 @@ from flatcraft_cad.export.layout.bend_badges import (
     BendLine2D,
     place_bend_badges,
 )
+from flatcraft_cad.export.layout.corner_picker import (
+    BBox2D,
+    Corner,
+    Size2D,
+    pick_annotation_corner,
+)
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -272,6 +278,31 @@ def bom_text_lines(
     return lines
 
 
+# Геометрія правої колонки анотацій (page-mm) для auto-layout (Phase 2.9.b E).
+_BEND_TABLE_TOP_MM: Final[float] = 170.0
+_BEND_ROW_H_MM: Final[float] = 6.0
+_ANNOT_COLUMN: Final[BBox2D] = BBox2D(173.0, 50.0, 290.0, 175.0)
+_BOM_SIZE: Final[Size2D] = Size2D(75.0, 28.0)
+_BOM_CLASSIC_ORIGIN: Final[tuple[float, float]] = (175.0, 140.0)
+
+
+def _choose_bom_origin(n_bend_rows: int) -> tuple[float, float]:
+    """Вибирає origin BOM-блоку у правій колонці під таблицею гибів (Block E).
+
+    Corner picker перевіряє, чи під таблицею є вільний кут (BL/BR) у колонці
+    анотацій. Якщо так — BOM лягає на фіксований відступ під ФАКТИЧНИМ низом
+    таблиці (слідує за нею, коли в таблиці більше рядків — Z/wall_shelf).
+    Інакше — класичний слот. Тест-orient: pure-функція pick_annotation_corner
+    покрита окремо; тут лише маппінг у координати."""
+    rows_total = n_bend_rows + 1  # + рядок-заголовок
+    table_bottom = _BEND_TABLE_TOP_MM - rows_total * _BEND_ROW_H_MM
+    table_bbox = BBox2D(173.0, table_bottom, 290.0, _BEND_TABLE_TOP_MM)
+    corner = pick_annotation_corner(table_bbox, _ANNOT_COLUMN, _BOM_SIZE, margin_mm=4.0)
+    if corner in (Corner.BL, Corner.BR):
+        return (175.0, table_bottom - 6.0)
+    return _BOM_CLASSIC_ORIGIN
+
+
 def _draw_bom_block(
     c: pdfcanvas.Canvas,
     *,
@@ -486,7 +517,7 @@ def export_l_bracket_pdf(
         unfolded,
         material_label=material_label,
         density_kg_m3=density_kg_m3,
-        origin_mm=(175, 140),
+        origin_mm=_choose_bom_origin(1),
     )
 
     # QR-код у footer-area.
@@ -587,14 +618,13 @@ def export_z_bracket_pdf(
     # Bend table з двома рядками.
     _draw_z_bracket_bend_table(c, parameters, unfolded, origin_mm=(175, 170))
 
-    # BOM через generic.
-    ox, oy = 175, 140
+    # BOM через generic — auto-layout під таблицею (2 гиби → нижче).
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(ox, oy),
+        origin_mm=_choose_bom_origin(2),
     )
 
     # QR-код.
@@ -704,14 +734,13 @@ def export_corner_angle_pdf(
         origin_mm=(175, 170),
     )
 
-    # BOM через generic.
-    ox, oy = 175, 140
+    # BOM через generic — auto-layout під таблицею (1 гиб).
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(ox, oy),
+        origin_mm=_choose_bom_origin(1),
     )
 
     # QR.
@@ -822,14 +851,13 @@ def export_wall_shelf_pdf(
     ]
     _draw_bend_table_rows(c, body_rows, origin_mm=(175, 170))
 
-    # BOM.
-    ox, oy = 175, 140
+    # BOM — auto-layout під таблицею (1-2 гиби залежно від front_lip).
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(ox, oy),
+        origin_mm=_choose_bom_origin(n_bends),
     )
 
     qr_png = _make_qr_png(qr_payload)
