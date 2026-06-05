@@ -44,6 +44,16 @@
       "layer": "BEND_TEXT",
       "text": "BEND 90° DOWN R4 #1",
       "type": "TEXT"
+    },
+    {
+      "height": 3.5,
+      "insert": [
+        78.08407,
+        50.0
+      ],
+      "layer": "BEND_TEXT",
+      "text": "#1",
+      "type": "TEXT"
     }
   ],
   "layers": [
@@ -58,6 +68,10 @@
     {
       "color": 8,
       "name": "DIM"
+    },
+    {
+      "color": 1,
+      "name": "DIM_HOLES"
     },
     {
       "color": 1,

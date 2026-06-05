@@ -41,7 +41,25 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from flatcraft_cad.export.dimensions import (
+    FinishedDimsParams,
+    compute_finished_dimensions,
+    format_dimensions,
+)
 from flatcraft_cad.export.fonts import register_fonts
+from flatcraft_cad.export.layout.bend_badges import (
+    BADGE_DIAMETER_MM,
+    BendBadge,
+    BendLine2D,
+    place_bend_badges,
+)
+from flatcraft_cad.export.layout.corner_picker import (
+    BBox2D,
+    Corner,
+    Size2D,
+    pick_annotation_corner,
+)
+from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -111,6 +129,113 @@ def _draw_beta_watermark(
     c.restoreState()
 
 
+def _draw_finished_dims_line(
+    c: pdfcanvas.Canvas,
+    template_slug: str,
+    params: FinishedDimsParams,
+    *,
+    y_mm: float = 210 - 28,
+) -> None:
+    """Рядок header'а «Габарити готового виробу: X × Y × Z мм» (Phase 2.9.b Block C).
+
+    Нижче рядка з розмірами розгортки/матеріалом. Той самий шрифт header'а
+    (DejaVuSans 10pt). Габарит — bbox зігнутої деталі (dimensions.py)."""
+    dims = compute_finished_dimensions(template_slug, params)
+    c.setFont("DejaVuSans", 10)
+    c.drawString(15 * mm, y_mm * mm, f"Габарити готового виробу: {format_dimensions(dims)}")
+
+
+def _draw_bend_badges(
+    c: pdfcanvas.Canvas,
+    badges: tuple[BendBadge, ...],
+    *,
+    x0_pt: float,
+    y0_pt: float,
+    scale: float,
+) -> None:
+    """Малює badge-кола з номерами гибів на розгортці (Phase 2.9.b Block B).
+
+    Позиції badge'ів приходять у model-space мм; (x0_pt, y0_pt, scale)
+    переводять їх у точки канви. Коло — ФІКСОВАНОГО розміру на папері
+    (Ø5мм), щоб лишалось читабельним незалежно від масштабу розгортки;
+    лише його центр масштабується разом з геометрією.
+    """
+    badge_r_pt = (BADGE_DIAMETER_MM / 2.0) * mm
+    for badge in badges:
+        cx = x0_pt + badge.x_mm * scale * mm
+        cy = y0_pt + badge.y_mm * scale * mm
+        if badge.has_leader:
+            lx = x0_pt + badge.leader_to_x_mm * scale * mm
+            ly = y0_pt + badge.leader_to_y_mm * scale * mm
+            c.saveState()
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0, 0, 0)
+            c.line(cx, cy, lx, ly)
+            c.restoreState()
+        c.saveState()
+        c.setFillColorRGB(0xFA / 255, 0xFA / 255, 0xFA / 255)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.5)
+        c.circle(cx, cy, badge_r_pt, stroke=1, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("DejaVuSans-Bold", 8)
+        # drawCentredString центрує по X; -2.8pt опускає baseline до візуального центру 8pt.
+        c.drawCentredString(cx, cy - 2.8, str(badge.number))
+        c.restoreState()
+
+
+def _draw_hole_dims(
+    c: pdfcanvas.Canvas,
+    holes: tuple[Hole2D, ...],
+    *,
+    x0_pt: float,
+    y0_pt: float,
+    scale: float,
+    part_top_pt: float,
+) -> None:
+    """Ø-виноски отворів на розгортці (Phase 2.9.b Block F).
+
+    ≤ cap отворів → коротка виноска-риска + текст «Ø8» біля кожного. Інакше
+    (перфо-панель) → одна виноска на першому + анотація «×N отворів Ø8» над
+    деталлю, щоб не захаращувати креслення сотнями підписів."""
+    individual = should_dim_individual_holes(len(holes))
+    targets = holes if individual else holes[:1]
+    c.saveState()
+    c.setStrokeColorRGB(0.8, 0.2, 0.2)
+    c.setFillColorRGB(0.8, 0.2, 0.2)
+    c.setLineWidth(0.3)
+    c.setFont("DejaVuSans", 7)
+    for hole in targets:
+        cx = x0_pt + hole.x_mm * scale * mm
+        cy = y0_pt + hole.y_mm * scale * mm
+        r = (hole.diameter_mm / 2.0) * scale * mm
+        # Виноска з верхньо-правого краю кола назовні під 45°.
+        lx, ly = cx + r * 0.707, cy + r * 0.707
+        tx, ty = lx + 3 * mm, ly + 3 * mm
+        c.line(lx, ly, tx, ty)
+        c.drawString(tx + 0.5 * mm, ty - 1 * mm, f"Ø{hole.diameter_mm:g}")
+    if not individual:
+        c.setFont("DejaVuSans", 8)
+        c.drawString(
+            x0_pt,
+            part_top_pt + 4 * mm,
+            f"×{len(holes)} отворів Ø{holes[0].diameter_mm:g}",
+        )
+    c.setFillColorRGB(0, 0, 0)
+    c.restoreState()
+
+
+def _bend_badges_for(
+    bend_positions_mm: tuple[float, ...], width_mm: float
+) -> tuple[BendBadge, ...]:
+    """Будує BendLine2D для кожної вертикальної лінії гибу і розкладає badge'і."""
+    lines = tuple(
+        BendLine2D(number=n + 1, x_mm=bend_mm, y_start_mm=0.0, y_end_mm=width_mm)
+        for n, bend_mm in enumerate(bend_positions_mm)
+    )
+    return place_bend_badges(lines)
+
+
 def _draw_bend_table_rows(
     c: pdfcanvas.Canvas,
     body_rows: list[tuple[str, ...]],
@@ -158,12 +283,90 @@ def compute_bom(
     """
     area_mm2 = unfolded.length_mm * unfolded.width_mm
     volume_mm3 = area_mm2 * unfolded.thickness_mm
+    mass_kg = (volume_mm3 / 1e9) * density_kg_m3
     return {
         "area_mm2": area_mm2,
         "area_m2": area_mm2 / 1e6,
+        # Площа фарбування — обидва боки листа (Phase 2.9.b Block D).
+        "area_paint_m2": (area_mm2 / 1e6) * 2.0,
         "volume_m3": volume_mm3 / 1e9,
-        "mass_g": (volume_mm3 / 1e9) * density_kg_m3 * 1000.0,
+        "mass_g": mass_kg * 1000.0,  # збережено для зворотної сумісності
+        "mass_kg": mass_kg,
     }
+
+
+def bom_text_lines(
+    *,
+    material_label: str,
+    thickness_mm: float,
+    bom: dict[str, float],
+    include_volume: bool = True,
+) -> list[str]:
+    """Рядки BOM-секції українською (Phase 2.9.b Block D).
+
+    Pure-функція (без canvas) — щоб юніт-тестувати лейбли/округлення без PDF.
+    Округлення: товщина 0.01мм, площа 0.001-0.0001 м², маса 0.01 кг. Лейбли
+    суто українські; англійською лишається тільки значення material_label.
+    """
+    lines = [
+        f"Матеріал: {material_label}",
+        f"Товщина: {thickness_mm:.2f} мм",
+        f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
+        f"Площа фарбування: {bom['area_paint_m2']:.3f} м²",
+    ]
+    if include_volume:
+        lines.append(f"Об'єм: {bom['volume_m3']:.6f} м³")
+    lines.append(f"Маса: {bom['mass_kg']:.2f} кг")
+    return lines
+
+
+# Геометрія правої колонки анотацій (page-mm) для auto-layout (Phase 2.9.b E).
+_BEND_TABLE_TOP_MM: Final[float] = 170.0
+_BEND_ROW_H_MM: Final[float] = 6.0
+_ANNOT_COLUMN: Final[BBox2D] = BBox2D(173.0, 50.0, 290.0, 175.0)
+_BOM_SIZE: Final[Size2D] = Size2D(75.0, 28.0)
+_BOM_CLASSIC_ORIGIN: Final[tuple[float, float]] = (175.0, 140.0)
+
+
+def _choose_bom_origin(n_bend_rows: int) -> tuple[float, float]:
+    """Вибирає origin BOM-блоку у правій колонці під таблицею гибів (Block E).
+
+    Corner picker перевіряє, чи під таблицею є вільний кут (BL/BR) у колонці
+    анотацій. Якщо так — BOM лягає на фіксований відступ під ФАКТИЧНИМ низом
+    таблиці (слідує за нею, коли в таблиці більше рядків — Z/wall_shelf).
+    Інакше — класичний слот. Тест-orient: pure-функція pick_annotation_corner
+    покрита окремо; тут лише маппінг у координати."""
+    rows_total = n_bend_rows + 1  # + рядок-заголовок
+    table_bottom = _BEND_TABLE_TOP_MM - rows_total * _BEND_ROW_H_MM
+    table_bbox = BBox2D(173.0, table_bottom, 290.0, _BEND_TABLE_TOP_MM)
+    corner = pick_annotation_corner(table_bbox, _ANNOT_COLUMN, _BOM_SIZE, margin_mm=4.0)
+    if corner in (Corner.BL, Corner.BR):
+        return (175.0, table_bottom - 6.0)
+    return _BOM_CLASSIC_ORIGIN
+
+
+def _draw_bom_block(
+    c: pdfcanvas.Canvas,
+    *,
+    material_label: str,
+    thickness_mm: float,
+    bom: dict[str, float],
+    origin_mm: tuple[float, float],
+    include_volume: bool = True,
+) -> None:
+    """Малює секцію BOM (заголовок + рядки) зі спільним layout'ом для всіх шаблонів."""
+    ox, oy = origin_mm
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
+    lines = bom_text_lines(
+        material_label=material_label,
+        thickness_mm=thickness_mm,
+        bom=bom,
+        include_volume=include_volume,
+    )
+    for i, line in enumerate(lines):
+        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
 
 
 # Метадані з фіксованою датою/ID для байт-у-байт детермінізму.
@@ -229,6 +432,15 @@ def _draw_unfold(
     c.line(x0 + bend_x * mm, y0, x0 + bend_x * mm, y0 + h * mm)
     c.restoreState()
 
+    # Bend number badge ПОСЕРЕДИНІ лінії (Phase 2.9.b Block B).
+    _draw_bend_badges(
+        c,
+        _bend_badges_for((unfolded.bend_position_mm,), unfolded.width_mm),
+        x0_pt=x0,
+        y0_pt=y0,
+        scale=scale,
+    )
+
     # Annotations: length / width / bend position.
     c.setFont("DejaVuSans", 8)
     c.drawCentredString(x0 + (w * mm) / 2, y0 - 4 * mm, f"L = {unfolded.length_mm:.2f} мм")
@@ -274,21 +486,13 @@ def _draw_bom(
     density_kg_m3: float,
     origin_mm: tuple[float, float],
 ) -> None:
-    ox, oy = origin_mm
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    lines = [
-        f"Матеріал: {material_label}",
-        f"Товщина: {unfolded.thickness_mm:.2f} мм",
-        f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-        f"Об'єм: {bom['volume_m3']:.6f} м³",
-        f"Маса (приблизно): {bom['mass_g']:.1f} г",
-    ]
-    for i, line in enumerate(lines):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=origin_mm,
+    )
 
 
 def _normalize_pdf_bytes(path: Path) -> None:
@@ -336,6 +540,7 @@ def export_l_bracket_pdf(
         f"Розміри (зовн.): A={parameters.leg_a_mm} · B={parameters.leg_b_mm} · "
         f"W={parameters.width_mm} мм · R={parameters.bend_radius_mm} мм",
     )
+    _draw_finished_dims_line(c, "l_bracket", parameters)
 
     # Layout.
     # Розгортка ліворуч (~150×110 мм), таблиці/BOM/QR праворуч.
@@ -354,7 +559,7 @@ def export_l_bracket_pdf(
         unfolded,
         material_label=material_label,
         density_kg_m3=density_kg_m3,
-        origin_mm=(175, 140),
+        origin_mm=_choose_bom_origin(1),
     )
 
     # QR-код у footer-area.
@@ -438,6 +643,7 @@ def export_z_bracket_pdf(
         f"bottom={parameters.bottom_flange_mm} · W={parameters.width_mm} мм · "
         f"R={parameters.bend_radius_mm} мм",
     )
+    _draw_finished_dims_line(c, "z_bracket", parameters)
 
     # Розгортка з двома bend lines.
     _draw_unfold_generic(
@@ -454,22 +660,14 @@ def export_z_bracket_pdf(
     # Bend table з двома рядками.
     _draw_z_bracket_bend_table(c, parameters, unfolded, origin_mm=(175, 170))
 
-    # BOM через generic.
-    ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    # BOM через generic — auto-layout під таблицею (2 гиби → нижче).
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=_choose_bom_origin(2),
+    )
 
     # QR-код.
     qr_png = _make_qr_png(qr_payload)
@@ -547,6 +745,7 @@ def export_corner_angle_pdf(
         f"отвори: {parameters.hole_rows}×{parameters.hole_cols}×2 (всього {n_holes}, "
         f"Ø{parameters.hole_diameter_mm:g} мм)",
     )
+    _draw_finished_dims_line(c, "corner_angle", parameters)
 
     _draw_unfold_generic(
         c,
@@ -577,22 +776,14 @@ def export_corner_angle_pdf(
         origin_mm=(175, 170),
     )
 
-    # BOM через generic.
-    ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    # BOM через generic — auto-layout під таблицею (1 гиб).
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=_choose_bom_origin(1),
+    )
 
     # QR.
     qr_png = _make_qr_png(qr_payload)
@@ -671,6 +862,7 @@ def export_wall_shelf_pdf(
         f"lip={parameters.front_lip_mm} мм · W={parameters.width_mm} мм · "
         f"гибів: {n_bends} · отворів: {n_holes} (Ø{parameters.mount_hole_diameter_mm:g})",
     )
+    _draw_finished_dims_line(c, "wall_shelf", parameters)
 
     _draw_unfold_generic(
         c,
@@ -701,22 +893,14 @@ def export_wall_shelf_pdf(
     ]
     _draw_bend_table_rows(c, body_rows, origin_mm=(175, 170))
 
-    # BOM.
-    ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    # BOM — auto-layout під таблицею (1-2 гиби залежно від front_lip).
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=_choose_bom_origin(n_bends),
+    )
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
@@ -794,6 +978,7 @@ def export_perforated_panel_pdf(
         f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
         f"Ø{parameters.hole_diameter_mm:g} мм",
     )
+    _draw_finished_dims_line(c, "perforated_panel", parameters)
 
     _draw_unfold_generic(
         c,
@@ -824,19 +1009,14 @@ def export_perforated_panel_pdf(
 
     # BOM.
     ox_b, oy_b = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox_b * mm, oy_b * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox_b * mm, (oy_b - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox_b, oy_b),
+        include_volume=False,
+    )
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
@@ -920,6 +1100,15 @@ def _draw_unfold_generic(
         c.setFillColorRGB(0, 0, 0)
         prev_pos_mm = bend_mm
 
+    # Bend number badges ПОСЕРЕДИНІ кожної лінії (Phase 2.9.b Block B).
+    _draw_bend_badges(
+        c,
+        _bend_badges_for(bend_positions_mm, width_mm),
+        x0_pt=x0,
+        y0_pt=y0,
+        scale=scale,
+    )
+
     if holes:
         c.saveState()
         c.setStrokeColorRGB(0.8, 0.2, 0.2)
@@ -930,6 +1119,8 @@ def _draw_unfold_generic(
             radius_pdf = (hole.diameter_mm / 2.0) * scale * mm
             c.circle(cx, cy, radius_pdf, stroke=1, fill=0)
         c.restoreState()
+        # Ø-callouts (Phase 2.9.b Block F): на кожен отвір (≤ cap) або один + «×N».
+        _draw_hole_dims(c, holes, x0_pt=x0, y0_pt=y0, scale=scale, part_top_pt=y0 + h * mm)
 
     c.setFont("DejaVuSans", 8)
     c.drawCentredString(x0 + (w * mm) / 2, y0 - 4 * mm, f"L = {length_mm:.2f} мм")
