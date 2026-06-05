@@ -182,9 +182,7 @@ class TestBomTextLines:
     }
 
     def test_включає_volume_шість_рядків(self) -> None:
-        lines = bom_text_lines(
-            material_label="cold_rolled_steel", thickness_mm=2.0, bom=self._BOM
-        )
+        lines = bom_text_lines(material_label="cold_rolled_steel", thickness_mm=2.0, bom=self._BOM)
         assert len(lines) == 6
 
     def test_без_volume_5_рядків(self) -> None:

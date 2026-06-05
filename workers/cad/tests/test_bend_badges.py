@@ -46,9 +46,7 @@ class TestShortLine:
         assert b.y_mm > short.y_end_mm
 
     def test_рівно_на_порозі_лишається_інлайн(self) -> None:
-        line = BendLine2D(
-            number=1, x_mm=0.0, y_start_mm=0.0, y_end_mm=MIN_LINE_LEN_FOR_INLINE_MM
-        )
+        line = BendLine2D(number=1, x_mm=0.0, y_start_mm=0.0, y_end_mm=MIN_LINE_LEN_FOR_INLINE_MM)
         badges = place_bend_badges((line,))
         assert badges[0].has_leader is False
 

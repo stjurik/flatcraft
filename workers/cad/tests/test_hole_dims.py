@@ -57,9 +57,7 @@ class TestDxfHoleDims:
     def test_corner_angle_dim_на_кожен_отвір(self, tmp_path: Path) -> None:
         params = _corner_params()
         unf = unfold_corner_angle(params, 0.4)
-        out = export_corner_angle_dxf(
-            unf, tmp_path / "c.dxf", bend_radius_mm=params.bend_radius_mm
-        )
+        out = export_corner_angle_dxf(unf, tmp_path / "c.dxf", bend_radius_mm=params.bend_radius_mm)
         doc = readfile(out)
         msp = doc.modelspace()
         assert doc.layers.has_entry("DIM_HOLES")
