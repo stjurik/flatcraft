@@ -46,6 +46,10 @@ _FROZEN_FINGERPRINT_GUID: Final[str] = "{00000000-0000-0000-0000-000000000001}"
 _FROZEN_VERSION_GUID: Final[str] = "{00000000-0000-0000-0000-000000000002}"
 _FROZEN_EZDXF_STAMP: Final[str] = "flatcraft-deterministic"
 _BEND_TEXT_HEIGHT_MM: Final[float] = 3.0
+# Phase 2.9.b Block B: окремий короткий "#N" badge ПОСЕРЕДИНІ лінії гибу
+# (на додачу до повного callout зверху). Трохи більший за callout, щоб
+# впадав у вічі оператору, який дивиться лише на лінію.
+_BEND_BADGE_TEXT_HEIGHT_MM: Final[float] = 3.5
 
 # Pattern: GUID у фігурних дужках (ezdxf $VERSIONGUID авто-генерується
 # при сейві, а не на створенні — header.set() його не перекриває).
@@ -127,6 +131,16 @@ def _export_flat_dxf(
                 "layer": "BEND_TEXT",
                 "height": _BEND_TEXT_HEIGHT_MM,
                 "insert": (bend_x + 1.0, width_mm + 1.0),
+            },
+        )
+        # Midpoint badge: самий "#N" на середині лінії — друга підказка для
+        # оператора (Phase 2.9.b Block B). Той самий BEND_TEXT шар; ASCII "#N".
+        msp.add_text(
+            f"#{n + 1}",
+            dxfattribs={
+                "layer": "BEND_TEXT",
+                "height": _BEND_BADGE_TEXT_HEIGHT_MM,
+                "insert": (bend_x + 1.0, width_mm / 2.0),
             },
         )
 

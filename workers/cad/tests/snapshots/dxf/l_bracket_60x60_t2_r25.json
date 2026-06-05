@@ -44,6 +44,16 @@
       "layer": "BEND_TEXT",
       "text": "BEND 90° DOWN R2.5 #1",
       "type": "TEXT"
+    },
+    {
+      "height": 3.5,
+      "insert": [
+        59.091814,
+        50.0
+      ],
+      "layer": "BEND_TEXT",
+      "text": "#1",
+      "type": "TEXT"
     }
   ],
   "layers": [

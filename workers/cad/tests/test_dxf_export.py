@@ -132,9 +132,13 @@ class TestStructural:
         )
         doc = readfile(out)
         texts = list(doc.modelspace().query("TEXT[layer=='BEND_TEXT']"))
-        assert len(texts) == 1
-        assert "90" in texts[0].dxf.text
-        assert "2.5" in texts[0].dxf.text
+        # Phase 2.9.b Block B: 2 текстові entity на гиб — повний callout + midpoint badge "#N".
+        assert len(texts) == 2
+        values = [t.dxf.text for t in texts]
+        callout = next(t for t in values if "BEND" in t)
+        assert "90" in callout
+        assert "2.5" in callout
+        assert "#1" in values  # midpoint badge entity
 
     def test_кожен_шар_має_конфігурований_колір(self, tmp_path: Path) -> None:
         params = _params()

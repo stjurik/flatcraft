@@ -42,6 +42,12 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 
 from flatcraft_cad.export.fonts import register_fonts
+from flatcraft_cad.export.layout.bend_badges import (
+    BADGE_DIAMETER_MM,
+    BendBadge,
+    BendLine2D,
+    place_bend_badges,
+)
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -109,6 +115,56 @@ def _draw_beta_watermark(
     c.setFillColorRGB(0x70 / 255, 0x70 / 255, 0x70 / 255)
     c.drawCentredString(page_width / 2, 18, _BETA_WATERMARK_TEXT)
     c.restoreState()
+
+
+def _draw_bend_badges(
+    c: pdfcanvas.Canvas,
+    badges: tuple[BendBadge, ...],
+    *,
+    x0_pt: float,
+    y0_pt: float,
+    scale: float,
+) -> None:
+    """Малює badge-кола з номерами гибів на розгортці (Phase 2.9.b Block B).
+
+    Позиції badge'ів приходять у model-space мм; (x0_pt, y0_pt, scale)
+    переводять їх у точки канви. Коло — ФІКСОВАНОГО розміру на папері
+    (Ø5мм), щоб лишалось читабельним незалежно від масштабу розгортки;
+    лише його центр масштабується разом з геометрією.
+    """
+    badge_r_pt = (BADGE_DIAMETER_MM / 2.0) * mm
+    for badge in badges:
+        cx = x0_pt + badge.x_mm * scale * mm
+        cy = y0_pt + badge.y_mm * scale * mm
+        if badge.has_leader:
+            lx = x0_pt + badge.leader_to_x_mm * scale * mm
+            ly = y0_pt + badge.leader_to_y_mm * scale * mm
+            c.saveState()
+            c.setLineWidth(0.3)
+            c.setStrokeColorRGB(0, 0, 0)
+            c.line(cx, cy, lx, ly)
+            c.restoreState()
+        c.saveState()
+        c.setFillColorRGB(0xFA / 255, 0xFA / 255, 0xFA / 255)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.5)
+        c.circle(cx, cy, badge_r_pt, stroke=1, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("DejaVuSans-Bold", 8)
+        # drawCentredString центрує по X; -2.8pt опускає baseline до візуального центру 8pt.
+        c.drawCentredString(cx, cy - 2.8, str(badge.number))
+        c.restoreState()
+
+
+def _bend_badges_for(
+    bend_positions_mm: tuple[float, ...], width_mm: float
+) -> tuple[BendBadge, ...]:
+    """Будує BendLine2D для кожної вертикальної лінії гибу і розкладає badge'і."""
+    lines = tuple(
+        BendLine2D(number=n + 1, x_mm=bend_mm, y_start_mm=0.0, y_end_mm=width_mm)
+        for n, bend_mm in enumerate(bend_positions_mm)
+    )
+    return place_bend_badges(lines)
 
 
 def _draw_bend_table_rows(
@@ -228,6 +284,15 @@ def _draw_unfold(
     c.setStrokeColorRGB(0.2, 0.4, 0.8)
     c.line(x0 + bend_x * mm, y0, x0 + bend_x * mm, y0 + h * mm)
     c.restoreState()
+
+    # Bend number badge ПОСЕРЕДИНІ лінії (Phase 2.9.b Block B).
+    _draw_bend_badges(
+        c,
+        _bend_badges_for((unfolded.bend_position_mm,), unfolded.width_mm),
+        x0_pt=x0,
+        y0_pt=y0,
+        scale=scale,
+    )
 
     # Annotations: length / width / bend position.
     c.setFont("DejaVuSans", 8)
@@ -919,6 +984,15 @@ def _draw_unfold_generic(
         )
         c.setFillColorRGB(0, 0, 0)
         prev_pos_mm = bend_mm
+
+    # Bend number badges ПОСЕРЕДИНІ кожної лінії (Phase 2.9.b Block B).
+    _draw_bend_badges(
+        c,
+        _bend_badges_for(bend_positions_mm, width_mm),
+        x0_pt=x0,
+        y0_pt=y0,
+        scale=scale,
+    )
 
     if holes:
         c.saveState()
