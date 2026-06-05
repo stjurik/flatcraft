@@ -8,6 +8,7 @@ from typing import Any
 from pypdf import PdfReader
 
 from flatcraft_cad.export.pdf import (
+    bom_text_lines,
     compute_bom,
     export_l_bracket_pdf,
     export_z_bracket_pdf,
@@ -157,3 +158,62 @@ class TestComputeBOM:
         small = compute_bom(unfold_l_bracket(_params(width_mm=50), k_factor=0.4))
         big = compute_bom(unfold_l_bracket(_params(width_mm=200), k_factor=0.4))
         assert big["mass_g"] > small["mass_g"] * 3.9  # ~4× per width.
+
+    def test_mass_kg_дорівнює_mass_g_поділеному_1000(self) -> None:
+        bom = compute_bom(unfold_l_bracket(_params(), k_factor=0.4))
+        assert bom["mass_kg"] == bom["mass_g"] / 1000.0
+
+    def test_площа_фарбування_удвічі_більша_за_заготовку(self) -> None:
+        # Фарбування з обох боків листа.
+        bom = compute_bom(unfold_l_bracket(_params(), k_factor=0.4))
+        assert bom["area_paint_m2"] == _pytest_approx(bom["area_m2"] * 2.0)
+
+
+class TestBomTextLines:
+    """Pure-рядки BOM: UA-лейбли, нові одиниці (кг, площа фарбування), no-English."""
+
+    _BOM = {
+        "area_mm2": 17618.0,
+        "area_m2": 0.017618,
+        "area_paint_m2": 0.035236,
+        "volume_m3": 3.5236e-05,
+        "mass_g": 276.6,
+        "mass_kg": 0.2766,
+    }
+
+    def test_включає_volume_шість_рядків(self) -> None:
+        lines = bom_text_lines(
+            material_label="cold_rolled_steel", thickness_mm=2.0, bom=self._BOM
+        )
+        assert len(lines) == 6
+
+    def test_без_volume_5_рядків(self) -> None:
+        lines = bom_text_lines(
+            material_label="cold_rolled_steel",
+            thickness_mm=2.0,
+            bom=self._BOM,
+            include_volume=False,
+        )
+        assert len(lines) == 5
+        assert not any("Об'єм" in ln for ln in lines)
+
+    def test_маса_у_кг_площа_фарбування_присутні(self) -> None:
+        lines = bom_text_lines(material_label="aisi_304", thickness_mm=1.5, bom=self._BOM)
+        joined = "\n".join(lines)
+        assert "Маса: 0.28 кг" in joined  # 0.2766 → 0.28
+        assert "Площа фарбування: 0.035 м²" in joined
+
+    def test_лейбли_без_англійських_слів(self) -> None:
+        # Лейбл (до ":") — суто український; англійською лишається лише значення.
+        import re
+
+        lines = bom_text_lines(material_label="cold_rolled_steel", thickness_mm=2.0, bom=self._BOM)
+        for ln in lines:
+            label = ln.split(":", 1)[0]
+            assert not re.search(r"[A-Za-z]{4,}", label), f"англ. у лейблі: {label!r}"
+
+
+def _pytest_approx(value: float) -> Any:
+    import pytest
+
+    return pytest.approx(value)

@@ -235,12 +235,65 @@ def compute_bom(
     """
     area_mm2 = unfolded.length_mm * unfolded.width_mm
     volume_mm3 = area_mm2 * unfolded.thickness_mm
+    mass_kg = (volume_mm3 / 1e9) * density_kg_m3
     return {
         "area_mm2": area_mm2,
         "area_m2": area_mm2 / 1e6,
+        # Площа фарбування — обидва боки листа (Phase 2.9.b Block D).
+        "area_paint_m2": (area_mm2 / 1e6) * 2.0,
         "volume_m3": volume_mm3 / 1e9,
-        "mass_g": (volume_mm3 / 1e9) * density_kg_m3 * 1000.0,
+        "mass_g": mass_kg * 1000.0,  # збережено для зворотної сумісності
+        "mass_kg": mass_kg,
     }
+
+
+def bom_text_lines(
+    *,
+    material_label: str,
+    thickness_mm: float,
+    bom: dict[str, float],
+    include_volume: bool = True,
+) -> list[str]:
+    """Рядки BOM-секції українською (Phase 2.9.b Block D).
+
+    Pure-функція (без canvas) — щоб юніт-тестувати лейбли/округлення без PDF.
+    Округлення: товщина 0.01мм, площа 0.001-0.0001 м², маса 0.01 кг. Лейбли
+    суто українські; англійською лишається тільки значення material_label.
+    """
+    lines = [
+        f"Матеріал: {material_label}",
+        f"Товщина: {thickness_mm:.2f} мм",
+        f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
+        f"Площа фарбування: {bom['area_paint_m2']:.3f} м²",
+    ]
+    if include_volume:
+        lines.append(f"Об'єм: {bom['volume_m3']:.6f} м³")
+    lines.append(f"Маса: {bom['mass_kg']:.2f} кг")
+    return lines
+
+
+def _draw_bom_block(
+    c: pdfcanvas.Canvas,
+    *,
+    material_label: str,
+    thickness_mm: float,
+    bom: dict[str, float],
+    origin_mm: tuple[float, float],
+    include_volume: bool = True,
+) -> None:
+    """Малює секцію BOM (заголовок + рядки) зі спільним layout'ом для всіх шаблонів."""
+    ox, oy = origin_mm
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
+    c.setFont("DejaVuSans", 9)
+    lines = bom_text_lines(
+        material_label=material_label,
+        thickness_mm=thickness_mm,
+        bom=bom,
+        include_volume=include_volume,
+    )
+    for i, line in enumerate(lines):
+        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
 
 
 # Метадані з фіксованою датою/ID для байт-у-байт детермінізму.
@@ -360,21 +413,13 @@ def _draw_bom(
     density_kg_m3: float,
     origin_mm: tuple[float, float],
 ) -> None:
-    ox, oy = origin_mm
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    lines = [
-        f"Матеріал: {material_label}",
-        f"Товщина: {unfolded.thickness_mm:.2f} мм",
-        f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-        f"Об'єм: {bom['volume_m3']:.6f} м³",
-        f"Маса (приблизно): {bom['mass_g']:.1f} г",
-    ]
-    for i, line in enumerate(lines):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=origin_mm,
+    )
 
 
 def _normalize_pdf_bytes(path: Path) -> None:
@@ -544,20 +589,13 @@ def export_z_bracket_pdf(
 
     # BOM через generic.
     ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox, oy),
+    )
 
     # QR-код.
     qr_png = _make_qr_png(qr_payload)
@@ -668,20 +706,13 @@ def export_corner_angle_pdf(
 
     # BOM через generic.
     ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox, oy),
+    )
 
     # QR.
     qr_png = _make_qr_png(qr_payload)
@@ -793,20 +824,13 @@ def export_wall_shelf_pdf(
 
     # BOM.
     ox, oy = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Об'єм: {bom['volume_m3']:.6f} м³",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox, oy),
+    )
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
@@ -915,19 +939,14 @@ def export_perforated_panel_pdf(
 
     # BOM.
     ox_b, oy_b = 175, 140
-    bom = compute_bom(unfolded, density_kg_m3=density_kg_m3)
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox_b * mm, oy_b * mm, "Специфікація матеріалів (BOM)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
-        [
-            f"Матеріал: {material_label}",
-            f"Товщина: {unfolded.thickness_mm:.2f} мм",
-            f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
-            f"Маса (приблизно): {bom['mass_g']:.1f} г",
-        ],
-    ):
-        c.drawString(ox_b * mm, (oy_b - 4 - i * 4) * mm, line)
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox_b, oy_b),
+        include_volume=False,
+    )
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
