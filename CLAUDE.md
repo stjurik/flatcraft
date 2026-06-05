@@ -214,13 +214,13 @@ flatcraft/
 
 > Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
 
-**Де ми зараз (2026-06-05):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks завершені, серверна валідація радіусу гибу як інваріант. Поточний фокус — Phase 2.9.b drawing polish перед публічним soft-launch.
+**Де ми зараз (2026-06-05):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks завершені, drawing polish (Phase 2.9.b) завершено, серверна валідація радіусу гибу як інваріант. Креслення наближене до ISO 7200. Наступний фокус — публічний soft-launch (анонс у Discord/форумах).
 
 **Останні 3 milestones:**
 
+- **Phase 2.9.b** (2026-06-05, ADR-021): drawing polish — bend badges на лініях розгортки (PDF+DXF), габарит готового виробу у header, BOM UA-одиниці (кг + площа фарбування), auto-layout corner picker, Ø-callouts на отворах (cap 10 для перфо). 4 нові pure-модулі. 151→206 pytest. perf ~48мс PDF (бюджет 5с).
 - **Phase X.1** (2026-06-04, ADR-020): IP rate-limit 30/год + PDF BETA-watermark + post-export ЗСУ-CTA + повноцінна `/about`. Phase 3 (Auth) + Phase 4 (Donations) → v1.1 conditional.
 - **Hotfix 2.10.e + UX-твіки** (2026-06-03, ADR-019): валідатор паритетний TS+Python, property-based suite (fast-check + hypothesis, 1000 iter), напрям згину UP/DOWN у моделі і кресленні, україномовні 422-меседжі.
-- **Phase 2.16.b** (2026-06-01): R3F screenshot-pipeline → preview-PNG у каталозі templates, staging авто-деплою з main увімкнено.
 
 **Інваріанти (must-not-break):**
 

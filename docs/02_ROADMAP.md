@@ -108,6 +108,19 @@
 
 ---
 
+## Phase 2.9.b. Drawing polish (завершено 2026-06-05)
+
+**Контекст:** закриває 5 залишкових пунктів аудиту креслень (ADR-021). Інкрементальні правки рендерера + pure-модулі `export/layout/` і `export/dimensions.py`, кожен покритий юніт-тестами. Детермінізм збережено; perf ~48мс PDF (бюджет 5с).
+
+- [x] **2.9.b.B.** Bend badges — номер гибу посеред лінії розгортки: PDF (коло Ø5мм + цифра) + DXF (midpoint `#N` TEXT на BEND_TEXT). Pure `place_bend_badges` (short-line leader, overlap avoidance). +11 pytest. — 2026-06-05
+- [x] **2.9.b.C.** Габарит готового (зігнутого) виробу у header усіх 5 шаблонів. Pure `compute_finished_dimensions` + `format_dimensions`, єдина конвенція осей (X×Y профіль, Z=width; перфо Z=товщина). +16 pytest. — 2026-06-05
+- [x] **2.9.b.D.** BOM UA-одиниці: маса г→кг, новий рядок «Площа фарбування (м²)». 5 дубльованих блоків → pure `bom_text_lines`. +6 pytest. — 2026-06-05
+- [x] **2.9.b.E.** Auto-layout corner picker — pure `pick_annotation_corner` (4 кути, BR-fallback). BOM слідує за низом таблиці гибів. +12 pytest. — 2026-06-05
+- [x] **2.9.b.F.** Ø-виноски отворів: PDF (виноска+«Ø8»), DXF (`add_diameter_dim` на шарі DIM_HOLES). `should_dim_individual_holes` cap=10 → перфо: один dim + «×N отворів». +10 pytest. — 2026-06-05
+- [x] **2.9.b.docs.** ADR-021. Baseline 151 → 206 pytest. — 2026-06-05
+
+---
+
 ## Phase 3. Auth & Limits (v1.1, conditional) — 2 тижні
 
 > ⏸ **Відкладено (ADR-020).** Активується лише коли спрацюють тригери: >5 ботів/тиждень на CF WAF, або >3 unique users просять «зберегти draft». До того — soft-launch (Phase X.1).
