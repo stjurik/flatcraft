@@ -41,6 +41,11 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from flatcraft_cad.export.dimensions import (
+    FinishedDimsParams,
+    compute_finished_dimensions,
+    format_dimensions,
+)
 from flatcraft_cad.export.fonts import register_fonts
 from flatcraft_cad.export.layout.bend_badges import (
     BADGE_DIAMETER_MM,
@@ -115,6 +120,22 @@ def _draw_beta_watermark(
     c.setFillColorRGB(0x70 / 255, 0x70 / 255, 0x70 / 255)
     c.drawCentredString(page_width / 2, 18, _BETA_WATERMARK_TEXT)
     c.restoreState()
+
+
+def _draw_finished_dims_line(
+    c: pdfcanvas.Canvas,
+    template_slug: str,
+    params: FinishedDimsParams,
+    *,
+    y_mm: float = 210 - 28,
+) -> None:
+    """Рядок header'а «Габарити готового виробу: X × Y × Z мм» (Phase 2.9.b Block C).
+
+    Нижче рядка з розмірами розгортки/матеріалом. Той самий шрифт header'а
+    (DejaVuSans 10pt). Габарит — bbox зігнутої деталі (dimensions.py)."""
+    dims = compute_finished_dimensions(template_slug, params)
+    c.setFont("DejaVuSans", 10)
+    c.drawString(15 * mm, y_mm * mm, f"Габарити готового виробу: {format_dimensions(dims)}")
 
 
 def _draw_bend_badges(
@@ -401,6 +422,7 @@ def export_l_bracket_pdf(
         f"Розміри (зовн.): A={parameters.leg_a_mm} · B={parameters.leg_b_mm} · "
         f"W={parameters.width_mm} мм · R={parameters.bend_radius_mm} мм",
     )
+    _draw_finished_dims_line(c, "l_bracket", parameters)
 
     # Layout.
     # Розгортка ліворуч (~150×110 мм), таблиці/BOM/QR праворуч.
@@ -503,6 +525,7 @@ def export_z_bracket_pdf(
         f"bottom={parameters.bottom_flange_mm} · W={parameters.width_mm} мм · "
         f"R={parameters.bend_radius_mm} мм",
     )
+    _draw_finished_dims_line(c, "z_bracket", parameters)
 
     # Розгортка з двома bend lines.
     _draw_unfold_generic(
@@ -612,6 +635,7 @@ def export_corner_angle_pdf(
         f"отвори: {parameters.hole_rows}×{parameters.hole_cols}×2 (всього {n_holes}, "
         f"Ø{parameters.hole_diameter_mm:g} мм)",
     )
+    _draw_finished_dims_line(c, "corner_angle", parameters)
 
     _draw_unfold_generic(
         c,
@@ -736,6 +760,7 @@ def export_wall_shelf_pdf(
         f"lip={parameters.front_lip_mm} мм · W={parameters.width_mm} мм · "
         f"гибів: {n_bends} · отворів: {n_holes} (Ø{parameters.mount_hole_diameter_mm:g})",
     )
+    _draw_finished_dims_line(c, "wall_shelf", parameters)
 
     _draw_unfold_generic(
         c,
@@ -859,6 +884,7 @@ def export_perforated_panel_pdf(
         f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
         f"Ø{parameters.hole_diameter_mm:g} мм",
     )
+    _draw_finished_dims_line(c, "perforated_panel", parameters)
 
     _draw_unfold_generic(
         c,
