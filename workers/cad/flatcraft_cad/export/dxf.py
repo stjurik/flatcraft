@@ -21,6 +21,7 @@ from typing import Final
 from ezdxf import new as ezdxf_new  # type: ignore[attr-defined]
 from ezdxf.document import Drawing
 
+from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
 from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
@@ -37,7 +38,9 @@ DXF_LAYERS: Final[tuple[tuple[str, int], ...]] = (
     ("BEND_LINES", 5),  # blue — лінії гиба
     ("BEND_TEXT", 3),  # green — анотації
     ("DIM", 8),  # сірий — розміри
+    ("DIM_HOLES", 1),  # red — діаметри отворів (Phase 2.9.b F)
 )
+_HOLE_DIM_TEXT_HEIGHT_MM: Final[float] = 3.0
 
 # Фіксовані штампи часу і GUID-и для детермінованих байтів.
 # Дата 2026-01-01 00:00 UTC — символічна точка відліку проєкту.
@@ -151,9 +154,46 @@ def _export_flat_dxf(
             dxfattribs={"layer": "INNER_CUTS"},
         )
 
+    if holes:
+        _add_hole_dims(msp, holes)
+
     doc.saveas(output_path)
     _normalize_dxf_bytes(output_path)
     return output_path
+
+
+def _add_hole_dims(msp: object, holes: tuple[Hole2D, ...]) -> None:
+    """Діаметричні розміри отворів на шарі DIM_HOLES (Phase 2.9.b F).
+
+    Якщо отворів небагато (≤ cap) — dim на кожен. Інакше (перфо-панель,
+    сотні отворів) — один зразковий dim + текст «xN отворів %%cD», щоб не
+    роздувати файл. `%%c` — CAD-код символу Ø. Текст dim'а перекрито явно
+    (детермінізм + гарантований Ø незалежно від dimstyle).
+    """
+    # msp типується як object, щоб не тягнути ezdxf-типи у сигнатуру; усі
+    # виклики нижче — публічне ezdxf Modelspace API.
+    individual = should_dim_individual_holes(len(holes))
+    targets = holes if individual else holes[:1]
+    for hole in targets:
+        dim = msp.add_diameter_dim(  # type: ignore[attr-defined]
+            center=(hole.x_mm, hole.y_mm),
+            radius=hole.diameter_mm / 2.0,
+            angle=45,
+            text=f"%%c{hole.diameter_mm:g}",
+            dimstyle="Standard",
+            dxfattribs={"layer": "DIM_HOLES"},
+        )
+        dim.render()
+    if not individual:
+        d0 = holes[0].diameter_mm
+        msp.add_text(  # type: ignore[attr-defined]
+            f"x{len(holes)} отворів %%c{d0:g}",
+            dxfattribs={
+                "layer": "DIM_HOLES",
+                "height": _HOLE_DIM_TEXT_HEIGHT_MM,
+                "insert": (0.0, -6.0),
+            },
+        )
 
 
 def export_l_bracket_dxf(

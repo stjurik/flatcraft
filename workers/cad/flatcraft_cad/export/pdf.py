@@ -59,6 +59,7 @@ from flatcraft_cad.export.layout.corner_picker import (
     Size2D,
     pick_annotation_corner,
 )
+from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -181,6 +182,47 @@ def _draw_bend_badges(
         # drawCentredString центрує по X; -2.8pt опускає baseline до візуального центру 8pt.
         c.drawCentredString(cx, cy - 2.8, str(badge.number))
         c.restoreState()
+
+
+def _draw_hole_dims(
+    c: pdfcanvas.Canvas,
+    holes: tuple[Hole2D, ...],
+    *,
+    x0_pt: float,
+    y0_pt: float,
+    scale: float,
+    part_top_pt: float,
+) -> None:
+    """Ø-виноски отворів на розгортці (Phase 2.9.b Block F).
+
+    ≤ cap отворів → коротка виноска-риска + текст «Ø8» біля кожного. Інакше
+    (перфо-панель) → одна виноска на першому + анотація «×N отворів Ø8» над
+    деталлю, щоб не захаращувати креслення сотнями підписів."""
+    individual = should_dim_individual_holes(len(holes))
+    targets = holes if individual else holes[:1]
+    c.saveState()
+    c.setStrokeColorRGB(0.8, 0.2, 0.2)
+    c.setFillColorRGB(0.8, 0.2, 0.2)
+    c.setLineWidth(0.3)
+    c.setFont("DejaVuSans", 7)
+    for hole in targets:
+        cx = x0_pt + hole.x_mm * scale * mm
+        cy = y0_pt + hole.y_mm * scale * mm
+        r = (hole.diameter_mm / 2.0) * scale * mm
+        # Виноска з верхньо-правого краю кола назовні під 45°.
+        lx, ly = cx + r * 0.707, cy + r * 0.707
+        tx, ty = lx + 3 * mm, ly + 3 * mm
+        c.line(lx, ly, tx, ty)
+        c.drawString(tx + 0.5 * mm, ty - 1 * mm, f"Ø{hole.diameter_mm:g}")
+    if not individual:
+        c.setFont("DejaVuSans", 8)
+        c.drawString(
+            x0_pt,
+            part_top_pt + 4 * mm,
+            f"×{len(holes)} отворів Ø{holes[0].diameter_mm:g}",
+        )
+    c.setFillColorRGB(0, 0, 0)
+    c.restoreState()
 
 
 def _bend_badges_for(
@@ -1077,6 +1119,8 @@ def _draw_unfold_generic(
             radius_pdf = (hole.diameter_mm / 2.0) * scale * mm
             c.circle(cx, cy, radius_pdf, stroke=1, fill=0)
         c.restoreState()
+        # Ø-callouts (Phase 2.9.b Block F): на кожен отвір (≤ cap) або один + «×N».
+        _draw_hole_dims(c, holes, x0_pt=x0, y0_pt=y0, scale=scale, part_top_pt=y0 + h * mm)
 
     c.setFont("DejaVuSans", 8)
     c.drawCentredString(x0 + (w * mm) / 2, y0 - 4 * mm, f"L = {length_mm:.2f} мм")

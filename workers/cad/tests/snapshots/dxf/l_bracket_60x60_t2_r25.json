@@ -71,6 +71,10 @@
     },
     {
       "color": 1,
+      "name": "DIM_HOLES"
+    },
+    {
+      "color": 1,
       "name": "INNER_CUTS"
     },
     {
