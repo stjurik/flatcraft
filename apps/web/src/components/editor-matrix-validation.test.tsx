@@ -13,16 +13,11 @@ import {
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-// @flatcraft/ui barrel тягне R3F 3d-viewport — у vitest (node, без WebGL) це
-// нестабільно. Мокаємо лише те, що редактори реально вживають: AutoForm — заглушка,
-// zodIssuesToFieldErrors — passthrough. Тестуємо ВЛАСНУ логіку редактора (банер).
-vi.mock("@flatcraft/ui", () => ({
-  AutoForm: () => null,
-  zodIssuesToFieldErrors: () => ({}),
-}));
-
+// @flatcraft/ui аліасовано на стаб у vitest.config.ts (R3F 3d-viewport + dist —
+// нестабільно у node). Тестуємо ВЛАСНУ логіку редактора (матричний банер); форму
+// рендерить стаб-AutoForm (null).
 import { CornerAngleEditor } from "./corner-angle-editor";
 import { LBracketEditor } from "./l-bracket-editor";
 import { WallShelfEditor } from "./wall-shelf-editor";
