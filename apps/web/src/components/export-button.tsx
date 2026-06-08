@@ -51,9 +51,11 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
         setState({ status: "error", message: err.message }),
       );
     } catch (err) {
+      // Hotfix 2.9.c (C): ApiError.message тепер несе дружній RFC 9457 `detail`
+      // з сервера (напр. «Збільшіть радіус…»), а не generic «експорт не вдався».
       const message =
         err instanceof ApiError
-          ? `API ${err.status}: експорт не вдався`
+          ? `API ${err.status}: ${err.message}`
           : err instanceof Error
             ? err.message
             : "Невідома помилка";
