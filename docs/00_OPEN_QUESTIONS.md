@@ -52,6 +52,12 @@
 - **OQ-18.** Перемикач мм↔дюйми — глобальний у профілі, чи на рівні моделі? Запропонований default: глобальний у профілі (PreferenceContext), модель завжди зберігається у мм.
 - **OQ-19.** EN-локалізація — у MVP лишаємо тільки UA, чи робимо UA+EN одразу? Замовник підтвердив UA+EN для MVP. Лишаємо обидві.
 
+## Build і тулінг
+
+- **OQ-21.** Структура build-емітів `@flatcraft/ui` (і ширше — консистентність `tsconfig.build` між пакетами). Виявлено під час Hotfix 2.9.c: `pnpm --filter @flatcraft/ui build` емітить у вкладену структуру (`dist/ui/src/index.js`, `dist/types/src/...`), а не у `dist/index.js`, на який вказує `package.json#main`. Причина — `ui/tsconfig.build.json` не задає `rootDir` і не оверрайдить `paths` на `dist`, тож `tsc` тягне rootDir вгору через `@flatcraft/types` (резолвиться у `src`). Наразі нікому не заважає (Next через `transpilePackages` і `tsx` беруть `@flatcraft/ui` із source за tsconfig `paths`; жоден runtime не імпортує `@flatcraft/ui` через node-resolution → `dist`). Але це **латентна пастка**: перший же споживач `@flatcraft/ui` через node-resolution (напр. vitest unit-тест, що рендерить компонент) падає на «Failed to resolve entry for package @flatcraft/ui». У Hotfix 2.9.c обійшли стабом+аліасом у `apps/web/vitest.config.ts`.
+  - _Чому важливо:_ крихкість unit-тестування UI-компонентів; неузгодженість конвенції `tsconfig.build` (порівн. `packages/db`, `packages/cad-engine`, які задають `rootDir:"src"` + `paths→dist`); потенційні сюрпризи при майбутньому publish/consume пакетів.
+  - _Запропонований default:_ вирівняти `ui/tsconfig.build.json` (і перевірити інші пакети) під конвенцію `packages/db` — `rootDir:"src"` + `paths: {"@flatcraft/*": ["packages/*/dist"]}`, щоб `@flatcraft/ui` емітив коректний `dist/index.js`. **Окремо:** барель `@flatcraft/ui` ре-експортує R3F `3d-viewport`, що крешить у node-середовищі тестів — навіть з коректним `dist` рендер компонентів у vitest потребує стабу/мока R3F (стаб із 2.9.c лишається доречним). Винести у окремий tech-debt issue.
+
 ## Тестування і якість
 
 - **OQ-20.** Хто верифікує DXF/PDF на стороні виробника під час пілота? Без пілота-партнера ризик — реальне виробництво виявить розбіжності (особливо з K-фактором).
