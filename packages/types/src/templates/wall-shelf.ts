@@ -33,9 +33,9 @@ export const WallShelfParametersBaseSchema = z.object({
     .number()
     .min(30)
     .max(500)
-    .describe("group:Задня полиця|label:Висота back-стінки (мм)"),
+    .describe("group:Розміри|label:Висота задньої стінки (мм)"),
   /** Глибина горизонтальної shelf-площини, мм. */
-  shelf_depth_mm: z.number().min(50).max(500).describe("group:Полиця|label:Глибина полиці (мм)"),
+  shelf_depth_mm: z.number().min(50).max(500).describe("group:Розміри|label:Глибина полиці (мм)"),
   /**
    * Висота переднього лопику, мм. Допустимі значення: 0 (без lip)
    * АБО проміжок [5, 100]. Cross-field constraint у refine нижче.
@@ -44,11 +44,11 @@ export const WallShelfParametersBaseSchema = z.object({
     .number()
     .min(0)
     .max(100)
-    .describe("group:Фронт-губка|label:Висота губки (0 або ≥5 мм)"),
+    .describe("group:Розміри|label:Висота фронт-губки (0 або ≥5 мм)"),
   bend_radius_mm: z
     .union([z.literal(1), z.literal(2.5), z.literal(4), z.literal(5)])
-    .describe("group:Гиби|label:Внутрішній радіус (мм)"),
-  bend_angle_deg: z.literal(90).describe("group:Гиби|label:Кут гиба (°)"),
+    .describe("group:Гиб|label:Внутрішній радіус (мм)"),
+  bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
   /**
    * Напрям згину на кожен гиб (Hotfix 2.10.e). 1 або 2 гиби залежно від
    * front_lip. Дефолт обидва 'down'. bends[0] — back→shelf, bends[1] — shelf→lip.
@@ -58,24 +58,20 @@ export const WallShelfParametersBaseSchema = z.object({
     .min(1)
     .max(2)
     .default([{ direction: "down" }, { direction: "down" }])
-    .describe("group:Гиби|label:Напрями згину"),
-  width_mm: z
-    .number()
-    .min(100)
-    .max(3000)
-    .describe("group:Загальне|label:Ширина (довжина гиба, мм)"),
+    .describe("group:Гиб|label:Напрями згину"),
+  width_mm: z.number().min(100).max(3000).describe("group:Розміри|label:Ширина (довжина гиба, мм)"),
   mount_hole_diameter_mm: z
     .number()
     .min(3)
     .max(20)
-    .describe("group:Отвори монтажу|label:Діаметр (мм)"),
-  mount_hole_rows: z.number().int().min(0).max(5).describe("group:Отвори монтажу|label:Рядів"),
-  mount_hole_cols: z.number().int().min(0).max(5).describe("group:Отвори монтажу|label:Колонок"),
+    .describe("group:Сітка отворів|label:Діаметр (мм)"),
+  mount_hole_rows: z.number().int().min(0).max(5).describe("group:Сітка отворів|label:Рядів"),
+  mount_hole_cols: z.number().int().min(0).max(5).describe("group:Сітка отворів|label:Колонок"),
   mount_hole_margin_mm: z
     .number()
     .min(5)
     .max(50)
-    .describe("group:Отвори монтажу|label:Відступ від країв (мм)"),
+    .describe("group:Сітка отворів|label:Відступ від країв (мм)"),
 });
 
 /**
