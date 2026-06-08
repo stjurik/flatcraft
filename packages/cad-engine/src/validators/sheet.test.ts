@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadSpecFromFile } from "../spec.js";
+import { loadSpecFromFile } from "../spec-node.js";
 import { validateSheet } from "./sheet.js";
 
 const spec = await loadSpecFromFile();

@@ -14,7 +14,7 @@
 import fc from "fast-check";
 import { describe, it } from "vitest";
 
-import { loadSpecFromFile } from "../spec.js";
+import { loadSpecFromFile } from "../spec-node.js";
 import { validateBend } from "./bend.js";
 
 const spec = await loadSpecFromFile();

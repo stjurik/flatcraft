@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadSpec, loadSpecFromFile } from "./spec.js";
+import { loadSpec } from "./spec.js";
 
 const DATA_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -56,6 +56,9 @@ describe("loadSpec — happy path з реального YAML", () => {
   });
 });
 
+// loadSpecFromFile тести переїхали у spec-node.test.ts (Hotfix 2.9.c: fs-loader
+// винесено у browser-unsafe subpath `@flatcraft/cad-engine/node`).
+
 describe("loadSpec — валідація", () => {
   it("кидає на відсутньому machine.vendor", () => {
     const bad = "machine:\n  model: x\nglobal:\n  max_force_t: 100";
@@ -77,17 +80,5 @@ k_factor: { default_by_material: {}, ratio_correction: [] }
 hole_to_bend_distance: { formula: "x", coefficient_by_material: {} }
 `;
     expect(() => loadSpec(yamlText)).toThrow();
-  });
-});
-
-describe("loadSpecFromFile", () => {
-  it("дефолтно читає bend-machine-esi.yaml з пакета", async () => {
-    const spec = await loadSpecFromFile();
-    expect(spec.machine.model).toBe("reference-100t");
-  });
-
-  it("приймає кастомний path", async () => {
-    const spec = await loadSpecFromFile(DATA_PATH);
-    expect(spec.global.max_force_t).toBe(100);
   });
 });

@@ -1,17 +1,18 @@
 /**
  * Завантажувач bend-machine spec — єдине джерело істини про обмеження
  * листозгинальної машини. YAML живе у `data/bend-machine-esi.yaml`,
- * валідується Zod-схемою на load. Будь-яка зміна спеки → перепарс при
- * наступному виклику без перезбірки.
+ * валідується Zod-схемою на load.
  *
  * Чому YAML, а не JSON: редагувати руками легше (коментарі, multiline).
  * Чому окрема Zod-схема, а не лише types: catch'имо помилки даних до того,
  * як вони потраплять у валідатори чи UI.
+ *
+ * ВАЖЛИВО (Hotfix 2.9.c): цей модуль — browser-safe. Жодних `node:fs`/`path`/
+ * `process` на top-level — інакше імпорт `@flatcraft/cad-engine` у web тягне
+ * Node-only код у клієнтський бандл. Файловий loader винесено у `spec-node.ts`
+ * (subpath `@flatcraft/cad-engine/node`). Браузер натомість бере згенерований
+ * snapshot `bakedSpec` (`generated/baked-spec.ts`, ADR-022).
  */
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { parse } from "yaml";
 import { z } from "zod";
 
@@ -75,16 +76,4 @@ export type BendMachineSpec = z.infer<typeof BendMachineSpecSchema>;
 export function loadSpec(yamlText: string): BendMachineSpec {
   const parsed = parse(yamlText);
   return BendMachineSpecSchema.parse(parsed);
-}
-
-const DEFAULT_SPEC_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../data/bend-machine-esi.yaml",
-);
-
-export async function loadSpecFromFile(
-  filePath: string = DEFAULT_SPEC_PATH,
-): Promise<BendMachineSpec> {
-  const text = await readFile(filePath, "utf8");
-  return loadSpec(text);
 }

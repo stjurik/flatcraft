@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { computeKFactor } from "./k-factor.js";
-import { loadSpecFromFile } from "./spec.js";
+import { loadSpecFromFile } from "./spec-node.js";
 
 const spec = await loadSpecFromFile();
 
