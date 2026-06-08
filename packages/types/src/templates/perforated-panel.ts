@@ -18,9 +18,9 @@ import { z } from "zod";
 
 export const PerforatedPanelParametersSchema = z.object({
   /** Довжина листа, мм. */
-  length_mm: z.number().min(100).max(3000).describe("group:Лист|label:Довжина листа (мм)"),
+  length_mm: z.number().min(100).max(3000).describe("group:Розміри|label:Довжина листа (мм)"),
   /** Ширина листа, мм. */
-  width_mm: z.number().min(100).max(3000).describe("group:Лист|label:Ширина листа (мм)"),
+  width_mm: z.number().min(100).max(3000).describe("group:Розміри|label:Ширина листа (мм)"),
   /** Діаметр отворів, мм. */
   hole_diameter_mm: z
     .number()

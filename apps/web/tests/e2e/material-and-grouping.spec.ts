@@ -7,9 +7,9 @@ const VIEWPORTS = [
 ] as const;
 
 test.describe("Phase 2.12 — material selector + grouped fieldsets (corner_angle)", () => {
-  test("legends усіх 5 груп присутні", async ({ page }) => {
+  test("legends усіх 4 груп присутні", async ({ page }) => {
     await page.goto("/templates/corner_angle");
-    for (const legend of ["Матеріал і товщина", "Полиця A", "Полиця B", "Гиб", "Сітка отворів"]) {
+    for (const legend of ["Матеріал і товщина", "Розміри", "Гиб", "Сітка отворів"]) {
       await expect(page.getByRole("group", { name: legend })).toBeVisible();
     }
   });

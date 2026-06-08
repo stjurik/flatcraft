@@ -15,6 +15,6 @@ export const BendDirectionSchema = z.enum(["up", "down"]);
 export type BendDirection = z.infer<typeof BendDirectionSchema>;
 
 export const BendSpecSchema = z.object({
-  direction: BendDirectionSchema.default("down").describe("group:Гиби|label:Напрям згину"),
+  direction: BendDirectionSchema.default("down").describe("group:Гиб|label:Напрям згину"),
 });
 export type BendSpec = z.infer<typeof BendSpecSchema>;
