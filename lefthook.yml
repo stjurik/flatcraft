@@ -17,6 +17,13 @@ pre-commit:
       root: "workers/cad/"
       glob: "*.py"
       run: uv run ruff check {staged_files}
+    python-format:
+      # Парність з CI (`ruff format --check .`): ловить неформатований Python
+      # до push'у. `--check` (не auto-fix) — як prettier-хук вище: падає, не
+      # переписує staged-файли мовчки. Виправлення: `uv run ruff format`.
+      root: "workers/cad/"
+      glob: "*.py"
+      run: uv run ruff format --check {staged_files}
     python-types:
       root: "workers/cad/"
       glob: "*.py"
