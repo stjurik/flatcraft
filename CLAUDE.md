@@ -104,7 +104,7 @@ flatcraft/
 - Trunk-based: одна гілка `main`, feature-branches короткоживучі (≤ 2 дні).
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`.
 - PR обов'язковий, навіть solo (для history). Squash merge.
-- Pre-commit hook: `lefthook` → lint, type-check, test, форматування.
+- Pre-commit hook: `lefthook` (`lefthook.yml`). На staged-файлах: ESLint + `tsc` + `prettier --check` (TS/JS/JSON/MD/YAML); для `workers/cad/**/*.py` — `ruff check` (lint), `ruff format --check` (формат, `python-format`-хук — парність з CI), `mypy --strict`. Pre-push: `pnpm test`. **Важливо:** `ruff format` для Python ганяється і локально, і в CI — форматуй Python через `uv run ruff format` перед commit, інакше `python-format` (і CI `ruff format --check .`) впаде.
 
 ## 6. Що Claude Code _робить_ і _не робить_
 
