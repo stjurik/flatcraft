@@ -549,6 +549,33 @@
 
 ---
 
+## ADR-022: Клієнтська валідація матриці гибу через bake'ed snapshot
+
+**Статус:** Accepted (2026-06-08)
+
+**Контекст:** На staging виявлено баг (Hotfix 2.9.c): corner_angle з t=5мм/R=2.5мм показував у студії зелений банер «Параметри валідні», хоч матриця для t=5 дозволяє лише R∈{4.0, 5.0}. Причина — накопичений розрив: Zod-схема шаблону перевіряє лише `bend_radius_mm ∈ глобальний enum {1, 2.5, 4, 5}`, не звіряючись із залежністю (матеріал, товщина) → (допустимі радіуси). Сервер цю матричну перевірку робить (ADR-019, `validateExportBends` через cad-engine), клієнт — ні. Додатково: при долітанні 422 з сервера `createExport` ігнорував тіло і кидав generic «API 422: експорт не вдався», ховаючи дружній `detail`.
+
+ADR-019 (серверна валідація як інваріант) лишається в силі — клієнтська перевірка її **доповнює**, не замінює. Проблема суто інженерна: матриця живе у `bend-machine-esi.yaml`, який читається через `node:fs`; браузер до нього доступу не має, а дублювати матрицю руками — порушення single-source.
+
+**Рішення:**
+
+1. **Bake YAML→TS на prebuild.** `tools/scripts/bake-bend-matrix.ts` читає `bend-machine-esi.yaml`, валідує тією ж `loadSpec` Zod-схемою і запікає типізований `packages/cad-engine/src/generated/baked-spec.ts` (`export const bakedSpec: BendMachineSpec`). Запускається у `prebuild` cad-engine; файл також комічений (тести зелені без build-кроку). YAML лишається ЄДИНИМ джерелом — `bakedSpec` завжди похідний.
+2. **Browser-safe split cad-engine.** `node:fs`-loader (`loadSpecFromFile`) винесено у `spec-node.ts` (subpath `@flatcraft/cad-engine/node`); головний entry лишається без `node:*` (тест-скан графа гарантує). Інакше Next тягне `node:fs` у клієнтський бандл.
+3. **Одна реалізація матричної валідації.** `validateExportBends`/`bendInputFor`/Problem-маппінг перенесено з `apps/api` у `@flatcraft/cad-engine` (`validators/export-gate.ts`, приймає spec параметром). Сервер і браузер ділять ОДНУ функцію; api re-експортує. Web кличе її через `bakedSpec` (`apps/web/src/lib/bend-matrix.ts`).
+4. **UI gate.** 4 редактори (l/z/corner/wall) рахують `matrixIssues` (useMemo) і показують червоний банер із матричним повідомленням замість зеленого; студії блокують кнопку (`disabled={!isValid || matrixIssues.length > 0}`). `createExport` парсить RFC 9457 (`detail` → `errors[].message` → generic).
+
+**Наслідки:**
+
+- ✅ Невалідна (матеріал, товщина, радіус) ловиться у студії ДО запиту — конкретне повідомлення, кнопка disabled.
+- ✅ Single source of truth збережено: один YAML, baked snapshot, одна функція валідації на клієнт+сервер.
+- ✅ cad-engine тепер безпечно імпортується у браузер (subpath `/node` ізолює `node:fs`).
+- ⚠ `bakedSpec` — snapshot на момент build. Свіжість гарантують `prebuild` + turbo `^build` перед typecheck/test/build у CI. Зміна YAML без rebuild → застарілий клієнтський snapshot (сервер усе одно перевіряє актуальний YAML — fail-safe).
+- ⚠ Радіус — спільне поле шаблону (`bend_radius_mm`), не per-bend; сценарій «невалідний саме 2-й гиб» непредставний у моделі.
+
+**Альтернативи:** (а) Дублювати матрицю у клієнтський код руками — відхилено (порушує single-source, дрейф). (б) Тримати валідацію лише на сервері — відхилено: погана UX (помилка лише після кліку), хоч безпеково достатньо. (в) Запікати у `dist/*.json` і імпортувати JSON — відхилено на користь типізованого `.ts` (повний type-check, без resolveJsonModule/copy-фрагільності). (г) Окремий легкий валідатор лише радіуса на клієнті — відхилено, перевикористання `validateExportBends` точніше і без дрейфу.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

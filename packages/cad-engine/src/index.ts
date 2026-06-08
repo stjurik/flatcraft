@@ -10,18 +10,28 @@
  * Дані обладнання — у data/bend-machine-esi.yaml.
  */
 
-export { BendMachineSpecSchema, loadSpec, loadSpecFromFile, type BendMachineSpec } from "./spec.js";
+// Головний entry — browser-safe. Файловий loader (`loadSpecFromFile`) живе у
+// subpath `@flatcraft/cad-engine/node` (node:fs). Браузер бере `bakedSpec`.
+export { BendMachineSpecSchema, loadSpec, type BendMachineSpec } from "./spec.js";
+export { bakedSpec } from "./generated/baked-spec.js";
 
 export {
+  bendInputFor,
+  buildProblem,
   combine,
   fail,
   ok,
+  ProblemDetailsSchema,
+  ProblemErrorSchema,
   validateBend,
+  validateExportBends,
   validateHoles,
   validateSheet,
   type BendInput,
   type HoleInput,
   type HolesInput,
+  type ProblemDetails,
+  type ProblemError,
   type SheetInput,
   type ValidationError,
   type ValidationResult,

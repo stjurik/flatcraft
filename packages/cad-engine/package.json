@@ -7,9 +7,12 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./node": "./dist/spec-node.js",
     "./data/bend-machine-esi.yaml": "./data/bend-machine-esi.yaml"
   },
   "scripts": {
+    "bake": "tsx ../../tools/scripts/bake-bend-matrix.ts",
+    "prebuild": "tsx ../../tools/scripts/bake-bend-matrix.ts",
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint src --max-warnings 0",
@@ -30,6 +33,7 @@
   },
   "devDependencies": {
     "fast-check": "^4.8.0",
+    "tsx": "^4.19.1",
     "vitest": "^2.1.2"
   }
 }

@@ -13,3 +13,6 @@ workers/cad/
 
 # Drizzle-kit generated metadata — не чіпаємо вручну і не reformat'имо.
 packages/db/src/migrations/
+
+# Baked bend-matrix — згенеровано з YAML (Hotfix 2.9.c, ADR-022).
+packages/cad-engine/src/generated/baked-spec.ts

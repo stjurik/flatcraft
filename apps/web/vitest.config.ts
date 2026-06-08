@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -6,6 +8,15 @@ export default defineConfig({
   // на «React is not defined» в test-файлах з JSX.
   esbuild: {
     jsx: "automatic",
+  },
+  resolve: {
+    alias: {
+      // Hotfix 2.9.c: барель @flatcraft/ui тягне R3F 3d-viewport і резолвиться з
+      // dist (крихко щодо порядку turbo-build). Лише editor-wrapper тести його
+      // вживають — і тільки AutoForm/zodIssuesToFieldErrors. Стаб робить web
+      // unit-suite незалежною від dist. Деталі — у src/test/flatcraft-ui-stub.tsx.
+      "@flatcraft/ui": fileURLToPath(new URL("./src/test/flatcraft-ui-stub.tsx", import.meta.url)),
+    },
   },
   test: {
     // Playwright e2e живуть у tests/e2e — їх запускає окрема цільова команда

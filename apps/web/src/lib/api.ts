@@ -86,9 +86,38 @@ export async function createExport(request: ExportRequest): Promise<ExportJobAcc
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new ApiError(`Failed to POST /exports: ${res.status}`, res.status);
+    // Hotfix 2.9.c (C): сервер віддає RFC 9457 problem details з дружнім
+    // `detail` (напр. «Збільшіть радіус…»). Дістаємо його замість generic
+    // «Failed to POST», щоб UI показав конкретну причину 422.
+    throw new ApiError(await problemMessage(res), res.status);
   }
   return ExportJobAcceptedSchema.parse(await res.json());
+}
+
+/**
+ * Витягує людиночитане повідомлення з RFC 9457 problem-details тіла.
+ * Пріоритет: `detail` → перший `errors[].message` → generic зі статусом.
+ * Безпечно ковтає не-JSON тіло (повертає generic).
+ */
+async function problemMessage(res: Response): Promise<string> {
+  const generic = `Запит відхилено (${res.status}).`;
+  try {
+    const problem: unknown = await res.json();
+    if (problem && typeof problem === "object") {
+      const p = problem as { detail?: unknown; errors?: unknown };
+      if (typeof p.detail === "string" && p.detail.length > 0) return p.detail;
+      if (Array.isArray(p.errors)) {
+        const first = p.errors.find(
+          (e): e is { message: string } =>
+            !!e && typeof (e as { message?: unknown }).message === "string",
+        );
+        if (first) return first.message;
+      }
+    }
+    return generic;
+  } catch {
+    return generic;
+  }
 }
 
 /**

@@ -8,9 +8,14 @@ import {
 import { AutoForm, zodIssuesToFieldErrors } from "@flatcraft/ui";
 import { useMemo } from "react";
 
+import { bendMatrixIssues } from "../lib/bend-matrix";
+
 interface WallShelfEditorProps {
   readonly value: WallShelfParameters;
   readonly onChange: (next: WallShelfParameters) => void;
+  /** Матеріал/товщина з Studio — потрібні для матричної валідації гибу. */
+  readonly materialCode: string;
+  readonly thicknessMm: number;
 }
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
@@ -18,16 +23,39 @@ const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 // Hotfix 2.10.e: bends (напрями 1-2 гибів, дефолт 'down') у моделі, приховано від UI.
 const FORM_SCHEMA = WallShelfParametersBaseSchema.omit({ bends: true });
 
-export function WallShelfEditor({ value, onChange }: WallShelfEditorProps) {
+export function WallShelfEditor({
+  value,
+  onChange,
+  materialCode,
+  thicknessMm,
+}: WallShelfEditorProps) {
   const validation = useMemo(() => WallShelfParametersSchema.safeParse(value), [value]);
   const fieldErrors = useMemo(
     () => (validation.success ? {} : zodIssuesToFieldErrors(validation.error.issues)),
     [validation],
   );
-  const allErrors = useMemo(() => {
+  const zodErrors = useMemo(() => {
     if (validation.success) return [] as string[];
     return validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
   }, [validation]);
+
+  // Hotfix 2.9.c: матрична валідація (матеріал, товщина, радіус) — той самий
+  // валідатор, що й серверний gate (ADR-022).
+  const matrixIssues = useMemo(
+    () =>
+      bendMatrixIssues({
+        template_slug: "wall_shelf",
+        parameters: value,
+        material_code: materialCode,
+        thickness_mm: thicknessMm,
+      }),
+    [value, materialCode, thicknessMm],
+  );
+
+  const allErrors = useMemo(
+    () => [...matrixIssues.map((e) => e.message ?? e.code), ...zodErrors],
+    [matrixIssues, zodErrors],
+  );
 
   const totalHoles = value.mount_hole_rows * value.mount_hole_cols;
   const lipNote =
