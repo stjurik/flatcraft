@@ -15,6 +15,8 @@ import {
 } from "@flatcraft/ui";
 import { useMemo, useState } from "react";
 
+import { bendMatrixIssues } from "../lib/bend-matrix";
+
 import { ExportButton } from "./export-button";
 import { LBracketEditor } from "./l-bracket-editor";
 import { LBracketViewport } from "./l-bracket-viewport";
@@ -50,13 +52,30 @@ export function LBracketStudio({ initialParameters, materials }: LBracketStudioP
     [parameters],
   );
 
+  // Hotfix 2.9.c: матричні помилки блокують експорт ще до запиту (UX-gate).
+  const matrixIssues = useMemo(
+    () =>
+      bendMatrixIssues({
+        template_slug: "l_bracket",
+        parameters,
+        material_code: material.materialCode,
+        thickness_mm: material.thicknessMm,
+      }),
+    [parameters, material.materialCode, material.thicknessMm],
+  );
+
   return (
     <div data-testid="l-bracket-studio" className="flex flex-col gap-4">
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
         <div className="flex flex-col gap-4">
           <MaterialSection materials={materials} value={material} onChange={setMaterial} />
           <StudioPreviewAnchor />
-          <LBracketEditor value={parameters} onChange={setParameters} />
+          <LBracketEditor
+            value={parameters}
+            onChange={setParameters}
+            materialCode={material.materialCode}
+            thicknessMm={material.thicknessMm}
+          />
           <ExportButton
             request={{
               template_slug: "l_bracket",
@@ -64,7 +83,7 @@ export function LBracketStudio({ initialParameters, materials }: LBracketStudioP
               material_code: material.materialCode,
               thickness_mm: material.thicknessMm,
             }}
-            disabled={!isValid}
+            disabled={!isValid || matrixIssues.length > 0}
           />
         </div>
 

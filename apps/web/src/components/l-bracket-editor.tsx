@@ -4,9 +4,14 @@ import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/ty
 import { AutoForm, zodIssuesToFieldErrors, type FieldDescriptor } from "@flatcraft/ui";
 import { useMemo } from "react";
 
+import { bendMatrixIssues } from "../lib/bend-matrix";
+
 interface LBracketEditorProps {
   readonly value: LBracketParameters;
   readonly onChange: (next: LBracketParameters) => void;
+  /** Матеріал/товщина з Studio — потрібні для матричної валідації гибу. */
+  readonly materialCode: string;
+  readonly thicknessMm: number;
 }
 
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
@@ -32,7 +37,12 @@ function renderField(descriptor: FieldDescriptor, value: unknown): React.ReactNo
   return undefined;
 }
 
-export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
+export function LBracketEditor({
+  value,
+  onChange,
+  materialCode,
+  thicknessMm,
+}: LBracketEditorProps) {
   // Live-валідація: безперервно парс'имо у Studio, AutoForm підсвічує
   // конкретні поля + summary рендериться знизу як list.
   const validation = useMemo(() => LBracketParametersSchema.safeParse(value), [value]);
@@ -42,10 +52,28 @@ export function LBracketEditor({ value, onChange }: LBracketEditorProps) {
     [validation],
   );
 
-  const allErrors = useMemo(() => {
+  const zodErrors = useMemo(() => {
     if (validation.success) return [] as string[];
     return validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
   }, [validation]);
+
+  // Hotfix 2.9.c: матрична валідація (матеріал, товщина, радіус) проти
+  // bend-machine spec — той самий валідатор, що й серверний gate (ADR-022).
+  const matrixIssues = useMemo(
+    () =>
+      bendMatrixIssues({
+        template_slug: "l_bracket",
+        parameters: value,
+        material_code: materialCode,
+        thickness_mm: thicknessMm,
+      }),
+    [value, materialCode, thicknessMm],
+  );
+
+  const allErrors = useMemo(
+    () => [...matrixIssues.map((e) => e.message ?? e.code), ...zodErrors],
+    [matrixIssues, zodErrors],
+  );
 
   return (
     <form
