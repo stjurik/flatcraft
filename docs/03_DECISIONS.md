@@ -576,6 +576,31 @@ ADR-019 (серверна валідація як інваріант) лишає
 
 ---
 
+## ADR-023: Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile
+
+**Статус:** Accepted (2026-06-11)
+
+**Контекст:** Soft-launch (ADR-020) потребує публічного каналу зворотного зв'язку. Обрано Discord community-сервер (структуровані forum-канали з тегами bug/feature, gated-категорії за інтересами). Сервер, налаштований кліками у UI, недокументований і дрейфує: ніхто не пам'ятає, чому канал має такий permission-overwrite, а відновити структуру після помилки нічим. Прецедент декларативної інфри у репо вже є — `infra/ansible/` для Mirohost (ADR-011). Обмеження Discord API: створення application/bot/сервера, Community-фіча (ToS-wizard), Onboarding і Welcome Screen НЕ автоматизуються — лишаються ручними.
+
+**Рішення:** Standalone workspace `infra/discord/` (`@flatcraft/discord-tools`: discord.js v14, zod, vitest; без нових root-залежностей). Config — єдине джерело істини у `config/*.ts` (12 ролей 3-axis таксономії authority/selfid/interest, 7 категорій, 19 каналів з permission-overwrites), валідується Zod при імпорті + крос-файлова перевірка цілісності. Три idempotent-скрипти: `snapshot` (read-only pull → `docs/discord-config/`), `diff` (dry-run для PR-review), `apply` (reconcile). Архітектурні інваріанти:
+
+1. **`apply` ніколи не видаляє.** Orphan'и (є у Discord, нема у config) лише попереджаються — рішення за людиною.
+2. **`apply` тільки вручну з машини** (`pnpm discord:apply`). У CI — лише read-only snapshot (weekly cron + dispatch), який авто-комітить doc при drift'і.
+3. **Pure-ядро без discord.js-моків:** diff/permissions/markdown/apply-оркестратор працюють над plain-об'єктами і портами; discord.js — тонкий адаптер у `scripts/`. Позиції порівнюються як відносний порядок (Discord переприсвоює абсолютні числа), tie-групи не порівнюються; overwrites — declared-subset semantics (category-sync не drift).
+4. **Snapshot-рендер без timestamp:** однаковий стан → байт-у-байт однаковий файл, weekly Action комітить лише реальний drift.
+
+**Наслідки:**
+
+- ✅ Структура сервера version-controlled: зміни через PR з рев'ю diff'ом, manual-drift видно у weekly snapshot-комітах.
+- ✅ Відновлюваність: порожній сервер → `apply` → повна структура за ~30 операцій.
+- ✗ Ручні кроки лишаються (`MANUAL_SETUP.md`): app/bot/OAuth, Community-wizard, Onboarding (`docs/discord-config/ONBOARDING.md`), Welcome Screen.
+- ⚠ Forum-теги обмежені 20 символами (Discord API) — префікс `tpl:` замість `template:` з ТЗ.
+- ⚠ Bot-токен — лише `.env` (gitignored) + GH Secrets; Server Members Intent не вмикається (скриптам досить `Guilds`).
+
+**Альтернативи:** (а) Налаштувати руками + Server Template як backup — відхилено: template не version-controlled, не показує drift. (б) Готові тули (discord-server-as-code, Terraform discord-провайдери) — відхилено: незрілі/закинуті, своя тонка обгортка над discord.js простіша за аудит чужої. (в) `apply` у CI після merge — відхилено: write-доступ до live-спільноти з CI небезпечний, обсяг змін малий, ручний запуск дешевий.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

@@ -122,6 +122,7 @@ flatcraft/
 - Не змінює `docker-compose.yml` без узгодження.
 - Не пише код у `infra/ansible/` без явного завдання.
 - Не торкається `packages/db/migrations/` без явної інструкції — міграції створюються вручну через `drizzle-kit`.
+- НЕ запускає `pnpm discord:apply` без explicit instruction — це manual-only команда, що пише у live Discord-спільноту (ADR-023). `discord:snapshot`/`discord:diff` — read-only, безпечні.
 
 ## 7. CAD-обмеження (must-know для будь-якого CAD-завдання)
 
@@ -206,6 +207,7 @@ flatcraft/
 - Bend machine spec: `docs/07_BEND_MACHINE_SPEC.md`
 - Deployment runbook: `docs/08_DEPLOYMENT.md`
 - Staging preflight checklist (manual setup до Ansible): `docs/09_STAGING_PREFLIGHT.md`
+- Discord config (community-сервер як IaC): `infra/discord/` + ADR-023; manual-кроки — `infra/discord/MANUAL_SETUP.md`
 - Design system: `docs/10_DESIGN_SYSTEM.md` (ADR-016)
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
@@ -214,13 +216,13 @@ flatcraft/
 
 > Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
 
-**Де ми зараз (2026-06-09):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022). Параметри студій уніфіковано згруповані (Матеріал → Розміри → Гиб → Сітка отворів). Креслення наближене до ISO 7200. Наступний фокус — публічний soft-launch (анонс у Discord/форумах).
+**Де ми зараз (2026-06-11):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022). Discord community-сервер як IaC готовий (`infra/discord/`, ADR-023) — чекає manual-setup (MANUAL_SETUP.md). Наступний фокус — публічний soft-launch (Discord-спільнота + анонс у форумах).
 
 **Останні 3 milestones:**
 
+- **Discord IaC** (2026-06-11, ADR-023): `infra/discord/` — workspace `@flatcraft/discord-tools` (discord.js 14, без root-deps). Декларативний config: 12 ролей (3-axis: authority/selfid/interest), 7 категорій (3 gated), 19 каналів. Скрипти `snapshot`/`diff`/`apply` (orphan-safe, ніколи не видаляє; apply — manual-only). Pure-ядро без discord.js-моків, 88 unit (2 fast-check property). Weekly snapshot GH Action (drift→auto-commit). MANUAL_SETUP.md + ONBOARDING.md для ручних кроків.
 - **UX-твік: групування параметрів** (2026-06-09, PR #21): уніфіковано секції редактора у всіх 5 студіях до **Матеріал і товщина → Розміри → Гиб → Сітка отворів**. Лише значення `group:` у Zod `.describe()` (механізм AutoForm/ADR-017 незмінний); усі розміри → «Розміри», «Гиби»→«Гиб», wall_shelf «Отвори монтажу»→«Сітка отворів». L/Z лишають «Отвори» (вручну розставлені, не сітка). Не зачіпає CAD-вивід/валідацію/testid'и. 6 схем + e2e. Задеплоєно (`sha-db05a4d`).
 - **Hotfix 2.9.c** (2026-06-08, ADR-022): клієнтська валідація матриці гибу — bake YAML→`bakedSpec`, browser-safe split cad-engine (subpath `/node`), `validateExportBends` перенесено у cad-engine (одна функція клієнт+сервер). Студії показують червоний банер для матрично-невалідних (матеріал, товщина, радіус) + блокують кнопку; `createExport` парсить RFC 9457 `detail`. +12 web unit, +4 e2e.
-- **Phase 2.9.b** (2026-06-05, ADR-021): drawing polish — bend badges на лініях розгортки (PDF+DXF), габарит готового виробу у header, BOM UA-одиниці (кг + площа фарбування), auto-layout corner picker, Ø-callouts на отворах (cap 10 для перфо). 4 нові pure-модулі. 151→206 pytest. perf ~48мс PDF (бюджет 5с).
 
 **Інваріанти (must-not-break):**
 
@@ -234,4 +236,4 @@ flatcraft/
 
 ---
 
-_Останнє оновлення: 2026-06-09. Коли архітектура змінюється — оновлюйте CLAUDE.md (§1-12) першим. Завершення фази — у `docs/13_PROGRESS_LOG.md` + ротація §13._
+_Останнє оновлення: 2026-06-11. Коли архітектура змінюється — оновлюйте CLAUDE.md (§1-12) першим. Завершення фази — у `docs/13_PROGRESS_LOG.md` + ротація §13._
