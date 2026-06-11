@@ -117,4 +117,4 @@ jobs:
 
       - name: Output image digest
         # Для аудиту: у Actions UI видно immutable digest для rollback'у.
-        run: echo "Pushed ${{ matrix.service }} with tags:\n${{ steps.meta.outputs.tags }}"
+        run: printf 'Pushed %s with tags:\n%s\n' "${{ matrix.service }}" "${{ steps.meta.outputs.tags }}"
