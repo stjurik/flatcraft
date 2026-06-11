@@ -212,7 +212,7 @@ export function diffCategories(actual: ActualCategory[], desired: CategoryConfig
   return [...creates, ...updates, ...reorders, ...orphans];
 }
 
-const channelKey = (category: string | null, name: string): string =>
+export const channelKey = (category: string | null, name: string): string =>
   `${category ?? "(без категорії)"}/${name}`;
 
 export function diffChannels(actual: ActualChannel[], desired: ChannelConfig[]): DiffOp[] {
