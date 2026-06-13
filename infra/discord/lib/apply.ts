@@ -137,3 +137,17 @@ const COMMUNITY_KINDS: ChannelKind[] = ["GuildAnnouncement", "GuildForum"];
 export function requiredGuildFeatures(channels: ChannelConfig[]): string[] {
   return channels.some((ch) => COMMUNITY_KINDS.includes(ch.type)) ? ["COMMUNITY"] : [];
 }
+
+/**
+ * Яких потрібних фіч НЕ вистачає guild'у. `guildFeatures` приймає undefined
+ * захисно: частковий guild (до REST-fetch) має features=undefined — трактуємо
+ * як «жодної фічі нема», щоб не впасти на `.includes`. У connect() ми форсуємо
+ * REST-fetch, тож на практиці сюди приходить заповнений масив.
+ */
+export function missingGuildFeatures(
+  channels: ChannelConfig[],
+  guildFeatures: readonly string[] | undefined,
+): string[] {
+  const present = new Set(guildFeatures ?? []);
+  return requiredGuildFeatures(channels).filter((feature) => !present.has(feature));
+}

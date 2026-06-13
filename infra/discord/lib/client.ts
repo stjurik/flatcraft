@@ -54,7 +54,10 @@ export async function connect(): Promise<Connection> {
   await client.login(token);
 
   try {
-    const guild = await client.guilds.fetch(guildId);
+    // force: true → REST-fetch повного guild. Без цього одразу після login()
+    // повертається частковий guild із gateway-кешу, де `features` ще undefined
+    // (apply preflight на `guild.features.includes` падав). REST гарантує повноту.
+    const guild = await client.guilds.fetch({ guild: guildId, force: true });
     return { client, guild };
   } catch (error) {
     await client.destroy();

@@ -4,7 +4,12 @@ import { CATEGORIES } from "../config/categories.js";
 import { CHANNELS } from "../config/channels.js";
 import { ROLES } from "../config/roles.js";
 import type { FullConfig } from "../config/types.js";
-import { applyOps, requiredGuildFeatures, type ApplyPorts } from "../lib/apply.js";
+import {
+  applyOps,
+  missingGuildFeatures,
+  requiredGuildFeatures,
+  type ApplyPorts,
+} from "../lib/apply.js";
 import { diffAll, type DiffOp } from "../lib/diff.js";
 import { formatOps } from "../lib/format-ops.js";
 
@@ -128,6 +133,28 @@ describe("requiredGuildFeatures", () => {
   it("лише text/voice → нічого не вимагає", () => {
     const plain = CHANNELS.filter((ch) => ch.type === "GuildText" || ch.type === "GuildVoice");
     expect(requiredGuildFeatures(plain)).toEqual([]);
+  });
+});
+
+describe("missingGuildFeatures", () => {
+  it("Community увімкнено → нічого не бракує", () => {
+    expect(missingGuildFeatures(CHANNELS, ["COMMUNITY", "NEWS"])).toEqual([]);
+  });
+
+  it("Community вимкнено → бракує COMMUNITY", () => {
+    expect(missingGuildFeatures(CHANNELS, ["NEWS"])).toEqual(["COMMUNITY"]);
+  });
+
+  it("undefined features (частковий guild до REST-fetch) → не падає, рапортує брак", () => {
+    // Регресія: apply падав з 'Cannot read properties of undefined (reading
+    // \"includes\")' саме на цьому — частковий guild мав features=undefined.
+    expect(() => missingGuildFeatures(CHANNELS, undefined)).not.toThrow();
+    expect(missingGuildFeatures(CHANNELS, undefined)).toEqual(["COMMUNITY"]);
+  });
+
+  it("config без Community-каналів → байдуже до features", () => {
+    const plain = CHANNELS.filter((ch) => ch.type === "GuildText" || ch.type === "GuildVoice");
+    expect(missingGuildFeatures(plain, undefined)).toEqual([]);
   });
 });
 

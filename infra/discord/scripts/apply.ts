@@ -15,7 +15,7 @@ import {
   type ChannelKind,
   type PermissionOverwriteConfig,
 } from "../config/types.js";
-import { applyOps, requiredGuildFeatures, type ApplyPorts } from "../lib/apply.js";
+import { applyOps, missingGuildFeatures, type ApplyPorts } from "../lib/apply.js";
 import { connect } from "../lib/client.js";
 import { diffAll } from "../lib/diff.js";
 import { fetchActualState } from "../lib/fetch-state.js";
@@ -161,9 +161,7 @@ async function main(): Promise<void> {
   try {
     // Preflight: GuildAnnouncement/GuildForum вимагають Community-фічі,
     // яку вмикають лише вручну (ToS-wizard, MANUAL_SETUP.md крок 2).
-    const missing = requiredGuildFeatures(config.channels).filter(
-      (feature) => !guild.features.includes(feature as never),
-    );
+    const missing = missingGuildFeatures(config.channels, guild.features);
     if (missing.length > 0) {
       console.error(
         `Guild не має фіч: ${missing.join(", ")}. Увімкніть Community у ` +
