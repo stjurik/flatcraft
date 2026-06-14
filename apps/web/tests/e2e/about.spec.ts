@@ -39,6 +39,20 @@ test.describe("/about (Phase X.1 D)", () => {
     await expect(page.getByTestId("about-hero")).toBeVisible();
   });
 
+  test("Footer Discord-лінк — зовнішній інвайт (не /soon)", async ({ page }) => {
+    await page.goto("/");
+    const discord = page.getByTestId("site-links").getByRole("link", { name: /Discord/ });
+    await expect(discord).toHaveAttribute("href", /^https:\/\/discord\.gg\//);
+    await expect(discord).toHaveAttribute("target", "_blank");
+  });
+
+  test("/about: Discord-спільнота — зовнішнє посилання", async ({ page }) => {
+    await page.goto("/about");
+    const discord = page.getByTestId("about-feedback-discord");
+    await expect(discord).toHaveAttribute("href", /^https:\/\/discord\.gg\//);
+    await expect(discord).toHaveAttribute("target", "_blank");
+  });
+
   for (const { name, width, height } of VIEWPORTS) {
     test(`console-clean + tap-targets ≥44 на ${name}`, async ({ page }: { page: Page }) => {
       const errors: string[] = [];

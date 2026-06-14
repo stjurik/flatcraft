@@ -1,0 +1,727 @@
+{
+  "roles": [
+    {
+      "id": "1514597533471604848",
+      "name": "hart-iac",
+      "color": 0,
+      "hoist": false,
+      "permissions": [
+        "Administrator"
+      ],
+      "position": 13,
+      "managed": true
+    },
+    {
+      "id": "1515386140415234058",
+      "name": "🔴 Founder",
+      "color": 15548997,
+      "hoist": true,
+      "permissions": [
+        "Administrator"
+      ],
+      "position": 12,
+      "managed": false
+    },
+    {
+      "id": "1515386144609538079",
+      "name": "🟠 Moderator",
+      "color": 15965202,
+      "hoist": true,
+      "permissions": [
+        "KickMembers",
+        "ManageMessages",
+        "ModerateMembers",
+        "MuteMembers"
+      ],
+      "position": 11,
+      "managed": false
+    },
+    {
+      "id": "1515386147944267776",
+      "name": "🟢 Verified-Manufacturer",
+      "color": 5763719,
+      "hoist": true,
+      "permissions": [
+        "AddReactions",
+        "AttachFiles",
+        "EmbedLinks",
+        "ReadMessageHistory",
+        "SendMessages"
+      ],
+      "position": 10,
+      "managed": false
+    },
+    {
+      "id": "1515386151211368448",
+      "name": "⚪ Member",
+      "color": 10070709,
+      "hoist": false,
+      "permissions": [
+        "AddReactions",
+        "AttachFiles",
+        "EmbedLinks",
+        "ReadMessageHistory",
+        "SendMessages"
+      ],
+      "position": 9,
+      "managed": false
+    },
+    {
+      "id": "1515386154206232808",
+      "name": "💡 i-am/DIY",
+      "color": 3447003,
+      "hoist": false,
+      "permissions": [],
+      "position": 8,
+      "managed": false
+    },
+    {
+      "id": "1515386158085967942",
+      "name": "🏢 i-am/Business",
+      "color": 10181046,
+      "hoist": false,
+      "permissions": [],
+      "position": 7,
+      "managed": false
+    },
+    {
+      "id": "1515386161705648170",
+      "name": "🛠️ i-am/Engineer",
+      "color": 1752220,
+      "hoist": false,
+      "permissions": [],
+      "position": 6,
+      "managed": false
+    },
+    {
+      "id": "1515386164759101633",
+      "name": "🏭 i-am/Manufacturer",
+      "color": 15105570,
+      "hoist": false,
+      "permissions": [],
+      "position": 5,
+      "managed": false
+    },
+    {
+      "id": "1515386168152293560",
+      "name": "🐛 interest/Support",
+      "color": 9807270,
+      "hoist": false,
+      "permissions": [],
+      "position": 4,
+      "managed": false
+    },
+    {
+      "id": "1515386171910262806",
+      "name": "🎨 interest/Design",
+      "color": 9807270,
+      "hoist": false,
+      "permissions": [],
+      "position": 3,
+      "managed": false
+    },
+    {
+      "id": "1515386175047733383",
+      "name": "🏭 interest/Production",
+      "color": 9807270,
+      "hoist": false,
+      "permissions": [],
+      "position": 2,
+      "managed": false
+    },
+    {
+      "id": "1515386178885517457",
+      "name": "📚 interest/Learning",
+      "color": 9807270,
+      "hoist": false,
+      "permissions": [],
+      "position": 1,
+      "managed": false
+    },
+    {
+      "id": "1513923572140216481",
+      "name": "@everyone",
+      "color": 0,
+      "hoist": false,
+      "permissions": [
+        "AddReactions",
+        "AttachFiles",
+        "ChangeNickname",
+        "Connect",
+        "CreateInstantInvite",
+        "CreatePrivateThreads",
+        "CreatePublicThreads",
+        "EmbedLinks",
+        "ReadMessageHistory",
+        "RequestToSpeak",
+        "SendMessages",
+        "SendMessagesInThreads",
+        "SendPolls",
+        "SendVoiceMessages",
+        "Speak",
+        "Stream",
+        "UseApplicationCommands",
+        "UseEmbeddedActivities",
+        "UseExternalApps",
+        "UseExternalEmojis",
+        "UseExternalSounds",
+        "UseExternalStickers",
+        "UseSoundboard",
+        "UseVAD",
+        "ViewChannel"
+      ],
+      "position": 0,
+      "managed": false
+    }
+  ],
+  "categories": [
+    {
+      "id": "1515386183079694518",
+      "name": "📋 ІНФОРМАЦІЯ",
+      "position": 0,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1513923573037928539",
+      "name": "Text Channels",
+      "position": 0,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1513923573037928540",
+      "name": "Voice Channels",
+      "position": 0,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386187907469432",
+      "name": "💬 ЗАГАЛЬНЕ",
+      "position": 1,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386191577485444",
+      "name": "🎨 ПРОЄКТУВАННЯ",
+      "position": 2,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386194626875576",
+      "name": "🐛 ТЕХ-ПІДТРИМКА",
+      "position": 3,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🐛 interest/Support",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386198669918239",
+      "name": "🏭 ВИРОБНИЦТВО",
+      "position": 4,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🏭 interest/Production",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386202419757086",
+      "name": "📚 НАВЧАННЯ",
+      "position": 5,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "📚 interest/Learning",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386205569683597",
+      "name": "🎙️ ГОЛОСОВІ",
+      "position": 6,
+      "permissionOverwrites": []
+    }
+  ],
+  "channels": [
+    {
+      "id": "1513923573037928542",
+      "name": "General",
+      "type": "GuildVoice",
+      "category": "Voice Channels",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515379859444994193",
+      "name": "лише-модератори",
+      "type": "GuildText",
+      "category": null,
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1515386212779688136",
+      "name": "оголошення",
+      "type": "GuildAnnouncement",
+      "category": "📋 ІНФОРМАЦІЯ",
+      "topic": "Релізи, downtime, новини проєкту.",
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "SendMessages"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386226624954449",
+      "name": "показуй-проєкти",
+      "type": "GuildForum",
+      "category": "💬 ЗАГАЛЬНЕ",
+      "topic": null,
+      "tags": [
+        "готово",
+        "у-процесі",
+        "ідея"
+      ],
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515379859444994190",
+      "name": "правила",
+      "type": "GuildText",
+      "category": null,
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1515386268110815335",
+      "name": "Voice — Загальний",
+      "type": "GuildVoice",
+      "category": "🎙️ ГОЛОСОВІ",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386230085521521",
+      "name": "поради-з-проєктування",
+      "type": "GuildForum",
+      "category": "🎨 ПРОЄКТУВАННЯ",
+      "topic": null,
+      "tags": [
+        "material:steel",
+        "material:aluminum",
+        "material:stainless",
+        "побут",
+        "меблі",
+        "виробництво"
+      ],
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386209092898916",
+      "name": "правила",
+      "type": "GuildText",
+      "category": "📋 ІНФОРМАЦІЯ",
+      "topic": "Правила спільноти UA — прочитай перед першим повідомленням.",
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "SendMessages"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386241062015186",
+      "name": "bug-report",
+      "type": "GuildForum",
+      "category": "🐛 ТЕХ-ПІДТРИМКА",
+      "topic": null,
+      "tags": [
+        "severity:critical",
+        "severity:high",
+        "severity:medium",
+        "severity:low",
+        "status:open",
+        "status:investigating",
+        "status:fixed",
+        "tpl:l-bracket",
+        "tpl:z-bracket",
+        "tpl:corner-angle",
+        "tpl:wall-shelf",
+        "tpl:perfo-panel"
+      ],
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🐛 interest/Support",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386271147753615",
+      "name": "Voice — Office-hours",
+      "type": "GuildVoice",
+      "category": "🎙️ ГОЛОСОВІ",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386216139329747",
+      "name": "welcome",
+      "type": "GuildText",
+      "category": "📋 ІНФОРМАЦІЯ",
+      "topic": "Вітання новим учасникам.",
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386219473670235",
+      "name": "ресурси",
+      "type": "GuildText",
+      "category": "📋 ІНФОРМАЦІЯ",
+      "topic": "Лінки: /about, ROADMAP, GitHub.",
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "SendMessages"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386222699085917",
+      "name": "загальний-чат",
+      "type": "GuildText",
+      "category": "💬 ЗАГАЛЬНЕ",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386234225164299",
+      "name": "підготовка-креслень",
+      "type": "GuildText",
+      "category": "🎨 ПРОЄКТУВАННЯ",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386237404450880",
+      "name": "запит-нового-шаблону",
+      "type": "GuildText",
+      "category": "🎨 ПРОЄКТУВАННЯ",
+      "topic": null,
+      "permissionOverwrites": []
+    },
+    {
+      "id": "1515386244341825708",
+      "name": "помилки-валідації",
+      "type": "GuildText",
+      "category": "🐛 ТЕХ-ПІДТРИМКА",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🐛 interest/Support",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386247739084821",
+      "name": "feature-request",
+      "type": "GuildText",
+      "category": "🐛 ТЕХ-ПІДТРИМКА",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🐛 interest/Support",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386250939601128",
+      "name": "вибір-виробника",
+      "type": "GuildText",
+      "category": "🏭 ВИРОБНИЦТВО",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🏭 interest/Production",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386254311559359",
+      "name": "виробники-офіційно",
+      "type": "GuildText",
+      "category": "🏭 ВИРОБНИЦТВО",
+      "topic": "Пишуть лише верифіковані виробники; читають усі.",
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        },
+        {
+          "role": "🟢 Verified-Manufacturer",
+          "allow": [
+            "SendMessages"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386257675649075",
+      "name": "k-фактор-і-допуски",
+      "type": "GuildText",
+      "category": "🏭 ВИРОБНИЦТВО",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "🏭 interest/Production",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386260758466671",
+      "name": "для-новачків",
+      "type": "GuildText",
+      "category": "📚 НАВЧАННЯ",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "ViewChannel"
+          ]
+        },
+        {
+          "role": "📚 interest/Learning",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "ViewChannel"
+          ],
+          "deny": []
+        }
+      ]
+    },
+    {
+      "id": "1515386264231215119",
+      "name": "туторіали",
+      "type": "GuildText",
+      "category": "📚 НАВЧАННЯ",
+      "topic": null,
+      "permissionOverwrites": [
+        {
+          "role": "@everyone",
+          "allow": [],
+          "deny": [
+            "SendMessages"
+          ]
+        },
+        {
+          "role": "🟠 Moderator",
+          "allow": [
+            "SendMessages"
+          ],
+          "deny": []
+        }
+      ]
+    }
+  ]
+}

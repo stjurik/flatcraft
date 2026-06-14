@@ -101,3 +101,8 @@ logs/
 
 # Cache
 .cache/
+
+# Claude Code локальні налаштування (permission allowlist з машинно-специфічними
+# командами + session lock) — не для публічного репо.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

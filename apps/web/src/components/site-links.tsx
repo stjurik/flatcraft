@@ -12,6 +12,7 @@ interface ColumnDef {
 }
 
 const GITHUB_URL = "https://github.com/stjurik/flatcraft";
+const DISCORD_URL = "https://discord.gg/Zx88FAFtkS";
 
 const COLUMNS: ReadonlyArray<ColumnDef> = [
   {
@@ -26,7 +27,7 @@ const COLUMNS: ReadonlyArray<ColumnDef> = [
     title: "Спільнота",
     items: [
       { label: "GitHub ↗", href: GITHUB_URL, external: true },
-      { label: "Discord", href: "/soon" },
+      { label: "Discord ↗", href: DISCORD_URL, external: true },
       { label: "Telegram", href: "/soon" },
     ],
   },

@@ -1,0 +1,28 @@
+{
+  "name": "@flatcraft/discord-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord community server як infrastructure-as-code: декларативний config + idempotent reconcile (ADR-023)",
+  "scripts": {
+    "snapshot": "tsx scripts/snapshot.ts",
+    "diff": "tsx scripts/diff.ts",
+    "apply": "tsx scripts/apply.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "fast-check": "^4.8.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.2"
+  }
+}

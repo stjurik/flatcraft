@@ -16,3 +16,10 @@ packages/db/src/migrations/
 
 # Baked bend-matrix — згенеровано з YAML (Hotfix 2.9.c, ADR-022).
 packages/cad-engine/src/generated/baked-spec.ts
+
+# Discord snapshot — згенеровано `pnpm discord:snapshot` (ADR-023). Формат
+# визначає скрипт (lib/markdown.ts), не prettier — інакше weekly Action
+# і скрипт дають різний формат → фальшивий drift. ONBOARDING.md не чіпаємо
+# (ручний). Лише два генеровані артефакти:
+docs/discord-config/snapshot.json
+docs/discord-config/README.md
