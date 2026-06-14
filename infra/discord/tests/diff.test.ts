@@ -349,15 +349,15 @@ describe("diffAll", () => {
     expect(ops).toEqual([]);
   });
 
-  it("на порожньому сервері — рівно 12+7+19 creates у порядку roles→categories→channels", () => {
+  it("на порожньому сервері — рівно 12+8+21 creates у порядку roles→categories→channels", () => {
     const ops = diffAll(
       { roles: [], categories: [], channels: [] },
       { roles: ROLES, categories: CATEGORIES, channels: CHANNELS },
     );
-    expect(ops).toHaveLength(12 + 7 + 19);
+    expect(ops).toHaveLength(12 + 8 + 21);
     expect(ops.every((op) => op.type === "create")).toBe(true);
     const entities = ops.map((op) => op.entity);
     expect(entities.indexOf("category")).toBe(12);
-    expect(entities.indexOf("channel")).toBe(19);
+    expect(entities.indexOf("channel")).toBe(20);
   });
 });

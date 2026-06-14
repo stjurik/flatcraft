@@ -108,4 +108,12 @@ export const CHANNELS: ChannelConfig[] = ChannelConfigSchema.array().parse([
   // ── 🎙️ ГОЛОСОВІ ──────────────────────────────────────────────────────────
   { name: "Voice — Загальний", type: "GuildVoice", category: "🎙️ ГОЛОСОВІ" },
   { name: "Voice — Office-hours", type: "GuildVoice", category: "🎙️ ГОЛОСОВІ" },
+  // ── 🔒 МОДЕРАЦІЯ (видима лише Moderator/Founder; видимість успадковує категорія)
+  {
+    name: "moderator-only",
+    type: "GuildText",
+    category: "🔒 МОДЕРАЦІЯ",
+    topic: "Координація модерації + офіційні нотиси Discord (Community Updates Channel).",
+  },
+  { name: "журнал-модерації", type: "GuildText", category: "🔒 МОДЕРАЦІЯ" },
 ]);

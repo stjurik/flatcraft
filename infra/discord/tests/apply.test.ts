@@ -54,7 +54,7 @@ describe("applyOps", () => {
     const ops = diffAll({ roles: [], categories: [], channels: [] }, CONFIG);
     const { calls, ports } = recordingPorts();
     const outcome = await applyOps(ops, CONFIG, ports, { sleep: noSleep });
-    expect(outcome.applied).toBe(12 + 7 + 19);
+    expect(outcome.applied).toBe(12 + 8 + 21);
     expect(outcome.failed).toEqual([]);
     const kinds = calls.map((c) => c.split(":")[0]);
     expect(kinds.lastIndexOf("createRole")).toBeLessThan(kinds.indexOf("createCategory"));
@@ -76,7 +76,7 @@ describe("applyOps", () => {
     const outcome = await applyOps(ops, CONFIG, ports, { sleep: noSleep });
     expect(outcome.failed).toHaveLength(1);
     expect(outcome.failed[0]!.target).toBe("⚪ Member");
-    expect(outcome.applied).toBe(12 + 7 + 19 - 1);
+    expect(outcome.applied).toBe(12 + 8 + 21 - 1);
   });
 
   it("sleep викликається між write-операціями (rate-limit safety)", async () => {

@@ -43,13 +43,13 @@ describe("canonical ROLES", () => {
 
 describe("canonical CATEGORIES + CHANNELS", () => {
   it("7 категорій з унікальними позиціями 0..6", () => {
-    expect(CATEGORIES).toHaveLength(7);
+    expect(CATEGORIES).toHaveLength(8);
     const positions = CATEGORIES.map((c) => c.position).sort((a, b) => a - b);
-    expect(positions).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(positions).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
-  it("19 каналів з правильним розподілом по категоріях", () => {
-    expect(CHANNELS).toHaveLength(19);
+  it("21 канал з правильним розподілом по категоріях", () => {
+    expect(CHANNELS).toHaveLength(21);
     const inCat = (cat: string) => CHANNELS.filter((ch) => ch.category.includes(cat)).length;
     expect(inCat("ІНФОРМАЦІЯ")).toBe(4);
     expect(inCat("ЗАГАЛЬНЕ")).toBe(2);
@@ -58,6 +58,17 @@ describe("canonical CATEGORIES + CHANNELS", () => {
     expect(inCat("ВИРОБНИЦТВО")).toBe(3);
     expect(inCat("НАВЧАННЯ")).toBe(2);
     expect(inCat("ГОЛОСОВІ")).toBe(2);
+    expect(inCat("МОДЕРАЦІЯ")).toBe(2);
+  });
+
+  it("🔒 МОДЕРАЦІЯ — mod-only: @everyone deny ViewChannel, Moderator allow", () => {
+    const cat = CATEGORIES.find((c) => c.name.includes("МОДЕРАЦІЯ"))!;
+    const everyone = cat.permissionOverwrites.find((ow) => ow.role === "@everyone");
+    const mod = cat.permissionOverwrites.find((ow) => ow.role === "🟠 Moderator");
+    expect(everyone?.deny).toContain("ViewChannel");
+    expect(mod?.allow).toContain("ViewChannel");
+    // жодної interest-ролі — це не opt-in категорія
+    expect(cat.permissionOverwrites.some((ow) => ow.role.startsWith("🐛 interest"))).toBe(false);
   });
 
   it("3 forum-канали; всі теги ≤ 20 символів (Discord API limit)", () => {
