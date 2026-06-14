@@ -8,11 +8,11 @@ export const metadata = {
     "BETA-платформа параметричного CAD для листового металу. Безкоштовно. На підтримку ЗСУ.",
 };
 
-const GITHUB_URL = "https://github.com/stjurik/flatcraft";
 const GITHUB_ISSUES_URL = "https://github.com/stjurik/flatcraft/issues";
 const MONOBANK_JAR_URL = "https://send.monobank.ua/jar/A1u3M7VqQz";
 const UNITED24_URL = "https://u24.gov.ua/";
 const FEEDBACK_EMAIL = "feedback@hart.crimea.ua";
+const DISCORD_URL = "https://discord.gg/Zx88FAFtkS";
 
 interface FreeCard {
   readonly icon: LucideIcon;
@@ -157,13 +157,13 @@ export default function AboutPage() {
             </li>
             <li>
               <a
-                data-testid="about-feedback-repo"
-                href={GITHUB_URL}
+                data-testid="about-feedback-discord"
+                href={DISCORD_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-fg-muted hover:text-fg min-h-tap inline-flex items-center text-sm"
+                className="text-primary hover:text-primary-hover min-h-tap inline-flex items-center text-sm font-medium"
               >
-                Discord — посилання зʼявиться тут найближчим часом
+                Discord-спільнота ↗
               </a>
             </li>
           </ul>
