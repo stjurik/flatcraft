@@ -145,25 +145,6 @@ class TestStructural:
         assert line.dxf.start.y == pytest.approx(0.0)
         assert line.dxf.end.y == pytest.approx(unf.width_mm)
 
-    def test_bend_text_містить_кут_і_радіус(self, tmp_path: Path) -> None:
-        params = _params()
-        unf = unfold_l_bracket(params, k_factor=0.4)
-        out = export_l_bracket_dxf(
-            unf,
-            tmp_path / "l.dxf",
-            bend_radius_mm=params.bend_radius_mm,
-            bend_angle_deg=90,
-        )
-        doc = readfile(out)
-        texts = list(doc.modelspace().query("TEXT[layer=='BEND_TEXT']"))
-        # Phase 2.9.b Block B: 2 текстові entity на гиб — повний callout + midpoint badge "#N".
-        assert len(texts) == 2
-        values = [t.dxf.text for t in texts]
-        callout = next(t for t in values if "BEND" in t)
-        assert "90" in callout
-        assert "2.5" in callout
-        assert "#1" in values  # midpoint badge entity
-
     def test_кожен_шар_має_конфігурований_колір(self, tmp_path: Path) -> None:
         params = _params()
         unf = unfold_l_bracket(params, k_factor=0.4)
@@ -234,7 +215,12 @@ class TestProductionGradeDxf:
         types = {e.dxftype() for e in doc.modelspace()}
         assert "TEXT" not in types, "TEXT-анотації заборонені у DXF (CAM-noise)"
         assert "DIMENSION" not in types, "DIMENSION заборонені у DXF (CAM-noise)"
-        assert "Defpoints" not in {layer.dxf.name for layer in doc.layers}
+        # "0"/"Defpoints" ezdxf створює автоматично (видалити не можна), але
+        # вони мусять лишатись ПОРОЖНІМИ — інакше це CAM-noise.
+        for e in doc.modelspace():
+            assert e.dxf.layer not in _MANDATORY_LAYERS, (
+                f"entity {e.dxftype()} на службовому шарі {e.dxf.layer}"
+            )
 
 
 class TestDeterminism:

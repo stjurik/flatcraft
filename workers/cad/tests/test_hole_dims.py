@@ -1,4 +1,5 @@
-"""Тести політики розмірних виносок отворів + DXF DIM_HOLES (Phase 2.9.b F)."""
+"""Тести політики Ø-виносок отворів: PDF-розміри (Phase 2.9.b F) + DXF
+cut-кола на LASER_CUT (Hotfix 2.9.d / ADR-024 — у DXF без розмірів)."""
 
 from __future__ import annotations
 
@@ -53,20 +54,31 @@ class TestShouldDimIndividualHoles:
         assert should_dim_individual_holes(3, cap=3) is True
 
 
-class TestDxfHoleDims:
-    def test_corner_angle_dim_на_кожен_отвір(self, tmp_path: Path) -> None:
+class TestDxfHoleCuts:
+    """ADR-024: у DXF отвори — CIRCLE на LASER_CUT (color 5), БЕЗ Ø-розмірів.
+
+    Діаметричні виноски лишаються тільки у PDF (TestPdfHoleDims) — у DXF це
+    CAM-noise. Раніше отвори дімилися на DIM_HOLES і жили на INNER_CUTS —
+    обидва шари прибрано."""
+
+    def test_corner_angle_отвори_кола_на_laser_cut(self, tmp_path: Path) -> None:
         params = _corner_params()
         unf = unfold_corner_angle(params, 0.4)
         out = export_corner_angle_dxf(unf, tmp_path / "c.dxf", bend_radius_mm=params.bend_radius_mm)
         doc = readfile(out)
         msp = doc.modelspace()
-        assert doc.layers.has_entry("DIM_HOLES")
-        dims = list(msp.query("DIMENSION[layer=='DIM_HOLES']"))
-        # ≤ cap отворів → dim на кожен.
-        assert len(dims) == len(unf.holes)
+        circles = list(msp.query("CIRCLE"))
+        assert len(circles) == len(unf.holes)
         assert len(unf.holes) > 0
+        for circ in circles:
+            assert circ.dxf.layer == "LASER_CUT"
+            assert int(circ.dxf.color) == 5
+        # Жодних розмірів/допоміжних шарів.
+        assert not list(msp.query("DIMENSION"))
+        assert not doc.layers.has_entry("DIM_HOLES")
+        assert not doc.layers.has_entry("INNER_CUTS")
 
-    def test_perforated_багато_отворів_один_dim_плюс_текст(self, tmp_path: Path) -> None:
+    def test_perforated_багато_отворів_без_розмірів(self, tmp_path: Path) -> None:
         params = PerforatedPanelBuildParameters(
             length_mm=400,
             width_mm=300,
@@ -81,10 +93,12 @@ class TestDxfHoleDims:
         out = export_perforated_panel_dxf(unf, tmp_path / "p.dxf")
         doc = readfile(out)
         msp = doc.modelspace()
-        dims = list(msp.query("DIMENSION[layer=='DIM_HOLES']"))
-        assert len(dims) == 1  # лише один зразковий розмір
-        texts = [t.dxf.text for t in msp.query("TEXT[layer=='DIM_HOLES']")]
-        assert any("отвор" in t for t in texts)  # анотація «×N отворів»
+        circles = list(msp.query("CIRCLE"))
+        # Усі отвори — повноцінні кола на LASER_CUT (CAM ріже кожен), без анотацій.
+        assert len(circles) == len(unf.holes)
+        assert all(c.dxf.layer == "LASER_CUT" and int(c.dxf.color) == 5 for c in circles)
+        assert not list(msp.query("DIMENSION"))
+        assert not list(msp.query("TEXT"))
 
     def test_dim_детермінізм_однакові_байти(self, tmp_path: Path) -> None:
         params = _corner_params()
