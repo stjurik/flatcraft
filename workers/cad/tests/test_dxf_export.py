@@ -7,11 +7,27 @@ from typing import Any
 import pytest
 from ezdxf import readfile  # type: ignore[attr-defined]
 
-from flatcraft_cad.export.dxf import DXF_LAYERS, export_l_bracket_dxf
+from flatcraft_cad.export.dxf import (
+    DXF_LAYERS,
+    export_corner_angle_dxf,
+    export_l_bracket_dxf,
+)
+from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.unfold import unfold_l_bracket
+from flatcraft_cad.unfold import unfold_corner_angle, unfold_l_bracket
 
 SNAPSHOTS_DIR = Path(__file__).parent / "snapshots" / "dxf"
+
+# Шари, які DXF-стандарт/ezdxf створює автоматично і які ми НЕ контролюємо
+# (їх не можна видалити). Production-перевірки рахують лише наші custom-шари.
+_MANDATORY_LAYERS = frozenset({"0", "Defpoints"})
+# ADR-024: рівно 2 виробничі шари.
+_EXPECTED_CUSTOM_LAYERS = frozenset({"LASER_CUT", "BEND_LINES"})
+
+
+def _custom_layer_names(doc: Any) -> set[str]:
+    """Імена шарів без обов'язкових авто-генерованих (0, Defpoints)."""
+    return {layer.dxf.name for layer in doc.layers} - _MANDATORY_LAYERS
 
 
 def _params(**overrides: Any) -> LBracketBuildParameters:
@@ -47,11 +63,14 @@ def _dxf_structure(dxf_path: Path) -> dict[str, Any]:
     for e in doc.modelspace():
         dxftype = e.dxftype()
         layer = e.dxf.layer
+        # color 256 = BYLAYER (entity успадковує колір шару).
+        color = int(e.dxf.color)
         if dxftype == "LWPOLYLINE":
             entities.append(
                 {
                     "type": dxftype,
                     "layer": layer,
+                    "color": color,
                     "closed": bool(e.closed),  # type: ignore[attr-defined]
                     "points": [
                         [round(x, 6), round(y, 6)]
@@ -64,20 +83,25 @@ def _dxf_structure(dxf_path: Path) -> dict[str, Any]:
                 {
                     "type": dxftype,
                     "layer": layer,
+                    "color": color,
                     "start": [round(e.dxf.start.x, 6), round(e.dxf.start.y, 6)],
                     "end": [round(e.dxf.end.x, 6), round(e.dxf.end.y, 6)],
                 }
             )
-        elif dxftype == "TEXT":
+        elif dxftype == "CIRCLE":
             entities.append(
                 {
                     "type": dxftype,
                     "layer": layer,
-                    "text": e.dxf.text,
-                    "height": round(e.dxf.height, 6),
-                    "insert": [round(e.dxf.insert.x, 6), round(e.dxf.insert.y, 6)],
+                    "color": color,
+                    "center": [round(e.dxf.center.x, 6), round(e.dxf.center.y, 6)],
+                    "radius": round(e.dxf.radius, 6),
                 }
             )
+        else:
+            # ADR-024: TEXT/DIMENSION тощо у DXF заборонені (CAM-noise) —
+            # фіксуємо лише тип, щоб snapshot впав, якщо щось просочиться.
+            entities.append({"type": dxftype, "layer": layer})
 
     return {"layers": layers, "entities": entities}
 
@@ -148,6 +172,69 @@ class TestStructural:
         for name, expected_color in DXF_LAYERS:
             layer = doc.layers.get(name)
             assert layer.dxf.color == expected_color
+
+
+def _corner_angle_dxf(tmp_path: Path) -> Path:
+    """corner_angle DXF з grid'ом отворів — для перевірки inner-cut шару/кольору."""
+    params = CornerAngleBuildParameters.model_validate(
+        {
+            "leg_a_mm": 60.0,
+            "leg_b_mm": 60.0,
+            "bend_radius_mm": 2.5,
+            "bend_angle_deg": 90,
+            "width_mm": 100.0,
+            "thickness_mm": 2.0,
+            "hole_rows": 2,
+            "hole_cols": 2,
+            "hole_diameter_mm": 6.0,
+            "hole_margin_mm": 15.0,
+        }
+    )
+    unf = unfold_corner_angle(params, k_factor=0.4)
+    return export_corner_angle_dxf(unf, tmp_path / "corner.dxf", bend_radius_mm=2.5)
+
+
+class TestProductionGradeDxf:
+    """ADR-024 (Hotfix 2.9.d): production-grade DXF для CAM (Lantek/ESI).
+
+    Інваріант: рівно 2 виробничі шари (LASER_CUT + BEND_LINES), усі cut-paths
+    на LASER_CUT (outer ByLayer, inner отвори color 5), жодного TEXT/DIMENSION
+    (CAM-noise). Ці 4 тести — RED-діагностика P0-бага «отвори поза LASER_CUT».
+    """
+
+    def test_рівно_два_виробничі_шари(self, tmp_path: Path) -> None:
+        params = _params()
+        unf = unfold_l_bracket(params, k_factor=0.4)
+        out = export_l_bracket_dxf(unf, tmp_path / "l.dxf", bend_radius_mm=params.bend_radius_mm)
+        doc = readfile(out)
+        assert _custom_layer_names(doc) == set(_EXPECTED_CUSTOM_LAYERS)
+
+    def test_отвори_на_laser_cut_з_кольором_5(self, tmp_path: Path) -> None:
+        out = _corner_angle_dxf(tmp_path)
+        doc = readfile(out)
+        circles = list(doc.modelspace().query("CIRCLE"))
+        assert circles, "очікували принаймні один отвір (CIRCLE)"
+        for circ in circles:
+            assert circ.dxf.layer == "LASER_CUT", "отвори мусять бути на LASER_CUT"
+            assert int(circ.dxf.color) == 5, "inner-cut отвори — explicit color 5 (blue)"
+
+    def test_зовнішній_контур_на_laser_cut_bylayer(self, tmp_path: Path) -> None:
+        params = _params()
+        unf = unfold_l_bracket(params, k_factor=0.4)
+        out = export_l_bracket_dxf(unf, tmp_path / "l.dxf", bend_radius_mm=params.bend_radius_mm)
+        doc = readfile(out)
+        polys = list(doc.modelspace().query("LWPOLYLINE[layer=='LASER_CUT']"))
+        assert len(polys) == 1
+        # 256 = BYLAYER: зовнішній контур успадковує колір шару (white 7).
+        assert int(polys[0].dxf.color) == 256
+
+    def test_жодного_text_або_dimension(self, tmp_path: Path) -> None:
+        out = _corner_angle_dxf(tmp_path)
+        doc = readfile(out)
+        types = {e.dxftype() for e in doc.modelspace()}
+        assert "TEXT" not in types, "TEXT-анотації заборонені у DXF (CAM-noise)"
+        assert "DIMENSION" not in types, "DIMENSION заборонені у DXF (CAM-noise)"
+        assert "Defpoints" not in {layer.dxf.name for layer in doc.layers}
 
 
 class TestDeterminism:
