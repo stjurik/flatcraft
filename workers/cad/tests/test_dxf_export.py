@@ -11,10 +11,22 @@ from flatcraft_cad.export.dxf import (
     DXF_LAYERS,
     export_corner_angle_dxf,
     export_l_bracket_dxf,
+    export_perforated_panel_dxf,
+    export_wall_shelf_dxf,
+    export_z_bracket_dxf,
 )
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.unfold import unfold_corner_angle, unfold_l_bracket
+from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
+from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
+from flatcraft_cad.unfold import (
+    unfold_corner_angle,
+    unfold_l_bracket,
+    unfold_perforated_panel,
+    unfold_wall_shelf,
+    unfold_z_bracket,
+)
 
 SNAPSHOTS_DIR = Path(__file__).parent / "snapshots" / "dxf"
 
@@ -175,6 +187,98 @@ def _corner_angle_dxf(tmp_path: Path) -> Path:
     return export_corner_angle_dxf(unf, tmp_path / "corner.dxf", bend_radius_mm=2.5)
 
 
+def _build_template_dxf(slug: str, tmp_path: Path) -> Path:
+    """Експортує DXF кожного з 5 шаблонів з фіксованими параметрами.
+
+    Один helper → snapshot + structure-перевірки покривають усі шаблони
+    однаково. Параметри дзеркалять *_VALID_PARAMS з test_server (camelCase
+    аліаси) + thickness_mm."""
+    out = tmp_path / f"{slug}.dxf"
+    if slug == "l_bracket":
+        params = LBracketBuildParameters.model_validate(
+            {
+                "legA_mm": 60,
+                "legB_mm": 60,
+                "bend_radius_mm": 2.5,
+                "bend_angle_deg": 90,
+                "width_mm": 100,
+                "thickness_mm": 2.0,
+            }
+        )
+        return export_l_bracket_dxf(
+            unfold_l_bracket(params, k_factor=0.4), out, bend_radius_mm=params.bend_radius_mm
+        )
+    if slug == "z_bracket":
+        zparams = ZBracketBuildParameters.model_validate(
+            {
+                "top_flange_mm": 60,
+                "bottom_flange_mm": 60,
+                "offset_mm": 40,
+                "bend_radius_mm": 2.5,
+                "bend_angle_deg": 90,
+                "width_mm": 100,
+                "thickness_mm": 2.0,
+            }
+        )
+        return export_z_bracket_dxf(
+            unfold_z_bracket(zparams, k_factor=0.4), out, bend_radius_mm=zparams.bend_radius_mm
+        )
+    if slug == "corner_angle":
+        cparams = CornerAngleBuildParameters.model_validate(
+            {
+                "legA_mm": 60,
+                "legB_mm": 60,
+                "bend_radius_mm": 2.5,
+                "bend_angle_deg": 90,
+                "width_mm": 80,
+                "thickness_mm": 2.0,
+                "hole_diameter_mm": 5,
+                "hole_rows": 1,
+                "hole_cols": 2,
+                "hole_margin_mm": 12,
+            }
+        )
+        return export_corner_angle_dxf(
+            unfold_corner_angle(cparams, k_factor=0.4), out, bend_radius_mm=cparams.bend_radius_mm
+        )
+    if slug == "wall_shelf":
+        wparams = WallShelfBuildParameters.model_validate(
+            {
+                "back_height_mm": 80,
+                "shelf_depth_mm": 150,
+                "front_lip_mm": 20,
+                "bend_radius_mm": 2.5,
+                "bend_angle_deg": 90,
+                "width_mm": 300,
+                "thickness_mm": 2.0,
+                "mount_hole_diameter_mm": 6,
+                "mount_hole_rows": 2,
+                "mount_hole_cols": 2,
+                "mount_hole_margin_mm": 15,
+            }
+        )
+        return export_wall_shelf_dxf(
+            unfold_wall_shelf(wparams, k_factor=0.4), out, bend_radius_mm=wparams.bend_radius_mm
+        )
+    if slug == "perforated_panel":
+        pparams = PerforatedPanelBuildParameters.model_validate(
+            {
+                "length_mm": 200,
+                "width_mm": 150,
+                "thickness_mm": 2.0,
+                "hole_diameter_mm": 8,
+                "pitch_x_mm": 20,
+                "pitch_y_mm": 20,
+                "margin_mm": 15,
+            }
+        )
+        return export_perforated_panel_dxf(unfold_perforated_panel(pparams), out)
+    raise ValueError(f"unknown slug {slug!r}")
+
+
+_ALL_TEMPLATES = ("l_bracket", "z_bracket", "corner_angle", "wall_shelf", "perforated_panel")
+
+
 class TestProductionGradeDxf:
     """ADR-024 (Hotfix 2.9.d): production-grade DXF для CAM (Lantek/ESI).
 
@@ -221,6 +325,52 @@ class TestProductionGradeDxf:
             assert e.dxf.layer not in _MANDATORY_LAYERS, (
                 f"entity {e.dxftype()} на службовому шарі {e.dxf.layer}"
             )
+
+    @pytest.mark.parametrize("slug", _ALL_TEMPLATES)
+    def test_кожен_шаблон_рівно_2_шари_правильні_кольори(self, slug: str, tmp_path: Path) -> None:
+        """5 шаблонів × інваріант: рівно 2 виробничі шари з кольорами 7/3."""
+        doc = readfile(_build_template_dxf(slug, tmp_path))
+        assert _custom_layer_names(doc) == set(_EXPECTED_CUSTOM_LAYERS)
+        assert int(doc.layers.get("LASER_CUT").dxf.color) == 7
+        assert int(doc.layers.get("BEND_LINES").dxf.color) == 3
+        # Жодного TEXT/DIMENSION у жодному шаблоні.
+        types = {e.dxftype() for e in doc.modelspace()}
+        assert not (types & {"TEXT", "DIMENSION"})
+
+    def test_integration_reopen_corner_angle(self, tmp_path: Path) -> None:
+        """Reopen через ezdxf: 2 шари, N CIRCLE color 5 (= к-ть отворів),
+        1 LWPOLYLINE ByLayer, нуль entity на службових шарах (ADR-024)."""
+        cparams = CornerAngleBuildParameters.model_validate(
+            {
+                "legA_mm": 60,
+                "legB_mm": 60,
+                "bend_radius_mm": 2.5,
+                "bend_angle_deg": 90,
+                "width_mm": 80,
+                "thickness_mm": 2.0,
+                "hole_diameter_mm": 5,
+                "hole_rows": 2,
+                "hole_cols": 2,
+                "hole_margin_mm": 12,
+            }
+        )
+        unf = unfold_corner_angle(cparams, k_factor=0.4)
+        out = export_corner_angle_dxf(unf, tmp_path / "c.dxf", bend_radius_mm=2.5)
+
+        doc = readfile(out)
+        msp = doc.modelspace()
+        assert _custom_layer_names(doc) == set(_EXPECTED_CUSTOM_LAYERS)
+
+        circles = list(msp.query("CIRCLE"))
+        assert len(circles) == len(unf.holes) > 0
+        assert all(c.dxf.layer == "LASER_CUT" and int(c.dxf.color) == 5 for c in circles)
+
+        polys = list(msp.query("LWPOLYLINE"))
+        assert len(polys) == 1
+        assert polys[0].dxf.layer == "LASER_CUT"
+        assert int(polys[0].dxf.color) == 256  # BYLAYER
+
+        assert all(e.dxf.layer not in _MANDATORY_LAYERS for e in msp)
 
 
 class TestDeterminism:
@@ -295,3 +445,14 @@ class TestSnapshot:
         json_text = json.dumps(structure, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         snapshot.snapshot_dir = SNAPSHOTS_DIR
         snapshot.assert_match(json_text, f"{name}.json")
+
+    @pytest.mark.parametrize("slug", _ALL_TEMPLATES)
+    def test_всі_шаблони_structural_snapshot(
+        self, snapshot: Any, tmp_path: Path, slug: str
+    ) -> None:
+        """Hotfix 2.9.d: по одному structural-snapshot на кожен з 5 шаблонів —
+        фіксує 2 шари + кольори + cut-геометрію (CAM-регресія ADR-024)."""
+        structure = _dxf_structure(_build_template_dxf(slug, tmp_path))
+        json_text = json.dumps(structure, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        snapshot.snapshot_dir = SNAPSHOTS_DIR
+        snapshot.assert_match(json_text, f"template_{slug}.json")
