@@ -60,6 +60,7 @@ from flatcraft_cad.export.layout.corner_picker import (
     pick_annotation_corner,
 )
 from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
+from flatcraft_cad.materials.industry_names import format_material_label
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
@@ -307,9 +308,13 @@ def bom_text_lines(
     Pure-функція (без canvas) — щоб юніт-тестувати лейбли/округлення без PDF.
     Округлення: товщина 0.01мм, площа 0.001-0.0001 м², маса 0.01 кг. Лейбли
     суто українські; англійською лишається тільки значення material_label.
+
+    `material_label` — це material_code (slug); Hotfix 2.9.d форматує його у
+    industry-назву (`DC01 (ДСТУ EN 10130) — холоднокатана сталь`), щоб виробник
+    розумів, що замовляти. Невідомий код → сирий код + WARNING (не падає).
     """
     lines = [
-        f"Матеріал: {material_label}",
+        f"Матеріал: {format_material_label(material_label)}",
         f"Товщина: {thickness_mm:.2f} мм",
         f"Площа заготовки: {bom['area_m2']:.4f} м² ({bom['area_mm2']:.0f} мм²)",
         f"Площа фарбування: {bom['area_paint_m2']:.3f} м²",
