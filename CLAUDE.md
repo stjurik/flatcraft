@@ -146,7 +146,9 @@ flatcraft/
 3. Полиця після гиба ≥ 7.5 мм.
 4. Габарит у площі заготовки ≤ 3050 × (макс. ширина листа з прайсу).
 5. Перетинів геометрії немає (через CadQuery isValid).
-6. Напрям згину (UP/DOWN) задано для кожного гибу — рендериться на креслі **текстом `UP`/`DOWN`** у колонці «Напрям» bend-table і поряд з callout на розгортці (дефолт `down`; Z-кронштейн — `[down, up]`; Hotfix 2.10.e, ADR-019).
+6. Напрям згину (UP/DOWN) задано для кожного гибу — рендериться на креслі **текстом `UP`/`DOWN`** у колонці «Напрям» bend-table і поряд з callout на розгортці (дефолт `down`; Z-кронштейн — `[down, up]`; Hotfix 2.10.e, ADR-019). У DXF напряму НЕ рендеримо (ADR-024) — лише у PDF.
+
+**DXF-інваріант (ADR-024):** експортований DXF має **рівно 2 виробничі шари** — `LASER_CUT` (ACI 7; outer ByLayer + отвори `CIRCLE` explicit color 5) і `BEND_LINES` (ACI 3, dashed). **Жодного `TEXT`/`DIMENSION` entity** (CAM-noise → ризик вторсировини). Текст/розміри/напрям/номери — тільки у PDF. Службові `0`/`Defpoints` ezdxf не дає видалити — лишаються порожніми.
 
 Якщо будь-яка перевірка падає — у UI підсвічуємо червоним конкретне обмеження, **і експорт блокується серверно** (ADR-019: Fastify-gate `POST /exports` + Python parity-валідатор; клієнтська валідація — лише UX, недостатня).
 
@@ -216,10 +218,11 @@ flatcraft/
 
 > Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
 
-**Де ми зараз (2026-06-11):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022). Discord community-сервер як IaC готовий (`infra/discord/`, ADR-023) — чекає manual-setup (MANUAL_SETUP.md). Наступний фокус — публічний soft-launch (Discord-спільнота + анонс у форумах).
+**Де ми зараз (2026-06-15):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022). DXF тепер production-grade для CAM (2 шари, ADR-024). Discord community-сервер як IaC готовий (`infra/discord/`, ADR-023) — чекає manual-setup (MANUAL_SETUP.md). Наступний фокус — публічний soft-launch (Discord-спільнота + анонс у форумах).
 
 **Останні 3 milestones:**
 
+- **Hotfix 2.9.d — production-grade DXF + UA material names** (2026-06-15, ADR-024): P0-фікс — CAM (Lantek/ESI) пропускав отвори на окремому `INNER_CUTS` → деталь без отворів. DXF тепер **рівно 2 шари**: `LASER_CUT` (7) несе outer (ByLayer) + отвори (`CIRCLE` color 5), `BEND_LINES` (3, dashed). Прибрано всі TEXT/DIMENSION (CAM-noise) — напрям/номери/Ø лишаються у PDF. Новий `materials/industry_names.py`: BOM показує `DC01 (ДСТУ EN 10130) — холоднокатана сталь` замість slug. 235 pytest (5 template-snapshot + integration reopen). Гілка `hotfix/2-9-d-production-grade-dxf`.
 - **Discord IaC** (2026-06-11, ADR-023): `infra/discord/` — workspace `@flatcraft/discord-tools` (discord.js 14, без root-deps). Декларативний config: 12 ролей (3-axis: authority/selfid/interest), 7 категорій (3 gated), 19 каналів. Скрипти `snapshot`/`diff`/`apply` (orphan-safe, ніколи не видаляє; apply — manual-only). Pure-ядро без discord.js-моків, 88 unit (2 fast-check property). Weekly snapshot GH Action (drift→auto-commit). MANUAL_SETUP.md + ONBOARDING.md для ручних кроків.
 - **UX-твік: групування параметрів** (2026-06-09, PR #21): уніфіковано секції редактора у всіх 5 студіях до **Матеріал і товщина → Розміри → Гиб → Сітка отворів**. Лише значення `group:` у Zod `.describe()` (механізм AutoForm/ADR-017 незмінний); усі розміри → «Розміри», «Гиби»→«Гиб», wall_shelf «Отвори монтажу»→«Сітка отворів». L/Z лишають «Отвори» (вручну розставлені, не сітка). Не зачіпає CAD-вивід/валідацію/testid'и. 6 схем + e2e. Задеплоєно (`sha-db05a4d`).
 - **Hotfix 2.9.c** (2026-06-08, ADR-022): клієнтська валідація матриці гибу — bake YAML→`bakedSpec`, browser-safe split cad-engine (subpath `/node`), `validateExportBends` перенесено у cad-engine (одна функція клієнт+сервер). Студії показують червоний банер для матрично-невалідних (матеріал, товщина, радіус) + блокують кнопку; `createExport` парсить RFC 9457 `detail`. +12 web unit, +4 e2e.

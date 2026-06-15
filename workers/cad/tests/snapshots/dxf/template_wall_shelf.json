@@ -1,0 +1,104 @@
+{
+  "entities": [
+    {
+      "closed": true,
+      "color": 256,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          242.367256,
+          0.0
+        ],
+        [
+          242.367256,
+          300.0
+        ],
+        [
+          0.0,
+          300.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "color": 256,
+      "end": [
+        78.091814,
+        300.0
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        78.091814,
+        0.0
+      ],
+      "type": "LINE"
+    },
+    {
+      "color": 256,
+      "end": [
+        224.275442,
+        300.0
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        224.275442,
+        0.0
+      ],
+      "type": "LINE"
+    },
+    {
+      "center": [
+        15.0,
+        15.0
+      ],
+      "color": 5,
+      "layer": "LASER_CUT",
+      "radius": 3.0,
+      "type": "CIRCLE"
+    },
+    {
+      "center": [
+        15.0,
+        285.0
+      ],
+      "color": 5,
+      "layer": "LASER_CUT",
+      "radius": 3.0,
+      "type": "CIRCLE"
+    },
+    {
+      "center": [
+        60.5,
+        15.0
+      ],
+      "color": 5,
+      "layer": "LASER_CUT",
+      "radius": 3.0,
+      "type": "CIRCLE"
+    },
+    {
+      "center": [
+        60.5,
+        285.0
+      ],
+      "color": 5,
+      "layer": "LASER_CUT",
+      "radius": 3.0,
+      "type": "CIRCLE"
+    }
+  ],
+  "layers": [
+    {
+      "color": 3,
+      "name": "BEND_LINES"
+    },
+    {
+      "color": 7,
+      "name": "LASER_CUT"
+    }
+  ]
+}

@@ -1,6 +1,8 @@
-"""Напрям згину у DXF/PDF (Hotfix 2.10.e D).
+"""Напрям згину у PDF (Hotfix 2.10.e D; оновлено Hotfix 2.9.d / ADR-024).
 
-Перевіряємо, що напрям (UP/DOWN) доходить до DXF bend-text і що дефолт — DOWN.
+Перевіряємо, що напрям (UP/DOWN) доходить до PDF текстом (не стрілкою) і що
+дефолт — DOWN. У DXF напряму більше НЕМАЄ (ADR-024: жодного TEXT — CAM-noise);
+це фіксує окремий інваріант-тест нижче.
 """
 
 from __future__ import annotations
@@ -29,26 +31,21 @@ def _l_unfold() -> UnfoldedLBracket:
     return unfold_l_bracket(params, k_factor=0.4)
 
 
-def test_l_bracket_dxf_дефолт_down(tmp_path: Path) -> None:
-    out = export_l_bracket_dxf(_l_unfold(), tmp_path / "l.dxf", bend_radius_mm=2.5)
-    text = out.read_text(encoding="utf-8")
-    assert "BEND 90° DOWN R2.5 #1" in text
-    # Жодного UP саме у bend-text (підрядок "UP" окремо є у DXF "GROUP" об'єктах).
-    assert "UP R2.5" not in text
-
-
-def test_l_bracket_dxf_up(tmp_path: Path) -> None:
+def test_dxf_не_містить_напряму_гибу(tmp_path: Path) -> None:
+    """ADR-024: напрям гибу (та будь-який BEND-текст) у DXF заборонений —
+    це CAM-noise. Напрям лишається тільки у PDF (тести нижче)."""
     out = export_l_bracket_dxf(
-        _l_unfold(),
-        tmp_path / "l.dxf",
-        bend_radius_mm=2.5,
-        bend_direction="up",
+        _l_unfold(), tmp_path / "l.dxf", bend_radius_mm=2.5, bend_direction="up"
     )
     text = out.read_text(encoding="utf-8")
-    assert "BEND 90° UP R2.5 #1" in text
+    # "BEND_LINES" (ім'я шару) лишається; забороняємо саме callout-текст.
+    assert "BEND 90" not in text
+    assert "UP R2.5" not in text
+    assert "DOWN R2.5" not in text
 
 
-def test_z_bracket_dxf_mixed_directions(tmp_path: Path) -> None:
+def test_z_bracket_dxf_без_текстових_анотацій(tmp_path: Path) -> None:
+    """Z-bracket DXF: напрями ("down","up") приймаються API, але у файл не пишуться."""
     params = ZBracketBuildParameters(
         top_flange_mm=60,
         bottom_flange_mm=60,
@@ -62,8 +59,8 @@ def test_z_bracket_dxf_mixed_directions(tmp_path: Path) -> None:
         unf, tmp_path / "z.dxf", bend_radius_mm=2.5, bend_directions=("down", "up")
     )
     text = out.read_text(encoding="utf-8")
-    assert "DOWN R2.5 #1" in text
-    assert "UP R2.5 #2" in text
+    assert "BEND 90" not in text
+    assert "UP R2.5" not in text
 
 
 def _l_params(direction: str) -> LBracketBuildParameters:

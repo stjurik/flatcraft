@@ -1,11 +1,18 @@
 """DXF-експорт розгорнутих листометалевих виробів.
 
-Шари відповідають конвенції виробництва лазерного різання + гибки:
-- LASER_CUT: зовнішній контур, який різатиме лазер.
-- INNER_CUTS: внутрішні вирізи (отвори, прорізи) — на тій же операції різання.
-- BEND_LINES: лінії, по яких гнутий метал (info для оператора, не ріжуться).
-- BEND_TEXT: текст біля BEND_LINES ("BEND 90° UP R2.5" тощо).
-- DIM: розміри для довідки.
+Production-grade структура для CAM (Lantek/SigmaNest/ESI) — ADR-024.
+Рівно ДВА виробничі шари; жодного TEXT/DIMENSION (CAM-noise → ризик
+вторсировини, бо CAM читав «LASER_CUT» як «усе, що ріжеться» і пропускав
+отвори на окремому шарі):
+
+- LASER_CUT (color 7): ВСІ cut-paths. Зовнішній контур — ByLayer (white);
+  внутрішні вирізи (отвори) — той самий шар, але explicit color 5 (blue),
+  щоб CAM/людина візуально відрізняли inner від outer (ByEntity color).
+- BEND_LINES (color 3, dashed): лінії гибу (info, не ріжуться).
+
+Текст/розміри/Ø-виноски/номери гибів лишаються ТІЛЬКИ у PDF — для людини,
+не для CAM. Шар "0" обов'язковий за DXF-стандартом (ezdxf не дає видалити),
+але лишається порожнім.
 
 Детермінізм (CLAUDE.md §2.4): фіксуємо $TDCREATE/$TDUPDATE і GUID-и
 з random-генерованих ezdxf-дефолтів. Це дає байт-у-байт identical
@@ -21,7 +28,6 @@ from typing import Final
 from ezdxf import new as ezdxf_new  # type: ignore[attr-defined]
 from ezdxf.document import Drawing
 
-from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
 from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
@@ -31,16 +37,18 @@ from flatcraft_cad.unfold import (
     UnfoldedZBracket,
 )
 
-# Шари, які створюємо у кожному DXF (порядок важливий — впливає на байти).
+# ADR-024: рівно 2 виробничі шари. Порядок важливий — впливає на байти.
 DXF_LAYERS: Final[tuple[tuple[str, int], ...]] = (
-    ("LASER_CUT", 7),  # white/black — основний контур
-    ("INNER_CUTS", 1),  # red — внутрішні вирізи
-    ("BEND_LINES", 5),  # blue — лінії гиба
-    ("BEND_TEXT", 3),  # green — анотації
-    ("DIM", 8),  # сірий — розміри
-    ("DIM_HOLES", 1),  # red — діаметри отворів (Phase 2.9.b F)
+    ("LASER_CUT", 7),  # white — ВСІ cut-paths (outer ByLayer + holes color 5)
+    ("BEND_LINES", 3),  # green dashed — лінії гиба (не ріжуться)
 )
-_HOLE_DIM_TEXT_HEIGHT_MM: Final[float] = 3.0
+# ACI-колір для внутрішніх вирізів (отворів): blue. Виставляється ByEntity
+# на CIRCLE, щоб CAM/око відрізняли inner-cut від outer-контуру ByLayer.
+_INNER_CUT_COLOR: Final[int] = 5
+# Dashed linetype для BEND_LINES (setup=False не вантажить стандартні —
+# додаємо власний з фіксованим pattern → детермінований).
+_DASHED_LINETYPE: Final[str] = "DASHED"
+_DASHED_PATTERN: Final[tuple[float, ...]] = (0.6, 0.5, -0.1)
 
 # Фіксовані штампи часу і GUID-и для детермінованих байтів.
 # Дата 2026-01-01 00:00 UTC — символічна точка відліку проєкту.
@@ -48,11 +56,6 @@ _FROZEN_JULIAN_DATE: Final[float] = 2461041.5  # 2026-01-01 00:00 UTC
 _FROZEN_FINGERPRINT_GUID: Final[str] = "{00000000-0000-0000-0000-000000000001}"
 _FROZEN_VERSION_GUID: Final[str] = "{00000000-0000-0000-0000-000000000002}"
 _FROZEN_EZDXF_STAMP: Final[str] = "flatcraft-deterministic"
-_BEND_TEXT_HEIGHT_MM: Final[float] = 3.0
-# Phase 2.9.b Block B: окремий короткий "#N" badge ПОСЕРЕДИНІ лінії гибу
-# (на додачу до повного callout зверху). Трохи більший за callout, щоб
-# впадав у вічі оператору, який дивиться лише на лінію.
-_BEND_BADGE_TEXT_HEIGHT_MM: Final[float] = 3.5
 
 # Pattern: GUID у фігурних дужках (ezdxf $VERSIONGUID авто-генерується
 # при сейві, а не на створенні — header.set() його не перекриває).
@@ -81,11 +84,6 @@ def _make_deterministic(doc: Drawing) -> None:
     doc.header["$VERSIONGUID"] = _FROZEN_VERSION_GUID
 
 
-def _bend_label(direction: str) -> str:
-    """ASCII-мітка напряму для DXF (↓/↑ Unicode не гарантовано у всіх в'юверах)."""
-    return "UP" if direction == "up" else "DOWN"
-
-
 def _export_flat_dxf(
     *,
     length_mm: float,
@@ -100,6 +98,11 @@ def _export_flat_dxf(
     """Базовий exporter: прямокутна заготовка length × width + bend lines
     на вказаних позиціях + опціональні внутрішні отвори.
 
+    ADR-024: лише геометрія cut/bend. Текст, розміри, напрям гибу, номери —
+    у PDF, не у DXF (CAM-noise). `bend_radius_mm`/`bend_angle_deg`/
+    `bend_directions` лишаються у сигнатурі заради спільного API шаблонів,
+    але у DXF більше не рендеряться.
+
     Reuse'абельний для всіх шаблонів (L/Z/corner_angle/wall_shelf).
     """
     # setup=False вимикає авто-створення VISUALSTYLE/DictionaryVariables,
@@ -107,93 +110,47 @@ def _export_flat_dxf(
     doc = ezdxf_new(dxfversion="R2010", setup=False)
     _make_deterministic(doc)
 
+    # Dashed linetype для BEND_LINES (детермінований pattern, без таблиць ezdxf-setup).
+    if _DASHED_LINETYPE not in doc.linetypes:
+        doc.linetypes.add(
+            name=_DASHED_LINETYPE,
+            pattern=list(_DASHED_PATTERN),
+            description="Dashed __ __ __ (bend lines)",
+        )
+
     for name, color in DXF_LAYERS:
         if name not in doc.layers:
-            doc.layers.add(name=name, color=color)
+            linetype = _DASHED_LINETYPE if name == "BEND_LINES" else "CONTINUOUS"
+            doc.layers.add(name=name, color=color, linetype=linetype)
 
     msp = doc.modelspace()
 
+    # Зовнішній контур — ByLayer (успадковує color 7 шару LASER_CUT).
     msp.add_lwpolyline(
         points=[(0, 0), (length_mm, 0), (length_mm, width_mm), (0, width_mm)],
         close=True,
         dxfattribs={"layer": "LASER_CUT"},
     )
 
-    for n, bend_x in enumerate(bend_lines_mm):
-        direction = bend_directions[n] if n < len(bend_directions) else "down"
+    for bend_x in bend_lines_mm:
         msp.add_line(
             start=(bend_x, 0),
             end=(bend_x, width_mm),
             dxfattribs={"layer": "BEND_LINES"},
         )
-        # Префікс "BEND {angle}°" збережено навмисно (Hotfix 2.10.e): додаємо
-        # напрям (DOWN/UP) і номер гибу #{n}, не ламаючи існуючих перевірок.
-        msp.add_text(
-            f"BEND {bend_angle_deg:g}° {_bend_label(direction)} R{bend_radius_mm:g} #{n + 1}",
-            dxfattribs={
-                "layer": "BEND_TEXT",
-                "height": _BEND_TEXT_HEIGHT_MM,
-                "insert": (bend_x + 1.0, width_mm + 1.0),
-            },
-        )
-        # Midpoint badge: самий "#N" на середині лінії — друга підказка для
-        # оператора (Phase 2.9.b Block B). Той самий BEND_TEXT шар; ASCII "#N".
-        msp.add_text(
-            f"#{n + 1}",
-            dxfattribs={
-                "layer": "BEND_TEXT",
-                "height": _BEND_BADGE_TEXT_HEIGHT_MM,
-                "insert": (bend_x + 1.0, width_mm / 2.0),
-            },
-        )
 
+    # Отвори — на LASER_CUT (та сама операція різання!), explicit color 5 (blue),
+    # щоб inner-cut візуально відрізнявся від outer-контуру (ADR-024).
     for hole in holes:
         msp.add_circle(
             center=(hole.x_mm, hole.y_mm),
             radius=hole.diameter_mm / 2.0,
-            dxfattribs={"layer": "INNER_CUTS"},
+            dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
         )
-
-    if holes:
-        _add_hole_dims(msp, holes)
 
     doc.saveas(output_path)
     _normalize_dxf_bytes(output_path)
     return output_path
-
-
-def _add_hole_dims(msp: object, holes: tuple[Hole2D, ...]) -> None:
-    """Діаметричні розміри отворів на шарі DIM_HOLES (Phase 2.9.b F).
-
-    Якщо отворів небагато (≤ cap) — dim на кожен. Інакше (перфо-панель,
-    сотні отворів) — один зразковий dim + текст «xN отворів %%cD», щоб не
-    роздувати файл. `%%c` — CAD-код символу Ø. Текст dim'а перекрито явно
-    (детермінізм + гарантований Ø незалежно від dimstyle).
-    """
-    # msp типується як object, щоб не тягнути ezdxf-типи у сигнатуру; усі
-    # виклики нижче — публічне ezdxf Modelspace API.
-    individual = should_dim_individual_holes(len(holes))
-    targets = holes if individual else holes[:1]
-    for hole in targets:
-        dim = msp.add_diameter_dim(  # type: ignore[attr-defined]
-            center=(hole.x_mm, hole.y_mm),
-            radius=hole.diameter_mm / 2.0,
-            angle=45,
-            text=f"%%c{hole.diameter_mm:g}",
-            dimstyle="Standard",
-            dxfattribs={"layer": "DIM_HOLES"},
-        )
-        dim.render()
-    if not individual:
-        d0 = holes[0].diameter_mm
-        msp.add_text(  # type: ignore[attr-defined]
-            f"x{len(holes)} отворів %%c{d0:g}",
-            dxfattribs={
-                "layer": "DIM_HOLES",
-                "height": _HOLE_DIM_TEXT_HEIGHT_MM,
-                "insert": (0.0, -6.0),
-            },
-        )
 
 
 def export_l_bracket_dxf(

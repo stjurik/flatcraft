@@ -116,6 +116,26 @@ class TestStructure:
         assert "Bill of materials" in text or "BOM" in text or "Матеріал" in text
 
 
+class TestMaterialIndustryName:
+    """Hotfix 2.9.d: BOM показує industry-марку матеріалу, не сирий slug."""
+
+    def test_bom_містить_industry_назву_за_замовчуванням(self, tmp_path: Path) -> None:
+        # Дефолт material_label="cold_rolled_steel" → DC01.
+        out = _generate(tmp_path)
+        text = PdfReader(str(out)).pages[0].extract_text() or ""
+        assert "DC01 (ДСТУ EN 10130)" in text
+        assert "холоднокатана сталь" in text
+        # Сирий slug у BOM більше не з'являється.
+        assert "cold_rolled_steel" not in text
+
+    def test_передана_марка_нержавійки(self, tmp_path: Path) -> None:
+        params = _params()
+        unf = unfold_l_bracket(params, k_factor=0.4)
+        out = export_l_bracket_pdf(params, unf, tmp_path / "ss.pdf", material_label="stainless_304")
+        text = PdfReader(str(out)).pages[0].extract_text() or ""
+        assert "AISI 304 (ДСТУ EN 10088-2)" in text
+
+
 class TestParameters:
     def test_різні_розміри_дають_різні_pdf(self, tmp_path: Path) -> None:
         a = _generate(tmp_path, name="a.pdf", leg_a_mm=60).read_bytes()

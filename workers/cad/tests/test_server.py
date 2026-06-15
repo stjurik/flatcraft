@@ -311,7 +311,7 @@ class TestCornerAngleExport:
     def test_corner_angle_dxf_має_inner_cuts_layer(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
-        """1×2 grid × 2 полиці = 4 отвори → DXF має CIRCLE entities на INNER_CUTS."""
+        """1×2 grid × 2 полиці = 4 отвори → DXF має CIRCLE entities на LASER_CUT (ADR-024)."""
         res = client.post(
             "/export",
             json={
@@ -325,10 +325,10 @@ class TestCornerAngleExport:
             Bucket=os.environ["S3_BUCKET"], Key=res["artifacts"]["dxf"]["s3_key"]
         )["Body"].read()
         dxf_text = dxf_bytes.decode("utf-8")
-        # 4 CIRCLE entities, всі на INNER_CUTS layer.
+        # 4 CIRCLE entities, всі на LASER_CUT (ADR-024: 2 шари, отвори color 5).
         assert dxf_text.count("\nCIRCLE\n") == 4
-        # Layer-string з'являється поряд із CIRCLE-entities.
-        assert "INNER_CUTS" in dxf_text
+        assert "LASER_CUT" in dxf_text
+        assert "INNER_CUTS" not in dxf_text
 
     def test_l_і_corner_angle_дають_різні_артефакти(
         self, client: TestClient, aws_with_bucket: None
@@ -393,8 +393,9 @@ class TestWallShelfExport:
         assert res.status_code == 422
 
     def test_wall_shelf_без_lip_має_1_bend(self, client: TestClient, aws_with_bucket: None) -> None:
-        """front_lip=0 → DXF має лише 1 BEND text annotation (не 2)."""
-        # З lip: 2 bend lines + 2 BEND text annotations.
+        """front_lip=0 → DXF має лише 1 лінію гибу (не 2). ADR-024: рахуємо
+        LINE-entities на BEND_LINES, бо текстових BEND-анотацій у DXF немає."""
+        # З lip: 2 bend lines.
         with_lip_res = client.post(
             "/export",
             json={
@@ -403,7 +404,7 @@ class TestWallShelfExport:
                 "thickness_mm": 2,
             },
         ).json()
-        # Без lip: 1 bend line + 1 BEND text annotation.
+        # Без lip: 1 bend line.
         without_lip_res = client.post(
             "/export",
             json={
@@ -429,14 +430,14 @@ class TestWallShelfExport:
             .read()
             .decode("utf-8")
         )
-        # BEND text annotation: "BEND 90° UP R2.5" (Cyrillic-safe ASCII).
-        assert with_lip.count("BEND 90") == 2
-        assert without_lip.count("BEND 90") == 1
+        # Лінії гибу = LINE-entities (outer — LWPOLYLINE, отвори — CIRCLE).
+        assert with_lip.count("\nLINE\n") == 2
+        assert without_lip.count("\nLINE\n") == 1
 
     def test_wall_shelf_dxf_має_4_inner_cuts_circles(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
-        """2×2 mount holes = 4 CIRCLE entities на INNER_CUTS."""
+        """2×2 mount holes = 4 CIRCLE entities на LASER_CUT (ADR-024)."""
         res = client.post(
             "/export",
             json={
@@ -454,7 +455,8 @@ class TestWallShelfExport:
             .decode("utf-8")
         )
         assert dxf.count("\nCIRCLE\n") == 4
-        assert "INNER_CUTS" in dxf
+        assert "LASER_CUT" in dxf
+        assert "INNER_CUTS" not in dxf
 
 
 class TestPerforatedPanelExport:
@@ -509,11 +511,12 @@ class TestPerforatedPanelExport:
             .read()
             .decode("utf-8")
         )
-        # Жодних BEND текстів (без гибів):
+        # Жодних BEND текстів (ADR-024: у DXF узагалі немає TEXT):
         assert dxf.count("BEND ") == 0
-        # 9 × 7 = 63 кола з grid.
+        # 9 × 7 = 63 кола з grid, усі на LASER_CUT.
         assert dxf.count("\nCIRCLE\n") == 63
-        assert "INNER_CUTS" in dxf
+        assert "LASER_CUT" in dxf
+        assert "INNER_CUTS" not in dxf
 
     def test_perforated_panel_pitch_впливає_на_кількість_отворів(
         self, client: TestClient, aws_with_bucket: None
