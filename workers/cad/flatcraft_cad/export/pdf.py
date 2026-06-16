@@ -17,9 +17,11 @@
     │ FOOTER: QR-код permalink · виробник підказки                    │
     └─────────────────────────────────────────────────────────────────┘
 
-Ізометрія 3D у Phase 2.9 поки не вкладена — ReportLab native 2D, повноцінний
-WebGL→PNG render вимагає окремого pipeline'у (Phase post-MVP). Поточний
-DXF (Phase 2.7) уже дає клієнтам відкривати у LibreCAD/FreeCAD для огляду.
+Ізометрія (Phase 2.9.e, ADR-025): довідковий векторний каркас згорнутого виробу
+у правій колонці під таблицею гибів. Будуємо через OCC hidden-line-removal
+(`export/isometric.py`) із 3D-solid, який worker уже рахує (`build_*`); отвори
+згортаємо назад на грані (`export/isometry_solid.py`). Видимі ребра — суцільні,
+приховані — пунктирні. Залишається байт-у-байт детермінованим (pure vector).
 
 Детермінізм (CLAUDE.md §2.4): однакові params → байт-у-байт ідентичний PDF.
 ReportLab вставляє timestamp у metadata; постобробку timestamp/ID робимо
@@ -36,6 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+import cadquery as cq
 import qrcode
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -47,6 +50,8 @@ from flatcraft_cad.export.dimensions import (
     format_dimensions,
 )
 from flatcraft_cad.export.fonts import register_fonts
+from flatcraft_cad.export.isometric import IsoPolyline, fit_to_box, project_isometric
+from flatcraft_cad.export.isometry_solid import with_isometry_holes
 from flatcraft_cad.export.layout.bend_badges import (
     BADGE_DIAMETER_MM,
     BendBadge,
@@ -374,6 +379,59 @@ def _draw_bom_block(
         c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
 
 
+# Ізометрія — слот у нижній частині правої колонки, над QR (Phase 2.9.e).
+_ISO_ORIGIN_MM: Final[tuple[float, float]] = (178.0, 52.0)
+_ISO_BOX_MM: Final[tuple[float, float]] = (96.0, 44.0)
+
+
+def _draw_isometric(
+    c: pdfcanvas.Canvas,
+    solid: cq.Workplane,
+    params: object,
+    unfolded: object,
+    *,
+    origin_mm: tuple[float, float] = _ISO_ORIGIN_MM,
+    box_mm: tuple[float, float] = _ISO_BOX_MM,
+    title: str = "Ізометрія (довідково)",
+) -> None:
+    """Малює векторну ізометрію виробу (Phase 2.9.e, ADR-025).
+
+    Згортає отвори на грані → HLR-проєкція → видимі ребра суцільні, приховані
+    пунктирні. Полілайни вписуються у бокс зі збереженням пропорцій. Якщо
+    проєкція порожня (теоретично) — мовчки пропускаємо, щоб не валити експорт.
+    """
+    holed = with_isometry_holes(params, unfolded, solid)
+    visible, hidden = project_isometric(holed)
+    polylines = (*visible, *hidden)
+    if not polylines:
+        return
+
+    box_w, box_h = box_mm
+    scale, tx, ty = fit_to_box(polylines, box_w, box_h)
+    ox, oy = origin_mm
+
+    c.setFont("DejaVuSans-Bold", 9)
+    c.drawString(ox * mm, (oy + box_h + 2) * mm, title)
+
+    def _stroke(group: tuple[IsoPolyline, ...], *, dashed: bool) -> None:
+        c.saveState()
+        if dashed:
+            c.setDash(2, 2)
+            c.setStrokeColorRGB(0.45, 0.45, 0.45)
+            c.setLineWidth(0.3)
+        else:
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setLineWidth(0.4)
+        for poly in group:
+            pts = [((ox + x * scale + tx) * mm, (oy + y * scale + ty) * mm) for x, y in poly]
+            c.lines([(*pts[i], *pts[i + 1]) for i in range(len(pts) - 1)])
+        c.restoreState()
+
+    # Приховані спершу, видимі поверх.
+    _stroke(hidden, dashed=True)
+    _stroke(visible, dashed=False)
+
+
 # Метадані з фіксованою датою/ID для байт-у-байт детермінізму.
 _FROZEN_DATE = "D:20260101000000+00'00'"
 _FROZEN_ID = "[<00000000000000000000000000000001> <00000000000000000000000000000002>]"
@@ -514,6 +572,7 @@ def export_l_bracket_pdf(
     unfolded: UnfoldedLBracket,
     output_path: Path,
     *,
+    solid: cq.Workplane | None = None,
     material_label: str = "cold_rolled_steel",
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
@@ -566,6 +625,8 @@ def export_l_bracket_pdf(
         density_kg_m3=density_kg_m3,
         origin_mm=_choose_bom_origin(1),
     )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
 
     # QR-код у footer-area.
     qr_png = _make_qr_png(qr_payload)
@@ -607,6 +668,7 @@ def export_z_bracket_pdf(
     unfolded: UnfoldedZBracket,
     output_path: Path,
     *,
+    solid: cq.Workplane | None = None,
     material_label: str = "cold_rolled_steel",
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
@@ -673,6 +735,8 @@ def export_z_bracket_pdf(
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
         origin_mm=_choose_bom_origin(2),
     )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
 
     # QR-код.
     qr_png = _make_qr_png(qr_payload)
@@ -711,6 +775,7 @@ def export_corner_angle_pdf(
     unfolded: UnfoldedCornerAngle,
     output_path: Path,
     *,
+    solid: cq.Workplane | None = None,
     material_label: str = "cold_rolled_steel",
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
@@ -789,6 +854,8 @@ def export_corner_angle_pdf(
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
         origin_mm=_choose_bom_origin(1),
     )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
 
     # QR.
     qr_png = _make_qr_png(qr_payload)
@@ -827,6 +894,7 @@ def export_wall_shelf_pdf(
     unfolded: UnfoldedWallShelf,
     output_path: Path,
     *,
+    solid: cq.Workplane | None = None,
     material_label: str = "cold_rolled_steel",
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
@@ -906,6 +974,8 @@ def export_wall_shelf_pdf(
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
         origin_mm=_choose_bom_origin(n_bends),
     )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
@@ -943,6 +1013,7 @@ def export_perforated_panel_pdf(
     unfolded: UnfoldedPerforatedPanel,
     output_path: Path,
     *,
+    solid: cq.Workplane | None = None,
     material_label: str = "cold_rolled_steel",
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
@@ -1022,6 +1093,8 @@ def export_perforated_panel_pdf(
         origin_mm=(ox_b, oy_b),
         include_volume=False,
     )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30

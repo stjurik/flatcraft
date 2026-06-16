@@ -99,7 +99,7 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    _ = build_l_bracket(params)
+    solid = build_l_bracket(params)
     unfolded = unfold_l_bracket(params, req.k_factor)
     dxf = export_l_bracket_dxf(
         unfolded,
@@ -107,7 +107,7 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         bend_radius_mm=params.bend_radius_mm,
         bend_direction=params.bend_direction,
     ).read_bytes()
-    pdf = export_l_bracket_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_l_bracket_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
     return dxf, pdf
 
 
@@ -120,7 +120,7 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    _ = build_z_bracket(params)
+    solid = build_z_bracket(params)
     unfolded = unfold_z_bracket(params, req.k_factor)
     dxf = export_z_bracket_dxf(
         unfolded,
@@ -128,7 +128,7 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         bend_radius_mm=params.bend_radius_mm,
         bend_directions=tuple(b.direction for b in params.bends),
     ).read_bytes()
-    pdf = export_z_bracket_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_z_bracket_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
     return dxf, pdf
 
 
@@ -141,7 +141,7 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    _ = build_corner_angle(params)
+    solid = build_corner_angle(params)
     unfolded = unfold_corner_angle(params, req.k_factor)
     dxf = export_corner_angle_dxf(
         unfolded,
@@ -149,7 +149,7 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
         bend_radius_mm=params.bend_radius_mm,
         bend_direction=params.bend_direction,
     ).read_bytes()
-    pdf = export_corner_angle_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_corner_angle_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
     return dxf, pdf
 
 
@@ -162,7 +162,7 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    _ = build_wall_shelf(params)
+    solid = build_wall_shelf(params)
     unfolded = unfold_wall_shelf(params, req.k_factor)
     dxf = export_wall_shelf_dxf(
         unfolded,
@@ -170,7 +170,7 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
         bend_radius_mm=params.bend_radius_mm,
         bend_directions=tuple(b.direction for b in params.bends),
     ).read_bytes()
-    pdf = export_wall_shelf_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_wall_shelf_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
     return dxf, pdf
 
 
@@ -186,10 +186,12 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    _ = build_perforated_panel(params)
+    solid = build_perforated_panel(params)
     unfolded = unfold_perforated_panel(params)
     dxf = export_perforated_panel_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
-    pdf = export_perforated_panel_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_perforated_panel_pdf(
+        params, unfolded, tmpdir / "out.pdf", solid=solid
+    ).read_bytes()
     return dxf, pdf
 
 
