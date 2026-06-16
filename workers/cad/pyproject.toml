@@ -64,6 +64,12 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 
+# OCP (raw OpenCascade-bindings, що їх тягне cadquery) не має py.typed/stubs.
+# Імпортуємо їх напряму лише в export/isometric.py для HLR-проєкції (ADR-025).
+[[tool.mypy.overrides]]
+module = ["OCP.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --cov=flatcraft_cad --cov-report=term-missing"

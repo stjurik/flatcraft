@@ -13,8 +13,8 @@ from flatcraft_cad.export.pdf import (
     export_l_bracket_pdf,
     export_z_bracket_pdf,
 )
-from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
+from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
+from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters, build_z_bracket
 from flatcraft_cad.unfold import unfold_l_bracket, unfold_z_bracket
 
 
@@ -34,7 +34,8 @@ def _params(**overrides: Any) -> LBracketBuildParameters:
 def _generate(tmp_path: Path, *, name: str = "out.pdf", **overrides: Any) -> Path:
     params = _params(**overrides)
     unf = unfold_l_bracket(params, k_factor=0.4)
-    return export_l_bracket_pdf(params, unf, tmp_path / name)
+    solid = build_l_bracket(params)
+    return export_l_bracket_pdf(params, unf, tmp_path / name, solid=solid)
 
 
 class TestBetaWatermark:
@@ -59,7 +60,8 @@ class TestBetaWatermark:
             }
         )
         unf = unfold_z_bracket(params, k_factor=0.4)
-        out = export_z_bracket_pdf(params, unf, tmp_path / "z-max.pdf")
+        solid = build_z_bracket(params)
+        out = export_z_bracket_pdf(params, unf, tmp_path / "z-max.pdf", solid=solid)
         text = PdfReader(str(out)).pages[0].extract_text() or ""
         assert "BETA" in text
 
