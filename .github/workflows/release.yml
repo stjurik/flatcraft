@@ -56,7 +56,7 @@ jobs:
             dockerfile: infra/docker/cad-worker.Dockerfile
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         # buildx-білдер потрібен для multi-platform і GHA-cache backend.
