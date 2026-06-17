@@ -152,6 +152,8 @@ flatcraft/
 
 Якщо будь-яка перевірка падає — у UI підсвічуємо червоним конкретне обмеження, **і експорт блокується серверно** (ADR-019: Fastify-gate `POST /exports` + Python parity-валідатор; клієнтська валідація — лише UX, недостатня).
 
+**Render-gate інваріант (ADR-026):** у viewport'ах студій 3D-сцена (R3F `<Canvas>`) рендериться **ЛИШЕ при геометрично валідних параметрах** — `validateProfile` (`packages/cad-engine/src/validators/profile.ts`, паритет з assertion'ами `packages/ui/src/3d-viewport/geometry.ts`) гейтить рендер; при issues показуємо `InvalidParametersFallback` замість сцени. Будь-який uncaught error усередині R3F-піддерева ловиться `R3FErrorBoundary` (backstop, ніколи не white-screen). Той самий `validateProfile` — у формі (банер + блок експорту), Fastify-gate (`validateExportProfile`) і Python worker (`validate/profile.py` → 422).
+
 ## 8. Безпека і дані
 
 - **Жодних PII у логах** (auto-redaction у pino + sentry beforeSend).
@@ -218,16 +220,17 @@ flatcraft/
 
 > Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
 
-**Де ми зараз (2026-06-16):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022). DXF тепер production-grade для CAM (2 шари, ADR-024). PDF тепер має довідкову векторну ізометрію виробу (ADR-025). Discord community-сервер як IaC готовий (`infra/discord/`, ADR-023) — чекає manual-setup (MANUAL_SETUP.md). Наступний фокус — публічний soft-launch (Discord-спільнота + анонс у форумах).
+**Де ми зараз (2026-06-16):** staging.hart.crimea.ua live, MVP feature-complete (5 шаблонів end-to-end з DXF+PDF експортом), soft-launch tweaks + drawing polish завершені. Серверна валідація радіусу гибу — інваріант (ADR-019); дзеркалена клієнтська матрична валідація у студії (ADR-022) + геометрична валідація профілю з render-gate проти крашу R3F (ADR-026). DXF production-grade для CAM (2 шари, ADR-024). PDF має довідкову векторну ізометрію виробу (ADR-025). Discord community-сервер як IaC готовий (`infra/discord/`, ADR-023) — чекає manual-setup (MANUAL_SETUP.md). Наступний фокус — публічний soft-launch (Discord-спільнота + анонс у форумах).
 
 **Останні 3 milestones:**
 
+- **Hotfix 2.9.f — R3F render-gate + ErrorBoundary** (2026-06-16, ADR-026): усунено P0-краш (замале плече → `build*ShapeCommands` throw → WebGL Context Lost → white-screen). 3 шари: новий `validateProfile` (cad-engine, дзеркало assertion'ів `geometry.ts`, єдине джерело істини) → render-gate у 4 viewport'ах (fallback замість `<Canvas>` при issues) + `R3FErrorBoundary` (ui, backstop) + form-банер/блок експорту + server parity (Fastify `validateExportProfile` + Python `validate/profile.py` → 422). property-тести (fast-check 300 + hypothesis 300). cad-engine 63 / ui 70 / web 47 / api 35 / pytest 249 / e2e 92. Гілка `hotfix/2-9-f-r3f-error-boundary-render-gate`.
 - **Feature 2.9.e — ізометрія виробу у PDF** (2026-06-16, ADR-025): довідковий векторний каркас згорнутого виробу у правій колонці PDF під таблицею гибів (видимі ребра суцільні, приховані пунктирні, з отворами). Через OCC hidden-line-removal (`HLRBRep_Algo`, який уже має cadquery) з 3D-solid (`build_*`, раніше відкидався) → `export/isometric.py`. `build_*` не вирізає отвори у 3D → `export/isometry_solid.py` згортає `unfolded.holes` на грані й ріже циліндри. Байт-детермінізм збережено. 241 pytest. Гілка `feat/pdf-isometric-view`.
 - **Hotfix 2.9.d — production-grade DXF + UA material names** (2026-06-15, ADR-024): P0-фікс — CAM (Lantek/ESI) пропускав отвори на окремому `INNER_CUTS` → деталь без отворів. DXF тепер **рівно 2 шари**: `LASER_CUT` (7) несе outer (ByLayer) + отвори (`CIRCLE` color 5), `BEND_LINES` (3, dashed). Прибрано всі TEXT/DIMENSION (CAM-noise) — напрям/номери/Ø лишаються у PDF. Новий `materials/industry_names.py`: BOM показує `DC01 (ДСТУ EN 10130) — холоднокатана сталь` замість slug. 235 pytest (5 template-snapshot + integration reopen). Гілка `hotfix/2-9-d-production-grade-dxf`.
-- **Discord IaC** (2026-06-11, ADR-023): `infra/discord/` — workspace `@flatcraft/discord-tools` (discord.js 14, без root-deps). Декларативний config: 12 ролей (3-axis: authority/selfid/interest), 7 категорій (3 gated), 19 каналів. Скрипти `snapshot`/`diff`/`apply` (orphan-safe, ніколи не видаляє; apply — manual-only). Pure-ядро без discord.js-моків, 88 unit (2 fast-check property). Weekly snapshot GH Action (drift→auto-commit). MANUAL_SETUP.md + ONBOARDING.md для ручних кроків.
 
 **Інваріанти (must-not-break):**
 
+- У viewport'ах студій сцена R3F рендериться ЛИШЕ при валідних параметрах (`validateProfile` render-gate); будь-який uncaught error у R3F ловиться `R3FErrorBoundary` (ADR-026). `validateProfile` — паритет з assertion'ами `geometry.ts` (клієнт render-gate/банер + Fastify-gate + Python worker).
 - PDF/DXF експорт — байт-у-байт детермінований (CLAUDE.md §2.4). Ізометрія (ADR-025) теж: HLR-проєкція + дискретизація детерміновані, геометрія — чиста функція params. `export/isometric.py` головний entry імпортує `OCP.*` напряму (scoped mypy-override).
 - Серверна валідація `bend_radius` через cad-engine у Fastify + Python parity (ADR-019). Клієнтська матрична валідація (ADR-022) — лише UX, не замінює серверну.
 - Single source of truth для bend-матриці: `packages/cad-engine/data/bend-machine-esi.yaml`. `bakedSpec` (`src/generated/baked-spec.ts`) — похідний snapshot, регенерується у `prebuild`; не редагувати руками.

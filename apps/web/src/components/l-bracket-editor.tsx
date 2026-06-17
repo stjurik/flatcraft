@@ -1,5 +1,6 @@
 "use client";
 
+import { validateProfile } from "@flatcraft/cad-engine";
 import { LBracketParametersSchema, type LBracketParameters } from "@flatcraft/types";
 import { AutoForm, zodIssuesToFieldErrors, type FieldDescriptor } from "@flatcraft/ui";
 import { useMemo } from "react";
@@ -70,9 +71,19 @@ export function LBracketEditor({
     [value, materialCode, thicknessMm],
   );
 
+  // Hotfix 2.9.f (ADR-026): геометрична валідність профілю (плече >= товщина+радіус).
+  const profileIssues = useMemo(
+    () => validateProfile({ templateSlug: "l_bracket", parameters: value, thicknessMm }),
+    [value, thicknessMm],
+  );
+
   const allErrors = useMemo(
-    () => [...matrixIssues.map((e) => e.message ?? e.code), ...zodErrors],
-    [matrixIssues, zodErrors],
+    () => [
+      ...profileIssues.map((i) => i.message),
+      ...matrixIssues.map((e) => e.message ?? e.code),
+      ...zodErrors,
+    ],
+    [profileIssues, matrixIssues, zodErrors],
   );
 
   return (

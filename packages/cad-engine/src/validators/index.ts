@@ -8,6 +8,13 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   validateExportBends,
+  validateExportProfile,
   type ProblemDetails,
   type ProblemError,
 } from "./export-gate.js";
+export {
+  validateProfile,
+  type ProfileIssue,
+  type ProfileIssueCode,
+  type ProfileValidationInput,
+} from "./profile.js";

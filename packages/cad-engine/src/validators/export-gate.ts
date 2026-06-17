@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import type { BendMachineSpec } from "../spec.js";
 import { validateBend, type BendInput } from "./bend.js";
+import { validateProfile, type ProfileIssue } from "./profile.js";
 import type { ValidationError } from "./types.js";
 
 export const ProblemErrorSchema = z.object({
@@ -178,6 +179,48 @@ export function validateExportBends(body: ExportRequest, spec: BendMachineSpec):
   const result = validateBend(input, spec);
   if (result.valid) return [];
   return result.errors.map((e) => mapError(e, input, spec));
+}
+
+/** ProfileIssue → RFC 9457 ProblemError (Hotfix 2.9.f, ADR-026). */
+function profileIssueToProblem(issue: ProfileIssue): ProblemError {
+  return {
+    field: issue.which,
+    code: issue.code,
+    value: issue.got,
+    message: issue.message,
+  };
+}
+
+/**
+ * Геометрична валідність профілю для ExportRequest (Hotfix 2.9.f, ADR-026) —
+ * та сама `validateProfile`, що й render-gate у браузері. Порожній масив —
+ * валідно (perforated_panel завжди порожній). Дзеркало Fastify-gate ↔ браузер.
+ */
+export function validateExportProfile(body: ExportRequest): ProblemError[] {
+  const thicknessMm = body.thickness_mm;
+  switch (body.template_slug) {
+    case "l_bracket":
+    case "corner_angle":
+      return validateProfile({
+        templateSlug: body.template_slug,
+        parameters: body.parameters,
+        thicknessMm,
+      }).map(profileIssueToProblem);
+    case "z_bracket":
+      return validateProfile({
+        templateSlug: "z_bracket",
+        parameters: body.parameters,
+        thicknessMm,
+      }).map(profileIssueToProblem);
+    case "wall_shelf":
+      return validateProfile({
+        templateSlug: "wall_shelf",
+        parameters: body.parameters,
+        thicknessMm,
+      }).map(profileIssueToProblem);
+    case "perforated_panel":
+      return [];
+  }
 }
 
 export function buildProblem(errors: ProblemError[], instance: string): ProblemDetails {

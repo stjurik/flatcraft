@@ -46,7 +46,7 @@ from flatcraft_cad.unfold import (
     unfold_wall_shelf,
     unfold_z_bracket,
 )
-from flatcraft_cad.validate import validate_export
+from flatcraft_cad.validate import validate_export, validate_export_profile
 
 PRESIGN_EXPIRES_SEC = 3600
 
@@ -204,11 +204,14 @@ def _build_app() -> FastAPI:
 
     @app.post("/export", response_model=ExportResponse)
     def export(req: ExportRequest) -> ExportResponse:
-        # ADR-019: parity-валідація гиба ДО будь-якої CAD-операції / S3-запису.
-        # Остання лінія оборони — навіть якщо API-gate обійдено.
-        bend_errors = validate_export(req.template_slug, req.parameters, req.thickness_mm)
-        if bend_errors:
-            raise HTTPException(status_code=422, detail=bend_errors)
+        # ADR-019/026: parity-валідація профілю+гиба ДО будь-якої CAD-операції /
+        # S3-запису. Остання лінія оборони — навіть якщо API-gate обійдено.
+        errors = [
+            *validate_export_profile(req.template_slug, req.parameters, req.thickness_mm),
+            *validate_export(req.template_slug, req.parameters, req.thickness_mm),
+        ]
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
 
         with tempfile.TemporaryDirectory() as td:
             tmpdir = Path(td)

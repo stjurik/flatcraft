@@ -27,6 +27,7 @@ import {
   getBendSpec,
   ProblemDetailsSchema,
   validateExportBends,
+  validateExportProfile,
 } from "../lib/validate-export.js";
 
 const NotFoundSchema = z.object({ error: z.literal("job_not_found") });
@@ -118,9 +119,11 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
         // ADR-019: серверний gate ПЕРЕД створенням job/forward. Невалідний гиб
         // (напр. R недопустимий для товщини) → 422 RFC 9457, жодного артефакта.
         const spec = await getBendSpec();
-        const bendErrors = validateExportBends(req.body, spec);
-        if (bendErrors.length > 0) {
-          return reply.code(422).send(buildProblem(bendErrors, "/exports"));
+        // ADR-026: геометрична валідність профілю (плече >= товщина+радіус) —
+        // та сама validateProfile, що й render-gate у браузері.
+        const errors = [...validateExportProfile(req.body), ...validateExportBends(req.body, spec)];
+        if (errors.length > 0) {
+          return reply.code(422).send(buildProblem(errors, "/exports"));
         }
         const job = store.create();
         // background: не await — щоб клієнт одразу отримав jobId.
