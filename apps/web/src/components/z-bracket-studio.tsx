@@ -1,5 +1,6 @@
 "use client";
 
+import { validateProfile } from "@flatcraft/cad-engine";
 import {
   ZBracketParametersSchema,
   type ZBracketParameters,
@@ -58,6 +59,13 @@ export function ZBracketStudio({ initialParameters, materials }: ZBracketStudioP
     [parameters, material.materialCode, material.thicknessMm],
   );
 
+  // Hotfix 2.9.f (ADR-026): геометрична валідність профілю блокує експорт.
+  const profileIssues = useMemo(
+    () =>
+      validateProfile({ templateSlug: "z_bracket", parameters, thicknessMm: material.thicknessMm }),
+    [parameters, material.thicknessMm],
+  );
+
   return (
     <div data-testid="z-bracket-studio" className="flex flex-col gap-4">
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
@@ -77,7 +85,7 @@ export function ZBracketStudio({ initialParameters, materials }: ZBracketStudioP
               material_code: material.materialCode,
               thickness_mm: material.thicknessMm,
             }}
-            disabled={!isValid || matrixIssues.length > 0}
+            disabled={!isValid || matrixIssues.length > 0 || profileIssues.length > 0}
           />
         </div>
 

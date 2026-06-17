@@ -11,6 +11,7 @@ export const UI_PACKAGE_VERSION = "0.0.0" as const;
 
 export * from "./3d-viewport/index.js";
 export * from "./components/index.js";
+export { R3FErrorBoundary, R3FErrorFallback } from "./r3f-error-boundary.js";
 export * from "./hooks/index.js";
 export * from "./icons.js";
 export * from "./lib/index.js";

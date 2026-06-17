@@ -1,5 +1,6 @@
 "use client";
 
+import { validateProfile } from "@flatcraft/cad-engine";
 import {
   CornerAngleParametersSchema,
   type CornerAngleParameters,
@@ -58,6 +59,17 @@ export function CornerAngleStudio({ initialParameters, materials }: CornerAngleS
     [parameters, material.materialCode, material.thicknessMm],
   );
 
+  // Hotfix 2.9.f (ADR-026): геометрична валідність профілю блокує експорт.
+  const profileIssues = useMemo(
+    () =>
+      validateProfile({
+        templateSlug: "corner_angle",
+        parameters,
+        thicknessMm: material.thicknessMm,
+      }),
+    [parameters, material.thicknessMm],
+  );
+
   return (
     <div data-testid="corner-angle-studio" className="flex flex-col gap-4">
       <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
@@ -77,7 +89,7 @@ export function CornerAngleStudio({ initialParameters, materials }: CornerAngleS
               material_code: material.materialCode,
               thickness_mm: material.thicknessMm,
             }}
-            disabled={!isValid || matrixIssues.length > 0}
+            disabled={!isValid || matrixIssues.length > 0 || profileIssues.length > 0}
           />
         </div>
 

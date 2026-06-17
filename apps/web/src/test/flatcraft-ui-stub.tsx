@@ -13,10 +13,38 @@
  * ⚠ Якщо майбутній web unit-тест потребуватиме справжній компонент із
  * `@flatcraft/ui` — приберіть/звузьте аліас і застабте конкретний підмодуль.
  */
+import type { ReactNode } from "react";
+
 export function AutoForm(): null {
   return null;
 }
 
 export function zodIssuesToFieldErrors(): Record<string, string> {
   return {};
+}
+
+// Hotfix 2.9.f (ADR-026): render-gate viewport-тести вживають R3FErrorBoundary.
+// Стаб — passthrough (рендерить children); справжній boundary покритий у
+// packages/ui (r3f-error-boundary.test.tsx).
+export function R3FErrorBoundary({ children }: { children: ReactNode }): ReactNode {
+  return children;
+}
+
+// Scene-компоненти вантажаться через dynamic(ssr:false) — у SSR-тесті
+// рендериться loading-плейсхолдер, тож реальні Scene не потрібні. Стаб-плейсхолдери
+// лише щоб `import("@flatcraft/ui").then(m => m.XScene)` мав визначене значення.
+export function CornerAngleScene(): null {
+  return null;
+}
+export function LBracketScene(): null {
+  return null;
+}
+export function ZBracketScene(): null {
+  return null;
+}
+export function WallShelfScene(): null {
+  return null;
+}
+export function PerforatedPanelScene(): null {
+  return null;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { validateProfile } from "@flatcraft/cad-engine";
 import { CornerAngleParametersSchema, type CornerAngleParameters } from "@flatcraft/types";
 import { AutoForm, zodIssuesToFieldErrors } from "@flatcraft/ui";
 import { useMemo } from "react";
@@ -48,9 +49,19 @@ export function CornerAngleEditor({
     [value, materialCode, thicknessMm],
   );
 
+  // Hotfix 2.9.f (ADR-026): геометрична валідність профілю (плече >= товщина+радіус).
+  const profileIssues = useMemo(
+    () => validateProfile({ templateSlug: "corner_angle", parameters: value, thicknessMm }),
+    [value, thicknessMm],
+  );
+
   const allErrors = useMemo(
-    () => [...matrixIssues.map((e) => e.message ?? e.code), ...zodErrors],
-    [matrixIssues, zodErrors],
+    () => [
+      ...profileIssues.map((i) => i.message),
+      ...matrixIssues.map((e) => e.message ?? e.code),
+      ...zodErrors,
+    ],
+    [profileIssues, matrixIssues, zodErrors],
   );
 
   const totalHoles = 2 * value.hole_rows * value.hole_cols;

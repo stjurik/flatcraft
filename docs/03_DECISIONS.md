@@ -677,6 +677,60 @@ DXF/розгортці). Тож для ізометрії згортаємо `un
 
 ---
 
+## ADR-026: R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params
+
+**Статус:** Accepted (2026-06-16)
+
+**Контекст:** P0-баг на staging — у студії гибового шаблону (corner_angle/l_bracket/
+z_bracket/wall_shelf) введення замалого значення плеча (напр. «1» при товщина+радіус
+= 4.5 мм) валило весь застосунок: controlled input → миттєве оновлення params →
+`useMemo` у Scene кличе `build*ShapeCommands` (`packages/ui/src/3d-viewport/geometry.ts`)
+→ assertion `throw` → **uncaught у React-дереві** → WebGL Context Lost → white-screen
+«Application error». Perforated_panel (без гибу) — імунний.
+
+**Рішення:** Три шари захисту:
+
+1. **Render-gate (основний):** новий чистий валідатор `validateProfile`
+   (`packages/cad-engine/src/validators/profile.ts`) — єдине джерело істини, що
+   **дзеркалить assertion'и `geometry.ts`** для всіх 4 шаблонів. Кожен viewport-wrapper
+   (`apps/web/src/components/*-viewport.tsx`) кличе його на (debounced) params і при
+   issues рендерить `InvalidParametersFallback` замість `<Canvas>` — throw не виникає.
+2. **R3FErrorBoundary (backstop):** класовий error-boundary (`packages/ui`) обгортає
+   сцену й ловить будь-який неочікуваний uncaught throw усередині R3F → дружній
+   fallback «3D-прев'ю тимчасово недоступне» + retry.
+3. **Form-gate + server parity:** студії/редактори показують банер + блокують експорт
+   (immediate params); Fastify-gate (`validateExportProfile`) і Python-worker
+   (`validate/profile.py`) валідують незалежно → 422 RFC 9457 (ADR-019 defense-in-depth).
+
+`validateProfile` повний паритет з `geometry.ts` (узгоджено): strictness точно як в
+assertion'ах — legs `leg >= t+r` (inclusive), z/wall flanges + offset + shelf строго
+`> threshold`. Прикрито property-тестами (fast-check TS 300 + hypothesis Python 300,
+спільний oracle).
+
+**Наслідки:**
+
+- (+) App не крашить через invalid params: render-gate не дає throw; boundary ловить
+  решту. Ясне UA-повідомлення замість white-screen.
+- (+) Один валідатор → клієнт (render-gate + банер) і сервер (Fastify + worker) ділять
+  логіку; не дублюється.
+- (−) Пер-шаблонний паритет із `geometry.ts` треба синхронізувати при зміні геометрії
+  білдерів (прикрито property-тестами + інваріантом CLAUDE.md §7).
+- (−) viewport валідує debounced-params, банер — immediate → короткий лаг між банером
+  і fallback'ом (прийнятно; debounce Phase 2.6 не чіпаємо).
+- ui-vitest отримав `jsx:automatic` + `.test.tsx` include (boundary-тест без DOM/нових
+  deps); web-stub доповнено `R3FErrorBoundary` (passthrough) + Scene-плейсхолдерами.
+
+**Альтернативи:**
+
+- Лише ErrorBoundary без render-gate — відхилено: boundary показав би загальний
+  «недоступне» без конкретної поради; render-gate дає точне «Збільшіть плече A до 4.5 мм».
+- Кешувати last-valid geometry (показувати попередню сцену при invalid) — відкладено
+  (L3, окремий PR): більший scope, не потрібен для усунення крашу.
+- Прибрати assertion'и з `geometry.ts` (не кидати) — відхилено: throw там — корисний
+  інваріант для unit-тестів білдерів; гасимо його gate'ом, а не послабленням контракту.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

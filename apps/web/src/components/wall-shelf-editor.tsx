@@ -1,5 +1,6 @@
 "use client";
 
+import { validateProfile } from "@flatcraft/cad-engine";
 import {
   WallShelfParametersBaseSchema,
   WallShelfParametersSchema,
@@ -52,9 +53,19 @@ export function WallShelfEditor({
     [value, materialCode, thicknessMm],
   );
 
+  // Hotfix 2.9.f (ADR-026): геометрична валідність профілю (back/shelf).
+  const profileIssues = useMemo(
+    () => validateProfile({ templateSlug: "wall_shelf", parameters: value, thicknessMm }),
+    [value, thicknessMm],
+  );
+
   const allErrors = useMemo(
-    () => [...matrixIssues.map((e) => e.message ?? e.code), ...zodErrors],
-    [matrixIssues, zodErrors],
+    () => [
+      ...profileIssues.map((i) => i.message),
+      ...matrixIssues.map((e) => e.message ?? e.code),
+      ...zodErrors,
+    ],
+    [profileIssues, matrixIssues, zodErrors],
   );
 
   const totalHoles = value.mount_hole_rows * value.mount_hole_cols;
