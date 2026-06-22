@@ -348,3 +348,144 @@ const BendSpec = z.object({ direction: z.enum(["up", "down"]).default("down") })
 | DXF/PDF/STEP у R2 | 90 днів від останнього скачування | scheduled job видаляє та оновлює exports.r2_keys                                        |
 | Backups           | 30 днів rolling                   | окремий R2 bucket з encryption-at-rest                                                  |
 | audit_log         | 1 рік                             | для security investigations                                                             |
+
+---
+
+## 8. Products (Phase 3.0)
+
+> Контекст: ADR-027 — Products як preset базового шаблону. Окрема таблиця (не дискримінатор у `templates`), слабкий зв'язок через `base_template_slug` (без FK). Composite products — відкладено до Phase 3.1.
+
+### products
+
+Готові вироби з обмеженим набором редагованих полів (preset базового шаблону). Користувач конфігурує лише `user_editable_fields`; решта параметрів — fixed виробником продукту.
+
+```sql
+CREATE TABLE products (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug                  TEXT UNIQUE NOT NULL,
+  name                  TEXT NOT NULL,
+  description           TEXT,
+  base_template_slug    TEXT NOT NULL,
+  fixed_parameters      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_editable_fields  TEXT[] NOT NULL,
+  preview_image_url     TEXT,
+  use_cases             TEXT[] NOT NULL DEFAULT '{}'::text[],
+  is_published          BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX products_published_idx ON products (is_published) WHERE is_published;
+CREATE INDEX products_base_template_idx ON products (base_template_slug);
+```
+
+**Поля.**
+
+| Поле                   | Тип             | Призначення                                                                                                            |
+| ---------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`                   | `uuid`          | uuid v4 (ADR-012); upgrade до v7 — окрема міграція                                                                     |
+| `slug`                 | `text` UNIQUE   | Стабільний ідентифікатор у URL `/products/<slug>` (наприклад, `perforated-panel-decorative`, `wall-shelf-custom`)      |
+| `name`                 | `text` NOT NULL | Юзер-friendly назва (UA), наприклад «Декоративна перфо-панель»                                                         |
+| `description`          | `text`          | Markdown-опис у каталозі та на сторінці продукту                                                                       |
+| `base_template_slug`   | `text` NOT NULL | Семантичний зв'язок з `templates.slug` (slug, не FK — templates можуть жити у seed/code, ADR-027 Рішення 1)            |
+| `fixed_parameters`     | `jsonb`         | Параметри, які виробник фіксує (наприклад, `{"hole_shape": "square", "thickness_mm": 2}`); валідуються Zod-валідатором |
+| `user_editable_fields` | `text[]`        | Список полів зі схеми `base_template_slug`, які користувач редагує; решта береться з `fixed_parameters`                |
+| `preview_image_url`    | `text`          | URL до PNG-рендера у `apps/web/public/product-previews/<slug>.png` (генерується через скрипт)                          |
+| `use_cases`            | `text[]`        | Теги для майбутньої фільтрації каталогу (наприклад, `["дім", "офіс", "інтер'єр"]`)                                     |
+| `is_published`         | `boolean`       | False → не видно у `/products` listing; для draft'ів і staging                                                         |
+| `created_at`           | `timestamptz`   |                                                                                                                        |
+| `updated_at`           | `timestamptz`   | Оновлюється тригером або на коді при PATCH'і (для майбутніх admin-операцій)                                            |
+
+### Зв'язок з `templates`
+
+**Семантичний slug-зв'язок, без FK constraint.** Причини (ADR-027 Рішення 1):
+
+- Шаблони ідентифікуються `slug`'ом (а не uuid) у Python-worker'і: `templates/<slug>.py`. slug — primary identifier у коді.
+- Не всі templates мусять бути у БД як рядки: вони можуть жити лише у seed/Python. FK constraint змусив би гарантувати DB-присутність.
+- Цілісність перевіряється **Zod-валідатором seed'а** (`packages/types/src/products/`): `base_template_slug` має існувати у відомому списку templates; `user_editable_fields[]` мають бути ключами у `template.parameters_schema`.
+
+```
+products.base_template_slug ──semantic──> templates.slug (UNIQUE)
+                            ──validator──> known template slugs
+```
+
+### Інваріанти (перевіряються у seed-валідаторі та API)
+
+- `base_template_slug` ∈ відомий список templates.
+- Кожне `user_editable_fields[i]` — валідний ключ у `template.parameters_schema` (cross-перевірка перед insert).
+- `fixed_parameters` JSON-валідний; його ключі НЕ перетинаються з `user_editable_fields` (інакше product має дві джерела істини для одного поля → undefined behavior).
+- `user_editable_fields` НЕ порожній (інакше product — це просто fixed export-template, не потребує studio-flow → seed-валідатор fail).
+- `slug` — kebab-case ASCII, відповідає URL-pattern `[a-z][a-z0-9-]*`.
+
+### Приклад seed-запису
+
+```yaml
+slug: perforated-panel-decorative
+name: Декоративна перфо-панель
+description: |
+  Стильна декоративна перфо-панель для інтер'єру.
+  Налаштуйте ширину, висоту і параметри сітки отворів.
+base_template_slug: perforated_panel_square # новий base-шаблон, ADR-027 Рішення 6
+fixed_parameters:
+  thickness_mm: 1.5
+  material_code: cold_rolled_steel
+user_editable_fields:
+  - width_mm
+  - height_mm
+  - hole_diameter_mm
+  - pitch_x_mm
+  - pitch_y_mm
+  - margin_mm
+preview_image_url: /product-previews/perforated-panel-decorative.png
+use_cases:
+  - "інтер'єр"
+  - офіс
+  - дім
+is_published: true
+```
+
+```yaml
+slug: wall-shelf-custom
+name: Кастомна настінна полиця
+description: |
+  Полиця для дому або офісу з перфорованими боковинами
+  і ребром жорсткості. Налаштуйте ширину, глибину і параметри перфорації.
+base_template_slug: enclosed_shelf # новий base-шаблон, ADR-027 Рішення 5
+fixed_parameters:
+  thickness_mm: 2.0
+  bend_radius_mm: 2.5
+  material_code: cold_rolled_steel
+  side_perforation:
+    hole_diameter_mm: 6
+    pitch_y_mm: 25
+    margin_mm: 15
+  stiffening_rib:
+    height_mm: 20
+user_editable_fields:
+  - width_mm
+  - depth_mm
+  - material_code
+  - side_perforation.hole_diameter_mm
+  - side_perforation.pitch_x_mm
+preview_image_url: /product-previews/wall-shelf-custom.png
+use_cases:
+  - дім
+  - офіс
+is_published: true
+```
+
+> Підтримка nested-полів у `user_editable_fields` (наприклад, `side_perforation.hole_diameter_mm`) — через dot-notation. AutoForm `visible_fields` filter резолвить nested через path-traversal. Якщо `side_perforation` як цілий об'єкт у `fixed_parameters` встановлений, а user редагує тільки одне sub-поле — merge відбувається на API-рівні через `resolveProductParams(fixed, userInput)` pure-helper.
+
+### Майбутня еволюція (Phase 3.1 — composite, ADR-027 Рішення 7)
+
+Композитні вироби додаються non-breaking через discriminator у `ProductSchema`:
+
+```sql
+ALTER TABLE products ADD COLUMN is_composite BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN components JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE products ADD COLUMN assembly_instructions_url TEXT;
+```
+
+Для single products (Phase 3.0): `is_composite=false`, `components=[]`, `assembly_instructions_url=NULL`. Для composite (Phase 3.1): `components: ComponentSpec[]` з `{base_template_slug, fixed_parameters, count, position?}`. Existing single products не торкаються.
+
+---
