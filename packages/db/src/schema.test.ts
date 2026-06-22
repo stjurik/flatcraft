@@ -140,3 +140,76 @@ describe("schema — audit_log", () => {
     expect(cfg.columns.find((c) => c.name === "action")?.notNull).toBe(true);
   });
 });
+
+describe("schema — products (Phase 3.0, ADR-027)", () => {
+  it("має таблицю products з очікуваним набором колонок", () => {
+    const cfg = getTableConfig(schema.products);
+    expect(cfg.name).toBe("products");
+    const colNames = cfg.columns.map((c) => c.name);
+    expect(colNames).toEqual(
+      expect.arrayContaining([
+        "id",
+        "slug",
+        "name",
+        "description",
+        "base_template_slug",
+        "fixed_parameters",
+        "user_editable_fields",
+        "preview_image_url",
+        "use_cases",
+        "is_published",
+        "created_at",
+        "updated_at",
+      ]),
+    );
+  });
+
+  it("slug — UNIQUE NOT NULL (primary identifier у URL)", () => {
+    const cfg = getTableConfig(schema.products);
+    const slug = cfg.columns.find((c) => c.name === "slug");
+    expect(slug?.notNull).toBe(true);
+    expect(slug?.isUnique).toBe(true);
+  });
+
+  it("НЕ має FK на templates (зв'язок через base_template_slug — semantic, ADR-027 Рішення 1)", () => {
+    const cfg = getTableConfig(schema.products);
+    expect(cfg.foreignKeys).toHaveLength(0);
+  });
+
+  it("base_template_slug — NOT NULL (вимога цілісності, перевіряється seed-валідатором)", () => {
+    const cfg = getTableConfig(schema.products);
+    const baseTpl = cfg.columns.find((c) => c.name === "base_template_slug");
+    expect(baseTpl?.notNull).toBe(true);
+  });
+
+  it("user_editable_fields — text[] NOT NULL (масив імен полів зі схеми шаблону)", () => {
+    const cfg = getTableConfig(schema.products);
+    const editable = cfg.columns.find((c) => c.name === "user_editable_fields");
+    expect(editable?.notNull).toBe(true);
+    // Drizzle тип PgArray — структурно перевіряємо через `getSQLType` або `dataType`.
+    expect(editable?.dataType).toBe("array");
+  });
+
+  it("fixed_parameters — jsonb NOT NULL з default {} (preset виробника)", () => {
+    const cfg = getTableConfig(schema.products);
+    const fixed = cfg.columns.find((c) => c.name === "fixed_parameters");
+    expect(fixed?.notNull).toBe(true);
+    expect(fixed?.dataType).toBe("json");
+  });
+
+  it("is_published — boolean NOT NULL default false (drafts невидимі)", () => {
+    const cfg = getTableConfig(schema.products);
+    const pub = cfg.columns.find((c) => c.name === "is_published");
+    expect(pub?.notNull).toBe(true);
+    expect(pub?.default).toBe(false);
+  });
+
+  it("має 2 індекси: products_published_idx (partial) і products_base_template_idx", () => {
+    const cfg = getTableConfig(schema.products);
+    const indexNames = cfg.indexes.map((i) => i.config.name);
+    expect(indexNames).toEqual(
+      expect.arrayContaining(["products_published_idx", "products_base_template_idx"]),
+    );
+    expect(cfg.indexes.length).toBeGreaterThanOrEqual(2);
+  });
+});

@@ -23,6 +23,7 @@ import {
 
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
+import { seedProducts } from "./seed-products.js";
 
 // ─── Матеріали (doc/05 §4) ─────────────────────────────────────────────────
 export interface MaterialSeed {
@@ -180,6 +181,7 @@ export async function runSeed(options: RunSeedOptions = {}): Promise<void> {
   try {
     await seedMaterialsAndThicknesses(client);
     await seedTemplates(client);
+    await seedProducts(client);
   } finally {
     await client.close();
   }
