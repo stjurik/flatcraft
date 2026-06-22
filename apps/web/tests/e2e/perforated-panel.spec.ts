@@ -9,7 +9,7 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     await page
       .locator('[data-testid="template-card"][data-slug="perforated_panel"]')
       .getByTestId("template-card-cta")
