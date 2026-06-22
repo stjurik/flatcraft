@@ -121,6 +121,30 @@
 
 ---
 
+## Phase 3.0. Products Catalog — ~3.5 тижні (target 2026-07-16)
+
+> **Контекст (ADR-027):** UX-shift від CAD-інструменту до сервісу. Каталог `/templates` стає двомодовим (Вироби | Деталі). Нова сутність `product` — preset базового шаблону з обмеженим набором редагованих полів. Два перші вироби: декоративна перфо-панель і кастомна настінна полиця.
+
+**Definition of Done:** на staging відкриваються URL `/templates?tab=products` (default) і `/products/perforated-panel-decorative` / `/products/wall-shelf-custom`; обидва вироби expor'ують DXF (2 шари, ADR-024) + PDF (з ізометрією, ADR-025); existing 5 part-шаблонів працюють без regressions; усі інваріанти (ADR-019/022/024/026, CLAUDE.md §7) збережені.
+
+**Архітектурні рішення локнуті у ADR-027** (7 рішень, кожне з ALT/CHOICE/RATIONALE/CONSEQUENCES). Sub-PR'и нижче виконуються послідовно з manual review pause між кожним.
+
+- [ ] **3.0.PR1.** `docs/phase-3-architecture` — цей PR. ADR-027 + Roadmap-секція + Data Model preview + API Contract preview. Без коду.
+- [ ] **3.0.PR2.** `feat/products-data-model` — Drizzle `products` таблиця + міграція `0001_*.sql` + Zod `ProductSummary`/`ProductDetail` у `packages/types/src/products/` + pure helpers `resolveProductParams`/`filterSchemaByVisibleFields` + seed-структура + API `GET /products` і `GET /products/:slug`.
+- [ ] **3.0.PR3.** `feat/catalog-toggle` — `<SegmentedControl>` primitive у `@flatcraft/ui` + `templates/page.tsx` з server-side parallel fetch `/templates`+`/products` + query param `?tab=products|parts` (default `products`) + `ProductCard` (app-local). Existing 5 cards без змін.
+- [ ] **3.0.PR4.** `refactor/studio-mode-prop` — extract `<TemplateStudio mode="part"|"product" ...>` у `apps/web/src/components/`; refactor 5 existing `*-studio.tsx` через `mode="part"`; AutoForm у `@flatcraft/ui/parameter-form` отримує `visible_fields?: string[]` prop. Регресія-guard на existing flow.
+- [ ] **3.0.PR5.** `feat/perforated-panel-square-template` — новий базовий шаблон `perforated_panel_square` (повна pipeline: Zod + Pydantic + CadQuery builder + R3F scene + studio + editor + tests; LWPOLYLINE 4 vertices на LASER_CUT color 5; PDF callout «□ N» замість «Ø N»). `is_published: false` у seed templates (base only). **Не extension existing perforated_panel** (ADR-027 Рішення 6).
+- [ ] **3.0.PR6.** `feat/product-decorative-perforated-panel` — seed `slug: 'perforated-panel-decorative'`, `base_template_slug: 'perforated_panel_square'`, `user_editable_fields: ['width_mm', 'height_mm', 'hole_diameter_mm', 'pitch_x_mm', 'pitch_y_mm', 'material_code']`, `use_cases: ["інтер'єр", 'офіс', 'дім']`, `is_published: true`. Route `/products/perforated-panel-decorative`. PNG preview (placeholder ОК — real generation у PR 8).
+- [ ] **3.0.PR7.** `feat/enclosed-shelf-template` — новий базовий шаблон `enclosed_shelf` (4-сегментний box back+bottom+2 sides з опційними `side_perforation: {hole_diameter_mm, pitch_x_mm, pitch_y_mm, margin_mm} | null` і `stiffening_rib: {height_mm} | null`). Geometрія: `depth_mm` водночас висота back AND розмір кожної боковини. Server validators (`validateProfile`/bend matrix/sheet bounds/holes margins) + R3F scene з conditional rib і perforation overlay. `is_published: false`.
+- [ ] **3.0.PR8.** `feat/product-custom-wall-shelf` — seed `slug: 'wall-shelf-custom'`, `base_template_slug: 'enclosed_shelf'`, `fixed_parameters: {thickness_mm: 2, bend_radius_mm: 2.5, side_perforation: {...}, stiffening_rib: {height_mm: 20}}`, `user_editable_fields: ['width_mm', 'depth_mm', 'material_code', 'side_perforation.hole_diameter_mm', 'side_perforation.pitch_x_mm']`, `use_cases: ['дім', 'офіс']`, `is_published: true`. Route `/products/wall-shelf-custom`. Новий `tools/scripts/generate-product-previews.ts` (Phase 2.16.b style) → PNG для обох products.
+- [ ] **3.0.PR9.** `docs/phase-3-progress-log` — повний запис у `docs/13_PROGRESS_LOG.md`, ротація CLAUDE.md §13 «Останні 3 milestones», manual smoke на staging.
+
+**Тестовий budget:** pytest 249 → ~290-310 (новий enclosed_shelf, perforated_panel_square, product validators); cad-engine TS 63 → ~85; ui TS 70 → ~95; web TS 47 → ~70; api TS 35 → ~50; e2e 92 → ~115. Existing — green throughout усіх PR (regression-guard).
+
+**Інваріант open/closed (ADR-027):** після Phase 3.0 додавання 3-го виробу = тільки seed entry + render PNG. Жодних змін у компонентах студії/форми/router — за умови, що `base_template_slug` вже існує.
+
+---
+
 ## Phase 3. Auth & Limits (v1.1, conditional) — 2 тижні
 
 > ⏸ **Відкладено (ADR-020).** Активується лише коли спрацюють тригери: >5 ботів/тиждень на CF WAF, або >3 unique users просять «зберегти draft». До того — soft-launch (Phase X.1).
