@@ -5,7 +5,7 @@
 import { L_BRACKET_DEFAULT_PARAMETERS, type ExportRequest } from "@flatcraft/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, createExport } from "./api";
+import { ApiError, createExport, fetchPublishedProducts } from "./api";
 
 const REQUEST: ExportRequest = {
   template_slug: "l_bracket",
@@ -78,5 +78,34 @@ describe("createExport — RFC 9457 parsing", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(500);
     expect(err.message).toContain("500");
+  });
+});
+
+describe("fetchPublishedProducts — Phase 3.0 PR 3", () => {
+  it("повертає masked Summary items при 200", async () => {
+    mockFetch(200, {
+      items: [
+        {
+          slug: "perforated-panel-decorative",
+          name: "Декоративна перфо-панель",
+          description: "Стильна декоративна.",
+          baseTemplateSlug: "perforated_panel_square",
+          previewImageUrl: "/product-previews/perforated-panel-decorative.png",
+          useCases: ["інтер'єр"],
+          isPublished: true,
+        },
+      ],
+    });
+    const products = await fetchPublishedProducts();
+    expect(products).toHaveLength(1);
+    expect(products[0]?.slug).toBe("perforated-panel-decorative");
+    expect(products[0]?.baseTemplateSlug).toBe("perforated_panel_square");
+  });
+
+  it("кидає ApiError при 500", async () => {
+    mockFetch(500, { error: "internal" });
+    const err = (await fetchPublishedProducts().catch((e) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(500);
   });
 });

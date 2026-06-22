@@ -11,12 +11,14 @@ import {
   ExportJobEventSchema,
   ExportRequestSchema,
   MaterialListResponseSchema,
+  ProductListResponseSchema,
   TemplateDetailSchema,
   TemplateListResponseSchema,
   type ExportJobAccepted,
   type ExportJobEvent,
   type ExportRequest,
   type MaterialChoice,
+  type ProductSummary,
   type TemplateDetail,
   type TemplateSummary,
 } from "@flatcraft/types";
@@ -48,6 +50,24 @@ export async function fetchPublishedTemplates(): Promise<TemplateSummary[]> {
   }
   const json = await res.json();
   const parsed = TemplateListResponseSchema.parse(json);
+  return parsed.items;
+}
+
+/**
+ * Phase 3.0 PR 3: каталог-toggle. Server-side fetch перед рендером
+ * `/templates?tab=products`. Якщо API повертає 404/500 — кидаємо ApiError,
+ * сторінка показує банер «не вдалося завантажити» (як для templates).
+ */
+export async function fetchPublishedProducts(): Promise<ProductSummary[]> {
+  const res = await fetch(`${SERVER_API_BASE_URL}/products`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError(`Failed to fetch /products: ${res.status}`, res.status);
+  }
+  const json = await res.json();
+  const parsed = ProductListResponseSchema.parse(json);
   return parsed.items;
 }
 
