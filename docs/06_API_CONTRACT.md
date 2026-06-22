@@ -308,6 +308,147 @@ errors:
 
 ---
 
+## 5.5. Products (Phase 3.0)
+
+> Контекст: ADR-027 — Products як preset базового шаблону. Окремий resource від `/templates`, окремі endpoints (Рішення 1 + 2). Composite products — відкладено до Phase 3.1 (Рішення 7), у Phase 3.0 повертається лише single-base shape.
+
+### GET /v1/products
+
+Listing виробів. Public, без auth (Phase X.1 soft-launch).
+
+**Query params:**
+
+- `is_published=true` (default) — показувати тільки опубліковані. `false`/відсутній — як у `/templates`, доступне лише адмінам (🚧 v1.1+).
+- `use_case=<tag>` — фільтр по тегу use_case (наприклад, `?use_case=дім`). Опційний, без фільтра — всі.
+- `base_template_slug=<slug>` — фільтр по базовому шаблону (наприклад, `?base_template_slug=enclosed_shelf` для відображення всіх продуктів на основі певного шаблону).
+
+**Response 200:**
+
+```json
+{
+  "items": [
+    {
+      "slug": "perforated-panel-decorative",
+      "name": "Декоративна перфо-панель",
+      "description": "Стильна декоративна перфо-панель для інтер'єру...",
+      "base_template_slug": "perforated_panel_square",
+      "preview_image_url": "/product-previews/perforated-panel-decorative.png",
+      "use_cases": ["інтер'єр", "офіс", "дім"]
+    },
+    {
+      "slug": "wall-shelf-custom",
+      "name": "Кастомна настінна полиця",
+      "description": "Полиця для дому або офісу з перфорованими боковинами...",
+      "base_template_slug": "enclosed_shelf",
+      "preview_image_url": "/product-previews/wall-shelf-custom.png",
+      "use_cases": ["дім", "офіс"]
+    }
+  ]
+}
+```
+
+`fixed_parameters` і `user_editable_fields` НЕ повертаються у listing — лише у `GET /products/:slug` (масковані для каталогу).
+
+### GET /v1/products/{slug}
+
+Деталь продукту для studio-flow.
+
+**Response 200:**
+
+```json
+{
+  "slug": "perforated-panel-decorative",
+  "name": "Декоративна перфо-панель",
+  "description": "...",
+  "base_template": {
+    "slug": "perforated_panel_square",
+    "name": "Перфорована панель (квадратні отвори)",
+    "parameters_schema": { "...": "Zod-as-JSON-Schema" },
+    "default_parameters": { "width_mm": 200, ... }
+  },
+  "fixed_parameters": {
+    "thickness_mm": 1.5,
+    "material_code": "cold_rolled_steel"
+  },
+  "user_editable_fields": [
+    "width_mm",
+    "height_mm",
+    "hole_diameter_mm",
+    "pitch_x_mm",
+    "pitch_y_mm",
+    "margin_mm"
+  ],
+  "preview_image_url": "/product-previews/perforated-panel-decorative.png",
+  "use_cases": ["інтер'єр", "офіс", "дім"]
+}
+```
+
+**Помилки:**
+
+- `404 PRODUCT_NOT_FOUND` — slug не знайдено або `is_published=false`.
+- `422 UNSUPPORTED_BASE_TEMPLATE` — `base_template_slug` посилається на template, якого нема у відомому списку. Це інваріант, який має бути порушений лише при corrupted seed; перевіряється seed-валідатором перед deploy. У runtime — 422 з вказівкою на проблемний slug.
+
+### POST /v1/exports — розширення для product-mode
+
+`POST /v1/exports` приймає **обидва формати**:
+
+**1. Template-mode (existing, без змін):**
+
+```yaml
+request:
+  template_slug: "perforated_panel" # або інший шаблон
+  parameters: { width_mm: 200, ... }
+  material_code: "cold_rolled_steel"
+  formats: ["dxf", "pdf"]
+```
+
+**2. Product-mode (новий, Phase 3.0):**
+
+```yaml
+request:
+  product_slug: "perforated-panel-decorative"
+  parameters: { width_mm: 250, height_mm: 300, ... } # лише user_editable_fields
+  formats: ["dxf", "pdf"]
+```
+
+**Server-side resolution (product-mode):**
+
+1. Lookup `product` за `product_slug` → 404 якщо не знайдено.
+2. Виклик `resolveProductParams(product.fixed_parameters, request.parameters)` (pure-helper у `@flatcraft/types/products`) → повний об'єкт параметрів.
+3. Перевірка, що `request.parameters` містить тільки ключі з `product.user_editable_fields` → 422 якщо є зайві (захист від обходу fixed_parameters).
+4. Перевірка через `validateExportProfile` (ADR-026) + `validateExportBends` (ADR-019, ADR-022) проти `base_template`'s schema. Server-gate інваріант лишається.
+5. Forward у cad-worker як стандартний template-mode payload з `template_slug = product.base_template_slug` (worker не знає про products — `material_code` strip за ADR-018, потім normal flow).
+
+**Discriminated request shape (Zod):**
+
+```ts
+ExportRequest = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("template"), template_slug, parameters, material_code, formats }),
+  z.object({ kind: z.literal("product"), product_slug, parameters, formats }),
+]);
+```
+
+`kind` — auto-derived з присутності `template_slug` vs `product_slug` (для backward-compat існуючих клієнтів — без явного `kind`).
+
+**Типові помилки (на додаток до RFC 9457 загальних з §0):**
+
+| HTTP  | `code`                                | Поле                        | Коли                                                                                                              |
+| ----- | ------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `404` | `PRODUCT_NOT_FOUND`                   | `product_slug`              | Product за slug'ом не знайдено або `is_published=false`                                                           |
+| `422` | `UNSUPPORTED_BASE_TEMPLATE`           | `base_template_slug`        | Product вказує на template, якого нема у системі (corrupted seed)                                                 |
+| `422` | `INVALID_USER_INPUT`                  | `parameters.<key>`          | `request.parameters` містить ключ, якого нема у `product.user_editable_fields` — спроба обійти `fixed_parameters` |
+| `422` | inherited (`RADIUS_NOT_ALLOWED` тощо) | `parameters.bend_radius_mm` | Resolved params (fixed + user) валідуються через bend matrix (ADR-019); ті ж коди, що для template-mode           |
+
+> **Інваріант:** product-mode validation відбувається **проти `base_template`'s parameters_schema** на повних resolved params (не лише `user_editable_fields`). Тобто навіть якщо `bend_radius_mm` зафіксований у `fixed_parameters`, він все одно перевіряється проти матриці — на випадок, якщо seed-валідатор пропустив, або YAML-матриця змінилася після створення продукту.
+
+### Майбутні endpoints (🚧 v1.1+)
+
+- `POST /v1/admin/products` — CRUD для адміна (потребує auth + role, ADR-020).
+- `GET /v1/products/{slug}/bom` — preview BOM до експорту (без витрачання quota).
+- Composite-shape у response (Phase 3.1, ADR-027 Рішення 7).
+
+---
+
 ## 6. Donations
 
 > 🚧 **v1.1+ planned — не реалізовано у MVP.** У soft-launch донати на ЗСУ — почесна система: прямі лінки (Monobank банка, UNITED24) у post-export CTA і на `/about`, без `donation_claims`/unlock-flow. Активується при тригері ADR-020 (>$50/міс). `/v1/uploads` (proof) також лишається v1.1+.
