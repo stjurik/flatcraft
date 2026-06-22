@@ -26,6 +26,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "fast-check": "^4",
     "vitest": "^2.1.2"
   }
 }

@@ -32,6 +32,22 @@ export interface AutoFormProps<TValues extends Record<string, unknown>> {
   readonly groups?: AutoFormGroups;
   /** Як називати дефолтну групу для незгрупованих полів. Default — «Загальне». */
   readonly defaultGroupLabel?: string;
+  /**
+   * Phase 3.0 PR 4 (ADR-027 Рішення 4): filter top-level fields для product-mode.
+   *
+   * Поведінка:
+   *   - `undefined` (дефолт) — рендерити всі поля схеми (як було до PR 4).
+   *   - `string[]` — рендерити ТІЛЬКИ поля, чиї імена є у списку. Порядок
+   *     рендеру — як у Zod-схемі (не у visibleFields), щоб groups з ADR-017
+   *     лишалися стабільні.
+   *   - Невідомі імена (нема у схемі) — тихо ігноруються; перевірка валідності
+   *     `user_editable_fields` — у seed-валідаторі (`filterSchemaByVisibleFields`).
+   *
+   * Не мутує схему (ADR-027 Рішення 4: «pure data transformation» — простіше
+   * за preprocess Zod-схеми, не ламає `.refine()` cross-field, як wall_shelf
+   * `front_lip` 0 або ≥5).
+   */
+  readonly visibleFields?: readonly string[];
 }
 
 // Phase 2.11 tokens — лише warm-industrial, без zinc/red hardcoded.
@@ -65,8 +81,18 @@ export function AutoForm<TValues extends Record<string, unknown>>({
   renderField,
   groups,
   defaultGroupLabel = "Загальне",
+  visibleFields,
 }: AutoFormProps<TValues>) {
-  const descriptors = useMemo(() => introspectSchema(schema), [schema]);
+  const allDescriptors = useMemo(() => introspectSchema(schema), [schema]);
+
+  // Phase 3.0 PR 4: visible_fields filter (ADR-027 Рішення 4). undefined → all;
+  // string[] → лише ті, що у списку. Порядок зберігається з descriptors —
+  // щоб groups (ADR-017) залишалися стабільні.
+  const descriptors = useMemo(() => {
+    if (!visibleFields) return allDescriptors;
+    const set = new Set(visibleFields);
+    return allDescriptors.filter((d) => set.has(d.name));
+  }, [allDescriptors, visibleFields]);
 
   const setField = (name: string, next: unknown) => {
     onChange({ ...value, [name]: next } as TValues);
