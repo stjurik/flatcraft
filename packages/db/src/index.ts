@@ -21,3 +21,10 @@ export {
   type RunSeedOptions,
   type TemplateSeed,
 } from "./seed.js";
+export {
+  runSeedProducts,
+  SEED_PRODUCTS,
+  seedProducts,
+  type ProductSeed,
+  type RunSeedProductsOptions,
+} from "./seed-products.js";

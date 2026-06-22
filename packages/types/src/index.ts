@@ -9,4 +9,5 @@
 export const TYPES_PACKAGE_VERSION = "0.0.0" as const;
 
 export * from "./domain/index.js";
+export * from "./products/index.js";
 export * from "./templates/index.js";
