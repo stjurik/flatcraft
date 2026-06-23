@@ -44,6 +44,29 @@ export const SEED_PRODUCTS: ReadonlyArray<ProductSeed> = [
     useCases: [],
     isPublished: false,
   },
+  {
+    // Phase 3.0 PR 6 (ADR-027 Рішення 6): перший публічний product. Preset
+    // над base шаблоном `perforated_panel_square` (PR 5). Усі геометричні
+    // параметри лишаються редаговані; material обирається у студії окремо.
+    // previewImageUrl — null до PR 8 (generate-product-previews.ts).
+    slug: "perforated-panel-decorative",
+    name: "Декоративна перфо-панель",
+    description:
+      "Стильна декоративна панель з квадратними отворами для інтер'єру, офісу та дому. Налаштуйте розмір, крок отворів і матеріал — отримайте готові креслення для лазерного різання.",
+    baseTemplateSlug: "perforated_panel_square",
+    fixedParameters: {},
+    userEditableFields: [
+      "length_mm",
+      "width_mm",
+      "hole_size_mm",
+      "pitch_x_mm",
+      "pitch_y_mm",
+      "margin_mm",
+    ],
+    previewImageUrl: null,
+    useCases: ["інтер'єр", "офіс", "дім"],
+    isPublished: true,
+  },
 ];
 
 export async function seedProducts(client: DatabaseClient): Promise<void> {
