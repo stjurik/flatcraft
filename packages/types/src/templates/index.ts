@@ -38,3 +38,13 @@ export {
   PerforatedPanelSquareParametersSchema,
   type PerforatedPanelSquareParameters,
 } from "./perforated-panel-square.js";
+
+export {
+  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+  EnclosedShelfParametersSchema,
+  EnclosedShelfSidePerforationSchema,
+  EnclosedShelfStiffeningRibSchema,
+  type EnclosedShelfParameters,
+  type EnclosedShelfSidePerforation,
+  type EnclosedShelfStiffeningRib,
+} from "./enclosed-shelf.js";

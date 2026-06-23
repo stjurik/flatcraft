@@ -15,6 +15,7 @@
  */
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
+  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
@@ -182,6 +183,21 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     // лише через products (PR 6 — декоративна перфо-панель).
     isPublished: false,
     defaultParameters: PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+    previewImageUrl: null,
+  },
+  {
+    slug: "enclosed_shelf",
+    nameUk: "Закрита полиця (cross-розгортка)",
+    nameEn: "Enclosed shelf (cross-unfold)",
+    descriptionUk:
+      "Базовий шаблон 4-сторонньої полиці (back + bottom + 2 квадратні бокові). Опційні features: side perforation, stiffening rib. Phase 3.0 PR 7 (ADR-027 Рішення 5).",
+    descriptionEn:
+      "Base 4-sided shelf template (back + bottom + 2 square sides). Optional features: side perforation, stiffening rib. Phase 3.0 PR 7.",
+    // PR 7a: типи + Pydantic + seed. Builder/unfold/export — PR 7b/7c.
+    // Не публікується у каталозі — споживається лише через products (PR 8 —
+    // кастомна настінна полиця).
+    isPublished: false,
+    defaultParameters: ENCLOSED_SHELF_DEFAULT_PARAMETERS,
     previewImageUrl: null,
   },
 ];

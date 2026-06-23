@@ -59,8 +59,8 @@ describe("STANDARD_THICKNESSES_MM", () => {
 });
 
 describe("SEED_TEMPLATES", () => {
-  it("містить 6 шаблонів (Phase 2.10 × 5 + Phase 3.0 PR5 perforated_panel_square)", () => {
-    expect(SEED_TEMPLATES).toHaveLength(6);
+  it("містить 7 шаблонів (5 published part + 2 unpublished base для products)", () => {
+    expect(SEED_TEMPLATES).toHaveLength(7);
   });
 
   it("Phase 2.10 шаблони опубліковано у каталозі", () => {
@@ -80,6 +80,7 @@ describe("SEED_TEMPLATES", () => {
     const slugs = SEED_TEMPLATES.map((t) => t.slug).sort();
     expect(slugs).toEqual([
       "corner_angle",
+      "enclosed_shelf",
       "l_bracket",
       "perforated_panel",
       "perforated_panel_square",
@@ -173,8 +174,22 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
-  it("perforated_panel_square — єдиний unpublished (base для products, Phase 3.0 PR 5)", () => {
-    const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished).map((t) => t.slug);
-    expect(unpublished).toEqual(["perforated_panel_square"]);
+  it("enclosed_shelf defaultParameters містить cross-shelf поля", () => {
+    const es = SEED_TEMPLATES.find((t) => t.slug === "enclosed_shelf");
+    expect(es?.defaultParameters).toMatchObject({
+      width_mm: expect.any(Number),
+      depth_mm: expect.any(Number),
+      bend_radius_mm: expect.any(Number),
+      bend_angle_deg: 90,
+      side_perforation: null,
+      stiffening_rib: null,
+    });
+  });
+
+  it("unpublished — лише base-шаблони для products (perforated_panel_square + enclosed_shelf)", () => {
+    const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished)
+      .map((t) => t.slug)
+      .sort();
+    expect(unpublished).toEqual(["enclosed_shelf", "perforated_panel_square"]);
   });
 });
