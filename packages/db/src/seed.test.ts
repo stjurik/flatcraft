@@ -59,11 +59,11 @@ describe("STANDARD_THICKNESSES_MM", () => {
 });
 
 describe("SEED_TEMPLATES", () => {
-  it("містить 5 шаблонів", () => {
-    expect(SEED_TEMPLATES).toHaveLength(5);
+  it("містить 6 шаблонів (Phase 2.10 × 5 + Phase 3.0 PR5 perforated_panel_square)", () => {
+    expect(SEED_TEMPLATES).toHaveLength(6);
   });
 
-  it("усі 5 шаблонів опубліковано (Phase 2.10 повністю закрита)", () => {
+  it("Phase 2.10 шаблони опубліковано у каталозі", () => {
     const published = SEED_TEMPLATES.filter((t) => t.isPublished)
       .map((t) => t.slug)
       .sort();
@@ -76,12 +76,13 @@ describe("SEED_TEMPLATES", () => {
     ]);
   });
 
-  it("slug-и унікальні і відповідають roadmap Phase 2.10", () => {
+  it("slug-и унікальні і відповідають Phase 2.10 + 3.0", () => {
     const slugs = SEED_TEMPLATES.map((t) => t.slug).sort();
     expect(slugs).toEqual([
       "corner_angle",
       "l_bracket",
       "perforated_panel",
+      "perforated_panel_square",
       "wall_shelf",
       "z_bracket",
     ]);
@@ -160,8 +161,20 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
-  it("більше немає шаблонів з isPublished=false (Phase 2.10 закрита)", () => {
-    const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished);
-    expect(unpublished).toHaveLength(0);
+  it("perforated_panel_square defaultParameters містить square-hole поля", () => {
+    const sq = SEED_TEMPLATES.find((t) => t.slug === "perforated_panel_square");
+    expect(sq?.defaultParameters).toMatchObject({
+      length_mm: expect.any(Number),
+      width_mm: expect.any(Number),
+      hole_size_mm: expect.any(Number),
+      pitch_x_mm: expect.any(Number),
+      pitch_y_mm: expect.any(Number),
+      margin_mm: expect.any(Number),
+    });
+  });
+
+  it("perforated_panel_square — єдиний unpublished (base для products, Phase 3.0 PR 5)", () => {
+    const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished).map((t) => t.slug);
+    expect(unpublished).toEqual(["perforated_panel_square"]);
   });
 });

@@ -154,7 +154,7 @@ def validate_export(
     Шаблони без гибів (perforated_panel) → []. Усі гиби в межах шаблону мають
     однаковий (радіус, кут), тож одного виклику validate_bend достатньо.
     """
-    if template_slug == "perforated_panel":
+    if template_slug in ("perforated_panel", "perforated_panel_square"):
         return []
 
     radius = parameters.get("bend_radius_mm")

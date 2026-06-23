@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
+from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 
@@ -35,6 +36,7 @@ FinishedDimsParams = (
     | ZBracketBuildParameters
     | WallShelfBuildParameters
     | PerforatedPanelBuildParameters
+    | PerforatedPanelSquareBuildParameters
 )
 
 
@@ -82,6 +84,13 @@ def compute_finished_dimensions(
             z_mm=params.width_mm,
         )
     if isinstance(params, PerforatedPanelBuildParameters) and template_slug == "perforated_panel":
+        return FinishedDimensions(
+            x_mm=params.length_mm, y_mm=params.width_mm, z_mm=params.thickness_mm
+        )
+    if (
+        isinstance(params, PerforatedPanelSquareBuildParameters)
+        and template_slug == "perforated_panel_square"
+    ):
         return FinishedDimensions(
             x_mm=params.length_mm, y_mm=params.width_mm, z_mm=params.thickness_mm
         )

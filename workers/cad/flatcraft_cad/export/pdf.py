@@ -69,6 +69,7 @@ from flatcraft_cad.materials.industry_names import format_material_label
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
+from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
@@ -76,6 +77,7 @@ from flatcraft_cad.unfold import (
     UnfoldedCornerAngle,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
+    UnfoldedPerforatedPanelSquare,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -211,6 +213,9 @@ def _draw_hole_dims(
     c.setFillColorRGB(0.8, 0.2, 0.2)
     c.setLineWidth(0.3)
     c.setFont("DejaVuSans", 7)
+    # Phase 3.0 PR 5 (ADR-027 Рішення 6): square holes → '□' замість 'Ø'.
+    # `diameter_mm` для square означає side length.
+    prefix = "□" if (holes and holes[0].shape == "square") else "Ø"
     for hole in targets:
         cx = x0_pt + hole.x_mm * scale * mm
         cy = y0_pt + hole.y_mm * scale * mm
@@ -219,13 +224,13 @@ def _draw_hole_dims(
         lx, ly = cx + r * 0.707, cy + r * 0.707
         tx, ty = lx + 3 * mm, ly + 3 * mm
         c.line(lx, ly, tx, ty)
-        c.drawString(tx + 0.5 * mm, ty - 1 * mm, f"Ø{hole.diameter_mm:g}")
+        c.drawString(tx + 0.5 * mm, ty - 1 * mm, f"{prefix}{hole.diameter_mm:g}")
     if not individual:
         c.setFont("DejaVuSans", 8)
         c.drawString(
             x0_pt,
             part_top_pt + 4 * mm,
-            f"×{len(holes)} отворів Ø{holes[0].diameter_mm:g}",
+            f"×{len(holes)} отворів {prefix}{holes[0].diameter_mm:g}",
         )
     c.setFillColorRGB(0, 0, 0)
     c.restoreState()
@@ -276,6 +281,7 @@ def compute_bom(
         | UnfoldedCornerAngle
         | UnfoldedWallShelf
         | UnfoldedPerforatedPanel
+        | UnfoldedPerforatedPanelSquare
     ),
     *,
     density_kg_m3: float = 7850.0,
@@ -1118,6 +1124,132 @@ def export_perforated_panel_pdf(
         15 * mm,
         15 * mm,
         "DXF для лазерного різання · INNER_CUTS = отвори · BEND операцій немає",
+    )
+
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
+    c.showPage()
+    c.save()
+    _normalize_pdf_bytes(output_path)
+    return output_path
+
+
+def export_perforated_panel_square_pdf(
+    parameters: PerforatedPanelSquareBuildParameters,
+    unfolded: UnfoldedPerforatedPanelSquare,
+    output_path: Path,
+    *,
+    solid: cq.Workplane | None = None,
+    material_label: str = "cold_rolled_steel",
+    density_kg_m3: float = 7850.0,
+    permalink_url: str | None = None,
+) -> Path:
+    """PDF для perforated_panel_square (Phase 3.0 PR 5, ADR-027 Рішення 6).
+
+    Structurally identical до export_perforated_panel_pdf, але:
+    - Заголовок «Перфо-панель (квадратні отвори)».
+    - Callout/summary text використовує '□' замість 'Ø' для розміру отвору.
+    - slug у subject/QR — perforated_panel_square.
+    """
+    article = (
+        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
+        .hexdigest()[:10]
+        .upper()
+    )
+    qr_payload = permalink_url or f"flatcraft://perforated_panel_square/{article}"
+    n_holes = len(unfolded.holes)
+
+    c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
+    c.setTitle(f"Perforated panel square {article}")
+    c.setAuthor("flatcraft")
+    c.setCreator("flatcraft-cad-worker")
+    c.setProducer("flatcraft-cad-worker")
+    c.setSubject(
+        f"Perforated panel square {parameters.length_mm}×{parameters.width_mm} мм, "
+        f"{n_holes} square holes □{parameters.hole_size_mm}"
+    )
+
+    c.setFont("DejaVuSans-Bold", 14)
+    c.drawString(15 * mm, (210 - 15) * mm, "Перфо-панель (квадратні отвори)")
+    c.setFont("DejaVuSans", 10)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    c.drawString(
+        15 * mm,
+        (210 - 20) * mm,
+        f"slug: perforated_panel_square · артикул: {article} · дата: {today}",
+    )
+    c.drawString(
+        15 * mm,
+        (210 - 24) * mm,
+        f"Лист {parameters.length_mm}×{parameters.width_mm} мм · крок "
+        f"pitch_x={parameters.pitch_x_mm} pitch_y={parameters.pitch_y_mm} · "
+        f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
+        f"□{parameters.hole_size_mm:g} мм",
+    )
+    # _draw_finished_dims_line dispatch'ує за slug; підтримка нового шаблону
+    # додана у dimensions.compute_finished_dimensions (той самий X×Y×Z).
+    _draw_finished_dims_line(c, "perforated_panel_square", parameters)
+
+    _draw_unfold_generic(
+        c,
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_positions_mm=(),
+        origin_mm=(15, 70),
+        canvas_size_mm=(150, 100),
+        holes=unfolded.holes,
+    )
+
+    # Без bend table — grid summary з □.
+    ox, oy = 175, 170
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Сітка отворів (квадратні)")
+    c.setFont("DejaVuSans", 9)
+    for i, line in enumerate(
+        [
+            f"Колонок (по X): {unfolded.grid_cols}",
+            f"Рядів (по Y): {unfolded.grid_rows}",
+            f"Усього отворів: {n_holes}",
+            f"Pitch X: {parameters.pitch_x_mm:g} мм",
+            f"Pitch Y: {parameters.pitch_y_mm:g} мм",
+            f"Сторона: □{parameters.hole_size_mm:g} мм",
+        ],
+    ):
+        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+
+    ox_b, oy_b = 175, 140
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        origin_mm=(ox_b, oy_b),
+        include_volume=False,
+    )
+    if solid is not None:
+        _draw_isometric(c, solid, parameters, unfolded)
+
+    qr_png = _make_qr_png(qr_payload)
+    qr_size_mm = 30
+    qr_buf = io.BytesIO(qr_png)
+    c.drawImage(
+        _ImageReader(qr_buf),
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        15 * mm,
+        width=qr_size_mm * mm,
+        height=qr_size_mm * mm,
+    )
+    c.setFont("DejaVuSans", 7)
+    c.drawString(
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        12 * mm,
+        f"QR: {qr_payload[:48]}",
+    )
+
+    c.setFont("DejaVuSans-Oblique", 8)
+    c.drawString(
+        15 * mm,
+        15 * mm,
+        "DXF для лазерного різання · INNER_CUTS = квадратні отвори · BEND операцій немає",
     )
 
     _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)

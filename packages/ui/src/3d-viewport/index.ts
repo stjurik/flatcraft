@@ -3,6 +3,7 @@ export { ZBracketScene } from "./z-bracket-scene.js";
 export { CornerAngleScene } from "./corner-angle-scene.js";
 export { WallShelfScene } from "./wall-shelf-scene.js";
 export { PerforatedPanelScene } from "./perforated-panel-scene.js";
+export { PerforatedPanelSquareScene } from "./perforated-panel-square-scene.js";
 export {
   buildLBracketShapeCommands,
   buildWallShelfShapeCommands,

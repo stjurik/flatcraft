@@ -4,7 +4,9 @@ import {
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
   PerforatedPanelParametersSchema,
+  PerforatedPanelSquareParametersSchema,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
   ZBracketParametersSchema,
@@ -16,6 +18,7 @@ import { notFound } from "next/navigation";
 
 import { CornerAngleStudio } from "../../../components/corner-angle-studio";
 import { LBracketStudio } from "../../../components/l-bracket-studio";
+import { PerforatedPanelSquareStudio } from "../../../components/perforated-panel-square-studio";
 import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
 import { WallShelfStudio } from "../../../components/wall-shelf-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
@@ -121,6 +124,17 @@ function TemplateStudio({
     return (
       <PerforatedPanelStudio
         initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
+        materials={materials}
+      />
+    );
+  }
+  if (slug === "perforated_panel_square") {
+    const parsed = PerforatedPanelSquareParametersSchema.safeParse(defaults);
+    return (
+      <PerforatedPanelSquareStudio
+        initialParameters={
+          parsed.success ? parsed.data : PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
+        }
         materials={materials}
       />
     );

@@ -24,7 +24,8 @@ export type TemplateStudioSlug =
   | "z_bracket"
   | "corner_angle"
   | "wall_shelf"
-  | "perforated_panel";
+  | "perforated_panel"
+  | "perforated_panel_square";
 
 export interface EditorRenderProps<T> {
   readonly value: T;

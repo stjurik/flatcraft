@@ -94,6 +94,8 @@ export function bendInputFor(body: ExportRequest): BendInput | null {
       };
     }
     case "perforated_panel":
+    case "perforated_panel_square":
+      // Жоден з них не має гибів → пропускаємо matrix-валідацію.
       return null;
   }
 }
@@ -219,6 +221,7 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
         thicknessMm,
       }).map(profileIssueToProblem);
     case "perforated_panel":
+    case "perforated_panel_square":
       return [];
   }
 }

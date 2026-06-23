@@ -33,6 +33,7 @@ from flatcraft_cad.unfold import (
     UnfoldedCornerAngle,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
+    UnfoldedPerforatedPanelSquare,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -141,12 +142,29 @@ def _export_flat_dxf(
 
     # Отвори — на LASER_CUT (та сама операція різання!), explicit color 5 (blue),
     # щоб inner-cut візуально відрізнявся від outer-контуру (ADR-024).
+    # Phase 3.0 PR 5 (ADR-027 Рішення 6): square holes → LWPOLYLINE 4 vertices
+    # замість CIRCLE. Той самий шар, та сама color 5 — DXF-інваріант 2 шари
+    # збережено.
     for hole in holes:
-        msp.add_circle(
-            center=(hole.x_mm, hole.y_mm),
-            radius=hole.diameter_mm / 2.0,
-            dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
-        )
+        if hole.shape == "square":
+            half = hole.diameter_mm / 2.0
+            cx, cy = hole.x_mm, hole.y_mm
+            msp.add_lwpolyline(
+                points=[
+                    (cx - half, cy - half),
+                    (cx + half, cy - half),
+                    (cx + half, cy + half),
+                    (cx - half, cy + half),
+                ],
+                close=True,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
+        else:
+            msp.add_circle(
+                center=(hole.x_mm, hole.y_mm),
+                radius=hole.diameter_mm / 2.0,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
 
     doc.saveas(output_path)
     _normalize_dxf_bytes(output_path)
@@ -242,6 +260,27 @@ def export_perforated_panel_dxf(
     """Perforated_panel DXF: лише прямокутник + grid отворів, без bends."""
     # bend_radius_mm/bend_angle_deg формально потрібні API, але цикл по
     # bend_lines_mm=() не виконається — їхні значення не використовуються.
+    return _export_flat_dxf(
+        length_mm=unfolded.length_mm,
+        width_mm=unfolded.width_mm,
+        bend_lines_mm=(),
+        bend_radius_mm=0.0,
+        bend_angle_deg=0.0,
+        output_path=output_path,
+        holes=unfolded.holes,
+    )
+
+
+def export_perforated_panel_square_dxf(
+    unfolded: UnfoldedPerforatedPanelSquare,
+    output_path: Path,
+) -> Path:
+    """Perforated_panel_square DXF (Phase 3.0 PR 5, ADR-027 Рішення 6).
+
+    Identical до export_perforated_panel_dxf за структурою (2 шари, color 5
+    holes), але holes мають shape='square' → _export_flat_dxf емітить
+    LWPOLYLINE 4 vertices замість CIRCLE.
+    """
     return _export_flat_dxf(
         length_mm=unfolded.length_mm,
         width_mm=unfolded.width_mm,
