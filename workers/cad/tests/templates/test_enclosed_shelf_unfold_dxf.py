@@ -15,6 +15,7 @@ from ezdxf import readfile  # type: ignore[attr-defined]
 from pydantic import ValidationError
 
 from flatcraft_cad.export.dxf import export_enclosed_shelf_dxf
+from flatcraft_cad.export.pdf import export_enclosed_shelf_pdf
 from flatcraft_cad.templates.enclosed_shelf import (
     EnclosedShelfBuildParameters,
     EnclosedShelfSidePerforation,
@@ -222,4 +223,36 @@ def test_dxf_byte_determinism_with_rib(tmp_path: Path) -> None:
     out2 = tmp_path / "b.dxf"
     export_enclosed_shelf_dxf(u, out1)
     export_enclosed_shelf_dxf(u, out2)
+    assert out1.read_bytes() == out2.read_bytes()
+
+
+# ─── PDF export (Phase 3.0 PR 7c) ───────────────────────────────────────────
+
+
+def test_pdf_export_writes_nonempty_file(tmp_path: Path) -> None:
+    p = _params()
+    u = unfold_enclosed_shelf(p, K_FACTOR)
+    out = tmp_path / "es.pdf"
+    export_enclosed_shelf_pdf(p, u, out)
+    assert out.read_bytes().startswith(b"%PDF-")
+
+
+def test_pdf_export_byte_determinism(tmp_path: Path) -> None:
+    """CLAUDE.md §2.4: PDF теж байт-detereministic."""
+    p = _params()
+    u = unfold_enclosed_shelf(p, K_FACTOR)
+    out1 = tmp_path / "a.pdf"
+    out2 = tmp_path / "b.pdf"
+    export_enclosed_shelf_pdf(p, u, out1)
+    export_enclosed_shelf_pdf(p, u, out2)
+    assert out1.read_bytes() == out2.read_bytes()
+
+
+def test_pdf_with_rib_byte_determinism(tmp_path: Path) -> None:
+    p = _params(stiffening_rib=EnclosedShelfStiffeningRib(height_mm=15.0))
+    u = unfold_enclosed_shelf(p, K_FACTOR)
+    out1 = tmp_path / "a.pdf"
+    out2 = tmp_path / "b.pdf"
+    export_enclosed_shelf_pdf(p, u, out1)
+    export_enclosed_shelf_pdf(p, u, out2)
     assert out1.read_bytes() == out2.read_bytes()
