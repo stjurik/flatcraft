@@ -97,3 +97,31 @@
       echo "api never became healthy" >&2; exit 1
     executable: /bin/sh
   changed_when: false
+
+# ─── 5. Docker image cleanup (старі images > 7 днів) ───────────────────────
+# Чому ПІСЛЯ healthcheck'у: prune видаляє ТІЛЬКИ untagged/unused images
+# (старі версії, замінені свіжими). Якщо deploy провалився раніше — старий
+# стек живе і його images НЕ pruned (`until=168h` фільтр + container-protection).
+# Інцидент 2026-06-23: за 5+ deploy'їв накопичились 118 dangling images
+# (35.84 GB у /var/lib/docker), диск перейшов 100%, /tmp Python tempfile.mkdtemp
+# падав → deploy блокувався. 7 днів — буфер на rollback за один тиждень, але
+# короткий достатньо щоб не накопичувати >5 GB на release.
+- name: Prune unused Docker images older than 7 days
+  community.docker.docker_prune:
+    images: true
+    images_filters:
+      until: 168h
+  become: true
+  become_user: "{{ app_user }}"
+  # Не валимо deploy якщо prune падає (наприклад, конкурентний docker pull):
+  # release-success > disk-cleanup. Логуємо вивід для cleanup metrics.
+  failed_when: false
+  register: flatcraft_prune_result
+
+- name: Report disk space reclaimed
+  ansible.builtin.debug:
+    msg: >-
+      Docker prune freed
+      {{ (flatcraft_prune_result.images_space_reclaimed | default(0) / 1024 / 1024) | round(1) }} MB
+      ({{ flatcraft_prune_result.images | default([]) | length }} images).
+  when: flatcraft_prune_result is defined
