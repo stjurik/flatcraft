@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
+import { z } from "zod";
 
 import { filterSchemaByVisibleFields, resolveProductParams } from "./helpers.js";
 
@@ -130,7 +131,6 @@ describe("filterSchemaByVisibleFields — fast-check", () => {
         (schemaKeys, visibleFields) => {
           // Білдимо ZodObject з простими z.string() полями (filter використовує
           // тільки `.shape` ключі — внутрішнього типу не торкається).
-          const { z } = require("zod") as typeof import("zod");
           const shape: Record<string, ReturnType<typeof z.string>> = {};
           for (const k of schemaKeys) shape[k] = z.string();
           const schema = z.object(shape);
@@ -149,7 +149,6 @@ describe("filterSchemaByVisibleFields — fast-check", () => {
         fc.uniqueArray(fieldName, { minLength: 0, maxLength: 10 }),
         fc.uniqueArray(fieldName, { minLength: 0, maxLength: 10 }),
         (schemaKeys, visibleFields) => {
-          const { z } = require("zod") as typeof import("zod");
           const shape: Record<string, ReturnType<typeof z.string>> = {};
           for (const k of schemaKeys) shape[k] = z.string();
           const schema = z.object(shape);
