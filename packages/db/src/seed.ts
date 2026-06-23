@@ -193,10 +193,10 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
       "Базовий шаблон 4-сторонньої полиці (back + bottom + 2 квадратні бокові). Опційні features: side perforation, stiffening rib. Phase 3.0 PR 7 (ADR-027 Рішення 5).",
     descriptionEn:
       "Base 4-sided shelf template (back + bottom + 2 square sides). Optional features: side perforation, stiffening rib. Phase 3.0 PR 7.",
-    // PR 7a: типи + Pydantic + seed. Builder/unfold/export — PR 7b/7c.
-    // Не публікується у каталозі — споживається лише через products (PR 8 —
-    // кастомна настінна полиця).
-    isPublished: false,
+    // PR 7d: web Studio + R3F готові — публікуємо у каталозі. Optional features
+    // (side perforation, stiffening rib) поки не у формі (default null),
+    // конфігурація — у наступних phase-ах або через product overrides.
+    isPublished: true,
     defaultParameters: ENCLOSED_SHELF_DEFAULT_PARAMETERS,
     previewImageUrl: null,
   },

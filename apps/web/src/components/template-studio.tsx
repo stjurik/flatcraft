@@ -25,7 +25,8 @@ export type TemplateStudioSlug =
   | "corner_angle"
   | "wall_shelf"
   | "perforated_panel"
-  | "perforated_panel_square";
+  | "perforated_panel_square"
+  | "enclosed_shelf";
 
 export interface EditorRenderProps<T> {
   readonly value: T;
@@ -85,6 +86,7 @@ const SLUGS_WITH_BENDS: ReadonlySet<TemplateStudioSlug> = new Set([
   "z_bracket",
   "corner_angle",
   "wall_shelf",
+  "enclosed_shelf",
 ]);
 
 const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
