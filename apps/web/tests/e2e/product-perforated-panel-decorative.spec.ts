@@ -45,7 +45,8 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("grid-summary-square")).toContainText("□");
 
     // R3F canvas рендериться (валідні params, render-gate ADR-026 пропускає).
-    const canvas = page.getByTestId("perforated-panel-square-canvas");
+    // getByTestId на R3F <Canvas> резолвиться у wrapper div; html-canvas — всередині.
+    const canvas = page.getByTestId("perforated-panel-square-canvas").locator("canvas");
     await expect(canvas).toBeVisible({ timeout: 15_000 });
     const dims = await canvas.evaluate((el: HTMLCanvasElement) => ({
       w: el.width,
