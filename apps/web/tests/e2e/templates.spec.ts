@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-const EXPECTED: ReadonlyArray<{ slug: string; name: string }> = [
-  { slug: "l_bracket", name: "L-кронштейн" },
-  { slug: "z_bracket", name: "Z-кронштейн" },
-  { slug: "corner_angle", name: "Кутник" },
-  { slug: "wall_shelf", name: "Полиця настінна" },
-  { slug: "perforated_panel", name: "Перфо-панель" },
+const EXPECTED: ReadonlyArray<{ slug: string; name: string; hasPreview: boolean }> = [
+  { slug: "l_bracket", name: "L-кронштейн", hasPreview: true },
+  { slug: "z_bracket", name: "Z-кронштейн", hasPreview: true },
+  { slug: "corner_angle", name: "Кутник", hasPreview: true },
+  { slug: "wall_shelf", name: "Полиця настінна", hasPreview: true },
+  { slug: "perforated_panel", name: "Перфо-панель", hasPreview: true },
+  // PR 7d: enclosed_shelf опубліковано без preview-PNG (fallback на SVG-thumb).
+  { slug: "enclosed_shelf", name: "Закрита полиця (cross-розгортка)", hasPreview: false },
 ];
 
 const VIEWPORTS = [
@@ -15,7 +17,7 @@ const VIEWPORTS = [
 ] as const;
 
 test.describe("Каталог /templates?tab=parts (Phase 2.13 → Phase 3.0)", () => {
-  test("hero + усі 5 опублікованих шаблонів під ?tab=parts", async ({ page }) => {
+  test("hero + усі 6 опублікованих шаблонів під ?tab=parts", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -25,14 +27,16 @@ test.describe("Каталог /templates?tab=parts (Phase 2.13 → Phase 3.0)", 
     // Phase 3.0: заголовок змінено на "Каталог" (двомодовий — Вироби + Деталі).
     await expect(page.getByTestId("templates-page-title")).toHaveText("Каталог");
 
-    for (const { slug, name } of EXPECTED) {
+    for (const { slug, name, hasPreview } of EXPECTED) {
       const card = page.locator(`[data-testid="template-card"][data-slug="${slug}"]`);
       await expect(card).toBeVisible();
       await expect(card).toContainText(name);
-      // Phase 2.16.b: previewImageUrl задано → рендериться <img>, не SVG-thumb.
-      const img = card.locator("img");
-      await expect(img).toBeVisible();
-      await expect(img).toHaveAttribute("src", new RegExp(`/template-previews/${slug}\\.png$`));
+      if (hasPreview) {
+        // Phase 2.16.b: previewImageUrl задано → рендериться <img>, не SVG-thumb.
+        const img = card.locator("img");
+        await expect(img).toBeVisible();
+        await expect(img).toHaveAttribute("src", new RegExp(`/template-previews/${slug}\\.png$`));
+      }
     }
 
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);

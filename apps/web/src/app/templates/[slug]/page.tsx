@@ -1,6 +1,8 @@
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
   CornerAngleParametersSchema,
+  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+  EnclosedShelfParametersSchema,
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
@@ -17,6 +19,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CornerAngleStudio } from "../../../components/corner-angle-studio";
+import { EnclosedShelfStudio } from "../../../components/enclosed-shelf-studio";
 import { LBracketStudio } from "../../../components/l-bracket-studio";
 import { PerforatedPanelSquareStudio } from "../../../components/perforated-panel-square-studio";
 import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
@@ -135,6 +138,15 @@ function TemplateStudio({
         initialParameters={
           parsed.success ? parsed.data : PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
         }
+        materials={materials}
+      />
+    );
+  }
+  if (slug === "enclosed_shelf") {
+    const parsed = EnclosedShelfParametersSchema.safeParse(defaults);
+    return (
+      <EnclosedShelfStudio
+        initialParameters={parsed.success ? parsed.data : ENCLOSED_SHELF_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );

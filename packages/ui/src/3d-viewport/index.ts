@@ -4,6 +4,7 @@ export { CornerAngleScene } from "./corner-angle-scene.js";
 export { WallShelfScene } from "./wall-shelf-scene.js";
 export { PerforatedPanelScene } from "./perforated-panel-scene.js";
 export { PerforatedPanelSquareScene } from "./perforated-panel-square-scene.js";
+export { EnclosedShelfScene } from "./enclosed-shelf-scene.js";
 export {
   buildLBracketShapeCommands,
   buildWallShelfShapeCommands,

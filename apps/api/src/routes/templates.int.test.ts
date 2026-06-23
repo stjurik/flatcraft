@@ -32,17 +32,18 @@ describe.skipIf(!DATABASE_URL)("GET /templates — integration", () => {
     await client?.close();
   });
 
-  it("повертає всі 5 опублікованих шаблонів (Phase 2.10 закрита)", async () => {
+  it("повертає всі 6 опублікованих шаблонів (Phase 3.0 PR 7d додав enclosed_shelf)", async () => {
     const res = await app.inject({ method: "GET", url: "/templates" });
     expect(res.statusCode).toBe(200);
     const body = res.json<{
       items: Array<{ slug: string; isPublished: boolean; nameUk: string }>;
     }>();
-    expect(body.items.length).toBe(5);
+    expect(body.items.length).toBe(6);
     expect(body.items.every((t) => t.isPublished)).toBe(true);
     const slugs = body.items.map((t) => t.slug).sort();
     expect(slugs).toEqual([
       "corner_angle",
+      "enclosed_shelf",
       "l_bracket",
       "perforated_panel",
       "wall_shelf",
