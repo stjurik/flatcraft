@@ -97,6 +97,20 @@ export function bendInputFor(body: ExportRequest): BendInput | null {
     case "perforated_panel_square":
       // Жоден з них не має гибів → пропускаємо matrix-валідацію.
       return null;
+    case "enclosed_shelf": {
+      // Phase 3.0 PR 7c: 3-4 UP-bends, всі однакові radius/angle. flangeMm
+      // — depth_mm (мінімальна сторона back/sides). Rib не bend-flange (мала
+      // смужка), у matrix-валідації нерелевантна.
+      const p = body.parameters;
+      return {
+        materialCode,
+        thicknessMm,
+        innerRadiusMm: p.bend_radius_mm,
+        angleDeg: p.bend_angle_deg,
+        flangeMm: p.depth_mm,
+        bendLengthMm: p.width_mm,
+      };
+    }
   }
 }
 
@@ -222,6 +236,12 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
       }).map(profileIssueToProblem);
     case "perforated_panel":
     case "perforated_panel_square":
+      return [];
+    case "enclosed_shelf":
+      // Phase 3.0 PR 7c: profile-валідатор для cross-розгортки поки не
+      // моделюється (no flange-after-bend перевірка — depth_mm уже >=100 і
+      // bend reduces by t+r≤~6мм, гарантовано >0). Zod-min ranges відсіюють
+      // невалідне ще на API. Якщо знадобиться — додаємо у наступному hotfix.
       return [];
   }
 }

@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -67,6 +68,7 @@ from flatcraft_cad.export.layout.corner_picker import (
 from flatcraft_cad.export.layout.hole_dims import should_dim_individual_holes
 from flatcraft_cad.materials.industry_names import format_material_label
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
+from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
 from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
@@ -75,6 +77,7 @@ from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
+    UnfoldedEnclosedShelf,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
     UnfoldedPerforatedPanelSquare,
@@ -1250,6 +1253,229 @@ def export_perforated_panel_square_pdf(
         15 * mm,
         15 * mm,
         "DXF для лазерного різання · INNER_CUTS = квадратні отвори · BEND операцій немає",
+    )
+
+    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
+    c.showPage()
+    c.save()
+    _normalize_pdf_bytes(output_path)
+    return output_path
+
+
+def _enclosed_shelf_area_mm2(unfolded: UnfoldedEnclosedShelf) -> float:
+    """Сумарна площа сегментів cross-розгортки (без перетинів — сегменти не
+    перекриваються у unfold)."""
+    area = (
+        unfolded.bottom.w_mm * unfolded.bottom.h_mm
+        + unfolded.back.w_mm * unfolded.back.h_mm
+        + unfolded.left.w_mm * unfolded.left.h_mm
+        + unfolded.right.w_mm * unfolded.right.h_mm
+    )
+    if unfolded.rib is not None:
+        area += unfolded.rib.w_mm * unfolded.rib.h_mm
+    return area
+
+
+def _draw_unfold_enclosed_shelf(
+    c: pdfcanvas.Canvas,
+    unfolded: UnfoldedEnclosedShelf,
+    *,
+    origin_mm: tuple[float, float],
+    canvas_size_mm: tuple[float, float],
+) -> None:
+    """Малює cross-shape outline (LASER_CUT-аналог) + bend lines (BEND_LINES).
+
+    Scaling: fit-to-canvas. Bend lines — dashed blue. Outline — solid black.
+    """
+    ox_mm, oy_mm = origin_mm
+    canvas_w, canvas_h = canvas_size_mm
+    bbox_w = unfolded.bbox_max_x_mm - unfolded.bbox_min_x_mm
+    bbox_h = unfolded.bbox_max_y_mm - unfolded.bbox_min_y_mm
+    scale = min(canvas_w / max(bbox_w, 1), canvas_h / max(bbox_h, 1))
+
+    # Center the cross inside the canvas.
+    w_drawn = bbox_w * scale
+    h_drawn = bbox_h * scale
+    x0_mm = ox_mm + (canvas_w - w_drawn) / 2.0
+    y0_mm = oy_mm + (canvas_h - h_drawn) / 2.0
+
+    def _to_pt(x_model: float, y_model: float) -> tuple[float, float]:
+        x_pt = (x0_mm + (x_model - unfolded.bbox_min_x_mm) * scale) * mm
+        y_pt = (y0_mm + (y_model - unfolded.bbox_min_y_mm) * scale) * mm
+        return x_pt, y_pt
+
+    # Outline — black solid.
+    c.setLineWidth(1.0)
+    c.setStrokeColorRGB(0, 0, 0)
+    path = c.beginPath()
+    first = unfolded.outline_vertices[0]
+    px, py = _to_pt(*first)
+    path.moveTo(px, py)
+    for vx, vy in unfolded.outline_vertices[1:]:
+        px, py = _to_pt(vx, vy)
+        path.lineTo(px, py)
+    path.close()
+    c.drawPath(path, stroke=1, fill=0)
+
+    # Bend lines — dashed blue.
+    c.saveState()
+    c.setDash(4, 3)
+    c.setStrokeColorRGB(0.2, 0.4, 0.8)
+    c.setLineWidth(0.6)
+    for bend in unfolded.bend_lines:
+        x1, y1 = _to_pt(bend.x1_mm, bend.y1_mm)
+        x2, y2 = _to_pt(bend.x2_mm, bend.y2_mm)
+        c.line(x1, y1, x2, y2)
+    c.restoreState()
+
+    # Side perforation holes — red circles/squares (наочно у PDF, у DXF — color 5).
+    if unfolded.side_holes:
+        c.saveState()
+        c.setStrokeColorRGB(0.8, 0.2, 0.2)
+        c.setLineWidth(0.4)
+        for hole in unfolded.side_holes:
+            cx, cy = _to_pt(hole.x_mm, hole.y_mm)
+            half_pt = (hole.diameter_mm / 2.0) * scale * mm
+            if hole.shape == "square":
+                c.rect(cx - half_pt, cy - half_pt, 2 * half_pt, 2 * half_pt, stroke=1, fill=0)
+            else:
+                c.circle(cx, cy, half_pt, stroke=1, fill=0)
+        c.restoreState()
+
+
+def export_enclosed_shelf_pdf(
+    parameters: EnclosedShelfBuildParameters,
+    unfolded: UnfoldedEnclosedShelf,
+    output_path: Path,
+    *,
+    material_label: str = "cold_rolled_steel",
+    density_kg_m3: float = 7850.0,
+    permalink_url: str | None = None,
+) -> Path:
+    """PDF для enclosed_shelf (Phase 3.0 PR 7c, ADR-027).
+
+    Simplified-варіант MVP — БЕЗ isometric view (additional PR). Має:
+    - Header: назва, slug, article, дата, dimensions.
+    - Cross outline + bend lines (dashed).
+    - Bend table (3-4 рядки).
+    - BOM з сумарною площею сегментів.
+    - Footer: QR + BETA watermark.
+    """
+    article = (
+        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
+        .hexdigest()[:10]
+        .upper()
+    )
+    qr_payload = permalink_url or f"flatcraft://enclosed_shelf/{article}"
+
+    c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
+    c.setTitle(f"Enclosed shelf {article}")
+    c.setAuthor("flatcraft")
+    c.setCreator("flatcraft-cad-worker")
+    c.setProducer("flatcraft-cad-worker")
+    c.setSubject(
+        f"Enclosed shelf {parameters.width_mm}×{parameters.depth_mm} мм, "
+        f"{'4' if parameters.stiffening_rib is not None else '3'} bends"
+    )
+
+    c.setFont("DejaVuSans-Bold", 14)
+    c.drawString(15 * mm, (210 - 15) * mm, "Закрита полиця (cross-розгортка)")
+    c.setFont("DejaVuSans", 10)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    c.drawString(
+        15 * mm,
+        (210 - 20) * mm,
+        f"slug: enclosed_shelf · артикул: {article} · дата: {today}",
+    )
+    rib_label = (
+        f"+ ребро {parameters.stiffening_rib.height_mm:g}мм"
+        if parameters.stiffening_rib is not None
+        else "без ребра"
+    )
+    perf_label = "+ перфорація сторін" if parameters.side_perforation is not None else ""
+    c.drawString(
+        15 * mm,
+        (210 - 24) * mm,
+        f"{parameters.width_mm:g}×{parameters.depth_mm:g} мм · {rib_label} {perf_label}".rstrip(),
+    )
+    _draw_finished_dims_line(c, "enclosed_shelf", parameters)
+
+    # Cross розгортка у лівій колонці.
+    _draw_unfold_enclosed_shelf(
+        c,
+        unfolded,
+        origin_mm=(15, 70),
+        canvas_size_mm=(150, 100),
+    )
+
+    # Bend table у правій колонці.
+    ox, oy = 175, 170
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, "Таблиця гибів (cross)")
+    c.setFont("DejaVuSans", 9)
+    n_bends = len(unfolded.bend_lines)
+    bend_descriptors = ["back", "left", "right", "rib"][:n_bends]
+    c.drawString(
+        ox * mm,
+        (oy - 4) * mm,
+        f"Гибів: {n_bends} ({', '.join(bend_descriptors)})",
+    )
+    c.drawString(ox * mm, (oy - 8) * mm, f"R: {parameters.bend_radius_mm:g} мм, кут: 90°")
+    k_derived = unfolded.bend_allowance_mm / (
+        math.radians(90) * (parameters.bend_radius_mm + 0.4 * unfolded.thickness_mm)
+    )
+    c.drawString(
+        ox * mm,
+        (oy - 12) * mm,
+        f"BA: {unfolded.bend_allowance_mm:.2f} мм (k≈{k_derived:.2g})",
+    )
+    # Напрям — всі 'up' (enclosed-форма).
+    c.drawString(ox * mm, (oy - 16) * mm, "Напрям: UP для всіх гибів")
+
+    # BOM (custom — sum segment areas).
+    area_mm2 = _enclosed_shelf_area_mm2(unfolded)
+    area_m2 = area_mm2 / 1e6
+    volume_m3 = (area_mm2 * unfolded.thickness_mm) / 1e9
+    mass_kg = volume_m3 * density_kg_m3
+    bom = {
+        "area_mm2": area_mm2,
+        "area_m2": area_m2,
+        "area_paint_m2": area_m2 * 2.0,
+        "volume_m3": volume_m3,
+        "mass_g": mass_kg * 1000.0,
+        "mass_kg": mass_kg,
+    }
+    _draw_bom_block(
+        c,
+        material_label=material_label,
+        thickness_mm=unfolded.thickness_mm,
+        bom=bom,
+        origin_mm=(175, 140),
+        include_volume=False,
+    )
+
+    qr_png = _make_qr_png(qr_payload)
+    qr_size_mm = 30
+    qr_buf = io.BytesIO(qr_png)
+    c.drawImage(
+        _ImageReader(qr_buf),
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        15 * mm,
+        width=qr_size_mm * mm,
+        height=qr_size_mm * mm,
+    )
+    c.setFont("DejaVuSans", 7)
+    c.drawString(
+        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
+        12 * mm,
+        f"QR: {qr_payload[:48]}",
+    )
+
+    c.setFont("DejaVuSans-Oblique", 8)
+    c.drawString(
+        15 * mm,
+        15 * mm,
+        "DXF: cross-shape LASER_CUT + 3-4 BEND_LINES (UP) · опц. перфорація сторін",
     )
 
     _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
