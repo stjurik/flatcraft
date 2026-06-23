@@ -12,13 +12,15 @@ import { PRODUCT_SLUG_REGEX } from "@flatcraft/types";
 import { SEED_PRODUCTS } from "./seed-products.js";
 
 describe("SEED_PRODUCTS", () => {
-  it("Phase 3.0 PR 2 містить лише seed placeholder", () => {
-    expect(SEED_PRODUCTS).toHaveLength(1);
-    expect(SEED_PRODUCTS[0]?.slug).toBe("seed-placeholder");
+  it("Phase 3.0 PR 6: 2 products — placeholder + perforated-panel-decorative", () => {
+    expect(SEED_PRODUCTS).toHaveLength(2);
+    const slugs = SEED_PRODUCTS.map((p) => p.slug).sort();
+    expect(slugs).toEqual(["perforated-panel-decorative", "seed-placeholder"]);
   });
 
-  it("placeholder НЕ опублікований (не потрапляє у catalog API)", () => {
-    expect(SEED_PRODUCTS.every((p) => !p.isPublished)).toBe(true);
+  it("placeholder НЕ опублікований; perforated-panel-decorative — опублікований", () => {
+    const published = SEED_PRODUCTS.filter((p) => p.isPublished).map((p) => p.slug);
+    expect(published).toEqual(["perforated-panel-decorative"]);
   });
 
   it("кожен product має унікальний slug (UNIQUE constraint у БД)", () => {
@@ -44,5 +46,22 @@ describe("SEED_PRODUCTS", () => {
       const overlap = p.userEditableFields.filter((f) => fixedKeys.has(f));
       expect(overlap).toEqual([]);
     }
+  });
+
+  it("perforated-panel-decorative використовує perforated_panel_square base (Phase 3.0 PR 5 dep)", () => {
+    const product = SEED_PRODUCTS.find((p) => p.slug === "perforated-panel-decorative");
+    expect(product).toBeDefined();
+    expect(product?.baseTemplateSlug).toBe("perforated_panel_square");
+    // Усі 6 геометричних параметрів редаговані (matrix-валідатор не задіяний — no-bend).
+    expect(product?.userEditableFields).toEqual([
+      "length_mm",
+      "width_mm",
+      "hole_size_mm",
+      "pitch_x_mm",
+      "pitch_y_mm",
+      "margin_mm",
+    ]);
+    expect(product?.fixedParameters).toEqual({});
+    expect(product?.useCases).toEqual(["інтер'єр", "офіс", "дім"]);
   });
 });
