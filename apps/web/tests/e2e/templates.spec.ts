@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+// PR 8b: enclosed_shelf переведено у Вироби (`/products/closed-shelf-standard`),
+// тому в parts-каталозі знов 5 deталей (як до PR 7d).
 const EXPECTED: ReadonlyArray<{ slug: string; name: string; hasPreview: boolean }> = [
   { slug: "l_bracket", name: "L-кронштейн", hasPreview: true },
   { slug: "z_bracket", name: "Z-кронштейн", hasPreview: true },
   { slug: "corner_angle", name: "Кутник", hasPreview: true },
   { slug: "wall_shelf", name: "Полиця настінна", hasPreview: true },
   { slug: "perforated_panel", name: "Перфо-панель", hasPreview: true },
-  // PR 7d: enclosed_shelf опубліковано без preview-PNG (fallback на SVG-thumb).
-  { slug: "enclosed_shelf", name: "Закрита полиця (cross-розгортка)", hasPreview: false },
 ];
 
 const VIEWPORTS = [
@@ -17,7 +17,7 @@ const VIEWPORTS = [
 ] as const;
 
 test.describe("Каталог /templates?tab=parts (Phase 2.13 → Phase 3.0)", () => {
-  test("hero + усі 6 опублікованих шаблонів під ?tab=parts", async ({ page }) => {
+  test("hero + усі 5 опублікованих шаблонів під ?tab=parts", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());

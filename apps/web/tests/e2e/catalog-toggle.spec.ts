@@ -63,13 +63,15 @@ test.describe("Каталог-toggle Вироби | Деталі (Phase 3.0 PR 3
     await expect(page).toHaveURL(/\/templates\/l_bracket$/);
   });
 
-  test("products grid містить перший published продукт після Phase 3.0 PR 6", async ({ page }) => {
+  test("products grid містить обидва published продукти (PR 6 + PR 8b)", async ({ page }) => {
     await page.goto("/templates");
-    // PR 6 seed додає `perforated-panel-decorative` (isPublished=true) →
-    // /products повертає 1 item, empty-state НЕ показується.
+    // PR 6: perforated-panel-decorative; PR 8b: closed-shelf-standard.
     await expect(page.getByTestId("products-empty")).not.toBeVisible();
     await expect(
       page.locator('[data-testid="product-card"][data-slug="perforated-panel-decorative"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-testid="product-card"][data-slug="closed-shelf-standard"]'),
     ).toBeVisible();
   });
 
