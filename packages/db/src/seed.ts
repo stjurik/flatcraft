@@ -17,12 +17,14 @@ import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
 
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
+import { seedProducts } from "./seed-products.js";
 
 // ─── Матеріали (doc/05 §4) ─────────────────────────────────────────────────
 export interface MaterialSeed {
@@ -168,6 +170,20 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     defaultParameters: PERFORATED_PANEL_DEFAULT_PARAMETERS,
     previewImageUrl: "/template-previews/perforated_panel.png",
   },
+  {
+    slug: "perforated_panel_square",
+    nameUk: "Перфо-панель (квадратні отвори)",
+    nameEn: "Perforated panel (square holes)",
+    descriptionUk:
+      "Плоский лист із сіткою КВАДРАТНИХ отворів. Базовий шаблон для декоративних виробів (Phase 3.0, ADR-027 Рішення 6).",
+    descriptionEn:
+      "Flat sheet with a grid of SQUARE holes. Base template for decorative products (Phase 3.0).",
+    // Phase 3.0 PR 5: base шаблон не публікується у каталозі — споживається
+    // лише через products (PR 6 — декоративна перфо-панель).
+    isPublished: false,
+    defaultParameters: PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+    previewImageUrl: null,
+  },
 ];
 
 // ─── Імплементація runSeed ─────────────────────────────────────────────────
@@ -180,6 +196,7 @@ export async function runSeed(options: RunSeedOptions = {}): Promise<void> {
   try {
     await seedMaterialsAndThicknesses(client);
     await seedTemplates(client);
+    await seedProducts(client);
   } finally {
     await client.close();
   }

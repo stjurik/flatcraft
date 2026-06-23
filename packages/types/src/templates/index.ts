@@ -32,3 +32,9 @@ export {
   PerforatedPanelParametersSchema,
   type PerforatedPanelParameters,
 } from "./perforated-panel.js";
+
+export {
+  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+  PerforatedPanelSquareParametersSchema,
+  type PerforatedPanelSquareParameters,
+} from "./perforated-panel-square.js";

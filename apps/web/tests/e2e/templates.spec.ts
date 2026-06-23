@@ -14,15 +14,16 @@ const VIEWPORTS = [
   { name: "desktop-1280", width: 1280, height: 800 },
 ] as const;
 
-test.describe("Каталог /templates (Phase 2.13)", () => {
-  test("hero + усі 5 опублікованих шаблонів — Phase 2.10 закрита", async ({ page }) => {
+test.describe("Каталог /templates?tab=parts (Phase 2.13 → Phase 3.0)", () => {
+  test("hero + усі 5 опублікованих шаблонів під ?tab=parts", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates");
-    await expect(page.getByTestId("templates-page-title")).toHaveText("Каталог шаблонів");
+    await page.goto("/templates?tab=parts");
+    // Phase 3.0: заголовок змінено на "Каталог" (двомодовий — Вироби + Деталі).
+    await expect(page.getByTestId("templates-page-title")).toHaveText("Каталог");
 
     for (const { slug, name } of EXPECTED) {
       const card = page.locator(`[data-testid="template-card"][data-slug="${slug}"]`);
@@ -38,7 +39,7 @@ test.describe("Каталог /templates (Phase 2.13)", () => {
   });
 
   test("CTA «Налаштувати →» на кожній картці веде на /templates/:slug", async ({ page }) => {
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     for (const { slug } of EXPECTED) {
       const cta = page
         .locator(`[data-testid="template-card"][data-slug="${slug}"]`)
@@ -50,7 +51,7 @@ test.describe("Каталог /templates (Phase 2.13)", () => {
   });
 
   test("title h3-link теж клікабельний і веде на /templates/:slug", async ({ page }) => {
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     const titleLink = page
       .locator('[data-testid="template-card"][data-slug="l_bracket"]')
       .getByTestId("template-card-title-link");
@@ -60,7 +61,7 @@ test.describe("Каталог /templates (Phase 2.13)", () => {
   });
 
   test("tap-targets усіх CTA ≥ 44×44px (WCAG 2.5.5)", async ({ page }) => {
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     const dims = await page.getByTestId("template-card-cta").evaluateAll((ctas) =>
       ctas.map((el) => ({
         w: (el as HTMLElement).offsetWidth,
@@ -81,7 +82,7 @@ test.describe("Каталог /templates (Phase 2.13)", () => {
         if (msg.type() === "error") errors.push(msg.text());
       });
       await page.setViewportSize({ width, height });
-      await page.goto("/templates");
+      await page.goto("/templates?tab=parts");
       await expect(page.getByTestId("templates-grid")).toBeVisible();
       expect(errors, errors.join("\n")).toEqual([]);
     });

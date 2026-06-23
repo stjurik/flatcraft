@@ -255,6 +255,45 @@ export const donationClaims = pgTable("donation_claims", {
   createdAt: createdAt(),
 });
 
+// ─── products (Phase 3.0, ADR-027) ─────────────────────────────────────────
+// Preset базового шаблону з обмеженим набором user_editable_fields. Окрема
+// таблиця від templates (Рішення 1). Слабкий зв'язок через base_template_slug
+// (без FK) — templates можуть жити лише у seed/Python-коді; цілісність
+// перевіряється Zod-валідатором seed'у.
+export const products = pgTable(
+  "products",
+  {
+    id: id(),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description"),
+    baseTemplateSlug: text("base_template_slug").notNull(),
+    // fixed_parameters: значення, які виробник фіксує. Cross-перевірка проти
+    // template.parameters_schema — у seed-валідаторі.
+    fixedParameters: jsonb("fixed_parameters").notNull().default({}),
+    // user_editable_fields: список полів зі схеми base_template, які користувач
+    // редагує. Підтримує dot-notation для nested (напр., side_perforation.hole_diameter_mm).
+    userEditableFields: text("user_editable_fields").array().notNull(),
+    previewImageUrl: text("preview_image_url"),
+    // use_cases: теги для майбутньої фільтрації каталогу (Phase 3.5+).
+    useCases: text("use_cases")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    isPublished: boolean("is_published").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    // Partial index: GET /products?is_published=true (default) — найгарячіший шлях.
+    publishedIdx: index("products_published_idx")
+      .on(t.isPublished)
+      .where(sql`${t.isPublished}`),
+    // Lookup для фільтрації за базовим шаблоном (UI: «всі вироби на основі X»).
+    baseTemplateIdx: index("products_base_template_idx").on(t.baseTemplateSlug),
+  }),
+);
+
 // ─── audit_log ──────────────────────────────────────────────────────────────
 export const auditLog = pgTable("audit_log", {
   id: id(),

@@ -7,7 +7,7 @@ test.describe("/templates/z_bracket — Z-bracket studio (Phase 2.10)", () => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     await page
       .locator('[data-testid="template-card"][data-slug="z_bracket"]')
       .getByTestId("template-card-cta")

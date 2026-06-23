@@ -9,7 +9,7 @@ test.describe("/templates/corner_angle — Corner angle studio (Phase 2.10.b)", 
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     await page
       .locator('[data-testid="template-card"][data-slug="corner_angle"]')
       .getByTestId("template-card-cta")

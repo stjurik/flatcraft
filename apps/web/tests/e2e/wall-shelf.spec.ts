@@ -9,7 +9,7 @@ test.describe("/templates/wall_shelf — Wall shelf studio (Phase 2.10.c)", () =
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates");
+    await page.goto("/templates?tab=parts");
     await page
       .locator('[data-testid="template-card"][data-slug="wall_shelf"]')
       .getByTestId("template-card-cta")

@@ -8,6 +8,13 @@
       "when": 1778911339349,
       "tag": "0000_wandering_vapor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782143647862,
+      "tag": "0001_glossy_black_bolt",
+      "breakpoints": true
     }
   ]
 }
