@@ -144,6 +144,26 @@ def test_pdf_contains_square_glyph_not_diameter(tmp_path: Path) -> None:
     assert "Ø" not in text
 
 
+def test_pdf_contains_unified_dimensions_table(tmp_path: Path) -> None:
+    """PR 8c (issue #5): уніфікована таблиця «Розміри» (2 колонки) у правій
+    колонці. Перевіряємо текст «Розміри» (header таблиці) + кілька rows.
+    """
+    unfolded = unfold_perforated_panel_square(VALID)
+    output = tmp_path / "out.pdf"
+    export_perforated_panel_square_pdf(VALID, unfolded, output)
+
+    reader = PdfReader(str(output))
+    text = "".join(p.extract_text() or "" for p in reader.pages)
+    # Header нової таблиці.
+    assert "Розміри" in text
+    # Старі inline-блоки видалено (replaced by table).
+    assert "Сітка отворів (квадратні)" not in text
+    # Rows таблиці (label з одиницею).
+    assert "Сторона отвору" in text
+    assert "Pitch X" in text
+    assert "Сітка (cols×rows)" in text
+
+
 def test_pdf_renders_square_holes_as_rects_not_circles(tmp_path: Path) -> None:
     """PR 8a regression-fix: PDF візуальний рендер квадратних отворів.
 

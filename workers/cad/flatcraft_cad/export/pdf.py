@@ -277,6 +277,46 @@ def _draw_bend_table_rows(
         cur_y_mm -= row_h_mm
 
 
+# Уніфікована таблиця розмірів (PR 8c, issue #5): 2 колонки «Параметр | Значення»,
+# той самий visual style, що `_draw_bend_table_rows`. Замінює неструктуровані
+# текстові блоки на перфо-панелях/закритій полиці.
+_DIMS_TABLE_HEADER: Final[tuple[str, str]] = ("Параметр", "Значення")
+_DIMS_TABLE_COL_WIDTHS_MM: Final[tuple[float, float]] = (60.0, 50.0)
+
+
+def _draw_dimensions_table(
+    c: pdfcanvas.Canvas,
+    title: str,
+    body_rows: list[tuple[str, str]],
+    *,
+    origin_mm: tuple[float, float],
+) -> float:
+    """Малює `[title]` + 2-колонкову таблицю «Параметр | Значення».
+
+    Повертає Y-координату (у мм) НИЖНЬОГО краю таблиці — для наступних
+    блоків, що мають слідувати за нею (BOM/grid summary).
+    """
+    ox, oy = origin_mm
+    c.setFont("DejaVuSans-Bold", 10)
+    c.drawString(ox * mm, oy * mm, title)
+    rows: list[tuple[str, str]] = [_DIMS_TABLE_HEADER, *body_rows]
+    row_h_mm = 6
+    cur_y_mm = oy - 7
+    c.setLineWidth(0.4)
+    for r_idx, row in enumerate(rows):
+        cur_x_mm = ox
+        if r_idx == 0:
+            c.setFont("DejaVuSans-Bold", 8)
+        else:
+            c.setFont("DejaVuSans", 9)
+        for cell, w_mm in zip(row, _DIMS_TABLE_COL_WIDTHS_MM, strict=True):
+            c.rect(cur_x_mm * mm, cur_y_mm * mm, w_mm * mm, row_h_mm * mm, stroke=1, fill=0)
+            c.drawString((cur_x_mm + 1) * mm, (cur_y_mm + 1.5) * mm, cell)
+            cur_x_mm += w_mm
+        cur_y_mm -= row_h_mm
+    return cur_y_mm
+
+
 def compute_bom(
     unfolded: (
         UnfoldedLBracket
@@ -1075,31 +1115,31 @@ def export_perforated_panel_pdf(
         holes=unfolded.holes,
     )
 
-    # Без bend table — натомість grid summary.
-    ox, oy = 175, 170
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Сітка отворів")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
+    # PR 8c (issue #5): уніфікована таблиця «Розміри» (2 колонки) замість
+    # неструктурованого текстового блоку. Той самий visual style, що bend-table.
+    bottom_y = _draw_dimensions_table(
+        c,
+        "Розміри",
         [
-            f"Колонок (по X): {unfolded.grid_cols}",
-            f"Рядів (по Y): {unfolded.grid_rows}",
-            f"Усього отворів: {n_holes}",
-            f"Pitch X: {parameters.pitch_x_mm:g} мм",
-            f"Pitch Y: {parameters.pitch_y_mm:g} мм",
-            f"Діаметр: {parameters.hole_diameter_mm:g} мм",
+            ("Довжина L, мм", f"{parameters.length_mm:g}"),
+            ("Ширина W, мм", f"{parameters.width_mm:g}"),
+            ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
+            ("Діаметр отвору Ø, мм", f"{parameters.hole_diameter_mm:g}"),
+            ("Pitch X, мм", f"{parameters.pitch_x_mm:g}"),
+            ("Pitch Y, мм", f"{parameters.pitch_y_mm:g}"),
+            ("Відступ від країв, мм", f"{parameters.margin_mm:g}"),
+            ("Сітка (cols×rows)", f"{unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes}"),
         ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+        origin_mm=(175, 170),
+    )
 
-    # BOM.
-    ox_b, oy_b = 175, 140
+    # BOM під таблицею розмірів (auto-position з відступом 6мм).
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(ox_b, oy_b),
+        origin_mm=(175, bottom_y - 6),
         include_volume=False,
     )
     if solid is not None:
@@ -1202,30 +1242,29 @@ def export_perforated_panel_square_pdf(
         holes=unfolded.holes,
     )
 
-    # Без bend table — grid summary з □.
-    ox, oy = 175, 170
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Сітка отворів (квадратні)")
-    c.setFont("DejaVuSans", 9)
-    for i, line in enumerate(
+    # PR 8c (issue #5): уніфікована таблиця «Розміри» (квадратні отвори).
+    bottom_y = _draw_dimensions_table(
+        c,
+        "Розміри",
         [
-            f"Колонок (по X): {unfolded.grid_cols}",
-            f"Рядів (по Y): {unfolded.grid_rows}",
-            f"Усього отворів: {n_holes}",
-            f"Pitch X: {parameters.pitch_x_mm:g} мм",
-            f"Pitch Y: {parameters.pitch_y_mm:g} мм",
-            f"Сторона: □{parameters.hole_size_mm:g} мм",
+            ("Довжина L, мм", f"{parameters.length_mm:g}"),
+            ("Ширина W, мм", f"{parameters.width_mm:g}"),
+            ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
+            ("Сторона отвору □, мм", f"{parameters.hole_size_mm:g}"),
+            ("Pitch X, мм", f"{parameters.pitch_x_mm:g}"),
+            ("Pitch Y, мм", f"{parameters.pitch_y_mm:g}"),
+            ("Відступ від країв, мм", f"{parameters.margin_mm:g}"),
+            ("Сітка (cols×rows)", f"{unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes}"),
         ],
-    ):
-        c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
+        origin_mm=(175, 170),
+    )
 
-    ox_b, oy_b = 175, 140
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(ox_b, oy_b),
+        origin_mm=(175, bottom_y - 6),
         include_volume=False,
     )
     if solid is not None:
@@ -1408,29 +1447,28 @@ def export_enclosed_shelf_pdf(
         canvas_size_mm=(150, 100),
     )
 
-    # Bend table у правій колонці.
-    ox, oy = 175, 170
-    c.setFont("DejaVuSans-Bold", 10)
-    c.drawString(ox * mm, oy * mm, "Таблиця гибів (cross)")
-    c.setFont("DejaVuSans", 9)
+    # PR 8c (issue #5): уніфікована таблиця «Розміри» (як у perfo-панелях).
     n_bends = len(unfolded.bend_lines)
     bend_descriptors = ["back", "left", "right", "rib"][:n_bends]
-    c.drawString(
-        ox * mm,
-        (oy - 4) * mm,
-        f"Гибів: {n_bends} ({', '.join(bend_descriptors)})",
-    )
-    c.drawString(ox * mm, (oy - 8) * mm, f"R: {parameters.bend_radius_mm:g} мм, кут: 90°")
     k_derived = unfolded.bend_allowance_mm / (
         math.radians(90) * (parameters.bend_radius_mm + 0.4 * unfolded.thickness_mm)
     )
-    c.drawString(
-        ox * mm,
-        (oy - 12) * mm,
-        f"BA: {unfolded.bend_allowance_mm:.2f} мм (k≈{k_derived:.2g})",
+    bottom_y = _draw_dimensions_table(
+        c,
+        "Розміри",
+        [
+            ("Ширина W, мм", f"{parameters.width_mm:g}"),
+            ("Глибина D, мм", f"{parameters.depth_mm:g}"),
+            ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
+            ("Радіус гибу R, мм", f"{parameters.bend_radius_mm:g}"),
+            ("Кут гибу, °", "90"),
+            ("BA, мм", f"{unfolded.bend_allowance_mm:.2f}"),
+            ("k-фактор (derived)", f"{k_derived:.2g}"),
+            ("Напрям", "UP (усі)"),
+            ("Гибів", f"{n_bends} ({', '.join(bend_descriptors)})"),
+        ],
+        origin_mm=(175, 170),
     )
-    # Напрям — всі 'up' (enclosed-форма).
-    c.drawString(ox * mm, (oy - 16) * mm, "Напрям: UP для всіх гибів")
 
     # BOM (custom — sum segment areas).
     area_mm2 = _enclosed_shelf_area_mm2(unfolded)
@@ -1450,7 +1488,7 @@ def export_enclosed_shelf_pdf(
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
         bom=bom,
-        origin_mm=(175, 140),
+        origin_mm=(175, bottom_y - 6),
         include_volume=False,
     )
 
