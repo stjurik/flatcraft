@@ -33,8 +33,8 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("param-length_mm")).toHaveValue("200");
     await expect(page.getByTestId("param-width_mm")).toHaveValue("150");
     await expect(page.getByTestId("param-hole_size_mm")).toHaveValue("8");
-    await expect(page.getByTestId("param-pitch_x_mm")).toHaveValue("30");
-    await expect(page.getByTestId("param-pitch_y_mm")).toHaveValue("30");
+    await expect(page.getByTestId("param-pitch_x_mm")).toHaveValue("25");
+    await expect(page.getByTestId("param-pitch_y_mm")).toHaveValue("25");
     await expect(page.getByTestId("param-margin_mm")).toHaveValue("15");
 
     // Валідація OK для дефолтів.

@@ -63,13 +63,14 @@ test.describe("Каталог-toggle Вироби | Деталі (Phase 3.0 PR 3
     await expect(page).toHaveURL(/\/templates\/l_bracket$/);
   });
 
-  test("products grid порожній на PR 3 — empty-state з ясним посиланням на PR 6", async ({
-    page,
-  }) => {
+  test("products grid містить перший published продукт після Phase 3.0 PR 6", async ({ page }) => {
     await page.goto("/templates");
-    // PR 3 seed має лише placeholder isPublished=false → /products повертає [].
-    await expect(page.getByTestId("products-empty")).toBeVisible();
-    await expect(page.getByTestId("products-empty")).toContainText("PR 6");
+    // PR 6 seed додає `perforated-panel-decorative` (isPublished=true) →
+    // /products повертає 1 item, empty-state НЕ показується.
+    await expect(page.getByTestId("products-empty")).not.toBeVisible();
+    await expect(
+      page.locator('[data-testid="product-card"][data-slug="perforated-panel-decorative"]'),
+    ).toBeVisible();
   });
 
   test("tap-targets обох tab-items ≥ 44×44px (WCAG 2.5.5)", async ({ page }) => {
