@@ -31,6 +31,7 @@ from ezdxf.document import Drawing
 from flatcraft_cad.unfold import (
     Hole2D,
     UnfoldedCornerAngle,
+    UnfoldedEnclosedShelf,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
     UnfoldedPerforatedPanelSquare,
@@ -290,6 +291,76 @@ def export_perforated_panel_square_dxf(
         output_path=output_path,
         holes=unfolded.holes,
     )
+
+
+def export_enclosed_shelf_dxf(
+    unfolded: UnfoldedEnclosedShelf,
+    output_path: Path,
+) -> Path:
+    """Enclosed_shelf DXF (Phase 3.0 PR 7b, ADR-027 Рішення 5).
+
+    Cross-розгортка: один LWPOLYLINE на LASER_CUT (cross-shape outline,
+    ByLayer color 7) + 3-4 BEND_LINES (axis-aligned segments, dashed) +
+    опціональні side perforation holes (квадратні LWPOLYLINEs, color 5).
+
+    Інваріант ADR-024 збережено: 2 виробничі шари, 0 TEXT/DIMENSION.
+    """
+    doc = ezdxf_new(dxfversion="R2010", setup=False)
+    _make_deterministic(doc)
+
+    if _DASHED_LINETYPE not in doc.linetypes:
+        doc.linetypes.add(
+            name=_DASHED_LINETYPE,
+            pattern=list(_DASHED_PATTERN),
+            description="Dashed __ __ __ (bend lines)",
+        )
+    for name, color in DXF_LAYERS:
+        if name not in doc.layers:
+            linetype = _DASHED_LINETYPE if name == "BEND_LINES" else "CONTINUOUS"
+            doc.layers.add(name=name, color=color, linetype=linetype)
+
+    msp = doc.modelspace()
+
+    # Cross-outline на LASER_CUT (ByLayer color 7).
+    msp.add_lwpolyline(
+        points=list(unfolded.outline_vertices),
+        close=True,
+        dxfattribs={"layer": "LASER_CUT"},
+    )
+
+    # Bend lines (3-4 axis-aligned segments) на BEND_LINES (dashed green).
+    for bend in unfolded.bend_lines:
+        msp.add_line(
+            start=(bend.x1_mm, bend.y1_mm),
+            end=(bend.x2_mm, bend.y2_mm),
+            dxfattribs={"layer": "BEND_LINES"},
+        )
+
+    # Опціональні side perforation holes — квадратні (LWPOLYLINE color 5)
+    # на тому ж LASER_CUT layer (ADR-024 інваріант: lonе 2 шари).
+    for hole in unfolded.side_holes:
+        if hole.shape == "square":
+            half = hole.diameter_mm / 2.0
+            msp.add_lwpolyline(
+                points=[
+                    (hole.x_mm - half, hole.y_mm - half),
+                    (hole.x_mm + half, hole.y_mm - half),
+                    (hole.x_mm + half, hole.y_mm + half),
+                    (hole.x_mm - half, hole.y_mm + half),
+                ],
+                close=True,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
+        else:
+            msp.add_circle(
+                center=(hole.x_mm, hole.y_mm),
+                radius=hole.diameter_mm / 2.0,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
+
+    doc.saveas(output_path)
+    _normalize_dxf_bytes(output_path)
+    return output_path
 
 
 def _normalize_dxf_bytes(path: Path) -> None:
