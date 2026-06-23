@@ -67,6 +67,22 @@ export const SEED_PRODUCTS: ReadonlyArray<ProductSeed> = [
     useCases: ["інтер'єр", "офіс", "дім"],
     isPublished: true,
   },
+  {
+    // Phase 3.0 PR 8b (issue #2): закрита полиця як Виріб (раніше — Деталь у
+    // /templates/enclosed_shelf, PR 7d). User-editable — лише габарити; bends,
+    // side_perforation, stiffening_rib фіксовані до дефолтів і не показуються
+    // у формі.
+    slug: "closed-shelf-standard",
+    name: "Закрита полиця стандартна",
+    description:
+      "Готова до виготовлення настінна полиця з трьома гибами (back + 2 бокові). Налаштуйте ширину, глибину і матеріал — отримайте DXF + PDF для лазерного різання.",
+    baseTemplateSlug: "enclosed_shelf",
+    fixedParameters: {},
+    userEditableFields: ["width_mm", "depth_mm", "bend_radius_mm"],
+    previewImageUrl: null,
+    useCases: ["інтер'єр", "офіс", "дім", "ванна"],
+    isPublished: true,
+  },
 ];
 
 export async function seedProducts(client: DatabaseClient): Promise<void> {

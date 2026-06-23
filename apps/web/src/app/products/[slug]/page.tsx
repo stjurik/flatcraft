@@ -9,6 +9,8 @@
  * published продукти мають base серед знаних, runtime — safety net).
  */
 import {
+  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+  EnclosedShelfParametersSchema,
   PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
   PerforatedPanelSquareParametersSchema,
   type MaterialChoice,
@@ -17,6 +19,7 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { EnclosedShelfStudio } from "../../../components/enclosed-shelf-studio";
 import { PerforatedPanelSquareStudio } from "../../../components/perforated-panel-square-studio";
 import { fetchMaterials, fetchProduct } from "../../../lib/api";
 
@@ -85,6 +88,23 @@ function ProductStudio({
         initialParameters={
           parsed.success ? parsed.data : PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
         }
+        materials={materials}
+        product={{
+          name: product.name,
+          description: product.description,
+          fixedParameters: product.fixedParameters,
+          userEditableFields: product.userEditableFields,
+        }}
+      />
+    );
+  }
+
+  if (product.baseTemplateSlug === "enclosed_shelf") {
+    const merged = { ...baseDefaults, ...product.fixedParameters };
+    const parsed = EnclosedShelfParametersSchema.safeParse(merged);
+    return (
+      <EnclosedShelfStudio
+        initialParameters={parsed.success ? parsed.data : ENCLOSED_SHELF_DEFAULT_PARAMETERS}
         materials={materials}
         product={{
           name: product.name,

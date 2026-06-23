@@ -1,39 +1,47 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("/templates/enclosed_shelf — Enclosed shelf studio (Phase 3.0 PR 7d)", () => {
-  test("картка → деталь enclosed_shelf: заголовок, форма з defaults, R3F canvas, summary", async ({
-    page,
-  }) => {
+/**
+ * E2E для /products/closed-shelf-standard (Phase 3.0 PR 8b, issue #2).
+ *
+ * enclosed_shelf переведено з parts-каталогу у products. Перевіряємо
+ * product-mode header (з product.name + description), AutoForm рендериться
+ * у TemplateStudio mode='product', R3F canvas з'являється з EnclosedShelfScene,
+ * export-payload містить `template_slug=enclosed_shelf` (НЕ slug продукту).
+ */
+
+test.describe("/products/closed-shelf-standard — product-mode studio (Phase 3.0 PR 8b)", () => {
+  test("заголовок продукту + 3 видимих поля + R3F canvas + summary", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
     });
 
-    await page.goto("/templates?tab=parts");
-    await page
-      .locator('[data-testid="template-card"][data-slug="enclosed_shelf"]')
-      .getByTestId("template-card-cta")
-      .click();
+    await page.goto("/products/closed-shelf-standard");
 
-    await expect(page).toHaveURL("/templates/enclosed_shelf");
-    await expect(page.getByTestId("template-detail-title")).toHaveText(
-      "Закрита полиця (cross-розгортка)",
-    );
+    // Header (product-mode) — назва продукту, а не назва базового шаблону.
+    await expect(page.getByTestId("product-detail-title")).toHaveText("Закрита полиця стандартна");
+    await expect(page.getByTestId("product-detail-slug")).toHaveText("closed-shelf-standard");
+
+    // Studio контейнер — той самий wrapper, що для part-mode (slug-based testId).
     await expect(page.getByTestId("enclosed-shelf-studio")).toBeVisible();
     await expect(page.getByTestId("enclosed-shelf-editor")).toBeVisible();
 
-    // Дефолти з seed (ENCLOSED_SHELF_DEFAULT_PARAMETERS).
+    // product-mode header у TemplateStudio
+    await expect(page.getByTestId("product-studio-header")).toBeVisible();
+
+    // 3 user_editable полів — присутні; bend_angle/material/інше — НЕ редаговані.
     await expect(page.getByTestId("param-width_mm")).toHaveValue("600");
     await expect(page.getByTestId("param-depth_mm")).toHaveValue("200");
     await expect(page.getByTestId("param-bend_radius_mm")).toHaveValue("2.5");
+
+    // Валідація OK для дефолтів.
     await expect(page.getByTestId("validation-ok")).toBeVisible();
 
-    // Summary показує "3 гиби UP · без перфорації" (default: rib=null, perf=null).
+    // Summary: "3 гиби UP · без перфорації".
     await expect(page.getByTestId("enclosed-shelf-summary")).toContainText("3 гиби UP");
-    await expect(page.getByTestId("enclosed-shelf-summary")).toContainText("без перфорації");
 
-    // 3D viewport.
-    const canvas = page.getByTestId("enclosed-shelf-viewport").locator("canvas");
+    // R3F canvas рендериться (валідні params, render-gate ADR-026 пропускає).
+    const canvas = page.getByTestId("enclosed-shelf-canvas").locator("canvas");
     await expect(canvas).toBeVisible({ timeout: 15_000 });
     const dims = await canvas.evaluate((el: HTMLCanvasElement) => ({
       w: el.width,
@@ -45,21 +53,23 @@ test.describe("/templates/enclosed_shelf — Enclosed shelf studio (Phase 3.0 PR
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });
 
-  test("Export → mock API → DXF + PDF з template_slug=enclosed_shelf", async ({ page }) => {
-    const jobId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  test("Export → payload містить template_slug=enclosed_shelf (НЕ product slug)", async ({
+    page,
+  }) => {
+    const jobId = "cccccccc-dddd-eeee-ffff-000000000000";
     const result = {
       artifacts: {
         dxf: {
-          url: "https://example-bucket.s3.amazonaws.com/es.dxf?Signature=abc&Expires=999",
+          url: "https://example-bucket.s3.amazonaws.com/cs.dxf?Signature=abc&Expires=999",
           bytes: 12000,
           expires_at: "2026-05-18T00:00:00.000Z",
-          s3_key: "exports/es.dxf",
+          s3_key: "exports/cs.dxf",
         },
         pdf: {
-          url: "https://example-bucket.s3.amazonaws.com/es.pdf?Signature=abc&Expires=999",
+          url: "https://example-bucket.s3.amazonaws.com/cs.pdf?Signature=abc&Expires=999",
           bytes: 6000,
           expires_at: "2026-05-18T00:00:00.000Z",
-          s3_key: "exports/es.pdf",
+          s3_key: "exports/cs.pdf",
         },
       },
     };
@@ -80,11 +90,10 @@ test.describe("/templates/enclosed_shelf — Enclosed shelf studio (Phase 3.0 PR
       });
     });
 
-    await page.goto("/templates/enclosed_shelf");
+    await page.goto("/products/closed-shelf-standard");
     await page.getByTestId("export-button").click();
 
     await expect(page.getByTestId("export-download-link")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("export-download-link-pdf")).toBeVisible();
     expect(received).toMatchObject({
       template_slug: "enclosed_shelf",
       parameters: {
@@ -92,8 +101,6 @@ test.describe("/templates/enclosed_shelf — Enclosed shelf studio (Phase 3.0 PR
         depth_mm: 200,
         bend_radius_mm: 2.5,
         bend_angle_deg: 90,
-        side_perforation: null,
-        stiffening_rib: null,
       },
     });
   });

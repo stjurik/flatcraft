@@ -193,10 +193,11 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
       "Базовий шаблон 4-сторонньої полиці (back + bottom + 2 квадратні бокові). Опційні features: side perforation, stiffening rib. Phase 3.0 PR 7 (ADR-027 Рішення 5).",
     descriptionEn:
       "Base 4-sided shelf template (back + bottom + 2 square sides). Optional features: side perforation, stiffening rib. Phase 3.0 PR 7.",
-    // PR 7d: web Studio + R3F готові — публікуємо у каталозі. Optional features
-    // (side perforation, stiffening rib) поки не у формі (default null),
-    // конфігурація — у наступних phase-ах або через product overrides.
-    isPublished: true,
+    // PR 8b (issue #2): закрита полиця — це Виріб, не Деталь. De-publish
+    // base-шаблон; продукт `closed-shelf-standard` (SEED_PRODUCTS) дає публічний
+    // доступ через `/products/closed-shelf-standard`. Той самий patern, що
+    // perforated_panel_square ← perforated-panel-decorative.
+    isPublished: false,
     defaultParameters: ENCLOSED_SHELF_DEFAULT_PARAMETERS,
     previewImageUrl: null,
   },
