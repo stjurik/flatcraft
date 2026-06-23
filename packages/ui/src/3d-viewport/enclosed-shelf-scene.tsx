@@ -9,6 +9,7 @@ import { BoxGeometry } from "three";
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { computeCameraPlacement } from "./camera-placement.js";
 
 interface SceneProps {
   readonly parameters: EnclosedShelfParameters;
@@ -130,12 +131,26 @@ export function EnclosedShelfScene({ parameters, thicknessMm }: SceneProps) {
   const reduced = useReducedMotion();
   const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
 
-  const maxDim = Math.max(parameters.width_mm, parameters.depth_mm);
-  const camDist = maxDim * 1.6;
+  // PR 8a: камера з урахуванням реального bbox (W × (t+d+rib) × D). Раніше
+  // `camDist = maxDim * 1.6 + fov=35°` клипав габаритну полицю (1000×300).
+  const placement = useMemo(
+    () =>
+      computeCameraPlacement({
+        x: parameters.width_mm,
+        y: thicknessMm + parameters.depth_mm + (parameters.stiffening_rib?.height_mm ?? 0),
+        z: parameters.depth_mm,
+      }),
+    [parameters.width_mm, parameters.depth_mm, parameters.stiffening_rib, thicknessMm],
+  );
   return (
     <Canvas
       dpr={[...quality.dpr]}
-      camera={{ position: [camDist, camDist * 0.7, camDist], fov: 35 }}
+      camera={{
+        position: [...placement.position],
+        fov: placement.fov,
+        near: placement.near,
+        far: placement.far,
+      }}
       data-testid="enclosed-shelf-canvas"
     >
       <ambientLight intensity={0.55} />

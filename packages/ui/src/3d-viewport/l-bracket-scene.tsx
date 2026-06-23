@@ -9,6 +9,7 @@ import { ExtrudeGeometry, Shape } from "three";
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { computeCameraPlacement } from "./camera-placement.js";
 import { buildLBracketShapeCommands } from "./geometry.js";
 
 interface SceneProps {
@@ -71,12 +72,25 @@ export function LBracketScene({ parameters, thicknessMm }: SceneProps) {
   const reduced = useReducedMotion();
   const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
 
-  const maxDim = Math.max(parameters.legA_mm, parameters.legB_mm, parameters.width_mm);
-  const camDist = maxDim * 1.8;
+  // PR 8a: bbox-aware камера (L-bracket: legA × legB по X/Y, width — extrude по Z).
+  const placement = useMemo(
+    () =>
+      computeCameraPlacement({
+        x: parameters.legA_mm,
+        y: parameters.legB_mm,
+        z: parameters.width_mm,
+      }),
+    [parameters.legA_mm, parameters.legB_mm, parameters.width_mm],
+  );
   return (
     <Canvas
       dpr={[...quality.dpr]}
-      camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
+      camera={{
+        position: [...placement.position],
+        fov: placement.fov,
+        near: placement.near,
+        far: placement.far,
+      }}
       data-testid="l-bracket-canvas"
     >
       <ambientLight intensity={0.55} />

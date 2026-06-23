@@ -144,6 +144,36 @@ def test_pdf_contains_square_glyph_not_diameter(tmp_path: Path) -> None:
     assert "Ø" not in text
 
 
+def test_pdf_renders_square_holes_as_rects_not_circles(tmp_path: Path) -> None:
+    """PR 8a regression-fix: PDF візуальний рендер квадратних отворів.
+
+    ДО фіксу `_draw_unfold_generic` завжди викликав c.circle() — square holes
+    на креслі виглядали як кола, попри текстовий callout '□'. Перевіряємо
+    content stream: reportlab `c.rect()` → "re" op, `c.circle()` → curveto
+    (~8 "c" op per circle). Очікуємо ≥ 30 "re" операторів (outer perimeter +
+    30 holes у дефолтному grid VALID = 5×6 = 30; пара ще і у BOM таблицях).
+    """
+    unfolded = unfold_perforated_panel_square(VALID)
+    output = tmp_path / "out.pdf"
+    export_perforated_panel_square_pdf(VALID, unfolded, output)
+
+    # Витягаємо content stream сторінки (decompressed pypdf'ом).
+    reader = PdfReader(str(output))
+    blob_parts: list[str] = []
+    for page in reader.pages:
+        contents = page.get_contents()
+        if contents is None:
+            continue
+        data = contents.get_data()
+        blob_parts.append(data.decode("latin-1", errors="ignore"))
+    blob = "\n".join(blob_parts)
+    # "re" — оператор rectangle; з'являється на кожен hole + outer perimeter.
+    re_count = sum(1 for op in blob.split() if op == "re")
+    # 30 holes + outer perimeter + кілька технічних (BOM/grid summary рамки)
+    # → мінімум 30.
+    assert re_count >= 30, f"Expected ≥30 're' (rect) ops in PDF; got {re_count}"
+
+
 def test_dxf_byte_determinism(tmp_path: Path) -> None:
     """CLAUDE.md §2.4 інваріант: однаковий вхід → байт-у-байт identical DXF."""
     unfolded = unfold_perforated_panel_square(VALID)

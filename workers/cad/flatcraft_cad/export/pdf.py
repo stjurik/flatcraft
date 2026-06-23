@@ -1552,10 +1552,17 @@ def _draw_unfold_generic(
         for hole in holes:
             cx = x0 + hole.x_mm * scale * mm
             cy = y0 + hole.y_mm * scale * mm
-            radius_pdf = (hole.diameter_mm / 2.0) * scale * mm
-            c.circle(cx, cy, radius_pdf, stroke=1, fill=0)
+            # ADR-027 Рішення 6: shape='square' → rect (side=diameter_mm),
+            # 'circle' → circle (diameter_mm/2 radius). PR 8a fix: до цього
+            # _draw_unfold_generic завжди малював circle → square holes на
+            # perforated_panel_square PDF виглядали як круги.
+            half_pdf = (hole.diameter_mm / 2.0) * scale * mm
+            if hole.shape == "square":
+                c.rect(cx - half_pdf, cy - half_pdf, 2 * half_pdf, 2 * half_pdf, stroke=1, fill=0)
+            else:
+                c.circle(cx, cy, half_pdf, stroke=1, fill=0)
         c.restoreState()
-        # Ø-callouts (Phase 2.9.b Block F): на кожен отвір (≤ cap) або один + «×N».
+        # □/Ø-callouts (Phase 2.9.b Block F): на кожен отвір (≤ cap) або один + «×N».
         _draw_hole_dims(c, holes, x0_pt=x0, y0_pt=y0, scale=scale, part_top_pt=y0 + h * mm)
 
     c.setFont("DejaVuSans", 8)
