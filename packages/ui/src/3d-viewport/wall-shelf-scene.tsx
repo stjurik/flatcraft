@@ -9,6 +9,7 @@ import { CylinderGeometry, ExtrudeGeometry, Shape } from "three";
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { computeCameraPlacement } from "./camera-placement.js";
 import { buildWallShelfShapeCommands } from "./geometry.js";
 
 interface SceneProps {
@@ -125,16 +126,25 @@ export function WallShelfScene({ parameters, thicknessMm }: SceneProps) {
   const reduced = useReducedMotion();
   const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
 
-  const maxDim = Math.max(
-    parameters.shelf_depth_mm,
-    parameters.back_height_mm,
-    parameters.width_mm,
+  // PR 8a: bbox-aware камера (wall_shelf: shelf_depth по X, back_height по Y, width — extrude по Z).
+  const placement = useMemo(
+    () =>
+      computeCameraPlacement({
+        x: parameters.shelf_depth_mm,
+        y: parameters.back_height_mm,
+        z: parameters.width_mm,
+      }),
+    [parameters.shelf_depth_mm, parameters.back_height_mm, parameters.width_mm],
   );
-  const camDist = maxDim * 1.5;
   return (
     <Canvas
       dpr={[...quality.dpr]}
-      camera={{ position: [camDist, camDist * 0.6, camDist], fov: 35 }}
+      camera={{
+        position: [...placement.position],
+        fov: placement.fov,
+        near: placement.near,
+        far: placement.far,
+      }}
       data-testid="wall-shelf-canvas"
     >
       <ambientLight intensity={0.55} />

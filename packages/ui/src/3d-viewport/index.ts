@@ -14,3 +14,9 @@ export {
   type WallShelfGeometryInputs,
   type ZBracketGeometryInputs,
 } from "./geometry.js";
+export {
+  computeCameraPlacement,
+  type BoundingBoxMm,
+  type CameraPlacement,
+  type CameraPlacementOptions,
+} from "./camera-placement.js";

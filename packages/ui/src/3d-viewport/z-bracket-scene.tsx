@@ -9,6 +9,7 @@ import { ExtrudeGeometry, Shape } from "three";
 import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
+import { computeCameraPlacement } from "./camera-placement.js";
 import { buildZBracketShapeCommands } from "./geometry.js";
 
 interface SceneProps {
@@ -75,16 +76,30 @@ export function ZBracketScene({ parameters, thicknessMm }: SceneProps) {
   const reduced = useReducedMotion();
   const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
 
-  const maxDim = Math.max(
-    parameters.bottom_flange_mm + parameters.top_flange_mm,
-    parameters.offset_mm,
-    parameters.width_mm,
+  // PR 8a: bbox-aware камера (Z-bracket: bottom+top flanges по X, offset по Y, width — по Z).
+  const placement = useMemo(
+    () =>
+      computeCameraPlacement({
+        x: parameters.bottom_flange_mm + parameters.top_flange_mm,
+        y: parameters.offset_mm,
+        z: parameters.width_mm,
+      }),
+    [
+      parameters.bottom_flange_mm,
+      parameters.top_flange_mm,
+      parameters.offset_mm,
+      parameters.width_mm,
+    ],
   );
-  const camDist = maxDim * 1.5;
   return (
     <Canvas
       dpr={[...quality.dpr]}
-      camera={{ position: [camDist, camDist * 0.8, camDist], fov: 35 }}
+      camera={{
+        position: [...placement.position],
+        fov: placement.fov,
+        near: placement.near,
+        far: placement.far,
+      }}
       data-testid="z-bracket-canvas"
     >
       <ambientLight intensity={0.55} />
