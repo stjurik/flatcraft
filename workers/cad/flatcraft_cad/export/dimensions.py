@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
+from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
 from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
@@ -37,6 +38,7 @@ FinishedDimsParams = (
     | WallShelfBuildParameters
     | PerforatedPanelBuildParameters
     | PerforatedPanelSquareBuildParameters
+    | EnclosedShelfBuildParameters
 )
 
 
@@ -93,6 +95,17 @@ def compute_finished_dimensions(
     ):
         return FinishedDimensions(
             x_mm=params.length_mm, y_mm=params.width_mm, z_mm=params.thickness_mm
+        )
+    if isinstance(params, EnclosedShelfBuildParameters) and template_slug == "enclosed_shelf":
+        # Bounding box зігнутого виробу:
+        # X = width_mm (повна ширина).
+        # Y = depth_mm (back витягнуто вертикально вгору) + thickness (bottom).
+        # Z = depth_mm (front-to-back глибина полиці).
+        # rib не впливає на bbox X/Y, але додає до Z front-side бік (нехтуємо).
+        return FinishedDimensions(
+            x_mm=params.width_mm,
+            y_mm=params.depth_mm + params.thickness_mm,
+            z_mm=params.depth_mm,
         )
     raise ValueError(
         f"невідома комбінація slug/параметрів для габаритів: slug={template_slug!r}, "

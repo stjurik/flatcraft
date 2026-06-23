@@ -12,6 +12,7 @@
 import { z } from "zod";
 
 import { CornerAngleParametersSchema } from "../templates/corner-angle.js";
+import { EnclosedShelfParametersSchema } from "../templates/enclosed-shelf.js";
 import { LBracketParametersSchema } from "../templates/l-bracket.js";
 import { PerforatedPanelSquareParametersSchema } from "../templates/perforated-panel-square.js";
 import { PerforatedPanelParametersSchema } from "../templates/perforated-panel.js";
@@ -58,6 +59,13 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
   z.object({
     template_slug: z.literal("perforated_panel_square"),
     parameters: PerforatedPanelSquareParametersSchema,
+    material_code: MaterialCodeSchema,
+    thickness_mm: ThicknessMmSchema,
+  }),
+  // Phase 3.0 PR 7c (ADR-027 Рішення 5): cross-розгортка enclosed_shelf.
+  z.object({
+    template_slug: z.literal("enclosed_shelf"),
+    parameters: EnclosedShelfParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
   }),
