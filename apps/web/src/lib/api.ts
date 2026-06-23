@@ -11,6 +11,7 @@ import {
   ExportJobEventSchema,
   ExportRequestSchema,
   MaterialListResponseSchema,
+  ProductDetailSchema,
   ProductListResponseSchema,
   TemplateDetailSchema,
   TemplateListResponseSchema,
@@ -18,6 +19,7 @@ import {
   type ExportJobEvent,
   type ExportRequest,
   type MaterialChoice,
+  type ProductDetail,
   type ProductSummary,
   type TemplateDetail,
   type TemplateSummary,
@@ -92,6 +94,24 @@ export async function fetchTemplate(slug: string): Promise<TemplateDetail | null
     throw new ApiError(`Failed to fetch /templates/${slug}: ${res.status}`, res.status);
   }
   return TemplateDetailSchema.parse(await res.json());
+}
+
+/**
+ * Phase 3.0 PR 6: detail product з resolved base_template (server-side fetch
+ * перед рендером `/products/[slug]`). Повертає null на 404 — сторінка робить
+ * notFound(). 422 (unsupported_base_template) — кидаємо ApiError, бо це
+ * інваріант seed-валідатора (ADR-027) і має бути 5xx-видимим для алертів.
+ */
+export async function fetchProduct(slug: string): Promise<ProductDetail | null> {
+  const res = await fetch(`${SERVER_API_BASE_URL}/products/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new ApiError(`Failed to fetch /products/${slug}: ${res.status}`, res.status);
+  }
+  return ProductDetailSchema.parse(await res.json());
 }
 
 /**
