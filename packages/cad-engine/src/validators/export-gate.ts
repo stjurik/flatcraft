@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import type { BendMachineSpec } from "../spec.js";
 import { validateBend, type BendInput } from "./bend.js";
+import { validatePerforation, type PerforationIssue } from "./perforation.js";
 import { validateProfile, type ProfileIssue } from "./profile.js";
 import type { ValidationError } from "./types.js";
 
@@ -242,6 +243,34 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
       // моделюється (no flange-after-bend перевірка — depth_mm уже >=100 і
       // bend reduces by t+r≤~6мм, гарантовано >0). Zod-min ranges відсіюють
       // невалідне ще на API. Якщо знадобиться — додаємо у наступному hotfix.
+      return [];
+  }
+}
+
+/** PerforationIssue → RFC 9457 ProblemError. */
+function perforationIssueToProblem(issue: PerforationIssue): ProblemError {
+  return {
+    field: issue.which,
+    code: issue.code,
+    value: issue.got,
+    message: issue.message,
+  };
+}
+
+/**
+ * Геометрична коректність grid перфорації для ExportRequest — та сама
+ * `validatePerforation`, що й клієнтський банер. Порожній масив — валідно
+ * (усі шаблони без перфорації). Дзеркало Fastify-gate ↔ браузер ↔ Python.
+ */
+export function validateExportPerforation(body: ExportRequest): ProblemError[] {
+  switch (body.template_slug) {
+    case "perforated_panel":
+    case "perforated_panel_square":
+      return validatePerforation({
+        templateSlug: body.template_slug,
+        parameters: body.parameters as unknown as Readonly<Record<string, number>>,
+      }).map(perforationIssueToProblem);
+    default:
       return [];
   }
 }

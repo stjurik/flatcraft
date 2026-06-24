@@ -1,5 +1,6 @@
 "use client";
 
+import { validatePerforation } from "@flatcraft/cad-engine";
 import {
   PerforatedPanelSquareParametersSchema,
   type PerforatedPanelSquareParameters,
@@ -43,6 +44,16 @@ export function PerforatedPanelSquareEditor({
     if (validation.success) return [] as string[];
     return validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
   }, [validation]);
+  // Grid-геометрія: крок має перевищувати сторону отвору, інакше отвори
+  // зливаються (той самий валідатор, що й серверний gate).
+  const perforationIssues = useMemo(
+    () => validatePerforation({ templateSlug: "perforated_panel_square", parameters: value }),
+    [value],
+  );
+  const allErrors = useMemo(
+    () => [...perforationIssues.map((i) => i.message), ...zodErrors],
+    [perforationIssues, zodErrors],
+  );
   const grid = useMemo(() => computeGrid(value), [value]);
 
   return (
@@ -69,12 +80,12 @@ export function PerforatedPanelSquareEditor({
         </p>
       </div>
 
-      {zodErrors.length > 0 ? (
+      {allErrors.length > 0 ? (
         <ul
           data-testid="validation-errors"
           className="border-danger/40 bg-danger-surface text-danger rounded-md border p-3 text-sm"
         >
-          {zodErrors.map((msg) => (
+          {allErrors.map((msg) => (
             <li key={msg}>{msg}</li>
           ))}
         </ul>

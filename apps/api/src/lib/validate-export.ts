@@ -18,6 +18,7 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   validateExportBends,
+  validateExportPerforation,
   validateExportProfile,
   type ProblemDetails,
   type ProblemError,

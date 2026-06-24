@@ -11,7 +11,8 @@ interface TemplateCardProps {
 /**
  * Шаблон-картка для каталогу `/templates`. Не клікабельна цілком —
  * вкладені анкори ламали б a11y (HTML5 не дозволяє `<a>` в `<a>`).
- * Замість того: окремий клікабельний `<h3>` (title) і явна CTA-Button.
+ * Замість того: окремі сиблінг-анкори — клікабельне прев'ю (thumb),
+ * клікабельний `<h3>` (title) і явна CTA-Button — усі ведуть на `href`.
  * Hover на article додає `shadow-lg` і змінює тон thumb-іконки —
  * через `group` пар.
  */
@@ -23,17 +24,25 @@ export function TemplateCard({ template }: TemplateCardProps) {
       data-slug={template.slug}
       className="bg-bg-elevated border-border hover:border-border-strong duration-base group flex flex-col overflow-hidden rounded-lg border shadow-md transition-shadow ease-out hover:shadow-lg"
     >
-      <div className="bg-surface-sunken border-border text-fg-subtle group-hover:text-primary duration-base flex aspect-[4/3] items-center justify-center border-b transition-colors ease-out">
-        {template.previewImageUrl ? (
-          <img
-            src={template.previewImageUrl}
-            alt={template.nameUk}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <TemplateThumb slug={template.slug} />
-        )}
-      </div>
+      <Link
+        href={href}
+        prefetch
+        aria-label={`Налаштувати: ${template.nameUk}`}
+        data-testid="template-card-thumb-link"
+        className="focus-visible:ring-primary focus-visible:outline-none focus-visible:ring-2"
+      >
+        <div className="bg-surface-sunken border-border text-fg-subtle group-hover:text-primary duration-base flex aspect-[4/3] items-center justify-center border-b transition-colors ease-out">
+          {template.previewImageUrl ? (
+            <img
+              src={template.previewImageUrl}
+              alt={template.nameUk}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <TemplateThumb slug={template.slug} />
+          )}
+        </div>
+      </Link>
 
       <div className="flex flex-col gap-2 p-5">
         <h3 className="font-display text-fg text-xl font-semibold">
