@@ -31,17 +31,25 @@ export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProp
       data-slug={product.slug}
       className="bg-bg-elevated border-border hover:border-border-strong duration-base group flex flex-col overflow-hidden rounded-lg border shadow-md transition-shadow ease-out hover:shadow-lg"
     >
-      <div className="bg-surface-sunken border-border text-fg-subtle group-hover:text-primary duration-base flex aspect-[4/3] items-center justify-center border-b transition-colors ease-out">
-        {product.previewImageUrl ? (
-          <img
-            src={product.previewImageUrl}
-            alt={product.name}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <ProductCardPlaceholder />
-        )}
-      </div>
+      <Link
+        href={href}
+        prefetch
+        aria-label={`Налаштувати: ${product.name}`}
+        data-testid="product-card-thumb-link"
+        className="focus-visible:ring-primary focus-visible:outline-none focus-visible:ring-2"
+      >
+        <div className="bg-surface-sunken border-border text-fg-subtle group-hover:text-primary duration-base flex aspect-[4/3] items-center justify-center border-b transition-colors ease-out">
+          {product.previewImageUrl ? (
+            <img
+              src={product.previewImageUrl}
+              alt={product.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <ProductCardPlaceholder />
+          )}
+        </div>
+      </Link>
 
       <div className="flex flex-col gap-2 p-5">
         <h3 className="font-display text-fg text-xl font-semibold">
