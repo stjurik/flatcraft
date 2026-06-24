@@ -10,13 +10,13 @@ import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
 import { computeCameraPlacement } from "./camera-placement.js";
+import { computeHoleGrid, DEFAULT_MAX_HOLES_PREVIEW } from "./hole-grid.js";
+import { InstancedHoles } from "./instanced-holes.js";
 
 interface SceneProps {
   readonly parameters: EnclosedShelfParameters;
   readonly thicknessMm: number;
 }
-
-const MAX_PERFORATION_PREVIEW = 200;
 
 /**
  * Enclosed shelf 3D — 4 (або 5 з rib) BoxGeometry-сегменти у Y-up системі
@@ -37,7 +37,7 @@ function EnclosedShelf({ parameters, thicknessMm }: SceneProps) {
   const d = parameters.depth_mm;
   const rh = parameters.stiffening_rib?.height_mm ?? 0;
 
-  const { segments, perforations } = useMemo(() => {
+  const { segments, perforationPositions } = useMemo(() => {
     const bottomGeom = new BoxGeometry(w, t, d);
     const backGeom = new BoxGeometry(w, d, t);
     const sideGeom = new BoxGeometry(t, d, d);
@@ -65,45 +65,43 @@ function EnclosedShelf({ parameters, thicknessMm }: SceneProps) {
       segs.push({ geom: ribGeom, pos: [w / 2, t + rh / 2, t / 2] as const, key: "rib" });
     }
 
-    // Перфорація боковин (left + right), декоративний overlay.
-    const perfs: Array<{ geom: BoxGeometry; pos: readonly [number, number, number]; key: string }> =
-      [];
+    // Перфорація боковин (left + right), декоративний overlay через
+    // InstancedHoles. Великі grid'и граційно проріджуються (`computeHoleGrid`),
+    // а не гасяться повністю (раніше total>cap → нуль отворів).
+    const perfPositions: Array<readonly [number, number, number]> = [];
     if (parameters.side_perforation) {
       const sp = parameters.side_perforation;
-      const availYz = d - 2 * sp.margin_mm; // вздовж Y (depth) — sides квадратні d×d
-      const availZy = d - 2 * sp.margin_mm;
-      if (availYz >= 0 && availZy >= 0) {
-        const nCols = Math.max(1, Math.floor(availYz / sp.pitch_x_mm) + 1);
-        const nRows = Math.max(1, Math.floor(availZy / sp.pitch_y_mm) + 1);
-        const total = nCols * nRows * 2;
-        if (total <= MAX_PERFORATION_PREVIEW) {
-          const effMarginY = (d - (nCols - 1) * sp.pitch_x_mm) / 2;
-          const effMarginZ = (d - (nRows - 1) * sp.pitch_y_mm) / 2;
-          const holeLen = t * 1.5;
-          const holeGeom = new BoxGeometry(holeLen, sp.hole_size_mm, sp.hole_size_mm);
-          for (let i = 0; i < nCols; i++) {
-            const ydepth = effMarginY + i * sp.pitch_x_mm;
-            for (let j = 0; j < nRows; j++) {
-              const zheight = t + effMarginZ + j * sp.pitch_y_mm;
-              // left side: x≈t/2 — overlay прокол по X
-              perfs.push({
-                geom: holeGeom,
-                pos: [t / 2, zheight, ydepth] as const,
-                key: `pl-${i}-${j}`,
-              });
-              perfs.push({
-                geom: holeGeom,
-                pos: [w - t / 2, zheight, ydepth] as const,
-                key: `pr-${i}-${j}`,
-              });
-            }
-          }
+      // sides квадратні d×d; pitch_x вздовж глибини (Y), pitch_y вздовж висоти (Z).
+      if (d - 2 * sp.margin_mm >= 0) {
+        // maxHoles/2 — бо кожну клітинку дублюємо на left+right боковини.
+        const { cells } = computeHoleGrid({
+          lengthMm: d,
+          widthMm: d,
+          pitchXMm: sp.pitch_x_mm,
+          pitchYMm: sp.pitch_y_mm,
+          marginMm: sp.margin_mm,
+          maxHoles: DEFAULT_MAX_HOLES_PREVIEW / 2,
+        });
+        for (const c of cells) {
+          const ydepth = c.u + d / 2; // де-центруємо у локальну систему групи
+          const zheight = t + c.v + d / 2;
+          // left side: x≈t/2; right side: x≈w−t/2 — overlay прокол по X.
+          perfPositions.push([t / 2, zheight, ydepth] as const);
+          perfPositions.push([w - t / 2, zheight, ydepth] as const);
         }
       }
     }
 
-    return { segments: segs, perforations: perfs };
+    return { segments: segs, perforationPositions: perfPositions };
   }, [w, d, t, rh, parameters.stiffening_rib, parameters.side_perforation]);
+
+  // Геометрія одного бокового отвору (прокол по X; квадрат у площині бічної стінки).
+  const sidePerf = parameters.side_perforation;
+  const perfGeom = useMemo(
+    () =>
+      sidePerf ? new BoxGeometry(t * 1.5, sidePerf.hole_size_mm, sidePerf.hole_size_mm) : null,
+    [sidePerf, t],
+  );
 
   // Центрування групи навколо origin.
   const cx = -w / 2;
@@ -117,11 +115,9 @@ function EnclosedShelf({ parameters, thicknessMm }: SceneProps) {
           <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
         </mesh>
       ))}
-      {perforations.map((p) => (
-        <mesh key={p.key} geometry={p.geom} position={p.pos}>
-          <meshStandardMaterial color="#fb923c" />
-        </mesh>
-      ))}
+      {perfGeom && perforationPositions.length > 0 ? (
+        <InstancedHoles geometry={perfGeom} positions={perforationPositions} />
+      ) : null}
     </group>
   );
 }

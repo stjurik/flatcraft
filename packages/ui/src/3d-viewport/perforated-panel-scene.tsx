@@ -10,57 +10,49 @@ import { useIsMobile } from "../hooks/use-is-mobile.js";
 import { useReducedMotion } from "../hooks/use-reduced-motion.js";
 import { viewportQuality } from "../lib/viewport-quality.js";
 import { computeCameraPlacement } from "./camera-placement.js";
+import { computeHoleGrid } from "./hole-grid.js";
+import { InstancedHoles } from "./instanced-holes.js";
 
 interface SceneProps {
   readonly parameters: PerforatedPanelParameters;
   readonly thicknessMm: number;
 }
 
-const MAX_HOLES_PREVIEW = 500;
-
 /**
  * Perforated panel 3D — плоский box + cylinder-отвори за обчисленим grid.
  *
  * Layout повторює `unfold_perforated_panel`: центрований grid з pitch'ом.
- * Cylinders побудовано як orange overlay (без CSG difference — швидше).
- * Якщо обчислений grid перевищує MAX_HOLES_PREVIEW, отвори не рендеряться
- * (UI показує summary). Для laser-cutter точна геометрія у DXF.
+ * Cylinders — orange overlay через InstancedHoles (1 draw call, без CSG).
+ * Великі grid'и граційно проріджуються (`computeHoleGrid`), а не гасяться —
+ * раніше `total > cap` робив усю панель суцільною. Точна геометрія — у DXF.
  */
 function PerforatedPanel({ parameters, thicknessMm }: SceneProps) {
-  const { boxGeom, holes } = useMemo(() => {
-    const t = thicknessMm;
-    const L = parameters.length_mm;
-    const W = parameters.width_mm;
-    const px = parameters.pitch_x_mm;
-    const py = parameters.pitch_y_mm;
-    const m = parameters.margin_mm;
+  const t = thicknessMm;
+  const boxGeom = useMemo(
+    () => new BoxGeometry(parameters.length_mm, t, parameters.width_mm),
+    [parameters.length_mm, parameters.width_mm, t],
+  );
 
-    const boxGeom = new BoxGeometry(L, t, W);
-
-    // Centered grid (idempotent з Python unfold_perforated_panel).
-    const availX = L - 2 * m;
-    const availY = W - 2 * m;
-    const nCols = Math.max(1, Math.floor(availX / px) + 1);
-    const nRows = Math.max(1, Math.floor(availY / py) + 1);
-    const effMarginX = (L - (nCols - 1) * px) / 2;
-    const effMarginY = (W - (nRows - 1) * py) / 2;
-
-    const total = nCols * nRows;
-    const holes: Array<{ pos: readonly [number, number, number] }> = [];
-    if (total <= MAX_HOLES_PREVIEW) {
-      for (let i = 0; i < nCols; i++) {
-        const x = effMarginX + i * px - L / 2; // re-center around origin
-        for (let j = 0; j < nRows; j++) {
-          const z = effMarginY + j * py - W / 2;
-          holes.push({ pos: [x, t / 2, z] as const });
-        }
-      }
-    }
-    return { boxGeom, holes };
-  }, [parameters, thicknessMm]);
+  const positions = useMemo(() => {
+    const { cells } = computeHoleGrid({
+      lengthMm: parameters.length_mm,
+      widthMm: parameters.width_mm,
+      pitchXMm: parameters.pitch_x_mm,
+      pitchYMm: parameters.pitch_y_mm,
+      marginMm: parameters.margin_mm,
+    });
+    return cells.map((c) => [c.u, t / 2, c.v] as const);
+  }, [
+    parameters.length_mm,
+    parameters.width_mm,
+    parameters.pitch_x_mm,
+    parameters.pitch_y_mm,
+    parameters.margin_mm,
+    t,
+  ]);
 
   const cylRadius = parameters.hole_diameter_mm / 2;
-  const cylLen = thicknessMm * 1.5;
+  const cylLen = t * 1.5;
   const cylGeom = useMemo(
     () => new CylinderGeometry(cylRadius, cylRadius, cylLen, 16),
     [cylRadius, cylLen],
@@ -71,11 +63,7 @@ function PerforatedPanel({ parameters, thicknessMm }: SceneProps) {
       <mesh geometry={boxGeom}>
         <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
       </mesh>
-      {holes.map((h, i) => (
-        <mesh key={i} geometry={cylGeom} position={h.pos}>
-          <meshStandardMaterial color="#fb923c" />
-        </mesh>
-      ))}
+      <InstancedHoles geometry={cylGeom} positions={positions} />
     </group>
   );
 }
