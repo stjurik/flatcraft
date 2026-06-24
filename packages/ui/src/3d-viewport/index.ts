@@ -20,3 +20,10 @@ export {
   type CameraPlacement,
   type CameraPlacementOptions,
 } from "./camera-placement.js";
+export {
+  computeHoleGrid,
+  DEFAULT_MAX_HOLES_PREVIEW,
+  type HoleGrid,
+  type HoleGridCell,
+  type HoleGridInput,
+} from "./hole-grid.js";
