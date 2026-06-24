@@ -60,7 +60,11 @@ from flatcraft_cad.unfold import (
     unfold_wall_shelf,
     unfold_z_bracket,
 )
-from flatcraft_cad.validate import validate_export, validate_export_profile
+from flatcraft_cad.validate import (
+    validate_export,
+    validate_export_perforation,
+    validate_export_profile,
+)
 
 PRESIGN_EXPIRES_SEC = 3600
 
@@ -273,6 +277,7 @@ def _build_app() -> FastAPI:
         errors = [
             *validate_export_profile(req.template_slug, req.parameters, req.thickness_mm),
             *validate_export(req.template_slug, req.parameters, req.thickness_mm),
+            *validate_export_perforation(req.template_slug, req.parameters),
         ]
         if errors:
             raise HTTPException(status_code=422, detail=errors)

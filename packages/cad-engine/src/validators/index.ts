@@ -8,6 +8,7 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   validateExportBends,
+  validateExportPerforation,
   validateExportProfile,
   type ProblemDetails,
   type ProblemError,
@@ -18,3 +19,9 @@ export {
   type ProfileIssueCode,
   type ProfileValidationInput,
 } from "./profile.js";
+export {
+  validatePerforation,
+  type PerforationIssue,
+  type PerforationIssueCode,
+  type PerforationValidationInput,
+} from "./perforation.js";

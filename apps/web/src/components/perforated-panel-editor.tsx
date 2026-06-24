@@ -1,5 +1,6 @@
 "use client";
 
+import { validatePerforation } from "@flatcraft/cad-engine";
 import { PerforatedPanelParametersSchema, type PerforatedPanelParameters } from "@flatcraft/types";
 import { AutoForm, zodIssuesToFieldErrors } from "@flatcraft/ui";
 import { useMemo } from "react";
@@ -27,10 +28,20 @@ export function PerforatedPanelEditor({ value, onChange }: PerforatedPanelEditor
     () => (validation.success ? {} : zodIssuesToFieldErrors(validation.error.issues)),
     [validation],
   );
-  const allErrors = useMemo(() => {
+  const zodErrors = useMemo(() => {
     if (validation.success) return [] as string[];
     return validation.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`);
   }, [validation]);
+  // Grid-геометрія: крок має перевищувати діаметр отвору, інакше отвори
+  // зливаються (той самий валідатор, що й серверний gate).
+  const perforationIssues = useMemo(
+    () => validatePerforation({ templateSlug: "perforated_panel", parameters: value }),
+    [value],
+  );
+  const allErrors = useMemo(
+    () => [...perforationIssues.map((i) => i.message), ...zodErrors],
+    [perforationIssues, zodErrors],
+  );
 
   const grid = useMemo(() => computeGrid(value), [value]);
 

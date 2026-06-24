@@ -207,6 +207,40 @@ describe("POST /exports — async flow", () => {
     expect(rad?.message).toMatch(/радіус/i);
   });
 
+  it("perforated_panel_square: pitch_y <= сторона отвору → 422 HOLES_OVERLAP, артефакт не створюється", async () => {
+    const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "perforated_panel_square",
+        parameters: {
+          length_mm: 300,
+          width_mm: 100,
+          hole_size_mm: 20,
+          pitch_x_mm: 27,
+          pitch_y_mm: 10,
+          margin_mm: 15,
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    const problem = res.json<{
+      detail: string;
+      errors: { field: string; code: string }[];
+    }>();
+    const overlap = problem.errors.find((e) => e.code === "HOLES_OVERLAP");
+    expect(overlap?.field).toBe("pitch_y_mm");
+    // pitch_x=27 > 20 → лише вісь Y; X не позначається.
+    expect(problem.errors.some((e) => e.field === "pitch_x_mm")).toBe(false);
+    expect(problem.detail).toMatch(/перетин/i);
+    // Жодного forward до cad-worker → жодного артефакта у R2.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
+  });
+
   it("GET /exports/:id для неіснуючого → 404", async () => {
     const res = await app.inject({
       method: "GET",

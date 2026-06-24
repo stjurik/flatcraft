@@ -1,6 +1,12 @@
 "use client";
 
-import { validateProfile, type ProblemError, type ProfileIssue } from "@flatcraft/cad-engine";
+import {
+  validatePerforation,
+  validateProfile,
+  type PerforationIssue,
+  type ProblemError,
+  type ProfileIssue,
+} from "@flatcraft/cad-engine";
 import type { MaterialChoice } from "@flatcraft/types";
 import {
   MaterialSection,
@@ -96,6 +102,11 @@ const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
   "wall_shelf",
 ]);
 
+const SLUGS_WITH_PERFORATION: ReadonlySet<TemplateStudioSlug> = new Set([
+  "perforated_panel",
+  "perforated_panel_square",
+]);
+
 /**
  * Shared studio контейнер для всіх 5 шаблонів — Phase 3.0 PR 4 (ADR-027 Рішення 3).
  *
@@ -179,7 +190,16 @@ export function TemplateStudio<T extends Record<string, unknown>>({
     } as unknown as Parameters<typeof validateProfile>[0]);
   }, [templateSlug, parameters, material.thicknessMm]);
 
-  const exportDisabled = !isValid || matrixIssues.length > 0 || profileIssues.length > 0;
+  const perforationIssues = useMemo<readonly PerforationIssue[]>(() => {
+    if (!SLUGS_WITH_PERFORATION.has(templateSlug)) return [];
+    return validatePerforation({
+      templateSlug,
+      parameters,
+    } as unknown as Parameters<typeof validatePerforation>[0]);
+  }, [templateSlug, parameters]);
+
+  const exportDisabled =
+    !isValid || matrixIssues.length > 0 || profileIssues.length > 0 || perforationIssues.length > 0;
 
   return (
     <div data-testid={testId} className="flex flex-col gap-4">

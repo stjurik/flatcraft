@@ -27,6 +27,7 @@ import {
   getBendSpec,
   ProblemDetailsSchema,
   validateExportBends,
+  validateExportPerforation,
   validateExportProfile,
 } from "../lib/validate-export.js";
 
@@ -121,7 +122,13 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
         const spec = await getBendSpec();
         // ADR-026: геометрична валідність профілю (плече >= товщина+радіус) —
         // та сама validateProfile, що й render-gate у браузері.
-        const errors = [...validateExportProfile(req.body), ...validateExportBends(req.body, spec)];
+        // validateExportPerforation: grid отворів перфо-панелі (pitch > розмір
+        // отвору) — інакше отвори зливаються у проріз.
+        const errors = [
+          ...validateExportProfile(req.body),
+          ...validateExportBends(req.body, spec),
+          ...validateExportPerforation(req.body),
+        ];
         if (errors.length > 0) {
           return reply.code(422).send(buildProblem(errors, "/exports"));
         }
