@@ -772,6 +772,45 @@ Fastify-gate (`validateExportPerforation` → 422 RFC 9457), Python-worker
 
 ---
 
+## ADR-029: Клієнтський перемикач форми отвору над двома шаблонами (без злиття)
+
+**Статус:** Accepted (2026-06-24)
+
+**Контекст:** Користувач має обирати тип отвору перфо-панелі (круг/квадрат) у самому
+конфігураторі. Форма живе у двох окремих шаблонах: `perforated_panel`
+(`hole_diameter_mm`, DXF `CIRCLE`, PDF `Ø`) і `perforated_panel_square`
+(`hole_size_mm`, DXF `LWPOLYLINE`, PDF `□`) — розділення з PR 5 (regression-ізоляція,
+CAM). Початковий план Phase 3.0 передбачав єдине поле `hole_shape`, але реалізація
+пішла на два шаблони.
+
+**Рішення:** Варіант B — **не зливати** шаблони; додати **клієнтський перемикач**
+(`SegmentedControl` «Круглі | Квадратні») у спільній студії. `holeShape` піднятий у
+`PerforatedPanelStudio`, керує похідними `templateSlug`/`schema`/`renderViewport`;
+`TemplateStudio` лишається змонтованим (params + матеріал зберігаються при свопі).
+Стан params тримає **обидва ключі розміру синхронно** (`syncHoleKeys`); активна
+Zod-схема читає свій, зайвий відкидається `ExportRequestSchema` (z.object) на API
+перед форвардом у worker (`extra="forbid"`). **Нуль змін у backend / Pydantic / worker
+/ DB / снапшотах** — байт-детермінізм і розділення шаблонів збережені. Хелпери —
+`apps/web/src/lib/perforation-shape.ts`; редактори/студії злиті в один кожен.
+
+**Наслідки:**
+
+- (+) Picker у конфігураторі для шаблону й продукту; перемикання без втрати введеного.
+- (+) ADR-027 «Рішення 6» (два шаблони) і ADR-024 (CAM DXF: CIRCLE vs LWPOLYLINE) не
+  порушені — worker отримує чисті per-shape params.
+- (−) Інваріант «обидва ключі синхронні» тримається клієнтом (`syncHoleKeys`); зайвий
+  ключ покладається на strip `ExportRequestSchema` (зафіксовано тестом в `exports.test.ts`).
+- Reversible: якщо колись зливати у `hole_shape`-шаблон — це окреме рішення (більший PR
+  - reseed), цей перемикач не блокує.
+
+**Альтернативи:**
+
+- Злиття у один шаблон з `hole_shape` — відхилено зараз (DB-reseed, merge снапшотів, ADR-
+  reversal); лишається можливим follow-up.
+- Два окремі продукти (round+square) — відхилено: не дає picker'а в самому конфігураторі.
+
+---
+
 _Шаблон нової ADR:_
 
 ```

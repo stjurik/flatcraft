@@ -274,6 +274,45 @@ describe("POST /exports — async flow", () => {
     expect(forwarded).not.toHaveProperty("material_code");
   });
 
+  it("perforated_panel: зайвий ключ розміру (hole_size_mm) обрізається перед cad-worker", async () => {
+    // Клієнтський перемикач форми отвору тримає ОБИДВА ключі синхронно
+    // (hole_diameter_mm + hole_size_mm). Для perforated_panel у worker (Pydantic
+    // extra=forbid) має піти лише hole_diameter_mm — ExportRequestSchema (z.object)
+    // відкидає зайвий ключ при парсингу на API.
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const create = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "perforated_panel",
+        parameters: {
+          length_mm: 200,
+          width_mm: 150,
+          hole_diameter_mm: 8,
+          hole_size_mm: 8, // зайвий ключ (дзеркало квадратної форми)
+          pitch_x_mm: 20,
+          pitch_y_mm: 20,
+          margin_mm: 15,
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      },
+    });
+    expect(create.statusCode).toBe(202);
+    await flushAsync();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0];
+    const forwarded = JSON.parse(init.body as string) as { parameters: Record<string, unknown> };
+    expect(forwarded.parameters).toHaveProperty("hole_diameter_mm", 8);
+    expect(forwarded.parameters).not.toHaveProperty("hole_size_mm");
+  });
+
   it("400 коли material_code відсутній — нова обов'язковість (Phase 2.12)", async () => {
     const { material_code: _omit, ...payloadWithoutMaterial } = VALID_REQUEST;
     const res = await app.inject({

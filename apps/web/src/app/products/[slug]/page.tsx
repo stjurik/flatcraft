@@ -11,8 +11,8 @@
 import {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   EnclosedShelfParametersSchema,
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
-  PerforatedPanelSquareParametersSchema,
   type MaterialChoice,
   type ProductDetail,
 } from "@flatcraft/types";
@@ -20,8 +20,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { EnclosedShelfStudio } from "../../../components/enclosed-shelf-studio";
-import { PerforatedPanelSquareStudio } from "../../../components/perforated-panel-square-studio";
+import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
 import { fetchMaterials, fetchProduct } from "../../../lib/api";
+import {
+  holeShapeFromSlug,
+  initialPerforationParams,
+  schemaForHoleShape,
+} from "../../../lib/perforation-shape";
 
 interface PageProps {
   readonly params: Promise<{ slug: string }>;
@@ -80,14 +85,22 @@ function ProductStudio({
   // від випадкового override). Тут — стартова форма для першого render'у.
   const baseDefaults = product.baseTemplate.defaultParameters;
 
-  if (product.baseTemplateSlug === "perforated_panel_square") {
+  if (
+    product.baseTemplateSlug === "perforated_panel_square" ||
+    product.baseTemplateSlug === "perforated_panel"
+  ) {
+    const shape = holeShapeFromSlug(product.baseTemplateSlug);
     const merged = { ...baseDefaults, ...product.fixedParameters };
-    const parsed = PerforatedPanelSquareParametersSchema.safeParse(merged);
+    const parsed = schemaForHoleShape(shape).safeParse(merged);
+    const base = parsed.success
+      ? parsed.data
+      : shape === "square"
+        ? PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
+        : PERFORATED_PANEL_DEFAULT_PARAMETERS;
     return (
-      <PerforatedPanelSquareStudio
-        initialParameters={
-          parsed.success ? parsed.data : PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
-        }
+      <PerforatedPanelStudio
+        initialHoleShape={shape}
+        initialParameters={initialPerforationParams(shape, base)}
         materials={materials}
         product={{
           name: product.name,

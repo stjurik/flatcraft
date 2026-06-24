@@ -23,6 +23,38 @@ export function zodIssuesToFieldErrors(): Record<string, string> {
   return {};
 }
 
+// SegmentedControl-стаб (perforated-panel-editor вживає для вибору форми отвору).
+// Рендерить кнопки з data-active/data-value — достатньо для SSR-асертів; реальний
+// контрол покритий у packages/ui (primitives).
+export function SegmentedControl({
+  value,
+  options,
+  ariaLabel,
+  testId,
+}: {
+  readonly value: string;
+  readonly onValueChange: (value: string) => void;
+  readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+  readonly ariaLabel: string;
+  readonly testId?: string;
+}): ReactNode {
+  return (
+    <div role="group" aria-label={ariaLabel} data-testid={testId}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          data-value={o.value}
+          data-active={o.value === value ? "true" : "false"}
+          data-testid={testId ? `${testId}-item-${o.value}` : undefined}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Hotfix 2.9.f (ADR-026): render-gate viewport-тести вживають R3FErrorBoundary.
 // Стаб — passthrough (рендерить children); справжній boundary покритий у
 // packages/ui (r3f-error-boundary.test.tsx).

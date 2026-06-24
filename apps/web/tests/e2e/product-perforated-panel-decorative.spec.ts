@@ -22,9 +22,17 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("product-detail-title")).toHaveText("Декоративна перфо-панель");
     await expect(page.getByTestId("product-detail-slug")).toHaveText("perforated-panel-decorative");
 
-    // Studio контейнер — той самий wrapper, що для part-mode (slug-based testId).
-    await expect(page.getByTestId("perforated-panel-square-studio")).toBeVisible();
-    await expect(page.getByTestId("perforated-panel-square-editor")).toBeVisible();
+    // Studio контейнер — спільна перфо-студія (Варіант B: один wrapper для
+    // обох форм отвору, slug-based testId).
+    await expect(page.getByTestId("perforated-panel-studio")).toBeVisible();
+    await expect(page.getByTestId("perforated-panel-editor")).toBeVisible();
+
+    // Перемикач форми отвору присутній, стартова форма — квадрат (square product).
+    await expect(page.getByTestId("hole-shape-toggle")).toBeVisible();
+    await expect(page.getByTestId("hole-shape-toggle-item-square")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
 
     // product-mode header у TemplateStudio
     await expect(page.getByTestId("product-studio-header")).toBeVisible();
@@ -41,8 +49,8 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("validation-ok")).toBeVisible();
 
     // Grid summary з square holes (□ glyph, не Ø).
-    await expect(page.getByTestId("grid-summary-square")).toBeVisible();
-    await expect(page.getByTestId("grid-summary-square")).toContainText("□");
+    await expect(page.getByTestId("grid-summary")).toBeVisible();
+    await expect(page.getByTestId("grid-summary")).toContainText("□");
 
     // R3F canvas рендериться (валідні params, render-gate ADR-026 пропускає).
     // getByTestId на R3F <Canvas> резолвиться у wrapper div; html-canvas — всередині.
