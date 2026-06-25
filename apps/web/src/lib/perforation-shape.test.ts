@@ -19,6 +19,11 @@ const BASE: PerforationParameters = {
   pitch_x_mm: 25,
   pitch_y_mm: 25,
   margin_mm: 15,
+  // ADR-030: квадратна форма тепер ребриста монтажна панель — її поля присутні
+  // у спільному стані (для круглої форми відкидаються при safeParse/export).
+  rib_height_mm: 30,
+  bend_radius_mm: 2.5,
+  bend_angle_deg: 90,
 };
 
 describe("slug ↔ holeShape mapping", () => {

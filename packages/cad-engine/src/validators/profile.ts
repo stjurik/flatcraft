@@ -56,6 +56,10 @@ interface WallProfile {
   readonly front_lip_mm: number;
   readonly bend_radius_mm: number;
 }
+interface RibbedPanelProfile {
+  readonly rib_height_mm: number;
+  readonly bend_radius_mm: number;
+}
 
 export type ProfileValidationInput =
   | {
@@ -77,6 +81,11 @@ export type ProfileValidationInput =
       readonly templateSlug: "perforated_panel";
       readonly parameters: Readonly<Record<string, number>>;
       readonly thicknessMm: number;
+    }
+  | {
+      readonly templateSlug: "perforated_panel_square";
+      readonly parameters: RibbedPanelProfile;
+      readonly thicknessMm: number;
     };
 
 /** Округлення до 0.001 мм без хвостових нулів — для повідомлень. */
@@ -92,6 +101,7 @@ const LABEL: Record<string, string> = {
   offset: "Вертикальний offset",
   back_height: "Висота задньої стінки",
   shelf_depth: "Глибина полиці",
+  rib_height: "Висота ребра",
 };
 
 /** «Збільшіть «X» до мінімум N мм (товщина T + радіус R).» — inclusive-правило (>=). */
@@ -209,6 +219,23 @@ export function validateProfile(input: ProfileValidationInput): ProfileIssue[] {
           min: shelfThreshold,
           got: sd,
           message: gtMessage("shelf_depth", shelfThreshold, t, r),
+        });
+      }
+      return issues;
+    }
+
+    case "perforated_panel_square": {
+      // Ребриста монтажна панель (ADR-030): flat-фланець = rib_height − (t+r)
+      // має бути додатним → rib_height > t+r (як flange у z/wall).
+      const { rib_height_mm: rh, bend_radius_mm: r } = input.parameters;
+      const min = t + r;
+      if (rh <= min) {
+        issues.push({
+          code: "FLANGE_TOO_SHORT",
+          which: "rib_height",
+          min,
+          got: rh,
+          message: gtMessage("rib_height", min, t, r),
         });
       }
       return issues;

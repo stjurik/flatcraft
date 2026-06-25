@@ -93,6 +93,8 @@ const SLUGS_WITH_BENDS: ReadonlySet<TemplateStudioSlug> = new Set([
   "corner_angle",
   "wall_shelf",
   "enclosed_shelf",
+  // ADR-030: перфо-монтажна панель — 4 гиби (ребра) → matrix-валідація.
+  "perforated_panel_square",
 ]);
 
 const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
@@ -100,6 +102,8 @@ const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
   "z_bracket",
   "corner_angle",
   "wall_shelf",
+  // ADR-030: render-gate за rib_height > t+r.
+  "perforated_panel_square",
 ]);
 
 const SLUGS_WITH_PERFORATION: ReadonlySet<TemplateStudioSlug> = new Set([

@@ -40,8 +40,35 @@ describe("PerforatedPanelSquareParametersSchema", () => {
       pitch_x_mm: 10,
       pitch_y_mm: 10,
       margin_mm: 5,
+      rib_height_mm: 15,
+      bend_radius_mm: 1,
+      bend_angle_deg: 90,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("відхиляє rib_height поза 15–50 (ADR-030)", () => {
+    for (const rib of [10, 60]) {
+      const parsed = PerforatedPanelSquareParametersSchema.safeParse({
+        ...PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+        rib_height_mm: rib,
+      });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  it("відхиляє bend_radius поза allowed set {1,2.5,4,5}", () => {
+    const parsed = PerforatedPanelSquareParametersSchema.safeParse({
+      ...PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+      bend_radius_mm: 1.7,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("вимагає rib_height (ребра обов'язкові)", () => {
+    const { rib_height_mm: _omit, ...withoutRib } = PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS;
+    const parsed = PerforatedPanelSquareParametersSchema.safeParse(withoutRib);
+    expect(parsed.success).toBe(false);
   });
 
   it("відхиляє від'ємні значення", () => {
