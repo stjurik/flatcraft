@@ -276,21 +276,72 @@ def export_perforated_panel_square_dxf(
     unfolded: UnfoldedPerforatedPanelSquare,
     output_path: Path,
 ) -> Path:
-    """Perforated_panel_square DXF (Phase 3.0 PR 5, ADR-027 Рішення 6).
+    """Перфо-монтажна панель DXF — cross-розгортка лотка (ADR-030).
 
-    Identical до export_perforated_panel_dxf за структурою (2 шари, color 5
-    holes), але holes мають shape='square' → _export_flat_dxf емітить
-    LWPOLYLINE 4 vertices замість CIRCLE.
+    Cross-outline (1 LWPOLYLINE на LASER_CUT, ByLayer; bulge≠0 на скруглених
+    R-кутах ребер) + 4 BEND_LINES (dashed) + перфорація (square LWPOLYLINE,
+    color 5) + 4 установочні отвори Ø5.5 (CIRCLE, color 5).
+
+    Інваріант ADR-024 збережено: рівно 2 виробничі шари, 0 TEXT/DIMENSION
+    (кріпильні розміри/напрям — у PDF).
     """
-    return _export_flat_dxf(
-        length_mm=unfolded.length_mm,
-        width_mm=unfolded.width_mm,
-        bend_lines_mm=(),
-        bend_radius_mm=0.0,
-        bend_angle_deg=0.0,
-        output_path=output_path,
-        holes=unfolded.holes,
+    doc = ezdxf_new(dxfversion="R2010", setup=False)
+    _make_deterministic(doc)
+
+    if _DASHED_LINETYPE not in doc.linetypes:
+        doc.linetypes.add(
+            name=_DASHED_LINETYPE,
+            pattern=list(_DASHED_PATTERN),
+            description="Dashed __ __ __ (bend lines)",
+        )
+    for name, color in DXF_LAYERS:
+        if name not in doc.layers:
+            linetype = _DASHED_LINETYPE if name == "BEND_LINES" else "CONTINUOUS"
+            doc.layers.add(name=name, color=color, linetype=linetype)
+
+    msp = doc.modelspace()
+
+    # Cross-outline на LASER_CUT (ByLayer color 7); bulge несе R-скруглення ребер.
+    msp.add_lwpolyline(
+        points=list(unfolded.outline_lw),
+        format="xyb",
+        close=True,
+        dxfattribs={"layer": "LASER_CUT"},
     )
+
+    # Лінії гибу (4 axis-aligned segments) на BEND_LINES (dashed green).
+    for bend in unfolded.bend_lines:
+        msp.add_line(
+            start=(bend.x1_mm, bend.y1_mm),
+            end=(bend.x2_mm, bend.y2_mm),
+            dxfattribs={"layer": "BEND_LINES"},
+        )
+
+    # Перфорація — square LWPOLYLINE (color 5) на тому ж LASER_CUT (ADR-024).
+    for hole in unfolded.holes:
+        half = hole.diameter_mm / 2.0
+        msp.add_lwpolyline(
+            points=[
+                (hole.x_mm - half, hole.y_mm - half),
+                (hole.x_mm + half, hole.y_mm - half),
+                (hole.x_mm + half, hole.y_mm + half),
+                (hole.x_mm - half, hole.y_mm + half),
+            ],
+            close=True,
+            dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+        )
+
+    # Установочні отвори Ø5.5 — CIRCLE (color 5), inner-cut на LASER_CUT.
+    for hole in unfolded.corner_holes:
+        msp.add_circle(
+            center=(hole.x_mm, hole.y_mm),
+            radius=hole.diameter_mm / 2.0,
+            dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+        )
+
+    doc.saveas(output_path)
+    _normalize_dxf_bytes(output_path)
+    return output_path
 
 
 def export_enclosed_shelf_dxf(

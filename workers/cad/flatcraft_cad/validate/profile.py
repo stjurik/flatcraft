@@ -25,6 +25,7 @@ _LABEL = {
     "offset": "Вертикальний offset",
     "back_height": "Висота задньої стінки",
     "shelf_depth": "Глибина полиці",
+    "rib_height": "Висота ребра",
 }
 
 
@@ -104,6 +105,13 @@ def validate_profile(
             )
         flange("top_flange", float(parameters["top_flange_mm"]), r)
         flange("bottom_flange", float(parameters["bottom_flange_mm"]), r)
+        return errors
+
+    if template_slug == "perforated_panel_square":
+        # Ребриста монтажна панель (ADR-030): flat-фланець = rib_height − (t+r)
+        # має бути додатним → rib_height > t+r (як flange у z/wall).
+        r = float(parameters.get("bend_radius_mm", 2.5))
+        flange("rib_height", float(parameters["rib_height_mm"]), r)
         return errors
 
     if template_slug == "wall_shelf":

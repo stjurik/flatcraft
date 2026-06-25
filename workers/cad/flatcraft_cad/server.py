@@ -242,10 +242,9 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
 
 
 def _generate_perforated_panel_square(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
-    """Phase 3.0 PR 5 (ADR-027 Рішення 6): perforated_panel_square pipeline.
+    """Перфо-монтажна панель (ребриста, ADR-030): build→лоток, cross-unfold, DXF/PDF.
 
-    Окремий шаблон (НЕ extension perforated_panel через hole_shape) — окремий
-    handler з власним Pydantic, builder, unfold, DXF/PDF.
+    Має гиби (4 ребра) → unfold приймає k_factor (паритет з enclosed_shelf).
     """
     try:
         params = PerforatedPanelSquareBuildParameters.model_validate(
@@ -255,7 +254,7 @@ def _generate_perforated_panel_square(req: ExportRequest, tmpdir: Path) -> tuple
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
     solid = build_perforated_panel_square(params)
-    unfolded = unfold_perforated_panel_square(params)
+    unfolded = unfold_perforated_panel_square(params, req.k_factor)
     dxf = export_perforated_panel_square_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
     pdf = export_perforated_panel_square_pdf(
         params, unfolded, tmpdir / "out.pdf", solid=solid

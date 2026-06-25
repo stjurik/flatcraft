@@ -45,6 +45,7 @@ def _square(
         pitch_x_mm=pitch_x,
         pitch_y_mm=pitch_y,
         margin_mm=margin,
+        rib_height_mm=30,
     )
 
 
@@ -52,16 +53,19 @@ def _square(
 CATALOG = _square(length=300, width=100, hole=20, pitch_x=27, pitch_y=10, margin=15)
 
 
-def test_reproduces_catalog_decorative_panel() -> None:
-    """Декоративна панель з каталогу: 300×100, pitch 27/10, margin 15 → 11×8=88.
+def test_perforation_lattice_dims_and_span() -> None:
+    """Решітка перфорації 300×100, pitch 27/10, margin 15 → латтіс 11×8.
 
-    Це точний regression еталонного виробу, показаного користувачу у PDF.
+    ADR-030: panel тепер ребриста монтажна — кутові точки решітки можуть бути
+    вирізані під установочні отвори Ø5.5, тож `len(holes) ≤ cols*rows`. Самі
+    стовпці/рядки решітки лишаються (вирізаються лише кутові точки), тож span
+    по краях зберігається.
     """
     u = unfold_perforated_panel_square(CATALOG)
     assert u.grid_cols == 11
     assert u.grid_rows == 8
-    assert len(u.holes) == 88
-    # Точна посадка (avail = ціле число кроків) → eff margin == заявлений margin.
+    assert len(u.holes) <= 88
+    # Стовпці/рядки решітки вціліли (culling прибирає лише кутові точки).
     xs = sorted({h.x_mm for h in u.holes})
     ys = sorted({h.y_mm for h in u.holes})
     assert xs[0] == pytest.approx(15.0)
@@ -90,8 +94,8 @@ def test_hole_count_math(
     )
     assert u.grid_cols == cols
     assert u.grid_rows == rows
-    # len(holes) завжди == cols * rows (повний прямокутний grid, без дірок).
-    assert len(u.holes) == cols * rows
+    # Латтіс cols×rows; culling під 4 установочні отвори прибирає ≤4 кутові точки.
+    assert cols * rows - 4 <= len(u.holes) <= cols * rows
 
 
 @pytest.mark.parametrize(("length", "width", "margin", "px", "py", "cols", "rows"), _COUNT_CASES)
@@ -204,7 +208,8 @@ def test_all_hole_positions_unique() -> None:
     """Grid не дублює позицій — set координат == кількості отворів."""
     u = unfold_perforated_panel_square(CATALOG)
     positions = {(h.x_mm, h.y_mm) for h in u.holes}
-    assert len(positions) == len(u.holes) == 88
+    assert len(positions) == len(u.holes)
+    assert len(u.holes) <= 88  # ≤ повна решітка (кутові точки culled, ADR-030)
 
 
 def test_single_hole_when_pitch_exceeds_available() -> None:
@@ -218,11 +223,12 @@ def test_single_hole_when_pitch_exceeds_available() -> None:
     assert u.holes[0].y_mm == pytest.approx(60.0)
 
 
-def test_round_and_square_share_identical_layout_math() -> None:
-    """Кругла і квадратна панелі рахують grid однаково (спільний алгоритм).
+def test_round_and_square_share_lattice_math() -> None:
+    """Кругла й квадратна панелі рахують ту саму решітку (спільний алгоритм).
 
-    При однакових length/width/pitch/margin позиції центрів і кількість
-    отворів мусять збігатись — різниця лише у `shape`.
+    ADR-030: квадратна тепер ребриста монтажна — її перфорація = решітка
+    круглої МІНУС кутові точки під установочні отвори. Тож латтіс (cols×rows)
+    збігається, а позиції квадратної ⊆ позицій круглої.
     """
     square = unfold_perforated_panel_square(
         _square(length=300, width=100, hole=20, pitch_x=27, pitch_y=10, margin=15)
@@ -239,8 +245,9 @@ def test_round_and_square_share_identical_layout_math() -> None:
         )
     )
     assert (square.grid_cols, square.grid_rows) == (circle.grid_cols, circle.grid_rows)
-    sq_pos = sorted((h.x_mm, h.y_mm) for h in square.holes)
-    ci_pos = sorted((h.x_mm, h.y_mm) for h in circle.holes)
-    assert sq_pos == ci_pos
+    sq_pos = {(h.x_mm, h.y_mm) for h in square.holes}
+    ci_pos = {(h.x_mm, h.y_mm) for h in circle.holes}
+    assert sq_pos <= ci_pos  # квадратна — підмножина (culled кути)
+    assert len(sq_pos) <= len(ci_pos)
     assert all(h.shape == "square" for h in square.holes)
     assert all(h.shape == "circle" for h in circle.holes)

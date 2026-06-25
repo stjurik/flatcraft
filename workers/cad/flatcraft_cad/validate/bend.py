@@ -153,8 +153,10 @@ def validate_export(
 
     Шаблони без гибів (perforated_panel) → []. Усі гиби в межах шаблону мають
     однаковий (радіус, кут), тож одного виклику validate_bend достатньо.
+    perforated_panel_square (ребриста монтажна панель, ADR-030) ВАЛІДУЄТЬСЯ —
+    має 4 гиби (ребра) з однаковим bend_radius_mm/bend_angle_deg.
     """
-    if template_slug in ("perforated_panel", "perforated_panel_square"):
+    if template_slug == "perforated_panel":
         return []
 
     radius = parameters.get("bend_radius_mm")
