@@ -125,8 +125,9 @@ def _draw_beta_watermark(
 ) -> None:
     """Центрований subtle-watermark «BETA · feedback» унизу сторінки.
 
-    Pure-рендер: 7pt курсив, сірий #707070, 18pt від нижнього краю — нижче
-    реального контенту (footer-hint на 15мм, QR на 12мм), тож не перекриває.
+    Pure-рендер: 7pt курсив, сірий #707070, 18pt (~6.35мм) від нижнього краю —
+    нижче footer-hint (15мм) і центрований, тож не перекриває ні footer, ні
+    винесений у нижній-лівий кут QR (label 29мм / зображення 33–63мм, Phase 3.0).
     `page_height` приймається для повноти сигнатури (footer-anchor — від низу).
     Керується прапором BETA_WATERMARK (вимкнення при v1.0).
     """
@@ -428,8 +429,11 @@ def _draw_bom_block(
         c.drawString(ox * mm, (oy - 4 - i * 4) * mm, line)
 
 
-# Ізометрія — слот у нижній частині правої колонки, над QR (Phase 2.9.e).
-_ISO_ORIGIN_MM: Final[tuple[float, float]] = (178.0, 52.0)
+# Ізометрія — слот у нижній частині правої колонки (Phase 3.0: опущено з y=52
+# до y=22, бо QR пішов у нижній-лівий кут — звільнив правий-низ). Так каркас
+# (бокс 96×44 → y∈[22,66], заголовок y=68) лягає нижче BOM перфо-панелей
+# (нижній рядок ≈y=83), усуваючи перетин «ізометрія ↔ BOM».
+_ISO_ORIGIN_MM: Final[tuple[float, float]] = (178.0, 22.0)
 _ISO_BOX_MM: Final[tuple[float, float]] = (96.0, 44.0)
 
 
@@ -479,6 +483,34 @@ def _draw_isometric(
     # Приховані спершу, видимі поверх.
     _stroke(hidden, dashed=True)
     _stroke(visible, dashed=False)
+
+
+# QR — нижній-лівий кут (Phase 3.0): під розгорткою (y=70), над footer-рядком
+# (y=15). Розкладка низу-зліва (мм від низу): watermark≈6 → footer 15 →
+# QR-label 29 → QR-зображення 33…63 → розгортка ≥70. Колізій немає.
+_QR_ORIGIN_MM: Final[tuple[float, float]] = (15.0, 33.0)
+_QR_SIZE_MM: Final[float] = 30.0
+
+
+def _draw_qr(c: pdfcanvas.Canvas, qr_payload: str) -> None:
+    """Малює QR-код виробу + текстову підпис у нижньому-лівому куті.
+
+    Спільний для всіх шаблонів (DRY) — раніше блок дублювався у кожній
+    export-функції з позицією в нижньому-правому куті. Перенесено вліво, щоб
+    звільнити правий-низ під опущену ізометрію (Phase 3.0).
+    """
+    qr_png = _make_qr_png(qr_payload)
+    ox, oy = _QR_ORIGIN_MM
+    c.drawImage(
+        # ReportLab приймає image як filename або ImageReader; через ImageReader.
+        _ImageReader(io.BytesIO(qr_png)),
+        ox * mm,
+        oy * mm,
+        width=_QR_SIZE_MM * mm,
+        height=_QR_SIZE_MM * mm,
+    )
+    c.setFont("DejaVuSans", 7)
+    c.drawString(ox * mm, (oy - 4) * mm, f"QR: {qr_payload[:48]}")
 
 
 # Метадані з фіксованою датою/ID для байт-у-байт детермінізму.
@@ -678,23 +710,7 @@ def export_l_bracket_pdf(
         _draw_isometric(c, solid, parameters, unfolded)
 
     # QR-код у footer-area.
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        # ReportLab приймає image як filename або ImageReader; через ImageReader.
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     # Footer hint.
     c.setFont("DejaVuSans-Oblique", 8)
@@ -788,22 +804,7 @@ def export_z_bracket_pdf(
         _draw_isometric(c, solid, parameters, unfolded)
 
     # QR-код.
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
@@ -907,22 +908,7 @@ def export_corner_angle_pdf(
         _draw_isometric(c, solid, parameters, unfolded)
 
     # QR.
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
@@ -1026,22 +1012,7 @@ def export_wall_shelf_pdf(
     if solid is not None:
         _draw_isometric(c, solid, parameters, unfolded)
 
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
@@ -1145,22 +1116,7 @@ def export_perforated_panel_pdf(
     if solid is not None:
         _draw_isometric(c, solid, parameters, unfolded)
 
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
@@ -1270,22 +1226,7 @@ def export_perforated_panel_square_pdf(
     if solid is not None:
         _draw_isometric(c, solid, parameters, unfolded)
 
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(
@@ -1492,22 +1433,7 @@ def export_enclosed_shelf_pdf(
         include_volume=False,
     )
 
-    qr_png = _make_qr_png(qr_payload)
-    qr_size_mm = 30
-    qr_buf = io.BytesIO(qr_png)
-    c.drawImage(
-        _ImageReader(qr_buf),
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        15 * mm,
-        width=qr_size_mm * mm,
-        height=qr_size_mm * mm,
-    )
-    c.setFont("DejaVuSans", 7)
-    c.drawString(
-        (PAGE_WIDTH / mm - qr_size_mm - 15) * mm,
-        12 * mm,
-        f"QR: {qr_payload[:48]}",
-    )
+    _draw_qr(c, qr_payload)
 
     c.setFont("DejaVuSans-Oblique", 8)
     c.drawString(

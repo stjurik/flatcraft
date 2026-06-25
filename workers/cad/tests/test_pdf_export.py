@@ -11,11 +11,26 @@ from flatcraft_cad.export.pdf import (
     bom_text_lines,
     compute_bom,
     export_l_bracket_pdf,
+    export_perforated_panel_pdf,
+    export_perforated_panel_square_pdf,
     export_z_bracket_pdf,
 )
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
+from flatcraft_cad.templates.perforated_panel import (
+    PerforatedPanelBuildParameters,
+    build_perforated_panel,
+)
+from flatcraft_cad.templates.perforated_panel_square import (
+    PerforatedPanelSquareBuildParameters,
+    build_perforated_panel_square,
+)
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters, build_z_bracket
-from flatcraft_cad.unfold import unfold_l_bracket, unfold_z_bracket
+from flatcraft_cad.unfold import (
+    unfold_l_bracket,
+    unfold_perforated_panel,
+    unfold_perforated_panel_square,
+    unfold_z_bracket,
+)
 
 
 def _params(**overrides: Any) -> LBracketBuildParameters:
@@ -237,3 +252,87 @@ def _pytest_approx(value: float) -> Any:
     import pytest
 
     return pytest.approx(value)
+
+
+class TestIsometryBomNoOverlap:
+    """Регрес (Phase 3.0): ізометрія не перетинається з BOM на перфо-панелях.
+
+    Раніше таблиця «Розміри» (8 рядків) опускала BOM до y≈83мм, а ізометрія
+    мала фіксований слот із заголовком на y≈98мм → перетин (видно на
+    скриншоті користувача). Ізометрію опущено (origin y 52→22), QR пішов у
+    нижній-лівий кут. Перевіряємо за координатами тексту, що заголовок
+    ізометрії нижче за всі рядки BOM-блоку.
+    """
+
+    _SQUARE = PerforatedPanelSquareBuildParameters(
+        length_mm=200,
+        width_mm=150,
+        thickness_mm=2.0,
+        hole_size_mm=8,
+        pitch_x_mm=25,
+        pitch_y_mm=25,
+        margin_mm=15,
+    )
+    # Кругла перфо-панель: та сама розкладка (8-рядкова таблиця «Розміри» →
+    # опущений BOM), тож той самий ризик перетину з ізометрією.
+    _ROUND = PerforatedPanelBuildParameters(
+        length_mm=200,
+        width_mm=150,
+        thickness_mm=2.0,
+        hole_diameter_mm=8,
+        pitch_x_mm=25,
+        pitch_y_mm=25,
+        margin_mm=15,
+    )
+
+    def _text_y_positions(self, pdf_path: Path) -> list[tuple[str, float]]:
+        """Збирає (фрагмент тексту, y у пунктах) через pypdf visitor."""
+        positions: list[tuple[str, float]] = []
+
+        def _visit(
+            text: str,
+            _cm: list[float],
+            tm: list[float],
+            _font_dict: Any,
+            _font_size: float,
+        ) -> None:
+            stripped = text.strip()
+            if stripped:
+                positions.append((stripped, tm[5]))
+
+        reader = PdfReader(str(pdf_path))
+        reader.pages[0].extract_text(visitor_text=_visit)
+        return positions
+
+    def _assert_iso_below_bom(self, out: Path) -> None:
+        positions = self._text_y_positions(out)
+        iso_ys = [y for text, y in positions if "зометрі" in text]
+        bom_ys = [
+            y
+            for text, y in positions
+            if any(k in text for k in ("Специфікація", "Матеріал", "Товщина", "Площа", "Маса"))
+        ]
+
+        assert iso_ys, "не знайдено заголовок ізометрії у PDF-тексті"
+        assert bom_ys, "не знайдено рядки BOM у PDF-тексті"
+        # Менший y = нижче на сторінці (origin внизу-зліва). Заголовок ізометрії
+        # має бути строго нижче найнижчого рядка BOM.
+        assert max(iso_ys) < min(bom_ys), (
+            f"ізометрія перетинає BOM: iso_max_y={max(iso_ys):.1f}pt, bom_min_y={min(bom_ys):.1f}pt"
+        )
+
+    def test_квадратна_перфо_ізометрія_нижче_bom(self, tmp_path: Path) -> None:
+        unfolded = unfold_perforated_panel_square(self._SQUARE)
+        solid = build_perforated_panel_square(self._SQUARE)
+        out = export_perforated_panel_square_pdf(
+            self._SQUARE, unfolded, tmp_path / "square.pdf", solid=solid
+        )
+        self._assert_iso_below_bom(out)
+
+    def test_кругла_перфо_ізометрія_нижче_bom(self, tmp_path: Path) -> None:
+        unfolded = unfold_perforated_panel(self._ROUND)
+        solid = build_perforated_panel(self._ROUND)
+        out = export_perforated_panel_pdf(
+            self._ROUND, unfolded, tmp_path / "round.pdf", solid=solid
+        )
+        self._assert_iso_below_bom(out)
