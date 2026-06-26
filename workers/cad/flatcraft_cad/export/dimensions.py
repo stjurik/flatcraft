@@ -93,8 +93,12 @@ def compute_finished_dimensions(
         isinstance(params, PerforatedPanelSquareBuildParameters)
         and template_slug == "perforated_panel_square"
     ):
+        # Ребриста монтажна панель (ADR-030): лоток. X×Y = площина; Z = товщина
+        # + висота ребра (4 фланці підняті вгору від площини).
         return FinishedDimensions(
-            x_mm=params.length_mm, y_mm=params.width_mm, z_mm=params.thickness_mm
+            x_mm=params.length_mm,
+            y_mm=params.width_mm,
+            z_mm=params.thickness_mm + params.rib_height_mm,
         )
     if isinstance(params, EnclosedShelfBuildParameters) and template_slug == "enclosed_shelf":
         # Bounding box зігнутого виробу:

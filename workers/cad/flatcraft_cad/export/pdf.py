@@ -71,7 +71,10 @@ from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
-from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
+from flatcraft_cad.templates.perforated_panel_square import (
+    CORNER_HOLE_DIAMETER_MM,
+    PerforatedPanelSquareBuildParameters,
+)
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 from flatcraft_cad.unfold import (
@@ -1176,6 +1179,102 @@ def export_perforated_panel_pdf(
     return output_path
 
 
+def _draw_unfold_perfo_ribbed(
+    c: pdfcanvas.Canvas,
+    unfolded: UnfoldedPerforatedPanelSquare,
+    *,
+    origin_mm: tuple[float, float],
+    canvas_size_mm: tuple[float, float],
+) -> None:
+    """Малює cross-розгортку ребристого лотка (ADR-030).
+
+    Контур (з R5 на вільних кутах ребер) + 4 bend lines (dashed) + перфорація
+    (square, blue) + 4 установочні отвори Ø5.5 (red) + кріпильні розміри
+    (bolt pattern + підписи між центрами отворів).
+    """
+    ox_mm, oy_mm = origin_mm
+    canvas_w, canvas_h = canvas_size_mm
+    bbox_w = unfolded.bbox_max_x_mm - unfolded.bbox_min_x_mm
+    bbox_h = unfolded.bbox_max_y_mm - unfolded.bbox_min_y_mm
+    scale = min(canvas_w / max(bbox_w, 1), canvas_h / max(bbox_h, 1))
+    x0_mm = ox_mm + (canvas_w - bbox_w * scale) / 2.0
+    y0_mm = oy_mm + (canvas_h - bbox_h * scale) / 2.0
+
+    def _to_pt(xm: float, ym: float) -> tuple[float, float]:
+        return (
+            (x0_mm + (xm - unfolded.bbox_min_x_mm) * scale) * mm,
+            (y0_mm + (ym - unfolded.bbox_min_y_mm) * scale) * mm,
+        )
+
+    # Cross-outline (black solid) — щільні вершини несуть R5-дуги.
+    c.setLineWidth(1.0)
+    c.setStrokeColorRGB(0, 0, 0)
+    path = c.beginPath()
+    px, py = _to_pt(*unfolded.outline_vertices[0])
+    path.moveTo(px, py)
+    for vx, vy in unfolded.outline_vertices[1:]:
+        px, py = _to_pt(vx, vy)
+        path.lineTo(px, py)
+    path.close()
+    c.drawPath(path, stroke=1, fill=0)
+
+    # Лінії гибу — dashed blue.
+    c.saveState()
+    c.setDash(4, 3)
+    c.setStrokeColorRGB(0.2, 0.4, 0.8)
+    c.setLineWidth(0.6)
+    for bend in unfolded.bend_lines:
+        x1, y1 = _to_pt(bend.x1_mm, bend.y1_mm)
+        x2, y2 = _to_pt(bend.x2_mm, bend.y2_mm)
+        c.line(x1, y1, x2, y2)
+    c.restoreState()
+
+    # Перфорація — square, blue outline.
+    c.saveState()
+    c.setStrokeColorRGB(0.2, 0.4, 0.8)
+    c.setLineWidth(0.3)
+    for hole in unfolded.holes:
+        cx, cy = _to_pt(hole.x_mm, hole.y_mm)
+        half_pt = (hole.diameter_mm / 2.0) * scale * mm
+        c.rect(cx - half_pt, cy - half_pt, 2 * half_pt, 2 * half_pt, stroke=1, fill=0)
+    c.restoreState()
+
+    # Установочні отвори Ø5.5 — red circles.
+    c.saveState()
+    c.setStrokeColorRGB(0.8, 0.1, 0.1)
+    c.setLineWidth(0.6)
+    for hole in unfolded.corner_holes:
+        cx, cy = _to_pt(hole.x_mm, hole.y_mm)
+        c.circle(cx, cy, (hole.diameter_mm / 2.0) * scale * mm, stroke=1, fill=0)
+    c.restoreState()
+
+    # Кріпильні розміри (bolt pattern) між центрами 4 кутових отворів.
+    if len(unfolded.corner_holes) == 4:
+        bl, br, tl, tr = unfolded.corner_holes  # BL, BR, TL, TR
+        c.saveState()
+        c.setStrokeColorRGB(0.63, 0.38, 0.0)
+        c.setLineWidth(0.4)
+        rect_path = c.beginPath()
+        rx, ry = _to_pt(bl.x_mm, bl.y_mm)
+        rect_path.moveTo(rx, ry)
+        for pt in (br, tr, tl, bl):
+            rx, ry = _to_pt(pt.x_mm, pt.y_mm)
+            rect_path.lineTo(rx, ry)
+        c.drawPath(rect_path, stroke=1, fill=0)
+        c.setFillColorRGB(0.63, 0.38, 0.0)
+        c.setFont("DejaVuSans", 7)
+        tlx, tly = _to_pt(tl.x_mm, tl.y_mm)
+        trx, _ = _to_pt(tr.x_mm, tr.y_mm)
+        c.drawCentredString((tlx + trx) / 2, tly + 2, f"{br.x_mm - bl.x_mm:g}")
+        blx, bly = _to_pt(bl.x_mm, bl.y_mm)
+        c.saveState()
+        c.translate(blx - 2, (bly + tly) / 2)
+        c.rotate(90)
+        c.drawCentredString(0, 0, f"{tl.y_mm - bl.y_mm:g}")
+        c.restoreState()
+        c.restoreState()
+
+
 def export_perforated_panel_square_pdf(
     parameters: PerforatedPanelSquareBuildParameters,
     unfolded: UnfoldedPerforatedPanelSquare,
@@ -1186,13 +1285,14 @@ def export_perforated_panel_square_pdf(
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
 ) -> Path:
-    """PDF для perforated_panel_square (Phase 3.0 PR 5, ADR-027 Рішення 6).
+    """PDF для перфо-монтажної панелі (ребриста, ADR-030).
 
-    Structurally identical до export_perforated_panel_pdf, але:
-    - Заголовок «Перфо-панель (квадратні отвори)».
-    - Callout/summary text використовує '□' замість 'Ø' для розміру отвору.
-    - slug у subject/QR — perforated_panel_square.
+    Cross-розгортка лотка (R5 на кутах ребер) + 4 bend lines + уніфікована
+    таблиця «Розміри» (вкл. ребро/гиб/кріпильні розміри) + BOM + QR. Без
+    isometric view (як enclosed_shelf — інший гнутий лоток). `solid` приймається
+    для сумісності сигнатури, але isometric тут не рендериться.
     """
+    _ = solid
     article = (
         hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
         .hexdigest()[:10]
@@ -1212,7 +1312,7 @@ def export_perforated_panel_square_pdf(
     )
 
     c.setFont("DejaVuSans-Bold", 14)
-    c.drawString(15 * mm, (210 - 15) * mm, "Перфо-панель (квадратні отвори)")
+    c.drawString(15 * mm, (210 - 15) * mm, "Перфо-монтажна панель (ребриста)")
     c.setFont("DejaVuSans", 10)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     c.drawString(
@@ -1223,52 +1323,74 @@ def export_perforated_panel_square_pdf(
     c.drawString(
         15 * mm,
         (210 - 24) * mm,
-        f"Лист {parameters.length_mm}×{parameters.width_mm} мм · крок "
-        f"pitch_x={parameters.pitch_x_mm} pitch_y={parameters.pitch_y_mm} · "
-        f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
-        f"□{parameters.hole_size_mm:g} мм",
+        f"Площина {parameters.length_mm:g}×{parameters.width_mm:g} мм · 4 ребра "
+        f"h={parameters.rib_height_mm:g}мм (R{parameters.rib_corner_radius_mm:g}) · "
+        f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отв "
+        f"□{parameters.hole_size_mm:g} · 4× Ø{CORNER_HOLE_DIAMETER_MM:g}",
     )
     # _draw_finished_dims_line dispatch'ує за slug; підтримка нового шаблону
     # додана у dimensions.compute_finished_dimensions (той самий X×Y×Z).
     _draw_finished_dims_line(c, "perforated_panel_square", parameters)
 
-    _draw_unfold_generic(
+    _draw_unfold_perfo_ribbed(
         c,
-        length_mm=unfolded.length_mm,
-        width_mm=unfolded.width_mm,
-        bend_positions_mm=(),
+        unfolded,
         origin_mm=(15, 70),
         canvas_size_mm=(150, 100),
-        holes=unfolded.holes,
     )
 
-    # PR 8c (issue #5): уніфікована таблиця «Розміри» (квадратні отвори).
+    # Кріпильні розміри (bolt pattern) + габарит заготовки.
+    ins = parameters.corner_hole_inset_mm
+    mount_x = parameters.length_mm - 2 * ins
+    mount_y = parameters.width_mm - 2 * ins
+    blank_w = unfolded.bbox_max_x_mm - unfolded.bbox_min_x_mm
+    blank_h = unfolded.bbox_max_y_mm - unfolded.bbox_min_y_mm
+
+    # Уніфікована таблиця «Розміри» — вкл. ребро/гиб/кріпильні розміри.
     bottom_y = _draw_dimensions_table(
         c,
         "Розміри",
         [
-            ("Довжина L, мм", f"{parameters.length_mm:g}"),
-            ("Ширина W, мм", f"{parameters.width_mm:g}"),
+            ("Площина L×W, мм", f"{parameters.length_mm:g}×{parameters.width_mm:g}"),
             ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
             ("Сторона отвору □, мм", f"{parameters.hole_size_mm:g}"),
-            ("Pitch X, мм", f"{parameters.pitch_x_mm:g}"),
-            ("Pitch Y, мм", f"{parameters.pitch_y_mm:g}"),
+            ("Крок X×Y, мм", f"{parameters.pitch_x_mm:g}×{parameters.pitch_y_mm:g}"),
             ("Відступ від країв, мм", f"{parameters.margin_mm:g}"),
             ("Сітка (cols×rows)", f"{unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes}"),
+            ("Ребро h, мм", f"{parameters.rib_height_mm:g}"),
+            ("Гиб R / кут", f"{parameters.bend_radius_mm:g} / 90°"),
+            ("BA / напрям", f"{unfolded.bend_allowance_mm:.2f} / DOWN"),
+            ("Скруглення ребра R, мм", f"{parameters.rib_corner_radius_mm:g}"),
+            (f"Кріпильні Ø{CORNER_HOLE_DIAMETER_MM:g}, мм", f"{mount_x:g}×{mount_y:g}"),
+            ("Заготовка, мм", f"{blank_w:.0f}×{blank_h:.0f}"),
         ],
         origin_mm=(175, 170),
     )
 
+    # BOM з площею cross-заготовки (площина + 4 фланці), не лише площини.
+    arm = unfolded.bend_allowance_mm + unfolded.flat_flange_mm
+    area_mm2 = (
+        parameters.length_mm * parameters.width_mm
+        + 2 * (parameters.length_mm + parameters.width_mm) * arm
+    )
+    volume_m3 = (area_mm2 * unfolded.thickness_mm) / 1e9
+    mass_kg = volume_m3 * density_kg_m3
+    bom = {
+        "area_mm2": area_mm2,
+        "area_m2": area_mm2 / 1e6,
+        "area_paint_m2": (area_mm2 / 1e6) * 2.0,
+        "volume_m3": volume_m3,
+        "mass_g": mass_kg * 1000.0,
+        "mass_kg": mass_kg,
+    }
     _draw_bom_block(
         c,
         material_label=material_label,
         thickness_mm=unfolded.thickness_mm,
-        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
+        bom=bom,
         origin_mm=(175, bottom_y - 6),
         include_volume=False,
     )
-    if solid is not None:
-        _draw_isometric(c, solid, parameters, unfolded)
 
     qr_png = _make_qr_png(qr_payload)
     qr_size_mm = 30
@@ -1291,7 +1413,7 @@ def export_perforated_panel_square_pdf(
     c.drawString(
         15 * mm,
         15 * mm,
-        "DXF для лазерного різання · INNER_CUTS = квадратні отвори · BEND операцій немає",
+        "DXF: cross-shape LASER_CUT (R-кути ребер) + 4 BEND_LINES (DOWN) · перфорація □ + 4× Ø5.5",
     )
 
     _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)

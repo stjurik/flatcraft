@@ -95,9 +95,21 @@ export function bendInputFor(body: ExportRequest): BendInput | null {
       };
     }
     case "perforated_panel":
-    case "perforated_panel_square":
-      // Жоден з них не має гибів → пропускаємо matrix-валідацію.
+      // Плаский лист — без гибів → пропускаємо matrix-валідацію.
       return null;
+    case "perforated_panel_square": {
+      // ADR-030: ребриста монтажна панель — 4 однакові 90° гиби (ребра).
+      // flangeMm = rib_height; лінія гибу найдовша = max(length, width).
+      const p = body.parameters;
+      return {
+        materialCode,
+        thicknessMm,
+        innerRadiusMm: p.bend_radius_mm,
+        angleDeg: p.bend_angle_deg,
+        flangeMm: p.rib_height_mm,
+        bendLengthMm: Math.max(p.length_mm, p.width_mm),
+      };
+    }
     case "enclosed_shelf": {
       // Phase 3.0 PR 7c: 3-4 UP-bends, всі однакові radius/angle. flangeMm
       // — depth_mm (мінімальна сторона back/sides). Rib не bend-flange (мала
@@ -236,8 +248,14 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
         thicknessMm,
       }).map(profileIssueToProblem);
     case "perforated_panel":
-    case "perforated_panel_square":
       return [];
+    case "perforated_panel_square":
+      // ADR-030: ребриста монтажна панель — перевіряємо rib_height > t+r.
+      return validateProfile({
+        templateSlug: "perforated_panel_square",
+        parameters: body.parameters,
+        thicknessMm,
+      }).map(profileIssueToProblem);
     case "enclosed_shelf":
       // Phase 3.0 PR 7c: profile-валідатор для cross-розгортки поки не
       // моделюється (no flange-after-bend перевірка — depth_mm уже >=100 і

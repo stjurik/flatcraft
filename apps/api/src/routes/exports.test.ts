@@ -221,6 +221,10 @@ describe("POST /exports — async flow", () => {
           pitch_x_mm: 27,
           pitch_y_mm: 10,
           margin_mm: 15,
+          // ADR-030: ребриста монтажна панель — обов'язкові поля гибу.
+          rib_height_mm: 30,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
         },
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
