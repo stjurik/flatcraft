@@ -68,7 +68,7 @@ describe("SEED_PRODUCTS", () => {
       "margin_mm",
       "rib_height_mm",
     ]);
-    expect(product?.fixedParameters).toEqual({ hole_shape: "square" });
+    expect(product?.fixedParameters).toEqual({});
     expect(product?.useCases).toEqual(["інтер'єр", "офіс", "дім"]);
   });
 

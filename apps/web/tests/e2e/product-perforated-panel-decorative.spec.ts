@@ -54,6 +54,23 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("grid-summary")).toBeVisible();
     await expect(page.getByTestId("grid-summary")).toContainText("□");
 
+    // Регрес: toggle «Круглі» працює у product-mode (hole_shape НЕ fixed) — клік
+    // активує circle і grid-summary переходить на Ø. Раніше fixedParameters
+    // затирав вибір назад на square (ADR-031 fix).
+    await page.getByTestId("hole-shape-toggle-item-circle").click();
+    await expect(page.getByTestId("hole-shape-toggle-item-circle")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    await expect(page.getByTestId("grid-summary")).toContainText("Ø");
+    // Назад на «Квадратні».
+    await page.getByTestId("hole-shape-toggle-item-square").click();
+    await expect(page.getByTestId("hole-shape-toggle-item-square")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    await expect(page.getByTestId("grid-summary")).toContainText("□");
+
     // R3F canvas рендериться (валідні params, render-gate ADR-026 пропускає).
     // getByTestId на R3F <Canvas> резолвиться у wrapper div; html-canvas — всередині.
     const canvas = page.getByTestId("perforated-panel-canvas").locator("canvas");
