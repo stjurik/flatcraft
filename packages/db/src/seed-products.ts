@@ -53,10 +53,11 @@ export const SEED_PRODUCTS: ReadonlyArray<ProductSeed> = [
     name: "Декоративна перфо-панель",
     description:
       "Стильна декоративна панель з квадратними отворами для інтер'єру, офісу та дому. Налаштуйте розмір, крок отворів, висоту ребра і матеріал — отримайте готові креслення для лазерного різання.",
-    // ADR-031: уніфікований шаблон. Форма отвору фіксована (квадрат) для цього
-    // продукту; у студії її можна перемкнути toggle'ом (круг/квадрат).
+    // ADR-031: уніфікований шаблон. Форма отвору НЕ фіксована — нею керує toggle
+    // (круг/квадрат) у студії; дефолт «квадрат» приходить із base-template default.
+    // (Якби hole_shape був у fixedParameters, product-mode merge затирав би toggle.)
     baseTemplateSlug: "perforated_panel",
-    fixedParameters: { hole_shape: "square" },
+    fixedParameters: {},
     userEditableFields: [
       "length_mm",
       "width_mm",
