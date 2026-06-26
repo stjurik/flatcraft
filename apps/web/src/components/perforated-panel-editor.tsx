@@ -1,27 +1,14 @@
 "use client";
 
 import { validatePerforation } from "@flatcraft/cad-engine";
+import { PerforatedPanelParametersSchema, type PerforatedPanelParameters } from "@flatcraft/types";
 import { AutoForm, SegmentedControl, zodIssuesToFieldErrors } from "@flatcraft/ui";
 import { useMemo } from "react";
 
-import {
-  holeSizeFieldFor,
-  normalizeVisibleFields,
-  schemaForHoleShape,
-  slugForHoleShape,
-  syncHoleKeys,
-  type HoleShape,
-  type PerforationParameters,
-} from "../lib/perforation-shape";
-
 interface PerforatedPanelEditorProps {
-  readonly value: PerforationParameters;
-  readonly onChange: (next: PerforationParameters) => void;
-  /** Активна форма отвору — керує схемою/лейблами/гліфом. */
-  readonly holeShape: HoleShape;
-  /** Перемикач форми (піднятий у студію — свопає slug/viewport). */
-  readonly onHoleShapeChange: (shape: HoleShape) => void;
-  /** Phase 3.0 PR 4: visible_fields для product-mode (нормалізується під форму). */
+  readonly value: PerforatedPanelParameters;
+  readonly onChange: (next: PerforatedPanelParameters) => void;
+  /** Phase 3.0 PR 4: visible_fields для product-mode (allowlist полів форми). */
   readonly visibleFields?: readonly string[];
 }
 
@@ -32,8 +19,13 @@ const SHAPE_OPTIONS = [
   { value: "square" as const, label: "Квадратні" },
 ];
 
-/** Centered grid — мусить збігатися з Python `unfold_perforated_panel*`. */
-function computeGrid(p: PerforationParameters): { cols: number; rows: number; total: number } {
+// Усі поля схеми, окрім hole_shape (ним керує окремий toggle вище форми).
+const FIELDS_WITHOUT_HOLE_SHAPE = Object.keys(PerforatedPanelParametersSchema.shape).filter(
+  (k) => k !== "hole_shape",
+);
+
+/** Centered grid — мусить збігатися з Python `unfold_perforated_panel`. */
+function computeGrid(p: PerforatedPanelParameters): { cols: number; rows: number; total: number } {
   const availX = p.length_mm - 2 * p.margin_mm;
   const availY = p.width_mm - 2 * p.margin_mm;
   if (availX < 0 || availY < 0) return { cols: 0, rows: 0, total: 0 };
@@ -43,20 +35,16 @@ function computeGrid(p: PerforationParameters): { cols: number; rows: number; to
 }
 
 /**
- * Єдиний редактор перфо-панелі для обох форм отвору (Варіант B). Зверху —
- * SegmentedControl «Тип отвору»; нижче — AutoForm активної схеми. Значення
- * розміру дзеркалиться в обидва ключі (`syncHoleKeys`), тож перемикання форми
- * у студії не втрачає введеного. Банер перетину отворів — спільний валідатор.
+ * Редактор перфо-монтажної панелі (ADR-031). Зверху — SegmentedControl «Тип
+ * отвору» (керує параметром `hole_shape`); нижче — AutoForm решти полів схеми.
+ * Банер перетину отворів — спільний валідатор (паритет із серверним gate).
  */
 export function PerforatedPanelEditor({
   value,
   onChange,
-  holeShape,
-  onHoleShapeChange,
   visibleFields,
 }: PerforatedPanelEditorProps) {
-  const schema = useMemo(() => schemaForHoleShape(holeShape), [holeShape]);
-  const validation = useMemo(() => schema.safeParse(value), [schema, value]);
+  const validation = useMemo(() => PerforatedPanelParametersSchema.safeParse(value), [value]);
   const fieldErrors = useMemo(
     () => (validation.success ? {} : zodIssuesToFieldErrors(validation.error.issues)),
     [validation],
@@ -69,8 +57,8 @@ export function PerforatedPanelEditor({
   // Grid-геометрія: крок має перевищувати розмір отвору, інакше отвори
   // зливаються (той самий валідатор, що й серверний gate).
   const perforationIssues = useMemo(
-    () => validatePerforation({ templateSlug: slugForHoleShape(holeShape), parameters: value }),
-    [holeShape, value],
+    () => validatePerforation({ templateSlug: "perforated_panel", parameters: value }),
+    [value],
   );
   const allErrors = useMemo(
     () => [...perforationIssues.map((i) => i.message), ...zodErrors],
@@ -79,26 +67,23 @@ export function PerforatedPanelEditor({
 
   const grid = useMemo(() => computeGrid(value), [value]);
 
-  const effectiveVisibleFields = useMemo(
-    () => normalizeVisibleFields(visibleFields, holeShape),
-    [visibleFields, holeShape],
-  );
+  // У product-mode — allowlist продукту; у part-mode — усі поля, крім hole_shape.
+  const effectiveVisibleFields = visibleFields ?? FIELDS_WITHOUT_HOLE_SHAPE;
 
-  const holeValue = value[holeSizeFieldFor(holeShape)];
-  const glyph = holeShape === "square" ? "□" : "Ø";
+  const glyph = value.hole_shape === "square" ? "□" : "Ø";
 
   return (
     <form
       data-testid="perforated-panel-editor"
-      data-hole-shape={holeShape}
+      data-hole-shape={value.hole_shape}
       className="flex flex-col gap-4"
       onSubmit={(e) => e.preventDefault()}
     >
       <div className="flex flex-col gap-2">
         <span className="text-fg text-sm font-medium">Тип отвору</span>
         <SegmentedControl
-          value={holeShape}
-          onValueChange={onHoleShapeChange}
+          value={value.hole_shape}
+          onValueChange={(shape) => onChange({ ...value, hole_shape: shape })}
           options={SHAPE_OPTIONS}
           ariaLabel="Тип отвору"
           testId="hole-shape-toggle"
@@ -106,18 +91,16 @@ export function PerforatedPanelEditor({
       </div>
 
       <AutoForm
-        schema={schema}
+        schema={PerforatedPanelParametersSchema}
         value={value as unknown as Record<string, unknown>}
-        onChange={(next) =>
-          onChange(syncHoleKeys(next as unknown as PerforationParameters, holeShape))
-        }
+        onChange={(next) => onChange(next as unknown as PerforatedPanelParameters)}
         errors={fieldErrors}
-        {...(effectiveVisibleFields ? { visibleFields: effectiveVisibleFields } : {})}
+        visibleFields={effectiveVisibleFields}
       />
 
       <p className="text-fg-muted text-xs" data-testid="grid-summary">
         Grid: {grid.cols}×{grid.rows} = {grid.total} отворів {glyph}
-        {holeValue} мм (centered, pitch_x={value.pitch_x_mm} pitch_y={value.pitch_y_mm}).
+        {value.hole_size_mm} мм (centered, pitch_x={value.pitch_x_mm} pitch_y={value.pitch_y_mm}).
       </p>
 
       {allErrors.length > 0 ? (

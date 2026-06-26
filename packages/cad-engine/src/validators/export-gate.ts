@@ -51,7 +51,7 @@ export type ProblemDetails = z.infer<typeof ProblemDetailsSchema>;
  * значення найкоротшої полиці: воно завжди ≥ Zod-min, тож точну перевірку
  * полиці-після-гиба тут не робимо (out of scope матричної валідації).
  *
- * perforated_panel не має гибів → null (валідація гиба пропускається).
+ * Перфо-панель (ADR-031) — ребристий лоток з 4 гибами → bend-input береться.
  */
 export function bendInputFor(body: ExportRequest): BendInput | null {
   const thicknessMm = body.thickness_mm;
@@ -94,11 +94,8 @@ export function bendInputFor(body: ExportRequest): BendInput | null {
         bendLengthMm: p.width_mm,
       };
     }
-    case "perforated_panel":
-      // Плаский лист — без гибів → пропускаємо matrix-валідацію.
-      return null;
-    case "perforated_panel_square": {
-      // ADR-030: ребриста монтажна панель — 4 однакові 90° гиби (ребра).
+    case "perforated_panel": {
+      // ADR-030/031: ребриста монтажна панель — 4 однакові 90° гиби (ребра).
       // flangeMm = rib_height; лінія гибу найдовша = max(length, width).
       const p = body.parameters;
       return {
@@ -223,7 +220,7 @@ function profileIssueToProblem(issue: ProfileIssue): ProblemError {
 /**
  * Геометрична валідність профілю для ExportRequest (Hotfix 2.9.f, ADR-026) —
  * та сама `validateProfile`, що й render-gate у браузері. Порожній масив —
- * валідно (perforated_panel завжди порожній). Дзеркало Fastify-gate ↔ браузер.
+ * валідно. Дзеркало Fastify-gate ↔ браузер.
  */
 export function validateExportProfile(body: ExportRequest): ProblemError[] {
   const thicknessMm = body.thickness_mm;
@@ -248,11 +245,9 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
         thicknessMm,
       }).map(profileIssueToProblem);
     case "perforated_panel":
-      return [];
-    case "perforated_panel_square":
-      // ADR-030: ребриста монтажна панель — перевіряємо rib_height > t+r.
+      // ADR-030/031: ребриста монтажна панель — перевіряємо rib_height > t+r.
       return validateProfile({
-        templateSlug: "perforated_panel_square",
+        templateSlug: "perforated_panel",
         parameters: body.parameters,
         thicknessMm,
       }).map(profileIssueToProblem);
@@ -283,10 +278,9 @@ function perforationIssueToProblem(issue: PerforationIssue): ProblemError {
 export function validateExportPerforation(body: ExportRequest): ProblemError[] {
   switch (body.template_slug) {
     case "perforated_panel":
-    case "perforated_panel_square":
       return validatePerforation({
-        templateSlug: body.template_slug,
-        parameters: body.parameters as unknown as Readonly<Record<string, number>>,
+        templateSlug: "perforated_panel",
+        parameters: body.parameters as unknown as Readonly<Record<string, number | string>>,
       }).map(perforationIssueToProblem);
     default:
       return [];

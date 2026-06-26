@@ -31,7 +31,6 @@ export type TemplateStudioSlug =
   | "corner_angle"
   | "wall_shelf"
   | "perforated_panel"
-  | "perforated_panel_square"
   | "enclosed_shelf";
 
 export interface EditorRenderProps<T> {
@@ -93,8 +92,8 @@ const SLUGS_WITH_BENDS: ReadonlySet<TemplateStudioSlug> = new Set([
   "corner_angle",
   "wall_shelf",
   "enclosed_shelf",
-  // ADR-030: перфо-монтажна панель — 4 гиби (ребра) → matrix-валідація.
-  "perforated_panel_square",
+  // ADR-030/031: перфо-монтажна панель — 4 гиби (ребра) → matrix-валідація.
+  "perforated_panel",
 ]);
 
 const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
@@ -102,14 +101,11 @@ const SLUGS_WITH_PROFILE: ReadonlySet<TemplateStudioSlug> = new Set([
   "z_bracket",
   "corner_angle",
   "wall_shelf",
-  // ADR-030: render-gate за rib_height > t+r.
-  "perforated_panel_square",
+  // ADR-030/031: render-gate за rib_height > t+r.
+  "perforated_panel",
 ]);
 
-const SLUGS_WITH_PERFORATION: ReadonlySet<TemplateStudioSlug> = new Set([
-  "perforated_panel",
-  "perforated_panel_square",
-]);
+const SLUGS_WITH_PERFORATION: ReadonlySet<TemplateStudioSlug> = new Set(["perforated_panel"]);
 
 /**
  * Shared studio контейнер для всіх 5 шаблонів — Phase 3.0 PR 4 (ADR-027 Рішення 3).
@@ -125,9 +121,9 @@ const SLUGS_WITH_PERFORATION: ReadonlySet<TemplateStudioSlug> = new Set([
  *
  * Валідація:
  *   - schema.safeParse: завжди (UX-gate проти Zod-помилок).
- *   - bendMatrixIssues: лише для шаблонів з гибами (perforated_panel пропускає).
+ *   - bendMatrixIssues: лише для шаблонів з гибами (перфо-панель ADR-031 — має).
  *   - validateProfile: лише для шаблонів з геометричними assertion'ами
- *     (perforated_panel — плоский, без profile-gate).
+ *     (перфо-панель ADR-031 — rib_height > t+r).
  */
 export function TemplateStudio<T extends Record<string, unknown>>({
   mode,

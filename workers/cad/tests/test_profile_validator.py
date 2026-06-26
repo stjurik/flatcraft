@@ -62,8 +62,22 @@ class TestProfileUnit:
             2,
         ) == ["SHELF_TOO_SHORT"]
 
-    def test_perforated_panel_immune(self) -> None:
-        assert validate_profile("perforated_panel", {"length_mm": 1, "width_mm": 1}, 2) == []
+    def test_perforated_panel_valid_rib_no_error(self) -> None:
+        # ADR-031: ребриста панель — валідне ребро (rib_height > t+r) → []
+        assert (
+            validate_profile("perforated_panel", {"rib_height_mm": 30, "bend_radius_mm": 2.5}, 2)
+            == []
+        )
+
+    def test_perforated_panel_short_rib_flagged(self) -> None:
+        # rib_height ≤ t+r → FLANGE_TOO_SHORT (ADR-031).
+        codes = [
+            e.code
+            for e in validate_profile(
+                "perforated_panel", {"rib_height_mm": 4, "bend_radius_mm": 2.5}, 2
+            )
+        ]
+        assert "FLANGE_TOO_SHORT" in codes
 
     def test_thickness_zero_no_error(self) -> None:
         assert (

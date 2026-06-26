@@ -130,26 +130,29 @@ class TestWallShelf:
 
 
 class TestPerforatedPanel:
-    def _p(self, **over: float) -> PerforatedPanelBuildParameters:
-        base: dict[str, float] = {
+    def _p(self, **over: float | str) -> PerforatedPanelBuildParameters:
+        base: dict[str, float | str] = {
             "length_mm": 400,
             "width_mm": 300,
             "thickness_mm": 2,
-            "hole_diameter_mm": 8,
+            "hole_shape": "square",
+            "hole_size_mm": 8,
             "pitch_x_mm": 30,
             "pitch_y_mm": 30,
             "margin_mm": 20,
+            "rib_height_mm": 30,
         }
         base.update(over)
-        return PerforatedPanelBuildParameters(**base)
+        return PerforatedPanelBuildParameters.model_validate(base)
 
-    def test_плоский_лист_z_товщина(self) -> None:
+    def test_лоток_z_товщина_плюс_ребро(self) -> None:
+        # Ребриста панель (ADR-031): X×Y = площина, Z = товщина + висота ребра.
         d = compute_finished_dimensions("perforated_panel", self._p())
-        assert (d.x_mm, d.y_mm, d.z_mm) == (400, 300, 2)
+        assert (d.x_mm, d.y_mm, d.z_mm) == (400, 300, 2 + 30)
 
     def test_тонкий_лист(self) -> None:
         d = compute_finished_dimensions("perforated_panel", self._p(thickness_mm=0.5))
-        assert d.z_mm == 0.5
+        assert d.z_mm == 0.5 + 30
 
 
 class TestPdfHeaderIntegration:

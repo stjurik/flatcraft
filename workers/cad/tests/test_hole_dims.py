@@ -83,10 +83,12 @@ class TestDxfHoleCuts:
             length_mm=400,
             width_mm=300,
             thickness_mm=2,
-            hole_diameter_mm=8,
+            hole_shape="circle",
+            hole_size_mm=8,
             pitch_x_mm=30,
             pitch_y_mm=30,
             margin_mm=20,
+            rib_height_mm=30,
         )
         unf = unfold_perforated_panel(params)
         assert len(unf.holes) > HOLE_DIM_CAP  # справді багато
@@ -94,8 +96,9 @@ class TestDxfHoleCuts:
         doc = readfile(out)
         msp = doc.modelspace()
         circles = list(msp.query("CIRCLE"))
-        # Усі отвори — повноцінні кола на LASER_CUT (CAM ріже кожен), без анотацій.
-        assert len(circles) == len(unf.holes)
+        # Круглі отвори — кола на LASER_CUT + 4 кутові установочні (CAM ріже кожен),
+        # без анотацій.
+        assert len(circles) == len(unf.holes) + 4
         assert all(c.dxf.layer == "LASER_CUT" and int(c.dxf.color) == 5 for c in circles)
         assert not list(msp.query("DIMENSION"))
         assert not list(msp.query("TEXT"))
@@ -131,12 +134,14 @@ class TestPdfHoleDims:
             length_mm=400,
             width_mm=300,
             thickness_mm=2,
-            hole_diameter_mm=8,
+            hole_shape="circle",
+            hole_size_mm=8,
             pitch_x_mm=30,
             pitch_y_mm=30,
             margin_mm=20,
+            rib_height_mm=30,
         )
         unf = unfold_perforated_panel(params)
         out = export_perforated_panel_pdf(params, unf, tmp_path / "p.pdf")
         text = PdfReader(str(out)).pages[0].extract_text() or ""
-        assert "отворів Ø8" in text
+        assert "отв Ø8" in text

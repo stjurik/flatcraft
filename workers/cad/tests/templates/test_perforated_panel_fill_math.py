@@ -1,17 +1,17 @@
-"""Математика наповненості робочої площини отворами — perforated_panel(_square).
+"""Математика наповненості робочої площини отворами — perforated_panel (ADR-031).
 
-Декоративна перфо-панель: плоский лист, centered grid отворів. Цей модуль
+Декоративна перфо-панель: ребристий лоток, centered grid отворів. Цей модуль
 ізолює і перевіряє САМЕ математику layout'у (а не DXF/PDF rendering, який
-вкритий у test_perforated_panel_square.py):
+вкритий у test_perforated_panel.py):
 
 - скільки отворів влізе: ``n = floor((dim - 2*margin) / pitch) + 1``;
 - grid симетрично центрований відносно листа;
 - effective margin ніколи не менший за заявлений (інваріант наповненості);
 - усі отвори лежать у межах листа й не перетинаються (при pitch > hole_size);
-- кругла і квадратна панелі рахують layout ідентично (спільний алгоритм).
+- кругла і квадратна форми отвору рахують layout ідентично (спільний алгоритм).
 
-Еталонний кейс — декоративна панель з каталогу/seed (perforated_panel_square,
-300×100, pitch 27/10, margin 15, □20) → grid 11×8 = 88 отворів.
+Еталонний кейс — декоративна панель з каталогу/seed (300×100, pitch 27/10,
+margin 15, □20) → grid 11×8 = 88 отворів.
 """
 
 from __future__ import annotations
@@ -19,13 +19,7 @@ from __future__ import annotations
 import pytest
 
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
-from flatcraft_cad.templates.perforated_panel_square import (
-    PerforatedPanelSquareBuildParameters,
-)
-from flatcraft_cad.unfold import (
-    unfold_perforated_panel,
-    unfold_perforated_panel_square,
-)
+from flatcraft_cad.unfold import unfold_perforated_panel
 
 
 def _square(
@@ -36,11 +30,12 @@ def _square(
     pitch_x: float = 30,
     pitch_y: float = 30,
     margin: float = 15,
-) -> PerforatedPanelSquareBuildParameters:
-    return PerforatedPanelSquareBuildParameters(
+) -> PerforatedPanelBuildParameters:
+    return PerforatedPanelBuildParameters(
         length_mm=length,
         width_mm=width,
         thickness_mm=1.5,
+        hole_shape="square",
         hole_size_mm=hole,
         pitch_x_mm=pitch_x,
         pitch_y_mm=pitch_y,
@@ -61,7 +56,7 @@ def test_perforation_lattice_dims_and_span() -> None:
     стовпці/рядки решітки лишаються (вирізаються лише кутові точки), тож span
     по краях зберігається.
     """
-    u = unfold_perforated_panel_square(CATALOG)
+    u = unfold_perforated_panel(CATALOG)
     assert u.grid_cols == 11
     assert u.grid_rows == 8
     assert len(u.holes) <= 88
@@ -89,7 +84,7 @@ def test_hole_count_math(
     length: float, width: float, margin: float, px: float, py: float, cols: int, rows: int
 ) -> None:
     """Кількість отворів = floor((dim - 2*margin) / pitch) + 1, по кожній осі."""
-    u = unfold_perforated_panel_square(
+    u = unfold_perforated_panel(
         _square(length=length, width=width, pitch_x=px, pitch_y=py, margin=margin)
     )
     assert u.grid_cols == cols
@@ -107,7 +102,7 @@ def test_grid_is_centered_and_symmetric(
     Перевіряємо через bounding-box отворів — його центр має збігатись із
     центром листа, а перший/останній отвір — бути дзеркальними.
     """
-    u = unfold_perforated_panel_square(
+    u = unfold_perforated_panel(
         _square(length=length, width=width, pitch_x=px, pitch_y=py, margin=margin)
     )
     xs = sorted({h.x_mm for h in u.holes})
@@ -129,7 +124,7 @@ def test_effective_margin_never_below_requested(
     Через floor у підрахунку колонок grid ніколи не «вилазить» за робочу
     зону — eff_margin = (dim - (n-1)*pitch)/2 ≥ margin завжди.
     """
-    u = unfold_perforated_panel_square(
+    u = unfold_perforated_panel(
         _square(length=length, width=width, pitch_x=px, pitch_y=py, margin=margin)
     )
     xs = sorted({h.x_mm for h in u.holes})
@@ -146,7 +141,7 @@ def test_holes_stay_within_sheet_bounds() -> None:
     Центр відступає на margin, тож край отвору = center ± hole/2 має лишатись
     усередині 0..dim. Беремо «щільний» кейс (margin 15, □20 → край за 5мм).
     """
-    u = unfold_perforated_panel_square(CATALOG)
+    u = unfold_perforated_panel(CATALOG)
     half = CATALOG.hole_size_mm / 2
     for h in u.holes:
         assert h.x_mm - half >= 0
@@ -157,7 +152,7 @@ def test_holes_stay_within_sheet_bounds() -> None:
 
 def test_adjacent_hole_spacing_equals_pitch() -> None:
     """Відстань між сусідніми центрами по кожній осі точно == pitch."""
-    u = unfold_perforated_panel_square(CATALOG)
+    u = unfold_perforated_panel(CATALOG)
     xs = sorted({h.x_mm for h in u.holes})
     ys = sorted({h.y_mm for h in u.holes})
     for a, b in zip(xs, xs[1:], strict=False):
@@ -173,7 +168,7 @@ def test_no_overlap_with_clean_grid() -> None:
     gap = pitch - hole_size > 0.
     """
     p = _square(length=200, width=150, hole=8, pitch_x=30, pitch_y=30, margin=15)
-    u = unfold_perforated_panel_square(p)
+    u = unfold_perforated_panel(p)
     xs = sorted({h.x_mm for h in u.holes})
     ys = sorted({h.y_mm for h in u.holes})
     for a, b in zip(xs, xs[1:], strict=False):
@@ -206,7 +201,7 @@ def test_overlap_math_detects_merged_holes(pitch: float, hole: float, overlaps: 
 
 def test_all_hole_positions_unique() -> None:
     """Grid не дублює позицій — set координат == кількості отворів."""
-    u = unfold_perforated_panel_square(CATALOG)
+    u = unfold_perforated_panel(CATALOG)
     positions = {(h.x_mm, h.y_mm) for h in u.holes}
     assert len(positions) == len(u.holes)
     assert len(u.holes) <= 88  # ≤ повна решітка (кутові точки culled, ADR-030)
@@ -215,7 +210,7 @@ def test_all_hole_positions_unique() -> None:
 def test_single_hole_when_pitch_exceeds_available() -> None:
     """Коли крок більший за робочу зону — рівно 1 отвір по центру листа."""
     p = _square(length=120, width=120, pitch_x=100, pitch_y=100, margin=50)
-    u = unfold_perforated_panel_square(p)
+    u = unfold_perforated_panel(p)
     assert u.grid_cols == 1
     assert u.grid_rows == 1
     assert len(u.holes) == 1
@@ -224,30 +219,23 @@ def test_single_hole_when_pitch_exceeds_available() -> None:
 
 
 def test_round_and_square_share_lattice_math() -> None:
-    """Кругла й квадратна панелі рахують ту саму решітку (спільний алгоритм).
+    """Кругла й квадратна форми отвору рахують ту саму решітку (ADR-031).
 
-    ADR-030: квадратна тепер ребриста монтажна — її перфорація = решітка
-    круглої МІНУС кутові точки під установочні отвори. Тож латтіс (cols×rows)
-    збігається, а позиції квадратної ⊆ позицій круглої.
+    Уніфікований ребристий шаблон: форма отвору — лише параметр `hole_shape`,
+    layout/culling спільний. Тож латтіс (cols×rows) і позиції збігаються;
+    різниться тільки `shape` кожного отвору.
     """
-    square = unfold_perforated_panel_square(
+    square = unfold_perforated_panel(
         _square(length=300, width=100, hole=20, pitch_x=27, pitch_y=10, margin=15)
     )
     circle = unfold_perforated_panel(
-        PerforatedPanelBuildParameters(
-            length_mm=300,
-            width_mm=100,
-            thickness_mm=1.5,
-            hole_diameter_mm=20,
-            pitch_x_mm=27,
-            pitch_y_mm=10,
-            margin_mm=15,
+        _square(length=300, width=100, hole=20, pitch_x=27, pitch_y=10, margin=15).model_copy(
+            update={"hole_shape": "circle"}
         )
     )
     assert (square.grid_cols, square.grid_rows) == (circle.grid_cols, circle.grid_rows)
     sq_pos = {(h.x_mm, h.y_mm) for h in square.holes}
     ci_pos = {(h.x_mm, h.y_mm) for h in circle.holes}
-    assert sq_pos <= ci_pos  # квадратна — підмножина (culled кути)
-    assert len(sq_pos) <= len(ci_pos)
+    assert sq_pos == ci_pos  # спільний layout/culling
     assert all(h.shape == "square" for h in square.holes)
     assert all(h.shape == "circle" for h in circle.holes)

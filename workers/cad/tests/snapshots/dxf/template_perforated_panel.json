@@ -7,6 +7,38 @@
       "points": [
         [
           0.0,
+          175.683628
+        ],
+        [
+          5.0,
+          180.683628
+        ],
+        [
+          195.0,
+          180.683628
+        ],
+        [
+          200.0,
+          175.683628
+        ],
+        [
+          200.0,
+          150.0
+        ],
+        [
+          225.683628,
+          150.0
+        ],
+        [
+          230.683628,
+          145.0
+        ],
+        [
+          230.683628,
+          5.0
+        ],
+        [
+          225.683628,
           0.0
         ],
         [
@@ -15,6 +47,38 @@
         ],
         [
           200.0,
+          -25.683628
+        ],
+        [
+          195.0,
+          -30.683628
+        ],
+        [
+          5.0,
+          -30.683628
+        ],
+        [
+          0.0,
+          -25.683628
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          -25.683628,
+          0.0
+        ],
+        [
+          -30.683628,
+          5.0
+        ],
+        [
+          -30.683628,
+          145.0
+        ],
+        [
+          -25.683628,
           150.0
         ],
         [
@@ -25,633 +89,1511 @@
       "type": "LWPOLYLINE"
     },
     {
+      "color": 256,
+      "end": [
+        200.0,
+        152.591814
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        0.0,
+        152.591814
+      ],
+      "type": "LINE"
+    },
+    {
+      "color": 256,
+      "end": [
+        200.0,
+        -2.591814
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        0.0,
+        -2.591814
+      ],
+      "type": "LINE"
+    },
+    {
+      "color": 256,
+      "end": [
+        -2.591814,
+        150.0
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        -2.591814,
+        0.0
+      ],
+      "type": "LINE"
+    },
+    {
+      "color": 256,
+      "end": [
+        202.591814,
+        150.0
+      ],
+      "layer": "BEND_LINES",
+      "start": [
+        202.591814,
+        0.0
+      ],
+      "type": "LINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          16.0,
+          31.0
+        ],
+        [
+          24.0,
+          31.0
+        ],
+        [
+          24.0,
+          39.0
+        ],
+        [
+          16.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          16.0,
+          51.0
+        ],
+        [
+          24.0,
+          51.0
+        ],
+        [
+          24.0,
+          59.0
+        ],
+        [
+          16.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          16.0,
+          71.0
+        ],
+        [
+          24.0,
+          71.0
+        ],
+        [
+          24.0,
+          79.0
+        ],
+        [
+          16.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          16.0,
+          91.0
+        ],
+        [
+          24.0,
+          91.0
+        ],
+        [
+          24.0,
+          99.0
+        ],
+        [
+          16.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          16.0,
+          111.0
+        ],
+        [
+          24.0,
+          111.0
+        ],
+        [
+          24.0,
+          119.0
+        ],
+        [
+          16.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          11.0
+        ],
+        [
+          44.0,
+          11.0
+        ],
+        [
+          44.0,
+          19.0
+        ],
+        [
+          36.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          31.0
+        ],
+        [
+          44.0,
+          31.0
+        ],
+        [
+          44.0,
+          39.0
+        ],
+        [
+          36.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          51.0
+        ],
+        [
+          44.0,
+          51.0
+        ],
+        [
+          44.0,
+          59.0
+        ],
+        [
+          36.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          71.0
+        ],
+        [
+          44.0,
+          71.0
+        ],
+        [
+          44.0,
+          79.0
+        ],
+        [
+          36.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          91.0
+        ],
+        [
+          44.0,
+          91.0
+        ],
+        [
+          44.0,
+          99.0
+        ],
+        [
+          36.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          111.0
+        ],
+        [
+          44.0,
+          111.0
+        ],
+        [
+          44.0,
+          119.0
+        ],
+        [
+          36.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          36.0,
+          131.0
+        ],
+        [
+          44.0,
+          131.0
+        ],
+        [
+          44.0,
+          139.0
+        ],
+        [
+          36.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          11.0
+        ],
+        [
+          64.0,
+          11.0
+        ],
+        [
+          64.0,
+          19.0
+        ],
+        [
+          56.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          31.0
+        ],
+        [
+          64.0,
+          31.0
+        ],
+        [
+          64.0,
+          39.0
+        ],
+        [
+          56.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          51.0
+        ],
+        [
+          64.0,
+          51.0
+        ],
+        [
+          64.0,
+          59.0
+        ],
+        [
+          56.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          71.0
+        ],
+        [
+          64.0,
+          71.0
+        ],
+        [
+          64.0,
+          79.0
+        ],
+        [
+          56.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          91.0
+        ],
+        [
+          64.0,
+          91.0
+        ],
+        [
+          64.0,
+          99.0
+        ],
+        [
+          56.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          111.0
+        ],
+        [
+          64.0,
+          111.0
+        ],
+        [
+          64.0,
+          119.0
+        ],
+        [
+          56.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          56.0,
+          131.0
+        ],
+        [
+          64.0,
+          131.0
+        ],
+        [
+          64.0,
+          139.0
+        ],
+        [
+          56.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          11.0
+        ],
+        [
+          84.0,
+          11.0
+        ],
+        [
+          84.0,
+          19.0
+        ],
+        [
+          76.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          31.0
+        ],
+        [
+          84.0,
+          31.0
+        ],
+        [
+          84.0,
+          39.0
+        ],
+        [
+          76.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          51.0
+        ],
+        [
+          84.0,
+          51.0
+        ],
+        [
+          84.0,
+          59.0
+        ],
+        [
+          76.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          71.0
+        ],
+        [
+          84.0,
+          71.0
+        ],
+        [
+          84.0,
+          79.0
+        ],
+        [
+          76.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          91.0
+        ],
+        [
+          84.0,
+          91.0
+        ],
+        [
+          84.0,
+          99.0
+        ],
+        [
+          76.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          111.0
+        ],
+        [
+          84.0,
+          111.0
+        ],
+        [
+          84.0,
+          119.0
+        ],
+        [
+          76.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          76.0,
+          131.0
+        ],
+        [
+          84.0,
+          131.0
+        ],
+        [
+          84.0,
+          139.0
+        ],
+        [
+          76.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          11.0
+        ],
+        [
+          104.0,
+          11.0
+        ],
+        [
+          104.0,
+          19.0
+        ],
+        [
+          96.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          31.0
+        ],
+        [
+          104.0,
+          31.0
+        ],
+        [
+          104.0,
+          39.0
+        ],
+        [
+          96.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          51.0
+        ],
+        [
+          104.0,
+          51.0
+        ],
+        [
+          104.0,
+          59.0
+        ],
+        [
+          96.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          71.0
+        ],
+        [
+          104.0,
+          71.0
+        ],
+        [
+          104.0,
+          79.0
+        ],
+        [
+          96.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          91.0
+        ],
+        [
+          104.0,
+          91.0
+        ],
+        [
+          104.0,
+          99.0
+        ],
+        [
+          96.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          111.0
+        ],
+        [
+          104.0,
+          111.0
+        ],
+        [
+          104.0,
+          119.0
+        ],
+        [
+          96.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          96.0,
+          131.0
+        ],
+        [
+          104.0,
+          131.0
+        ],
+        [
+          104.0,
+          139.0
+        ],
+        [
+          96.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          11.0
+        ],
+        [
+          124.0,
+          11.0
+        ],
+        [
+          124.0,
+          19.0
+        ],
+        [
+          116.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          31.0
+        ],
+        [
+          124.0,
+          31.0
+        ],
+        [
+          124.0,
+          39.0
+        ],
+        [
+          116.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          51.0
+        ],
+        [
+          124.0,
+          51.0
+        ],
+        [
+          124.0,
+          59.0
+        ],
+        [
+          116.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          71.0
+        ],
+        [
+          124.0,
+          71.0
+        ],
+        [
+          124.0,
+          79.0
+        ],
+        [
+          116.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          91.0
+        ],
+        [
+          124.0,
+          91.0
+        ],
+        [
+          124.0,
+          99.0
+        ],
+        [
+          116.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          111.0
+        ],
+        [
+          124.0,
+          111.0
+        ],
+        [
+          124.0,
+          119.0
+        ],
+        [
+          116.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          116.0,
+          131.0
+        ],
+        [
+          124.0,
+          131.0
+        ],
+        [
+          124.0,
+          139.0
+        ],
+        [
+          116.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          11.0
+        ],
+        [
+          144.0,
+          11.0
+        ],
+        [
+          144.0,
+          19.0
+        ],
+        [
+          136.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          31.0
+        ],
+        [
+          144.0,
+          31.0
+        ],
+        [
+          144.0,
+          39.0
+        ],
+        [
+          136.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          51.0
+        ],
+        [
+          144.0,
+          51.0
+        ],
+        [
+          144.0,
+          59.0
+        ],
+        [
+          136.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          71.0
+        ],
+        [
+          144.0,
+          71.0
+        ],
+        [
+          144.0,
+          79.0
+        ],
+        [
+          136.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          91.0
+        ],
+        [
+          144.0,
+          91.0
+        ],
+        [
+          144.0,
+          99.0
+        ],
+        [
+          136.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          111.0
+        ],
+        [
+          144.0,
+          111.0
+        ],
+        [
+          144.0,
+          119.0
+        ],
+        [
+          136.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          136.0,
+          131.0
+        ],
+        [
+          144.0,
+          131.0
+        ],
+        [
+          144.0,
+          139.0
+        ],
+        [
+          136.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          11.0
+        ],
+        [
+          164.0,
+          11.0
+        ],
+        [
+          164.0,
+          19.0
+        ],
+        [
+          156.0,
+          19.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          31.0
+        ],
+        [
+          164.0,
+          31.0
+        ],
+        [
+          164.0,
+          39.0
+        ],
+        [
+          156.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          51.0
+        ],
+        [
+          164.0,
+          51.0
+        ],
+        [
+          164.0,
+          59.0
+        ],
+        [
+          156.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          71.0
+        ],
+        [
+          164.0,
+          71.0
+        ],
+        [
+          164.0,
+          79.0
+        ],
+        [
+          156.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          91.0
+        ],
+        [
+          164.0,
+          91.0
+        ],
+        [
+          164.0,
+          99.0
+        ],
+        [
+          156.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          111.0
+        ],
+        [
+          164.0,
+          111.0
+        ],
+        [
+          164.0,
+          119.0
+        ],
+        [
+          156.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          156.0,
+          131.0
+        ],
+        [
+          164.0,
+          131.0
+        ],
+        [
+          164.0,
+          139.0
+        ],
+        [
+          156.0,
+          139.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          176.0,
+          31.0
+        ],
+        [
+          184.0,
+          31.0
+        ],
+        [
+          184.0,
+          39.0
+        ],
+        [
+          176.0,
+          39.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          176.0,
+          51.0
+        ],
+        [
+          184.0,
+          51.0
+        ],
+        [
+          184.0,
+          59.0
+        ],
+        [
+          176.0,
+          59.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          176.0,
+          71.0
+        ],
+        [
+          184.0,
+          71.0
+        ],
+        [
+          184.0,
+          79.0
+        ],
+        [
+          176.0,
+          79.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          176.0,
+          91.0
+        ],
+        [
+          184.0,
+          91.0
+        ],
+        [
+          184.0,
+          99.0
+        ],
+        [
+          176.0,
+          99.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
+      "closed": true,
+      "color": 5,
+      "layer": "LASER_CUT",
+      "points": [
+        [
+          176.0,
+          111.0
+        ],
+        [
+          184.0,
+          111.0
+        ],
+        [
+          184.0,
+          119.0
+        ],
+        [
+          176.0,
+          119.0
+        ]
+      ],
+      "type": "LWPOLYLINE"
+    },
+    {
       "center": [
-        20.0,
-        15.0
+        12.0,
+        12.0
       ],
       "color": 5,
       "layer": "LASER_CUT",
-      "radius": 4.0,
+      "radius": 2.75,
       "type": "CIRCLE"
     },
     {
       "center": [
-        20.0,
-        35.0
+        188.0,
+        12.0
       ],
       "color": 5,
       "layer": "LASER_CUT",
-      "radius": 4.0,
+      "radius": 2.75,
       "type": "CIRCLE"
     },
     {
       "center": [
-        20.0,
-        55.0
+        12.0,
+        138.0
       ],
       "color": 5,
       "layer": "LASER_CUT",
-      "radius": 4.0,
+      "radius": 2.75,
       "type": "CIRCLE"
     },
     {
       "center": [
-        20.0,
-        75.0
+        188.0,
+        138.0
       ],
       "color": 5,
       "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        20.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        20.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        20.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        40.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        60.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        80.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        100.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        120.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        140.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        160.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        15.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        35.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        55.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        75.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        95.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        115.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
-      "type": "CIRCLE"
-    },
-    {
-      "center": [
-        180.0,
-        135.0
-      ],
-      "color": 5,
-      "layer": "LASER_CUT",
-      "radius": 4.0,
+      "radius": 2.75,
       "type": "CIRCLE"
     }
   ],

@@ -6,7 +6,7 @@ import {
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+  PerforatedPanelParametersSchema,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
   ZBracketParametersSchema,
@@ -23,11 +23,6 @@ import { PerforatedPanelStudio } from "../../../components/perforated-panel-stud
 import { WallShelfStudio } from "../../../components/wall-shelf-studio";
 import { ZBracketStudio } from "../../../components/z-bracket-studio";
 import { fetchMaterials, fetchTemplate } from "../../../lib/api";
-import {
-  holeShapeFromSlug,
-  initialPerforationParams,
-  schemaForHoleShape,
-} from "../../../lib/perforation-shape";
 
 interface PageProps {
   readonly params: Promise<{ slug: string }>;
@@ -124,17 +119,11 @@ function TemplateStudio({
       />
     );
   }
-  if (slug === "perforated_panel" || slug === "perforated_panel_square") {
-    const shape = holeShapeFromSlug(slug);
-    const fallback =
-      shape === "square"
-        ? PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
-        : PERFORATED_PANEL_DEFAULT_PARAMETERS;
-    const parsed = schemaForHoleShape(shape).safeParse(defaults);
+  if (slug === "perforated_panel") {
+    const parsed = PerforatedPanelParametersSchema.safeParse(defaults);
     return (
       <PerforatedPanelStudio
-        initialHoleShape={shape}
-        initialParameters={initialPerforationParams(shape, parsed.success ? parsed.data : fallback)}
+        initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );

@@ -4,7 +4,7 @@
  * Сервер-сайд паралельно тягне детальний product (з resolved base_template)
  * і materials, далі рендерить TemplateStudio у product-mode через відповідний
  * `*Studio` wrapper за `baseTemplateSlug`. У PR 6 підтриманий лише один
- * base — `perforated_panel_square`; для невідомого base — placeholder з
+ * base — `perforated_panel`; для невідомого base — placeholder з
  * посиланням на каталог (інваріант ADR-027: seed-валідація гарантує, що
  * published продукти мають base серед знаних, runtime — safety net).
  */
@@ -12,7 +12,7 @@ import {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   EnclosedShelfParametersSchema,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
+  PerforatedPanelParametersSchema,
   type MaterialChoice,
   type ProductDetail,
 } from "@flatcraft/types";
@@ -22,11 +22,6 @@ import { notFound } from "next/navigation";
 import { EnclosedShelfStudio } from "../../../components/enclosed-shelf-studio";
 import { PerforatedPanelStudio } from "../../../components/perforated-panel-studio";
 import { fetchMaterials, fetchProduct } from "../../../lib/api";
-import {
-  holeShapeFromSlug,
-  initialPerforationParams,
-  schemaForHoleShape,
-} from "../../../lib/perforation-shape";
 
 interface PageProps {
   readonly params: Promise<{ slug: string }>;
@@ -85,22 +80,12 @@ function ProductStudio({
   // від випадкового override). Тут — стартова форма для першого render'у.
   const baseDefaults = product.baseTemplate.defaultParameters;
 
-  if (
-    product.baseTemplateSlug === "perforated_panel_square" ||
-    product.baseTemplateSlug === "perforated_panel"
-  ) {
-    const shape = holeShapeFromSlug(product.baseTemplateSlug);
+  if (product.baseTemplateSlug === "perforated_panel") {
     const merged = { ...baseDefaults, ...product.fixedParameters };
-    const parsed = schemaForHoleShape(shape).safeParse(merged);
-    const base = parsed.success
-      ? parsed.data
-      : shape === "square"
-        ? PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS
-        : PERFORATED_PANEL_DEFAULT_PARAMETERS;
+    const parsed = PerforatedPanelParametersSchema.safeParse(merged);
     return (
       <PerforatedPanelStudio
-        initialHoleShape={shape}
-        initialParameters={initialPerforationParams(shape, base)}
+        initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
         materials={materials}
         product={{
           name: product.name,

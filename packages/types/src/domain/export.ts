@@ -14,7 +14,6 @@ import { z } from "zod";
 import { CornerAngleParametersSchema } from "../templates/corner-angle.js";
 import { EnclosedShelfParametersSchema } from "../templates/enclosed-shelf.js";
 import { LBracketParametersSchema } from "../templates/l-bracket.js";
-import { PerforatedPanelSquareParametersSchema } from "../templates/perforated-panel-square.js";
 import { PerforatedPanelParametersSchema } from "../templates/perforated-panel.js";
 // Base (non-refined) — discriminatedUnion вимагає ZodObject, не ZodEffects.
 // Cross-field constraint живе у `WallShelfParametersSchema` (UI), і у Pydantic.
@@ -49,16 +48,10 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
   }),
+  // ADR-031: ОДИН параметричний шаблон перфо-панелі (форма отвору — параметр).
   z.object({
     template_slug: z.literal("perforated_panel"),
     parameters: PerforatedPanelParametersSchema,
-    material_code: MaterialCodeSchema,
-    thickness_mm: ThicknessMmSchema,
-  }),
-  // Phase 3.0 PR 5 (ADR-027 Рішення 6): окремий шаблон з квадратними отворами.
-  z.object({
-    template_slug: z.literal("perforated_panel_square"),
-    parameters: PerforatedPanelSquareParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
   }),

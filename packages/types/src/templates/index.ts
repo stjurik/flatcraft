@@ -28,16 +28,12 @@ export {
 } from "./wall-shelf.js";
 
 export {
+  HOLE_SHAPES,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   PerforatedPanelParametersSchema,
+  type HoleShape,
   type PerforatedPanelParameters,
 } from "./perforated-panel.js";
-
-export {
-  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
-  PerforatedPanelSquareParametersSchema,
-  type PerforatedPanelSquareParameters,
-} from "./perforated-panel-square.js";
 
 export {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,

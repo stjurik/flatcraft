@@ -8,7 +8,7 @@
  * is_published=true у route), але дає unit-тестам реальну row для query-test'ів.
  *
  * Реальні products додаються:
- *   - PR 6: perforated-panel-decorative (base: perforated_panel_square)
+ *   - PR 6: perforated-panel-decorative (base: perforated_panel, ADR-031)
  *   - PR 8: wall-shelf-custom (base: enclosed_shelf)
  *
  * Інваріант (cross-перевірка з template.parameters_schema) — у seed-валідаторі
@@ -46,15 +46,17 @@ export const SEED_PRODUCTS: ReadonlyArray<ProductSeed> = [
   },
   {
     // Phase 3.0 PR 6 (ADR-027 Рішення 6): перший публічний product. Preset
-    // над base шаблоном `perforated_panel_square` (PR 5). Усі геометричні
-    // параметри лишаються редаговані; material обирається у студії окремо.
+    // над base шаблоном `perforated_panel` (ADR-031, уніфікований). Геометрія +
+    // висота ребра редаговані; форма отвору фіксована; material — у студії.
     // previewImageUrl — null до PR 8 (generate-product-previews.ts).
     slug: "perforated-panel-decorative",
     name: "Декоративна перфо-панель",
     description:
-      "Стильна декоративна панель з квадратними отворами для інтер'єру, офісу та дому. Налаштуйте розмір, крок отворів і матеріал — отримайте готові креслення для лазерного різання.",
-    baseTemplateSlug: "perforated_panel_square",
-    fixedParameters: {},
+      "Стильна декоративна панель з квадратними отворами для інтер'єру, офісу та дому. Налаштуйте розмір, крок отворів, висоту ребра і матеріал — отримайте готові креслення для лазерного різання.",
+    // ADR-031: уніфікований шаблон. Форма отвору фіксована (квадрат) для цього
+    // продукту; у студії її можна перемкнути toggle'ом (круг/квадрат).
+    baseTemplateSlug: "perforated_panel",
+    fixedParameters: { hole_shape: "square" },
     userEditableFields: [
       "length_mm",
       "width_mm",
@@ -62,6 +64,7 @@ export const SEED_PRODUCTS: ReadonlyArray<ProductSeed> = [
       "pitch_x_mm",
       "pitch_y_mm",
       "margin_mm",
+      "rib_height_mm",
     ],
     previewImageUrl: null,
     useCases: ["інтер'єр", "офіс", "дім"],

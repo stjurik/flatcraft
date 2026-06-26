@@ -18,14 +18,19 @@ import {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
 
+import { eq } from "drizzle-orm";
+
 import { createClient, type DatabaseClient } from "./client.js";
 import { materialThicknesses, materials, templates } from "./schema.js";
 import { seedProducts } from "./seed-products.js";
+
+// Застарілі slug-и шаблонів, видалені рефакторингом — прибираються при seed
+// (на свіжій БД — no-op). ADR-031: perforated_panel_square злито у perforated_panel.
+const RETIRED_TEMPLATE_SLUGS: readonly string[] = ["perforated_panel_square"];
 
 // ─── Матеріали (doc/05 §4) ─────────────────────────────────────────────────
 export interface MaterialSeed {
@@ -162,28 +167,16 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
   },
   {
     slug: "perforated_panel",
-    nameUk: "Перфо-панель",
-    nameEn: "Perforated panel",
-    descriptionUk: "Плоский лист із сіткою отворів за заданим pitch (без гибів).",
-    descriptionEn: "Flat sheet with a grid of holes at given pitch (no bends).",
-    // Phase 2.10.d — Phase 2.10 повністю закрита.
+    nameUk: "Перфо-монтажна панель",
+    nameEn: "Perforated mounting panel",
+    descriptionUk:
+      "Ребриста монтажна панель (гнутий лоток): перфо-площина + 4 ребра жорсткості + кутові установочні отвори. Форма перфо-отвору — круг або квадрат (ADR-031).",
+    descriptionEn:
+      "Ribbed mounting panel (bent tray): perforated face + 4 stiffening ribs + corner mounting holes. Hole shape — circle or square (ADR-031).",
+    // ADR-031: уніфікований шаблон (раніше окремий perforated_panel_square).
     isPublished: true,
     defaultParameters: PERFORATED_PANEL_DEFAULT_PARAMETERS,
     previewImageUrl: "/template-previews/perforated_panel.png",
-  },
-  {
-    slug: "perforated_panel_square",
-    nameUk: "Перфо-панель (квадратні отвори)",
-    nameEn: "Perforated panel (square holes)",
-    descriptionUk:
-      "Плоский лист із сіткою КВАДРАТНИХ отворів. Базовий шаблон для декоративних виробів (Phase 3.0, ADR-027 Рішення 6).",
-    descriptionEn:
-      "Flat sheet with a grid of SQUARE holes. Base template for decorative products (Phase 3.0).",
-    // Phase 3.0 PR 5: base шаблон не публікується у каталозі — споживається
-    // лише через products (PR 6 — декоративна перфо-панель).
-    isPublished: false,
-    defaultParameters: PERFORATED_PANEL_SQUARE_DEFAULT_PARAMETERS,
-    previewImageUrl: null,
   },
   {
     slug: "enclosed_shelf",
@@ -282,6 +275,13 @@ async function seedTemplates(client: DatabaseClient): Promise<void> {
           isPublished: t.isPublished,
         },
       });
+  }
+
+  // Прибираємо застарілі шаблони (ADR-031). На свіжій БД — 0 рядків.
+  // Виконується ПІСЛЯ seedProducts-репойнту (runSeed order) — щоб слабкий
+  // base_template_slug-зв'язок продукту вже вказував на новий slug.
+  for (const slug of RETIRED_TEMPLATE_SLUGS) {
+    await db.delete(templates).where(eq(templates.slug, slug));
   }
 }
 

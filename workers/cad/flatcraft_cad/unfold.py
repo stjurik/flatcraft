@@ -25,10 +25,9 @@ from typing import Literal
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
-from flatcraft_cad.templates.perforated_panel_square import (
+from flatcraft_cad.templates.perforated_panel import (
     CORNER_HOLE_DIAMETER_MM,
-    PerforatedPanelSquareBuildParameters,
+    PerforatedPanelBuildParameters,
 )
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
@@ -104,25 +103,7 @@ class UnfoldedCornerAngle:
 
 @dataclass(frozen=True)
 class UnfoldedPerforatedPanel:
-    """Розгортка perforated_panel = просто плоский лист + grid отворів.
-
-    Без bends → length_mm = params.length_mm. bend_allowance_mm = 0.
-    """
-
-    length_mm: float
-    width_mm: float
-    thickness_mm: float
-    holes: tuple[Hole2D, ...]
-    grid_cols: int
-    """Кількість колонок отворів."""
-
-    grid_rows: int
-    """Кількість рядів отворів."""
-
-
-@dataclass(frozen=True)
-class UnfoldedPerforatedPanelSquare:
-    """Розгортка ребристої перфо-монтажної панелі (ADR-030).
+    """Розгортка ребристої перфо-монтажної панелі (ADR-030/031).
 
     Гнутий лоток → cross/плюс-розгортка: центральна перфо-площина
     `length_mm × width_mm` (= між лініями гибу) + 4 фланцеві «язики».
@@ -466,54 +447,6 @@ def unfold_wall_shelf(params: WallShelfBuildParameters, k_factor: float) -> Unfo
     )
 
 
-def unfold_perforated_panel(
-    params: PerforatedPanelBuildParameters,
-) -> UnfoldedPerforatedPanel:
-    """Обчислює centered grid отворів на плоскому листі.
-
-    Не приймає k_factor: без bends — без bend allowance.
-
-    Layout: для кожного виміру обчислюємо max кількість отворів, що
-    влізе з відступом ≥margin, потім перераховуємо effective_margin
-    щоб grid опинився симетрично відносно центра листа.
-    """
-    if params.length_mm - 2 * params.margin_mm < 0:
-        raise ValueError(
-            f"length_mm ({params.length_mm}) < 2 * margin_mm ({params.margin_mm}): "
-            "no room for holes"
-        )
-    if params.width_mm - 2 * params.margin_mm < 0:
-        raise ValueError(
-            f"width_mm ({params.width_mm}) < 2 * margin_mm ({params.margin_mm}): no room for holes"
-        )
-
-    # Кількість отворів вдовж кожного виміру.
-    avail_x = params.length_mm - 2 * params.margin_mm
-    avail_y = params.width_mm - 2 * params.margin_mm
-    n_cols = max(1, int(avail_x // params.pitch_x_mm) + 1)
-    n_rows = max(1, int(avail_y // params.pitch_y_mm) + 1)
-
-    # Centered effective margins.
-    eff_margin_x = (params.length_mm - (n_cols - 1) * params.pitch_x_mm) / 2.0
-    eff_margin_y = (params.width_mm - (n_rows - 1) * params.pitch_y_mm) / 2.0
-
-    holes: list[Hole2D] = []
-    for i in range(n_cols):
-        x = eff_margin_x + i * params.pitch_x_mm
-        for j in range(n_rows):
-            y = eff_margin_y + j * params.pitch_y_mm
-            holes.append(Hole2D(x_mm=x, y_mm=y, diameter_mm=params.hole_diameter_mm))
-
-    return UnfoldedPerforatedPanel(
-        length_mm=params.length_mm,
-        width_mm=params.width_mm,
-        thickness_mm=params.thickness_mm,
-        holes=tuple(holes),
-        grid_cols=n_cols,
-        grid_rows=n_rows,
-    )
-
-
 def _unit(dx: float, dy: float) -> tuple[float, float]:
     d = math.hypot(dx, dy)
     return (dx / d, dy / d) if d else (0.0, 0.0)
@@ -577,11 +510,11 @@ def _fillet_convex_corners(
     return tuple(lw), tuple(poly)
 
 
-def unfold_perforated_panel_square(
-    params: PerforatedPanelSquareBuildParameters,
+def unfold_perforated_panel(
+    params: PerforatedPanelBuildParameters,
     k_factor: float = 0.4,
-) -> UnfoldedPerforatedPanelSquare:
-    """Cross-розгортка ребристої перфо-монтажної панелі (ADR-030).
+) -> UnfoldedPerforatedPanel:
+    """Cross-розгортка ребристої перфо-монтажної панелі (ADR-030/031).
 
     Центральна перфо-площина [0,length]×[0,width] (= між лініями гибу) + 4
     фланцеві «язики» (ребра), кожен спан свого краю площини → кути ВІДКРИТІ
@@ -665,12 +598,14 @@ def unfold_perforated_panel_square(
             y = em_y + j * params.pitch_y_mm
             if any(math.hypot(x - h.x_mm, y - h.y_mm) < keep_out for h in corner_holes):
                 continue
-            holes.append(Hole2D(x_mm=x, y_mm=y, diameter_mm=params.hole_size_mm, shape="square"))
+            holes.append(
+                Hole2D(x_mm=x, y_mm=y, diameter_mm=params.hole_size_mm, shape=params.hole_shape)
+            )
 
     xs = [v[0] for v in outline_vertices]
     ys = [v[1] for v in outline_vertices]
 
-    return UnfoldedPerforatedPanelSquare(
+    return UnfoldedPerforatedPanel(
         length_mm=length,
         width_mm=width,
         thickness_mm=t,
@@ -697,7 +632,7 @@ def _enclosed_shelf_side_holes(
 ) -> tuple[Hole2D, ...]:
     """Centered square-hole grid на одній боковій стінці (left або right).
 
-    Layout — той самий що `unfold_perforated_panel_square`: centered grid з
+    Layout — той самий що `unfold_perforated_panel`: centered grid з
     effective margin, square holes (shape='square', diameter_mm = side length).
     Координати absolute (відносно бази розгортки), щоб DXF emit'тер міг писати
     LWPOLYLINEs без додаткового зсуву.

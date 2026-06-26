@@ -9,8 +9,8 @@
     pitch > hole_size   → валідно
     pitch <= hole_size  → HOLES_OVERLAP
 
-де hole_size — сторона квадрата (perforated_panel_square) або діаметр
-(perforated_panel). Остання лінія оборони у воркері — навіть якщо API-gate
+де hole_size = `hole_size_mm` (сторона квадрата при hole_shape='square' або
+діаметр при 'circle'). Остання лінія оборони у воркері — навіть якщо API-gate
 обійдено, відмова ДО CAD-операції/запису у R2 з 422 RFC 9457.
 """
 
@@ -55,12 +55,9 @@ def validate_perforation(
     Невідомий slug або невизначений/непозитивний розмір отвору → [] (останнє
     відсіється Pydantic-діапазонами окремо).
     """
-    if template_slug == "perforated_panel_square":
+    if template_slug == "perforated_panel":
         hole_size = parameters.get("hole_size_mm")
-        shape_word = "сторону"
-    elif template_slug == "perforated_panel":
-        hole_size = parameters.get("hole_diameter_mm")
-        shape_word = "діаметр"
+        shape_word = "сторону" if parameters.get("hole_shape") == "square" else "діаметр"
     else:
         return []
 

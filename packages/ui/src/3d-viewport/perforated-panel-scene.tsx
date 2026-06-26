@@ -18,52 +18,87 @@ interface SceneProps {
   readonly thicknessMm: number;
 }
 
+// ADR-030 worker-константи, віддзеркалені для прев'ю (не у Zod-параметрах).
+const CORNER_HOLE_DIAMETER_MM = 5.5;
+const CORNER_HOLE_INSET_MM = 12;
+
 /**
- * Perforated panel 3D — плоский box + cylinder-отвори за обчисленим grid.
- *
- * Layout повторює `unfold_perforated_panel`: центрований grid з pitch'ом.
- * Cylinders — orange overlay через InstancedHoles (1 draw call, без CSG).
- * Великі grid'и граційно проріджуються (`computeHoleGrid`), а не гасяться —
- * раніше `total > cap` робив усю панель суцільною. Точна геометрія — у DXF.
+ * Перфо-монтажна панель 3D — ГНУТИЙ ЛОТОК (ADR-030/031): перфо-площина + 4 ребра
+ * (фланці ВНИЗ) + 4 кутові установочні отвори. Форма перфо-отвору — параметр
+ * `hole_shape`: square → box-отвори, circle → cylinder-отвори (InstancedHoles,
+ * 1 draw call). Ребра — box-стінки по краях (дзеркало enclosed-shelf), опущені
+ * вниз (−Y) узгоджено з bend direction='down'. Перфорація прорідж. на великих
+ * grid'ах (`computeHoleGrid`).
  */
 function PerforatedPanel({ parameters, thicknessMm }: SceneProps) {
   const t = thicknessMm;
-  const boxGeom = useMemo(
-    () => new BoxGeometry(parameters.length_mm, t, parameters.width_mm),
-    [parameters.length_mm, parameters.width_mm, t],
-  );
+  const { length_mm: L, width_mm: W, rib_height_mm: rib } = parameters;
+
+  const faceGeom = useMemo(() => new BoxGeometry(L, t, W), [L, W, t]);
+  // Ребра по краях ширини (front/back) і довжини (left/right); опущені вниз (−Y).
+  const ribLenGeom = useMemo(() => new BoxGeometry(L, rib, t), [L, rib, t]);
+  const ribWidGeom = useMemo(() => new BoxGeometry(t, rib, W), [W, rib, t]);
+  const ribY = -(t / 2 + rib / 2);
 
   const positions = useMemo(() => {
     const { cells } = computeHoleGrid({
-      lengthMm: parameters.length_mm,
-      widthMm: parameters.width_mm,
+      lengthMm: L,
+      widthMm: W,
       pitchXMm: parameters.pitch_x_mm,
       pitchYMm: parameters.pitch_y_mm,
       marginMm: parameters.margin_mm,
     });
     return cells.map((c) => [c.u, t / 2, c.v] as const);
-  }, [
-    parameters.length_mm,
-    parameters.width_mm,
-    parameters.pitch_x_mm,
-    parameters.pitch_y_mm,
-    parameters.margin_mm,
-    t,
-  ]);
+  }, [L, W, parameters.pitch_x_mm, parameters.pitch_y_mm, parameters.margin_mm, t]);
 
-  const cylRadius = parameters.hole_diameter_mm / 2;
-  const cylLen = t * 1.5;
-  const cylGeom = useMemo(
-    () => new CylinderGeometry(cylRadius, cylRadius, cylLen, 16),
-    [cylRadius, cylLen],
+  const side = parameters.hole_size_mm;
+  // Форма перфо-отвору: square → box, circle → cylinder (ADR-031).
+  const holeGeom = useMemo(
+    () =>
+      parameters.hole_shape === "circle"
+        ? new CylinderGeometry(side / 2, side / 2, t * 1.5, 16)
+        : new BoxGeometry(side, t * 1.5, side),
+    [parameters.hole_shape, side, t],
+  );
+
+  // 4 кутові установочні отвори (Ø5.5) — циліндри крізь площину.
+  const cornerGeom = useMemo(
+    () =>
+      new CylinderGeometry(CORNER_HOLE_DIAMETER_MM / 2, CORNER_HOLE_DIAMETER_MM / 2, t * 1.5, 16),
+    [t],
+  );
+  const ins = CORNER_HOLE_INSET_MM;
+  const cornerPositions = useMemo(
+    () =>
+      [
+        [-(L / 2 - ins), t / 2, -(W / 2 - ins)],
+        [L / 2 - ins, t / 2, -(W / 2 - ins)],
+        [-(L / 2 - ins), t / 2, W / 2 - ins],
+        [L / 2 - ins, t / 2, W / 2 - ins],
+      ] as const,
+    [L, W, t, ins],
   );
 
   return (
     <group>
-      <mesh geometry={boxGeom}>
+      <mesh geometry={faceGeom}>
         <meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.45} />
       </mesh>
-      <InstancedHoles geometry={cylGeom} positions={positions} />
+      {/* 4 ребра жорсткості (фланці вниз) */}
+      <mesh geometry={ribLenGeom} position={[0, ribY, W / 2 - t / 2]}>
+        <meshStandardMaterial color="#7c8aa0" metalness={0.5} roughness={0.45} />
+      </mesh>
+      <mesh geometry={ribLenGeom} position={[0, ribY, -(W / 2 - t / 2)]}>
+        <meshStandardMaterial color="#7c8aa0" metalness={0.5} roughness={0.45} />
+      </mesh>
+      <mesh geometry={ribWidGeom} position={[L / 2 - t / 2, ribY, 0]}>
+        <meshStandardMaterial color="#7c8aa0" metalness={0.5} roughness={0.45} />
+      </mesh>
+      <mesh geometry={ribWidGeom} position={[-(L / 2 - t / 2), ribY, 0]}>
+        <meshStandardMaterial color="#7c8aa0" metalness={0.5} roughness={0.45} />
+      </mesh>
+      <InstancedHoles geometry={holeGeom} positions={positions} />
+      <InstancedHoles geometry={cornerGeom} positions={cornerPositions} color="#dc2626" />
     </group>
   );
 }
@@ -73,15 +108,15 @@ export function PerforatedPanelScene({ parameters, thicknessMm }: SceneProps) {
   const reduced = useReducedMotion();
   const quality = useMemo(() => viewportQuality({ isMobile, reduced }), [isMobile, reduced]);
 
-  // PR 8a: bbox-aware камера (perforated_panel: плоский лист L × t × W).
+  // ADR-030/031: bbox-aware камера (лоток L × (t+rib) × W — ребра додають висоту).
   const placement = useMemo(
     () =>
       computeCameraPlacement({
         x: parameters.length_mm,
-        y: thicknessMm,
+        y: thicknessMm + parameters.rib_height_mm,
         z: parameters.width_mm,
       }),
-    [parameters.length_mm, parameters.width_mm, thicknessMm],
+    [parameters.length_mm, parameters.width_mm, parameters.rib_height_mm, thicknessMm],
   );
   return (
     <Canvas

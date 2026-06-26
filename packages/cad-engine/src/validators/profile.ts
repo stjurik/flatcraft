@@ -79,11 +79,6 @@ export type ProfileValidationInput =
     }
   | {
       readonly templateSlug: "perforated_panel";
-      readonly parameters: Readonly<Record<string, number>>;
-      readonly thicknessMm: number;
-    }
-  | {
-      readonly templateSlug: "perforated_panel_square";
       readonly parameters: RibbedPanelProfile;
       readonly thicknessMm: number;
     };
@@ -115,8 +110,8 @@ function gtMessage(which: string, threshold: number, t: number, r: number): stri
 }
 
 /**
- * Валідує геометричну достатність профілю. Повертає [] коли валідно або коли
- * шаблон без гибу (perforated_panel). Дзеркалить geometry.ts один-в-один.
+ * Валідує геометричну достатність профілю. Повертає [] коли валідно.
+ * Дзеркалить geometry.ts один-в-один.
  */
 export function validateProfile(input: ProfileValidationInput): ProfileIssue[] {
   const t = input.thicknessMm;
@@ -224,8 +219,8 @@ export function validateProfile(input: ProfileValidationInput): ProfileIssue[] {
       return issues;
     }
 
-    case "perforated_panel_square": {
-      // Ребриста монтажна панель (ADR-030): flat-фланець = rib_height − (t+r)
+    case "perforated_panel": {
+      // Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
       // має бути додатним → rib_height > t+r (як flange у z/wall).
       const { rib_height_mm: rh, bend_radius_mm: r } = input.parameters;
       const min = t + r;
@@ -240,9 +235,5 @@ export function validateProfile(input: ProfileValidationInput): ProfileIssue[] {
       }
       return issues;
     }
-
-    case "perforated_panel":
-      // Без гибу — немає assertion'у в geometry.ts, профіль завжди валідний.
-      return issues;
   }
 }

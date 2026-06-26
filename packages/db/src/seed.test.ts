@@ -59,8 +59,8 @@ describe("STANDARD_THICKNESSES_MM", () => {
 });
 
 describe("SEED_TEMPLATES", () => {
-  it("містить 7 шаблонів (5 published part + 2 unpublished base для products)", () => {
-    expect(SEED_TEMPLATES).toHaveLength(7);
+  it("містить 6 шаблонів (5 published part + 1 unpublished base для products)", () => {
+    expect(SEED_TEMPLATES).toHaveLength(6);
   });
 
   it("Phase 2.10 шаблони опубліковано у каталозі (Phase 3.0 PR 8b: enclosed_shelf → Виріб)", () => {
@@ -83,7 +83,6 @@ describe("SEED_TEMPLATES", () => {
       "enclosed_shelf",
       "l_bracket",
       "perforated_panel",
-      "perforated_panel_square",
       "wall_shelf",
       "z_bracket",
     ]);
@@ -150,27 +149,17 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
-  it("perforated_panel defaultParameters містить pitch-grid поля", () => {
+  it("perforated_panel defaultParameters містить pitch-grid + rib + hole_shape поля", () => {
     const panel = SEED_TEMPLATES.find((t) => t.slug === "perforated_panel");
     expect(panel?.defaultParameters).toMatchObject({
       length_mm: expect.any(Number),
       width_mm: expect.any(Number),
-      hole_diameter_mm: expect.any(Number),
-      pitch_x_mm: expect.any(Number),
-      pitch_y_mm: expect.any(Number),
-      margin_mm: expect.any(Number),
-    });
-  });
-
-  it("perforated_panel_square defaultParameters містить square-hole поля", () => {
-    const sq = SEED_TEMPLATES.find((t) => t.slug === "perforated_panel_square");
-    expect(sq?.defaultParameters).toMatchObject({
-      length_mm: expect.any(Number),
-      width_mm: expect.any(Number),
+      hole_shape: expect.any(String),
       hole_size_mm: expect.any(Number),
       pitch_x_mm: expect.any(Number),
       pitch_y_mm: expect.any(Number),
       margin_mm: expect.any(Number),
+      rib_height_mm: expect.any(Number),
     });
   });
 
@@ -186,10 +175,10 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
-  it("unpublished — лише base-шаблони для products (perforated_panel_square + enclosed_shelf)", () => {
+  it("unpublished — лише base-шаблони для products (enclosed_shelf)", () => {
     const unpublished = SEED_TEMPLATES.filter((t) => !t.isPublished)
       .map((t) => t.slug)
       .sort();
-    expect(unpublished).toEqual(["enclosed_shelf", "perforated_panel_square"]);
+    expect(unpublished).toEqual(["enclosed_shelf"]);
   });
 });

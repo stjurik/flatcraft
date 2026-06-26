@@ -54,11 +54,11 @@ describe("SEED_PRODUCTS", () => {
     }
   });
 
-  it("perforated-panel-decorative використовує perforated_panel_square base (Phase 3.0 PR 5 dep)", () => {
+  it("perforated-panel-decorative використовує perforated_panel base (ADR-031)", () => {
     const product = SEED_PRODUCTS.find((p) => p.slug === "perforated-panel-decorative");
     expect(product).toBeDefined();
-    expect(product?.baseTemplateSlug).toBe("perforated_panel_square");
-    // Усі 6 геометричних параметрів редаговані (matrix-валідатор не задіяний — no-bend).
+    expect(product?.baseTemplateSlug).toBe("perforated_panel");
+    // Геометрія + висота ребра редаговані; форма отвору фіксована (квадрат).
     expect(product?.userEditableFields).toEqual([
       "length_mm",
       "width_mm",
@@ -66,8 +66,9 @@ describe("SEED_PRODUCTS", () => {
       "pitch_x_mm",
       "pitch_y_mm",
       "margin_mm",
+      "rib_height_mm",
     ]);
-    expect(product?.fixedParameters).toEqual({});
+    expect(product?.fixedParameters).toEqual({ hole_shape: "square" });
     expect(product?.useCases).toEqual(["інтер'єр", "офіс", "дім"]);
   });
 

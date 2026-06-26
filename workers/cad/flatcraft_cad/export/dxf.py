@@ -34,7 +34,6 @@ from flatcraft_cad.unfold import (
     UnfoldedEnclosedShelf,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
-    UnfoldedPerforatedPanelSquare,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -258,29 +257,12 @@ def export_perforated_panel_dxf(
     unfolded: UnfoldedPerforatedPanel,
     output_path: Path,
 ) -> Path:
-    """Perforated_panel DXF: лише прямокутник + grid отворів, без bends."""
-    # bend_radius_mm/bend_angle_deg формально потрібні API, але цикл по
-    # bend_lines_mm=() не виконається — їхні значення не використовуються.
-    return _export_flat_dxf(
-        length_mm=unfolded.length_mm,
-        width_mm=unfolded.width_mm,
-        bend_lines_mm=(),
-        bend_radius_mm=0.0,
-        bend_angle_deg=0.0,
-        output_path=output_path,
-        holes=unfolded.holes,
-    )
-
-
-def export_perforated_panel_square_dxf(
-    unfolded: UnfoldedPerforatedPanelSquare,
-    output_path: Path,
-) -> Path:
-    """Перфо-монтажна панель DXF — cross-розгортка лотка (ADR-030).
+    """Перфо-монтажна панель DXF — cross-розгортка лотка (ADR-030/031).
 
     Cross-outline (1 LWPOLYLINE на LASER_CUT, ByLayer; bulge≠0 на скруглених
-    R-кутах ребер) + 4 BEND_LINES (dashed) + перфорація (square LWPOLYLINE,
-    color 5) + 4 установочні отвори Ø5.5 (CIRCLE, color 5).
+    R-кутах ребер) + 4 BEND_LINES (dashed) + перфорація (CIRCLE або square
+    LWPOLYLINE за hole.shape, color 5) + 4 установочні отвори Ø5.5 (CIRCLE,
+    color 5).
 
     Інваріант ADR-024 збережено: рівно 2 виробничі шари, 0 TEXT/DIMENSION
     (кріпильні розміри/напрям — у PDF).
@@ -317,19 +299,27 @@ def export_perforated_panel_square_dxf(
             dxfattribs={"layer": "BEND_LINES"},
         )
 
-    # Перфорація — square LWPOLYLINE (color 5) на тому ж LASER_CUT (ADR-024).
+    # Перфорація (color 5) на тому ж LASER_CUT (ADR-024): CIRCLE для круглих,
+    # square LWPOLYLINE для квадратних отворів (за hole.shape, ADR-031).
     for hole in unfolded.holes:
         half = hole.diameter_mm / 2.0
-        msp.add_lwpolyline(
-            points=[
-                (hole.x_mm - half, hole.y_mm - half),
-                (hole.x_mm + half, hole.y_mm - half),
-                (hole.x_mm + half, hole.y_mm + half),
-                (hole.x_mm - half, hole.y_mm + half),
-            ],
-            close=True,
-            dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
-        )
+        if hole.shape == "square":
+            msp.add_lwpolyline(
+                points=[
+                    (hole.x_mm - half, hole.y_mm - half),
+                    (hole.x_mm + half, hole.y_mm - half),
+                    (hole.x_mm + half, hole.y_mm + half),
+                    (hole.x_mm - half, hole.y_mm + half),
+                ],
+                close=True,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
+        else:
+            msp.add_circle(
+                center=(hole.x_mm, hole.y_mm),
+                radius=half,
+                dxfattribs={"layer": "LASER_CUT", "color": _INNER_CUT_COLOR},
+            )
 
     # Установочні отвори Ø5.5 — CIRCLE (color 5), inner-cut на LASER_CUT.
     for hole in unfolded.corner_holes:

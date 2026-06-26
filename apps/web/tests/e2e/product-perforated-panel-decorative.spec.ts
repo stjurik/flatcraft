@@ -4,9 +4,9 @@ import { expect, test } from "@playwright/test";
  * E2E для /products/perforated-panel-decorative (Phase 3.0 PR 6, ADR-027).
  *
  * Перевіряє: product-mode header (з product.name + description), AutoForm
- * фільтрується по userEditableFields (рендериться лише 6 геометричних полів),
- * R3F canvas з'являється з PerforatedPanelSquareScene, експорт-payload містить
- * `template_slug=perforated_panel_square` (а НЕ slug продукту).
+ * фільтрується по userEditableFields (геометрія + висота ребра), R3F canvas
+ * з'являється (PerforatedPanelScene, ADR-031), експорт-payload містить
+ * `template_slug=perforated_panel` (а НЕ slug продукту).
  */
 
 test.describe("/products/perforated-panel-decorative — product-mode studio (Phase 3.0 PR 6)", () => {
@@ -44,6 +44,8 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     await expect(page.getByTestId("param-pitch_x_mm")).toHaveValue("25");
     await expect(page.getByTestId("param-pitch_y_mm")).toHaveValue("25");
     await expect(page.getByTestId("param-margin_mm")).toHaveValue("15");
+    // ADR-031: висота ребра редагована у формі продукту.
+    await expect(page.getByTestId("param-rib_height_mm")).toHaveValue("30");
 
     // Валідація OK для дефолтів.
     await expect(page.getByTestId("validation-ok")).toBeVisible();
@@ -54,7 +56,7 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
 
     // R3F canvas рендериться (валідні params, render-gate ADR-026 пропускає).
     // getByTestId на R3F <Canvas> резолвиться у wrapper div; html-canvas — всередині.
-    const canvas = page.getByTestId("perforated-panel-square-canvas").locator("canvas");
+    const canvas = page.getByTestId("perforated-panel-canvas").locator("canvas");
     await expect(canvas).toBeVisible({ timeout: 15_000 });
     const dims = await canvas.evaluate((el: HTMLCanvasElement) => ({
       w: el.width,
@@ -66,7 +68,7 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   });
 
-  test("Export → payload містить template_slug=perforated_panel_square (НЕ product slug)", async ({
+  test("Export → payload містить template_slug=perforated_panel (НЕ product slug)", async ({
     page,
   }) => {
     const jobId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
@@ -108,10 +110,11 @@ test.describe("/products/perforated-panel-decorative — product-mode studio (Ph
 
     await expect(page.getByTestId("export-download-link")).toBeVisible({ timeout: 10_000 });
     expect(received).toMatchObject({
-      template_slug: "perforated_panel_square",
+      template_slug: "perforated_panel",
       parameters: {
         length_mm: 200,
         width_mm: 150,
+        hole_shape: "square",
         hole_size_mm: 8,
       },
     });

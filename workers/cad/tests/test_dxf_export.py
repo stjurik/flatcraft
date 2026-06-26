@@ -266,10 +266,12 @@ def _build_template_dxf(slug: str, tmp_path: Path) -> Path:
                 "length_mm": 200,
                 "width_mm": 150,
                 "thickness_mm": 2.0,
-                "hole_diameter_mm": 8,
+                "hole_shape": "square",
+                "hole_size_mm": 8,
                 "pitch_x_mm": 20,
                 "pitch_y_mm": 20,
                 "margin_mm": 15,
+                "rib_height_mm": 30,
             }
         )
         return export_perforated_panel_dxf(unfold_perforated_panel(pparams), out)
