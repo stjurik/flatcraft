@@ -401,28 +401,31 @@ class TestUnfoldWallShelf:
 
 class TestUnfoldPerforatedPanel:
     def _params(self, **overrides: float) -> PerforatedPanelBuildParameters:
-        defaults: dict[str, float] = {
+        defaults: dict[str, float | str] = {
             "length_mm": 200.0,
             "width_mm": 150.0,
             "thickness_mm": 2.0,
-            "hole_diameter_mm": 8.0,
+            "hole_shape": "square",
+            "hole_size_mm": 8.0,
             "pitch_x_mm": 20.0,
             "pitch_y_mm": 20.0,
             "margin_mm": 15.0,
+            "rib_height_mm": 30.0,
         }
         defaults.update(overrides)
-        return PerforatedPanelBuildParameters(**defaults)
+        return PerforatedPanelBuildParameters.model_validate(defaults)
 
     def test_дефолти_200x150_pitch20_margin15(self) -> None:
         """avail_x = 200-30 = 170; n_cols = 170//20+1 = 9.
         avail_y = 150-30 = 120; n_rows = 120//20+1 = 7.
-        Усього = 63 отвори. eff_margin_x = (200 - 8*20)/2 = 20.
+        Латтіс = 63 точки; 4 кутові точки вирізаються під установочні отвори Ø5.5
+        (keep-out) → 59 перфо-отворів (ADR-031). eff_margin_x = (200 - 8*20)/2 = 20.
         """
         result = unfold_perforated_panel(self._params())
         assert isinstance(result, UnfoldedPerforatedPanel)
         assert result.grid_cols == 9
         assert result.grid_rows == 7
-        assert len(result.holes) == 63
+        assert len(result.holes) == 59
 
     def test_centered_layout(self) -> None:
         """eff_margin = (200 - (9-1)*20) / 2 = 20. Перший hole.x = 20,
@@ -456,15 +459,9 @@ class TestUnfoldPerforatedPanel:
             assert h.diameter_mm == 8.0
 
     def test_невалідний_margin_кидає(self) -> None:
-        params = PerforatedPanelBuildParameters.model_construct(
-            length_mm=50.0,
-            width_mm=150.0,
-            thickness_mm=2.0,
-            hole_diameter_mm=8.0,
-            pitch_x_mm=20.0,
-            pitch_y_mm=20.0,
-            margin_mm=30.0,  # 2*30 > 50 → no room
-        )
+        # length=120, margin=100 → 120 - 2*100 = -80 < 0 → "no room"
+        # (значення валідні за Pydantic-діапазонами: length≥100, margin≤100).
+        params = self._params(length_mm=120.0, width_mm=300.0, margin_mm=100.0)
         with pytest.raises(ValueError, match="no room"):
             unfold_perforated_panel(params)
 

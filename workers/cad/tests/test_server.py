@@ -96,10 +96,14 @@ WALL_SHELF_VALID_PARAMS: dict[str, object] = {
 PERFORATED_PANEL_VALID_PARAMS: dict[str, object] = {
     "length_mm": 200,
     "width_mm": 150,
-    "hole_diameter_mm": 8,
+    "hole_shape": "square",
+    "hole_size_mm": 8,
     "pitch_x_mm": 20,
     "pitch_y_mm": 20,
     "margin_mm": 15,
+    "rib_height_mm": 30,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
 }
 
 
@@ -491,10 +495,11 @@ class TestPerforatedPanelExport:
         )
         assert res.status_code == 422
 
-    def test_perforated_panel_dxf_без_bend_lines(
+    def test_perforated_panel_dxf_layers_and_holes(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
-        """Без bends → 0 BEND text annotations. 9×7 grid = 63 CIRCLE."""
+        """Ребриста панель (ADR-031): square-перфо → LWPOLYLINE; 4 кутові Ø5.5 →
+        CIRCLE; є BEND_LINES (4 ребра); ADR-024: жодного TEXT у DXF."""
         res = client.post(
             "/export",
             json={
@@ -511,17 +516,20 @@ class TestPerforatedPanelExport:
             .read()
             .decode("utf-8")
         )
-        # Жодних BEND текстів (ADR-024: у DXF узагалі немає TEXT):
+        # ADR-024: у DXF немає TEXT/BEND-анотацій.
         assert dxf.count("BEND ") == 0
-        # 9 × 7 = 63 кола з grid, усі на LASER_CUT.
-        assert dxf.count("\nCIRCLE\n") == 63
+        assert "\nTEXT\n" not in dxf
+        # Квадратна перфо → LWPOLYLINE; рівно 4 CIRCLE — кутові установочні отвори.
+        assert dxf.count("\nCIRCLE\n") == 4
+        # Лоток має 4 лінії гибу.
+        assert "BEND_LINES" in dxf
         assert "LASER_CUT" in dxf
         assert "INNER_CUTS" not in dxf
 
     def test_perforated_panel_pitch_впливає_на_кількість_отворів(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
-        """Більший pitch → менше отворів у DXF."""
+        """Більший pitch → менше отворів у DXF (square-перфо → LWPOLYLINE)."""
         small_pitch = client.post(
             "/export",
             json={
@@ -557,4 +565,4 @@ class TestPerforatedPanelExport:
             .read()
             .decode("utf-8")
         )
-        assert small.count("\nCIRCLE\n") > big.count("\nCIRCLE\n")
+        assert small.count("\nLWPOLYLINE\n") > big.count("\nLWPOLYLINE\n")

@@ -29,7 +29,7 @@ interface SceneProps {
  * Сегменти центруємо навколо origin для зручної камери.
  *
  * Side perforation — overlay BoxGeometry на боковинах (декоративний preview,
- * не вирізаємо solid; той самий patern, що у PerforatedPanelSquareScene).
+ * не вирізаємо solid; той самий patern, що у PerforatedPanelScene).
  */
 function EnclosedShelf({ parameters, thicknessMm }: SceneProps) {
   const t = thicknessMm;

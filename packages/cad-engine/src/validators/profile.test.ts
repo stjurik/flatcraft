@@ -163,21 +163,24 @@ describe("validateProfile — wall_shelf (back + shelf double-bend/lip)", () => 
   });
 });
 
-describe("validateProfile — perforated_panel імунний", () => {
-  it("без гибу → завжди []", () => {
+describe("validateProfile — perforated_panel (ребриста, ADR-031)", () => {
+  it("валідне ребро (rib_height > t+r) → []", () => {
     expect(
       validateProfile({
         templateSlug: "perforated_panel",
-        parameters: {
-          length_mm: 1,
-          width_mm: 1,
-          hole_diameter_mm: 5,
-          pitch_x_mm: 20,
-          pitch_y_mm: 20,
-          margin_mm: 10,
-        },
+        parameters: { rib_height_mm: 30, bend_radius_mm: 2.5 },
         thicknessMm: 2,
       }),
     ).toEqual([]);
+  });
+
+  it("замале ребро (rib_height ≤ t+r) → FLANGE_TOO_SHORT", () => {
+    const issues = validateProfile({
+      templateSlug: "perforated_panel",
+      parameters: { rib_height_mm: 4, bend_radius_mm: 2.5 },
+      thicknessMm: 2,
+    });
+    expect(issues.map((i) => i.code)).toContain("FLANGE_TOO_SHORT");
+    expect(issues[0]?.which).toBe("rib_height");
   });
 });

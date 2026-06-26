@@ -63,8 +63,8 @@ def validate_profile(
 ) -> list[ProfileError]:
     """Перевіряє геометричну достатність профілю. Порожній список → валідно.
 
-    perforated_panel (без гибу) та невідомий slug → []. thickness <= 0 → []
-    (як `t <= 0` early-return у geometry.ts; Pydantic відмовить окремо).
+    Невідомий slug → []. thickness <= 0 → [] (як `t <= 0` early-return у
+    geometry.ts; Pydantic відмовить окремо).
     """
     t = thickness_mm
     if t <= 0:
@@ -107,8 +107,8 @@ def validate_profile(
         flange("bottom_flange", float(parameters["bottom_flange_mm"]), r)
         return errors
 
-    if template_slug == "perforated_panel_square":
-        # Ребриста монтажна панель (ADR-030): flat-фланець = rib_height − (t+r)
+    if template_slug == "perforated_panel":
+        # Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
         # має бути додатним → rib_height > t+r (як flange у z/wall).
         r = float(parameters.get("bend_radius_mm", 2.5))
         flange("rib_height", float(parameters["rib_height_mm"]), r)

@@ -7,7 +7,7 @@ const EXPECTED: ReadonlyArray<{ slug: string; name: string; hasPreview: boolean 
   { slug: "z_bracket", name: "Z-кронштейн", hasPreview: true },
   { slug: "corner_angle", name: "Кутник", hasPreview: true },
   { slug: "wall_shelf", name: "Полиця настінна", hasPreview: true },
-  { slug: "perforated_panel", name: "Перфо-панель", hasPreview: true },
+  { slug: "perforated_panel", name: "Перфо-монтажна панель", hasPreview: true },
 ];
 
 const VIEWPORTS = [

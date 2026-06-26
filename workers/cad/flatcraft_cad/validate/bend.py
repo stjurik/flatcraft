@@ -151,14 +151,11 @@ def validate_export(
 ) -> list[dict[str, str]]:
     """Валідація гиба для export-payload. Повертає JSON-готовий список dict-ів.
 
-    Шаблони без гибів (perforated_panel) → []. Усі гиби в межах шаблону мають
-    однаковий (радіус, кут), тож одного виклику validate_bend достатньо.
-    perforated_panel_square (ребриста монтажна панель, ADR-030) ВАЛІДУЄТЬСЯ —
-    має 4 гиби (ребра) з однаковим bend_radius_mm/bend_angle_deg.
+    Усі гиби в межах шаблону мають однаковий (радіус, кут), тож одного виклику
+    validate_bend достатньо. perforated_panel (ребриста монтажна панель,
+    ADR-030/031) ВАЛІДУЄТЬСЯ — має 4 гиби (ребра) з однаковим
+    bend_radius_mm/bend_angle_deg. Шаблони без bend-полів → [] (нижче).
     """
-    if template_slug == "perforated_panel":
-        return []
-
     radius = parameters.get("bend_radius_mm")
     angle = parameters.get("bend_angle_deg")
     if radius is None or angle is None:

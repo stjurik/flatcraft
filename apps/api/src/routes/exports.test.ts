@@ -207,21 +207,22 @@ describe("POST /exports — async flow", () => {
     expect(rad?.message).toMatch(/радіус/i);
   });
 
-  it("perforated_panel_square: pitch_y <= сторона отвору → 422 HOLES_OVERLAP, артефакт не створюється", async () => {
+  it("perforated_panel (square holes): pitch_y <= сторона → 422 HOLES_OVERLAP, артефакт не створюється", async () => {
     const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
     const res = await app.inject({
       method: "POST",
       url: "/exports",
       payload: {
-        template_slug: "perforated_panel_square",
+        template_slug: "perforated_panel",
         parameters: {
           length_mm: 300,
           width_mm: 100,
+          hole_shape: "square",
           hole_size_mm: 20,
           pitch_x_mm: 27,
           pitch_y_mm: 10,
           margin_mm: 15,
-          // ADR-030: ребриста монтажна панель — обов'язкові поля гибу.
+          // ADR-030/031: ребриста монтажна панель — обов'язкові поля гибу.
           rib_height_mm: 30,
           bend_radius_mm: 2.5,
           bend_angle_deg: 90,
@@ -278,11 +279,10 @@ describe("POST /exports — async flow", () => {
     expect(forwarded).not.toHaveProperty("material_code");
   });
 
-  it("perforated_panel: зайвий ключ розміру (hole_size_mm) обрізається перед cad-worker", async () => {
-    // Клієнтський перемикач форми отвору тримає ОБИДВА ключі синхронно
-    // (hole_diameter_mm + hole_size_mm). Для perforated_panel у worker (Pydantic
-    // extra=forbid) має піти лише hole_diameter_mm — ExportRequestSchema (z.object)
-    // відкидає зайвий ключ при парсингу на API.
+  it("perforated_panel: невідомий ключ обрізається, hole_shape+hole_size форвардяться", async () => {
+    // ADR-031: уніфікований шаблон — один ключ hole_size_mm + hole_shape.
+    // ExportRequestSchema (z.object) відкидає невідомі ключі (legacy
+    // hole_diameter_mm) перед форвардом у cad-worker (Pydantic extra=forbid).
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify(UPSTREAM_OK_BODY), {
         status: 200,
@@ -297,11 +297,15 @@ describe("POST /exports — async flow", () => {
         parameters: {
           length_mm: 200,
           width_mm: 150,
-          hole_diameter_mm: 8,
-          hole_size_mm: 8, // зайвий ключ (дзеркало квадратної форми)
+          hole_shape: "square",
+          hole_size_mm: 8,
+          hole_diameter_mm: 8, // невідомий legacy-ключ → відкидається
           pitch_x_mm: 20,
           pitch_y_mm: 20,
           margin_mm: 15,
+          rib_height_mm: 30,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
         },
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
@@ -313,8 +317,9 @@ describe("POST /exports — async flow", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [, init] = fetchSpy.mock.calls[0];
     const forwarded = JSON.parse(init.body as string) as { parameters: Record<string, unknown> };
-    expect(forwarded.parameters).toHaveProperty("hole_diameter_mm", 8);
-    expect(forwarded.parameters).not.toHaveProperty("hole_size_mm");
+    expect(forwarded.parameters).toHaveProperty("hole_size_mm", 8);
+    expect(forwarded.parameters).toHaveProperty("hole_shape", "square");
+    expect(forwarded.parameters).not.toHaveProperty("hole_diameter_mm");
   });
 
   it("400 коли material_code відсутній — нова обов'язковість (Phase 2.12)", async () => {

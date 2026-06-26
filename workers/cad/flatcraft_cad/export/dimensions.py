@@ -26,7 +26,6 @@ from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
-from flatcraft_cad.templates.perforated_panel_square import PerforatedPanelSquareBuildParameters
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
 
@@ -37,7 +36,6 @@ FinishedDimsParams = (
     | ZBracketBuildParameters
     | WallShelfBuildParameters
     | PerforatedPanelBuildParameters
-    | PerforatedPanelSquareBuildParameters
     | EnclosedShelfBuildParameters
 )
 
@@ -67,7 +65,8 @@ def compute_finished_dimensions(
       - wall_shelf: полиця глибиною shelf_depth (X), вертикалі back_height і
         front_lip вгору від полиці → Y = max(back_height, front_lip),
         extrude = width → (shelf_depth, max(back,lip), width).
-      - perforated_panel: плоский лист → (length, width, thickness).
+      - perforated_panel: ребриста монтажна панель (лоток) → (length, width,
+        thickness + rib_height).
     """
     if isinstance(params, LBracketBuildParameters) and template_slug == "l_bracket":
         return FinishedDimensions(x_mm=params.leg_a_mm, y_mm=params.leg_b_mm, z_mm=params.width_mm)
@@ -86,15 +85,8 @@ def compute_finished_dimensions(
             z_mm=params.width_mm,
         )
     if isinstance(params, PerforatedPanelBuildParameters) and template_slug == "perforated_panel":
-        return FinishedDimensions(
-            x_mm=params.length_mm, y_mm=params.width_mm, z_mm=params.thickness_mm
-        )
-    if (
-        isinstance(params, PerforatedPanelSquareBuildParameters)
-        and template_slug == "perforated_panel_square"
-    ):
-        # Ребриста монтажна панель (ADR-030): лоток. X×Y = площина; Z = товщина
-        # + висота ребра (4 фланці підняті вгору від площини).
+        # Ребриста монтажна панель (ADR-030/031): лоток. X×Y = площина; Z =
+        # товщина + висота ребра (4 фланці гнуті від площини).
         return FinishedDimensions(
             x_mm=params.length_mm,
             y_mm=params.width_mm,

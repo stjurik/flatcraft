@@ -16,21 +16,21 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
       .click();
 
     await expect(page).toHaveURL("/templates/perforated_panel");
-    await expect(page.getByTestId("template-detail-title")).toHaveText("Перфо-панель");
+    await expect(page.getByTestId("template-detail-title")).toHaveText("Перфо-монтажна панель");
     await expect(page.getByTestId("perforated-panel-studio")).toBeVisible();
     await expect(page.getByTestId("perforated-panel-editor")).toBeVisible();
 
-    // Дефолти з seed (PERFORATED_PANEL_DEFAULT_PARAMETERS).
+    // Дефолти з seed (PERFORATED_PANEL_DEFAULT_PARAMETERS, ADR-031).
     await expect(page.getByTestId("param-length_mm")).toHaveValue("200");
     await expect(page.getByTestId("param-width_mm")).toHaveValue("150");
-    await expect(page.getByTestId("param-hole_diameter_mm")).toHaveValue("8");
-    await expect(page.getByTestId("param-pitch_x_mm")).toHaveValue("20");
-    await expect(page.getByTestId("param-pitch_y_mm")).toHaveValue("20");
+    await expect(page.getByTestId("param-hole_size_mm")).toHaveValue("8");
+    await expect(page.getByTestId("param-pitch_x_mm")).toHaveValue("25");
+    await expect(page.getByTestId("param-pitch_y_mm")).toHaveValue("25");
     await expect(page.getByTestId("validation-ok")).toBeVisible();
 
-    // Grid summary: 9×7 = 63 з pitch=20, margin=15, length=200, width=150.
-    await expect(page.getByTestId("grid-summary")).toContainText("9×7");
-    await expect(page.getByTestId("grid-summary")).toContainText("63 отворів");
+    // Grid summary (латтіс): 7×5 = 35 з pitch=25, margin=15, length=200, width=150.
+    await expect(page.getByTestId("grid-summary")).toContainText("7×5");
+    await expect(page.getByTestId("grid-summary")).toContainText("35 отворів");
 
     // 3D viewport.
     const canvas = page.getByTestId("perforated-panel-viewport").locator("canvas");
@@ -47,7 +47,7 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
 
   test("більший pitch → менше отворів у summary", async ({ page }) => {
     await page.goto("/templates/perforated_panel");
-    await expect(page.getByTestId("grid-summary")).toContainText("63 отворів");
+    await expect(page.getByTestId("grid-summary")).toContainText("35 отворів");
 
     await page.getByTestId("param-pitch_x_mm").fill("50");
     await page.getByTestId("param-pitch_y_mm").fill("50");
@@ -58,15 +58,12 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
     await expect(page.getByTestId("grid-summary")).toContainText("12 отворів");
   });
 
-  test("hole_diameter поза діапазоном → invalid + export disabled", async ({ page }) => {
+  test("hole_size поза діапазоном → invalid + export disabled", async ({ page }) => {
     await page.goto("/templates/perforated_panel");
     await expect(page.getByTestId("export-button")).toBeEnabled();
 
-    await page.getByTestId("param-hole_diameter_mm").fill("40");
-    await expect(page.getByTestId("field-hole_diameter_mm")).toHaveAttribute(
-      "data-invalid",
-      "true",
-    );
+    await page.getByTestId("param-hole_size_mm").fill("40");
+    await expect(page.getByTestId("field-hole_size_mm")).toHaveAttribute("data-invalid", "true");
     await expect(page.getByTestId("export-button")).toBeDisabled();
   });
 
@@ -115,9 +112,10 @@ test.describe("/templates/perforated_panel — Perforated panel studio (Phase 2.
       parameters: {
         length_mm: 200,
         width_mm: 150,
-        hole_diameter_mm: 8,
-        pitch_x_mm: 20,
-        pitch_y_mm: 20,
+        hole_shape: "square",
+        hole_size_mm: 8,
+        pitch_x_mm: 25,
+        pitch_y_mm: 25,
       },
     });
   });

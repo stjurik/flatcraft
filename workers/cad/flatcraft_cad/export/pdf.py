@@ -70,10 +70,9 @@ from flatcraft_cad.materials.industry_names import format_material_label
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
-from flatcraft_cad.templates.perforated_panel import PerforatedPanelBuildParameters
-from flatcraft_cad.templates.perforated_panel_square import (
+from flatcraft_cad.templates.perforated_panel import (
     CORNER_HOLE_DIAMETER_MM,
-    PerforatedPanelSquareBuildParameters,
+    PerforatedPanelBuildParameters,
 )
 from flatcraft_cad.templates.wall_shelf import WallShelfBuildParameters
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters
@@ -83,7 +82,6 @@ from flatcraft_cad.unfold import (
     UnfoldedEnclosedShelf,
     UnfoldedLBracket,
     UnfoldedPerforatedPanel,
-    UnfoldedPerforatedPanelSquare,
     UnfoldedWallShelf,
     UnfoldedZBracket,
 )
@@ -328,7 +326,6 @@ def compute_bom(
         | UnfoldedCornerAngle
         | UnfoldedWallShelf
         | UnfoldedPerforatedPanel
-        | UnfoldedPerforatedPanelSquare
     ),
     *,
     density_kg_m3: float = 7850.0,
@@ -1031,113 +1028,9 @@ def export_wall_shelf_pdf(
     return output_path
 
 
-def export_perforated_panel_pdf(
-    parameters: PerforatedPanelBuildParameters,
-    unfolded: UnfoldedPerforatedPanel,
-    output_path: Path,
-    *,
-    solid: cq.Workplane | None = None,
-    material_label: str = "cold_rolled_steel",
-    density_kg_m3: float = 7850.0,
-    permalink_url: str | None = None,
-) -> Path:
-    """PDF для perforated_panel: rectangle + hole grid + BOM + QR (без bend table)."""
-    article = (
-        hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
-        .hexdigest()[:10]
-        .upper()
-    )
-    qr_payload = permalink_url or f"flatcraft://perforated_panel/{article}"
-    n_holes = len(unfolded.holes)
-
-    c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
-    c.setTitle(f"Perforated panel {article}")
-    c.setAuthor("flatcraft")
-    c.setCreator("flatcraft-cad-worker")
-    c.setProducer("flatcraft-cad-worker")
-    c.setSubject(
-        f"Perforated panel {parameters.length_mm}×{parameters.width_mm} мм, "
-        f"{n_holes} holes Ø{parameters.hole_diameter_mm}"
-    )
-
-    c.setFont("DejaVuSans-Bold", 14)
-    c.drawString(15 * mm, (210 - 15) * mm, "Перфо-панель")
-    c.setFont("DejaVuSans", 10)
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    c.drawString(
-        15 * mm,
-        (210 - 20) * mm,
-        f"slug: perforated_panel · артикул: {article} · дата: {today}",
-    )
-    c.drawString(
-        15 * mm,
-        (210 - 24) * mm,
-        f"Лист {parameters.length_mm}×{parameters.width_mm} мм · крок "
-        f"pitch_x={parameters.pitch_x_mm} pitch_y={parameters.pitch_y_mm} · "
-        f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отворів "
-        f"Ø{parameters.hole_diameter_mm:g} мм",
-    )
-    _draw_finished_dims_line(c, "perforated_panel", parameters)
-
-    _draw_unfold_generic(
-        c,
-        length_mm=unfolded.length_mm,
-        width_mm=unfolded.width_mm,
-        bend_positions_mm=(),
-        origin_mm=(15, 70),
-        canvas_size_mm=(150, 100),
-        holes=unfolded.holes,
-    )
-
-    # PR 8c (issue #5): уніфікована таблиця «Розміри» (2 колонки) замість
-    # неструктурованого текстового блоку. Той самий visual style, що bend-table.
-    bottom_y = _draw_dimensions_table(
-        c,
-        "Розміри",
-        [
-            ("Довжина L, мм", f"{parameters.length_mm:g}"),
-            ("Ширина W, мм", f"{parameters.width_mm:g}"),
-            ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
-            ("Діаметр отвору Ø, мм", f"{parameters.hole_diameter_mm:g}"),
-            ("Pitch X, мм", f"{parameters.pitch_x_mm:g}"),
-            ("Pitch Y, мм", f"{parameters.pitch_y_mm:g}"),
-            ("Відступ від країв, мм", f"{parameters.margin_mm:g}"),
-            ("Сітка (cols×rows)", f"{unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes}"),
-        ],
-        origin_mm=(175, 170),
-    )
-
-    # BOM під таблицею розмірів (auto-position з відступом 6мм).
-    _draw_bom_block(
-        c,
-        material_label=material_label,
-        thickness_mm=unfolded.thickness_mm,
-        bom=compute_bom(unfolded, density_kg_m3=density_kg_m3),
-        origin_mm=(175, bottom_y - 6),
-        include_volume=False,
-    )
-    if solid is not None:
-        _draw_isometric(c, solid, parameters, unfolded)
-
-    _draw_qr(c, qr_payload)
-
-    c.setFont("DejaVuSans-Oblique", 8)
-    c.drawString(
-        15 * mm,
-        15 * mm,
-        "DXF для лазерного різання · INNER_CUTS = отвори · BEND операцій немає",
-    )
-
-    _draw_beta_watermark(c, PAGE_WIDTH, PAGE_HEIGHT)
-    c.showPage()
-    c.save()
-    _normalize_pdf_bytes(output_path)
-    return output_path
-
-
 def _draw_unfold_perfo_ribbed(
     c: pdfcanvas.Canvas,
-    unfolded: UnfoldedPerforatedPanelSquare,
+    unfolded: UnfoldedPerforatedPanel,
     *,
     origin_mm: tuple[float, float],
     canvas_size_mm: tuple[float, float],
@@ -1185,14 +1078,17 @@ def _draw_unfold_perfo_ribbed(
         c.line(x1, y1, x2, y2)
     c.restoreState()
 
-    # Перфорація — square, blue outline.
+    # Перфорація — blue outline; square→rect, circle→circle (за hole.shape, ADR-031).
     c.saveState()
     c.setStrokeColorRGB(0.2, 0.4, 0.8)
     c.setLineWidth(0.3)
     for hole in unfolded.holes:
         cx, cy = _to_pt(hole.x_mm, hole.y_mm)
         half_pt = (hole.diameter_mm / 2.0) * scale * mm
-        c.rect(cx - half_pt, cy - half_pt, 2 * half_pt, 2 * half_pt, stroke=1, fill=0)
+        if hole.shape == "square":
+            c.rect(cx - half_pt, cy - half_pt, 2 * half_pt, 2 * half_pt, stroke=1, fill=0)
+        else:
+            c.circle(cx, cy, half_pt, stroke=1, fill=0)
     c.restoreState()
 
     # Установочні отвори Ø5.5 — red circles.
@@ -1231,9 +1127,9 @@ def _draw_unfold_perfo_ribbed(
         c.restoreState()
 
 
-def export_perforated_panel_square_pdf(
-    parameters: PerforatedPanelSquareBuildParameters,
-    unfolded: UnfoldedPerforatedPanelSquare,
+def export_perforated_panel_pdf(
+    parameters: PerforatedPanelBuildParameters,
+    unfolded: UnfoldedPerforatedPanel,
     output_path: Path,
     *,
     solid: cq.Workplane | None = None,
@@ -1241,30 +1137,32 @@ def export_perforated_panel_square_pdf(
     density_kg_m3: float = 7850.0,
     permalink_url: str | None = None,
 ) -> Path:
-    """PDF для перфо-монтажної панелі (ребриста, ADR-030).
+    """PDF для перфо-монтажної панелі (ребриста, ADR-030/031).
 
     Cross-розгортка лотка (R5 на кутах ребер) + 4 bend lines + уніфікована
     таблиця «Розміри» (вкл. ребро/гиб/кріпильні розміри) + BOM + QR. Без
     isometric view (як enclosed_shelf — інший гнутий лоток). `solid` приймається
-    для сумісності сигнатури, але isometric тут не рендериться.
+    для сумісності сигнатури, але isometric тут не рендериться. Форма отвору
+    (круг/квадрат) — за `parameters.hole_shape`.
     """
     _ = solid
+    hole_glyph = "□" if parameters.hole_shape == "square" else "Ø"
     article = (
         hashlib.sha256(json.dumps(parameters.model_dump(), sort_keys=True).encode("utf-8"))
         .hexdigest()[:10]
         .upper()
     )
-    qr_payload = permalink_url or f"flatcraft://perforated_panel_square/{article}"
+    qr_payload = permalink_url or f"flatcraft://perforated_panel/{article}"
     n_holes = len(unfolded.holes)
 
     c = pdfcanvas.Canvas(str(output_path), pagesize=landscape(A4))
-    c.setTitle(f"Perforated panel square {article}")
+    c.setTitle(f"Perforated panel {article}")
     c.setAuthor("flatcraft")
     c.setCreator("flatcraft-cad-worker")
     c.setProducer("flatcraft-cad-worker")
     c.setSubject(
-        f"Perforated panel square {parameters.length_mm}×{parameters.width_mm} мм, "
-        f"{n_holes} square holes □{parameters.hole_size_mm}"
+        f"Perforated panel {parameters.length_mm}×{parameters.width_mm} мм, "
+        f"{n_holes} {parameters.hole_shape} holes {hole_glyph}{parameters.hole_size_mm}"
     )
 
     c.setFont("DejaVuSans-Bold", 14)
@@ -1274,7 +1172,7 @@ def export_perforated_panel_square_pdf(
     c.drawString(
         15 * mm,
         (210 - 20) * mm,
-        f"slug: perforated_panel_square · артикул: {article} · дата: {today}",
+        f"slug: perforated_panel · артикул: {article} · дата: {today}",
     )
     c.drawString(
         15 * mm,
@@ -1282,11 +1180,11 @@ def export_perforated_panel_square_pdf(
         f"Площина {parameters.length_mm:g}×{parameters.width_mm:g} мм · 4 ребра "
         f"h={parameters.rib_height_mm:g}мм (R{parameters.rib_corner_radius_mm:g}) · "
         f"grid {unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes} отв "
-        f"□{parameters.hole_size_mm:g} · 4× Ø{CORNER_HOLE_DIAMETER_MM:g}",
+        f"{hole_glyph}{parameters.hole_size_mm:g} · 4× Ø{CORNER_HOLE_DIAMETER_MM:g}",
     )
     # _draw_finished_dims_line dispatch'ує за slug; підтримка нового шаблону
     # додана у dimensions.compute_finished_dimensions (той самий X×Y×Z).
-    _draw_finished_dims_line(c, "perforated_panel_square", parameters)
+    _draw_finished_dims_line(c, "perforated_panel", parameters)
 
     _draw_unfold_perfo_ribbed(
         c,
@@ -1309,7 +1207,7 @@ def export_perforated_panel_square_pdf(
         [
             ("Площина L×W, мм", f"{parameters.length_mm:g}×{parameters.width_mm:g}"),
             ("Товщина, мм", f"{unfolded.thickness_mm:g}"),
-            ("Сторона отвору □, мм", f"{parameters.hole_size_mm:g}"),
+            (f"Розмір отвору {hole_glyph}, мм", f"{parameters.hole_size_mm:g}"),
             ("Крок X×Y, мм", f"{parameters.pitch_x_mm:g}×{parameters.pitch_y_mm:g}"),
             ("Відступ від країв, мм", f"{parameters.margin_mm:g}"),
             ("Сітка (cols×rows)", f"{unfolded.grid_cols}×{unfolded.grid_rows} = {n_holes}"),

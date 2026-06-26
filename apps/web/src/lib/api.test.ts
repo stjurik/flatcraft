@@ -89,7 +89,7 @@ describe("fetchPublishedProducts — Phase 3.0 PR 3", () => {
           slug: "perforated-panel-decorative",
           name: "Декоративна перфо-панель",
           description: "Стильна декоративна.",
-          baseTemplateSlug: "perforated_panel_square",
+          baseTemplateSlug: "perforated_panel",
           previewImageUrl: "/product-previews/perforated-panel-decorative.png",
           useCases: ["інтер'єр"],
           isPublished: true,
@@ -99,7 +99,7 @@ describe("fetchPublishedProducts — Phase 3.0 PR 3", () => {
     const products = await fetchPublishedProducts();
     expect(products).toHaveLength(1);
     expect(products[0]?.slug).toBe("perforated-panel-decorative");
-    expect(products[0]?.baseTemplateSlug).toBe("perforated_panel_square");
+    expect(products[0]?.baseTemplateSlug).toBe("perforated_panel");
   });
 
   it("кидає ApiError при 500", async () => {
