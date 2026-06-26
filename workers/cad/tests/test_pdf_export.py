@@ -12,7 +12,6 @@ from flatcraft_cad.export.pdf import (
     compute_bom,
     export_l_bracket_pdf,
     export_perforated_panel_pdf,
-    export_perforated_panel_square_pdf,
     export_z_bracket_pdf,
 )
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters, build_l_bracket
@@ -20,15 +19,10 @@ from flatcraft_cad.templates.perforated_panel import (
     PerforatedPanelBuildParameters,
     build_perforated_panel,
 )
-from flatcraft_cad.templates.perforated_panel_square import (
-    PerforatedPanelSquareBuildParameters,
-    build_perforated_panel_square,
-)
 from flatcraft_cad.templates.z_bracket import ZBracketBuildParameters, build_z_bracket
 from flatcraft_cad.unfold import (
     unfold_l_bracket,
     unfold_perforated_panel,
-    unfold_perforated_panel_square,
     unfold_z_bracket,
 )
 
@@ -264,17 +258,9 @@ class TestIsometryBomNoOverlap:
     ізометрії нижче за всі рядки BOM-блоку.
     """
 
-    _SQUARE = PerforatedPanelSquareBuildParameters(
-        length_mm=200,
-        width_mm=150,
-        thickness_mm=2.0,
-        hole_size_mm=8,
-        pitch_x_mm=25,
-        pitch_y_mm=25,
-        margin_mm=15,
-    )
-    # Кругла перфо-панель: та сама розкладка (8-рядкова таблиця «Розміри» →
-    # опущений BOM), тож той самий ризик перетину з ізометрією.
+    # Кругла перфо-панель: 8-рядкова таблиця «Розміри» опускає BOM, тож саме тут
+    # був ризик перетину з ізометрією. (Квадратна ребриста панель ізометрію більше
+    # не рендерить — ADR-030, тож для неї цей регрес неактуальний.)
     _ROUND = PerforatedPanelBuildParameters(
         length_mm=200,
         width_mm=150,
@@ -320,14 +306,6 @@ class TestIsometryBomNoOverlap:
         assert max(iso_ys) < min(bom_ys), (
             f"ізометрія перетинає BOM: iso_max_y={max(iso_ys):.1f}pt, bom_min_y={min(bom_ys):.1f}pt"
         )
-
-    def test_квадратна_перфо_ізометрія_нижче_bom(self, tmp_path: Path) -> None:
-        unfolded = unfold_perforated_panel_square(self._SQUARE)
-        solid = build_perforated_panel_square(self._SQUARE)
-        out = export_perforated_panel_square_pdf(
-            self._SQUARE, unfolded, tmp_path / "square.pdf", solid=solid
-        )
-        self._assert_iso_below_bom(out)
 
     def test_кругла_перфо_ізометрія_нижче_bom(self, tmp_path: Path) -> None:
         unfolded = unfold_perforated_panel(self._ROUND)
