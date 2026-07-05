@@ -903,6 +903,132 @@ dimensions/validate/k_factor (worker), одна Zod-схема + одна гіл
 
 ---
 
+## ADR-032: Observability & self-improvement loop
+
+**Статус:** Accepted (2026-07-05)
+
+**Контекст:** Перед публічним soft-launch платформа **сліпа** (діагноз
+`docs/14_ARCHITECTURE_EVOLUTION.md §1.4`): pino-логи живуть у stdout контейнера і ніхто їх
+не читає; Sentry (Phase 5.1) і продуктова аналітика (Phase 5.2) не зроблені; історія
+експортів — in-memory `JobStore` (`apps/api/src/routes/exports.ts`), яка втрачається при
+рестарті; ніде не рахується, який constraint найчастіше блокує користувача (R-10), ні чи
+зійшлась деталь у металі (R-01). Після запуску ми не дізнаємось ні про краш R3F на телефоні
+(R-02 acceptance неперевірюваний), ні де користувач страждає. Принцип, який фіксуємо: **кожен
+експорт — це експеримент, результат якого платформа зобов'язана зібрати** (14 §4). Обмеження —
+ресурси MS21 (2 vCPU / 4 GB, ADR-011), solo-maintenance (R-07) і GDPR-by-design
+(CLAUDE.md §7-8, ADR-006).
+
+**Рішення:** Побудувати observability трьома рівнями (технічна телеметрія → продуктова
+аналітика → виробничий фідбек) на мінімальному стеку, що вписується в один сервер.
+Специфікація — `docs/11_OBSERVABILITY.md`; послідовність PR — `docs/02_ROADMAP.md` §Phase 3.3.
+Шість складових рішень, кожне з альтернативою / вибором / обґрунтуванням / наслідками:
+
+**1. Сховище подій — Postgres-таблиця `events`, не зовнішній метрик-стек.**
+
+- _Альтернатива:_ Prometheus + Grafana + OpenTelemetry-колектор, або «тільки pino stdout».
+- _Вибір:_ append-only таблиця `events` у наявному Postgres
+  (`id, ts, event_type, template_slug, process, params jsonb, error_code, duration_ms,
+session_hash`).
+- _Обґрунтування:_ MS21 не має ресурсу під окремий метрик-стек (анти-цілі 14 §5); solo-проєкт
+  не має ким його обслуговувати (R-07 — складність головний ворог). Головне: `events` — це
+  **продуктові дані**, не тільки метрики: `params jsonb` join'иться з `exports` і дає
+  найцінніший датасет платформи (які параметри реально конфігурують, які constraint блокують).
+  Метрик-стек цього не вміє, а SQL — вміє. Postgres уже в стеку → нуль нових залежностей, один
+  бекап покриває і телеметрію.
+- _Наслідки:_ (+) SQL-join `events`↔`exports`; дешево; бекап уже є. (−) не realtime-дашборд
+  (прийнятно при ~100 експортів/день); потрібен retention-job; складне алертування замінює
+  щотижневий digest.
+
+**2. Трекінг помилок — Sentry SaaS free tier ×3, не self-hosted і не «тільки pino».**
+
+- _Альтернатива:_ self-hosted GlitchTip (ще один контейнер → тиск на RAM MS21, R-11); «тільки
+  pino» (нуль видимості клієнтських крашів).
+- _Вибір:_ Sentry (SaaS free tier) у web + api + worker з обов'язковим `beforeSend`-фільтром PII.
+- _Обґрунтування:_ це єдиний спосіб дізнатись про краш R3F на реальному телефоні (R-02
+  acceptance зараз неперевірюваний — 14 §4.1); free tier покриває обсяг MVP; SaaS не їсть RAM
+  сервера (R-11). `beforeSend` фільтрує email/IP — це вже інваріант CLAUDE.md §8 (R-04), паритет
+  з pino-redact (`apps/api/src/logger.ts`).
+- _Наслідки:_ (+) реальна видимість крашів на трьох сервісах; підтверджує R-02. (−) третя
+  сторона-процесор → згадка у Privacy Policy (GDPR); DSN — тільки через env (`.env.example` з
+  плейсхолдерами); sample-rate errors 100 % / traces 0 (ресурси MS21).
+
+**3. Історія експортів — persist у таблицю `exports`, не in-memory.**
+
+- _Альтернатива:_ лишити in-memory `JobStore` (втрата історії при рестарті — 14 §1.4);
+  зберігати в Redis.
+- _Вибір:_ persist у таблицю `exports` (уже описана в `docs/05_DATA_MODEL.md §2`) через
+  drizzle-репозиторій з **тим самим інтерфейсом**, що й наявний `JobStore` (SSE-flow не
+  змінюється). Retention артефактів у R2 — 90 днів від останнього скачування (data-model §7).
+- _Обґрунтування:_ історія експортів = сировина для калібрування, статистики й аудиту; робить
+  можливим R-12 mitigation 5 (аудит R2 на історичні invalid-експорти). p95 `export_duration` з
+  `events.duration_ms` робить бюджети CLAUDE.md §9 вимірюваними, а не декларативними.
+- _Наслідки:_ (+) довговічна, аудитована історія; drop-in заміна (інтерфейс-паритет). (−)
+  потрібна міграція (PR 2, створює yurii вручну — CLAUDE.md §6); наявні e2e SSE мають лишитись
+  зеленими.
+
+**4. Продуктова аналітика — Plausible, не Umami і не «нічого».**
+
+- _Альтернатива:_ «нічого» (воронка невидима — R-10 лишається інтуїцією); Umami self-hosted.
+- _Вибір:_ Plausible, cookie-less. Umami — задокументована рівноцінна fallback-опція (теж
+  cookie-less/GDPR-friendly), якщо вартість/self-host стане вирішальною.
+- _Обґрунтування:_ cookie-less → GDPR **без ускладнень cookie-banner** (ADR-006); зріліший за
+  Umami. Воронка `catalog → studio_opened → param_changed → validation_error_shown →
+export_clicked → export_done`. Ключова метрика — `validation_error_shown` з розбивкою по
+  constraint: який ліміт найчастіше блокує → який шаблон потребує ширшої параметризації. Це
+  прямий вхід для R-10 (зараз оцінюється інтуїтивно).
+- _Наслідки:_ (+) видимість воронки й точок фрустрації. (−) self-hosted Plausible = ще один
+  контейнер на MS21 → у PR 5 зважити cloud vs RAM; web-vitals (FCP/TTI/mesh-update) — як custom
+  events.
+
+**5. Digest — щотижневий cron → Discord webhook, не email і не дашборд.**
+
+- _Альтернатива:_ email (потрібен SMTP/Postmark — нова залежність); власний дашборд
+  (build + auth + хостинг — overkill для solo).
+- _Вибір:_ cron (неділя 18:00 Europe/Kyiv) → SQL по `events`/`exports`/`export_feedback` за
+  7 днів → markdown → Discord webhook (`DIGEST_WEBHOOK_URL`).
+- _Обґрунтування:_ найдешевше (один cron + webhook), інфра Discord уже існує (ADR-023). Це
+  звичайний webhook-POST, **не** `pnpm discord:apply` (CLAUDE.md §6 не порушено). Markdown-digest
+  — ідеальний вхід для дешевої LLM-моделі (14 §4.4, `docs/15` C3). Формат: top-5
+  `validation_error` по constraint, failed exports, p95 `export_duration` vs бюджет §9,
+  deviation-репорти (Phase 3.4+), Sentry-summary.
+- _Наслідки:_ (+) нуль нової інфри; сирі дані → щотижневий список рішень. (−) не інтерактивний
+  (прийнятно); залежить від `events`+`exports` (PR 2 першим). Правило процесу: **кожен пункт
+  digest'а → або GitHub-issue, або явно «accepted noise»** — це і є механізм самовдосконалення.
+
+**6. GDPR-межі — без PII у телеметрії.**
+
+- _Альтернатива:_ логувати IP / стабільний session-id для багатшої аналітики (відхилено — GDPR,
+  §8, R-04).
+- _Вибір:_ `events` і `export_feedback` — **без email/IP**; `session_hash` = хеш із **добовим
+  salt** (непереслідуваний між днями); retention 12 місяців; правило «параметри виробу —
+  технічні дані, не PII».
+- _Обґрунтування:_ GDPR-by-design (CLAUDE.md §7, R-04); мінімізація PII. Параметри — це
+  геометрія, не персональні дані. Добовий salt не дає зшити сесії користувача між добами
+  (агрегатний сигнал є, стеження немає). 12 міс — паритет з retention `audit_log`
+  (data-model §7).
+- _Наслідки:_ (+) аналітика без експозиції PII. (−) не можна відстежити користувача крос-день
+  (свідомо — потрібен агрегат, не нагляд); згадка у Privacy Policy.
+
+**Наслідки (загальні):**
+
+- Замикається **self-improvement loop** (14 §4.4): `Sentry + events + export_feedback +
+web-vitals → щотижневий digest → issue/hotfix + обов'язковий регресійний тест` (культура
+  «інцидент → тест», Hotfix 2.10.e) → калібрування YAML. Рішення перестають прийматись наосліп.
+- Бюджети CLAUDE.md §9 стають вимірюваними (p95 export з `events.duration_ms`).
+- Ризики отримують інструментацію: R-02 (краш на mobile) стає перевірюваним, R-10 (шаблони не
+  задовольняють потреби) — вимірюваним, R-12 (аудит R2) — можливим, R-01 (K-фактор) готується
+  до замикання у Phase 3.4 (виробничий фідбек).
+- Фаза розбита на PR-и (docs-gate → імплементація → progress-log), деталі — `docs/02_ROADMAP.md`
+  §Phase 3.3. Нові top-level залежності (`@sentry/*`, Plausible) вводяться у своїх PR з явним OK
+  (CLAUDE.md §6).
+
+**Альтернативи (для фази загалом):** повний observability-стек (Prometheus + Grafana + Loki +
+OTel + Kafka/event-sourcing + ML-пайплайн) — відхилено як анти-ціль (14 §5): на 2 vCPU / 4 GB і
+10 users/day він коштує більше, ніж дає, і суперечить R-07. Sentry (free) + Postgres `events` +
+Plausible + Discord webhook покривають 100 % потреб MVP і v1.x.
+
+---
+
 _Шаблон нової ADR:_
 
 ```
