@@ -182,18 +182,20 @@ PK `(template_id, material_id)`.
 
 **Індекс:** `(user_id, created_at DESC)`, `status` для черги.
 
-> **Phase 3.3 (ADR-032):** in-memory `JobStore` (`apps/api/src/routes/exports.ts`) → persist у цю
-> таблицю через drizzle-репо з тим самим інтерфейсом (SSE-flow незмінний). Робить історію
-> експортів довговічною — сировина для калібрування / статистики / аудиту (R-12 mitigation 5).
-> Міграція — Phase 3.3 PR 2 (drizzle-kit, вручну).
+> **Phase 3.3 (ADR-032, PR 2 — landed у `schema.ts`):** in-memory `JobStore`
+> (`apps/api/src/routes/exports.ts`) → persist у цю таблицю через best-effort telemetry-writer
+> (SSE-flow незмінний). Зміни `schema.ts`: `user_id` / `draft_id` → **nullable** (soft-launch без
+> auth/drafts, ADR-020), додано `template_slug` / `process` / `session_hash` + індекс
+> `exports_template_created_at_idx`. Історія стає довговічною (калібрування / аудит, R-12 mit.5).
+> **Міграцію генерує yurii вручну** (`drizzle-kit generate`, CLAUDE.md §6).
 
 ---
 
 ### events
 
-> **Preview (Phase 3.3, ADR-032).** Append-only телеметрія, без PII. Специфікація —
-> `docs/11_OBSERVABILITY.md §3-4`. Фактична `schema.ts` + міграція — Phase 3.3 PR 2 (міграцію
-> створює yurii вручну, CLAUDE.md §6).
+> **Phase 3.3, ADR-032 (PR 2 — landed у `schema.ts`).** Append-only телеметрія, без PII.
+> Специфікація — `docs/11_OBSERVABILITY.md §3-4`. Таблиця вже у `schema.ts`; **міграцію генерує
+> yurii вручну** (`drizzle-kit generate`, CLAUDE.md §6) — до неї int-тести RED.
 
 | Поле            | Тип           | Constraint              | Опис                                                                                                                                    |
 | --------------- | ------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
