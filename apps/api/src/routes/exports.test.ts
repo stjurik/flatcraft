@@ -5,11 +5,37 @@
  * final state. SSE-streaming тестується окремо в integration (e2e),
  * бо app.inject() не тримає persistent connection.
  */
+import type { EventPayload } from "@flatcraft/types";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JobStore } from "../lib/job-store.js";
+import {
+  NOOP_TELEMETRY,
+  type ExportCompletion,
+  type ExportInsert,
+  type Telemetry,
+} from "../lib/telemetry.js";
 import { createServer } from "../server.js";
+
+/** Recording-телеметрія: збирає емітовані події/persist-виклики для asserts. */
+function recordingTelemetry() {
+  const events: EventPayload[] = [];
+  const inserts: ExportInsert[] = [];
+  const completions: Array<{ id: string; patch: ExportCompletion }> = [];
+  const telemetry: Telemetry = {
+    async writeEvent(payload) {
+      events.push(payload);
+    },
+    async insertExport(row) {
+      inserts.push(row);
+    },
+    async completeExport(id, patch) {
+      completions.push({ id, patch });
+    },
+  };
+  return { telemetry, events, inserts, completions };
+}
 
 const DUMMY_DB_URL = "postgresql://dummy:dummy@127.0.0.1:1/dummy";
 
@@ -57,7 +83,12 @@ describe("POST /exports — async flow", () => {
 
   beforeEach(async () => {
     store = new JobStore({ retentionMs: 60_000 });
-    app = await createServer({ logger: false, dbUrl: DUMMY_DB_URL, jobStore: store });
+    app = await createServer({
+      logger: false,
+      dbUrl: DUMMY_DB_URL,
+      jobStore: store,
+      telemetry: NOOP_TELEMETRY,
+    });
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -400,5 +431,107 @@ describe("POST /exports — async flow", () => {
     expect(sse.body).toContain("data: ");
     expect(sse.body).toContain('"status":"done"');
     expect(sse.body).toContain('"progress":100');
+  });
+
+  describe("телеметрія (ADR-032)", () => {
+    it("успішний експорт → повна послідовність подій + persist без PII", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+      const create = await app2.inject({ method: "POST", url: "/exports", payload: VALID_REQUEST });
+      expect(create.statusCode).toBe(202);
+      await flushAsync();
+
+      // Порядок: requested → cad_started → cad_completed → completed.
+      expect(rec.events.map((e) => e.event_type)).toEqual([
+        "export_requested",
+        "cad_started",
+        "cad_completed",
+        "export_completed",
+      ]);
+      // persist: один insert (queued) + одне completion (done).
+      expect(rec.inserts).toHaveLength(1);
+      expect(rec.inserts[0]).toMatchObject({ templateSlug: "l_bracket", formats: ["dxf", "pdf"] });
+      expect(rec.completions.at(-1)?.patch.status).toBe("done");
+      expect(rec.completions.at(-1)?.patch.r2Keys).toMatchObject({
+        dxf: expect.stringContaining(".dxf"),
+        pdf: expect.stringContaining(".pdf"),
+      });
+      // No-PII інваріант: жоден payload не несе email/IP.
+      const serialized = JSON.stringify(rec.events);
+      expect(serialized).not.toMatch(/email|"ip"|password/i);
+
+      await app2.close();
+    });
+
+    it("422 валідації → лише validation_rejected з error_code, job не створюється", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+
+      const res = await app2.inject({
+        method: "POST",
+        url: "/exports",
+        payload: {
+          template_slug: "z_bracket",
+          parameters: {
+            top_flange_mm: 60,
+            bottom_flange_mm: 60,
+            offset_mm: 40,
+            bend_radius_mm: 2.5,
+            bend_angle_deg: 90,
+            width_mm: 100,
+            holes: [],
+          },
+          material_code: "cold_rolled_steel",
+          thickness_mm: 5,
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(rec.events.map((e) => e.event_type)).toEqual(["validation_rejected"]);
+      expect(rec.events[0]).toMatchObject({ error_code: "RADIUS_NOT_ALLOWED" });
+      expect(rec.inserts).toHaveLength(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      await app2.close();
+    });
+
+    it("cad-worker 5xx → export_failed з error_code і completeExport(failed)", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+      fetchSpy.mockResolvedValue(new Response("trace", { status: 500 }));
+
+      const create = await app2.inject({ method: "POST", url: "/exports", payload: VALID_REQUEST });
+      expect(create.statusCode).toBe(202);
+      await flushAsync();
+
+      const types = rec.events.map((e) => e.event_type);
+      expect(types).toEqual(["export_requested", "cad_started", "export_failed"]);
+      const failed = rec.events.find((e) => e.event_type === "export_failed");
+      expect(failed).toMatchObject({ error_code: "CAD_WORKER_500" });
+      expect(rec.completions.at(-1)?.patch.status).toBe("failed");
+
+      await app2.close();
+    });
   });
 });

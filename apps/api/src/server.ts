@@ -20,6 +20,7 @@ import { dbPlugin } from "./plugins/db.js";
 import rateLimitPlugin from "./plugins/rate-limit.js";
 import { buildExportRoutes } from "./routes/exports.js";
 import type { JobStore } from "./lib/job-store.js";
+import type { Telemetry } from "./lib/telemetry.js";
 import { healthRoutes } from "./routes/health.js";
 import { materialRoutes } from "./routes/materials.js";
 import { productRoutes } from "./routes/products.js";
@@ -33,6 +34,8 @@ export interface CreateServerOptions {
   readonly dbUrl?: string;
   /** Override job-store (тестам зручно інжектити власний). */
   readonly jobStore?: JobStore;
+  /** Override телеметрії (unit-тести: NOOP/recording; дефолт — drizzle через app.db). */
+  readonly telemetry?: Telemetry;
 }
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -67,7 +70,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   await app.register(templateRoutes);
   await app.register(productRoutes);
   await app.register(materialRoutes);
-  await app.register(buildExportRoutes(options.jobStore ? { store: options.jobStore } : {}));
+  await app.register(
+    buildExportRoutes({
+      ...(options.jobStore ? { store: options.jobStore } : {}),
+      ...(options.telemetry ? { telemetry: options.telemetry } : {}),
+    }),
+  );
 
   return app;
 }
