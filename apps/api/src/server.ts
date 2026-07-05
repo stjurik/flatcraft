@@ -5,8 +5,12 @@
  * щоб тести могли використовувати `app.inject()` без відкриття порту.
  * Реальний запуск (listen) — у main() нижче і у `start` npm-скрипті.
  */
+// ⚠️ ПЕРШИМ: Sentry.init має статись до інших модулів (ADR-032). No-op без DSN.
+import "./instrument.js";
+
 import cors from "@fastify/cors";
 import type { DatabaseClient } from "@flatcraft/db";
+import * as Sentry from "@sentry/node";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import {
   serializerCompiler,
@@ -76,6 +80,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       ...(options.telemetry ? { telemetry: options.telemetry } : {}),
     }),
   );
+
+  // Sentry error handler (ADR-032) — репортить помилки роутів/плагінів.
+  // No-op без DSN (init не відбувся). PII-фільтр — у instrument.ts beforeSend.
+  if (env.SENTRY_DSN) {
+    Sentry.setupFastifyErrorHandler(app);
+  }
 
   return app;
 }

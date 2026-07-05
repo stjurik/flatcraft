@@ -14,6 +14,9 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS).optional(),
   APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   CAD_WORKER_URL: z.string().url().default("http://localhost:5000"),
+  // Sentry (ADR-032). Порожній DSN → SDK не ініціалізується (dev/CI/тести).
+  SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema> & { LOG_LEVEL: (typeof LOG_LEVELS)[number] };
