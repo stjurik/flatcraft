@@ -33,6 +33,7 @@ from flatcraft_cad.export.pdf import (
     export_wall_shelf_pdf,
     export_z_bracket_pdf,
 )
+from flatcraft_cad.sentry_setup import init_sentry
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters, build_corner_angle
 from flatcraft_cad.templates.enclosed_shelf import (
     EnclosedShelfBuildParameters,
@@ -235,6 +236,7 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
 
 
 def _build_app() -> FastAPI:
+    init_sentry()  # ADR-032: no-op без SENTRY_DSN (dev/CI/тести)
     app = FastAPI(title="flatcraft-cad", version="0.0.0")
 
     @app.get("/health")
