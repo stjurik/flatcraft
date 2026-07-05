@@ -10,6 +10,7 @@
  * in-memory достатньо для одного API-replica MVP.
  */
 import {
+  DEFAULT_PROCESS,
   ExportJobAcceptedSchema,
   ExportJobEventSchema,
   ExportRequestSchema,
@@ -21,6 +22,8 @@ import { z } from "zod";
 import { env } from "../env.js";
 import type { ExportJob } from "../lib/job-store.js";
 import { JobStore } from "../lib/job-store.js";
+import { sessionHash } from "../lib/session-hash.js";
+import { createTelemetry, type Telemetry } from "../lib/telemetry.js";
 import { EXPORT_RATE_LIMIT } from "../plugins/rate-limit.js";
 import {
   buildProblem,
@@ -61,8 +64,33 @@ function toEvent(job: ExportJob) {
   return base;
 }
 
-async function runJob(store: JobStore, jobId: string, body: unknown): Promise<void> {
+/** Контекст телеметрії, який тягнеться крізь фонову обробку job'а (ADR-032). */
+interface JobContext {
+  readonly telemetry: Telemetry;
+  readonly templateSlug: string;
+  readonly sessionHash: string | null;
+  /** `Date.now()` моменту прийому запиту — для повної тривалості export_*. */
+  readonly requestStart: number;
+}
+
+async function runJob(
+  store: JobStore,
+  jobId: string,
+  body: unknown,
+  ctx: JobContext,
+): Promise<void> {
+  const { telemetry, templateSlug, sessionHash: sh, requestStart } = ctx;
   store.update(jobId, { status: "running", progress: 10 });
+
+  // D3 (план PR 2): api вимірює worker-round-trip; worker без змін.
+  const cadStart = Date.now();
+  await telemetry.writeEvent({
+    event_type: "cad_started",
+    template_slug: templateSlug,
+    process: DEFAULT_PROCESS,
+    session_hash: sh,
+  });
+
   try {
     // ADR-018: web→api приймає material_code, але cad-worker Pydantic має
     // extra="forbid" — strip перед форвардом. material_code знадобиться при
@@ -80,29 +108,71 @@ async function runJob(store: JobStore, jobId: string, body: unknown): Promise<vo
         progress: 0,
         error: `cad-worker ${upstream.status}: ${detail || "no detail"}`,
       });
+      await telemetry.completeExport(jobId, {
+        status: "failed",
+        errorMessage: `cad-worker ${upstream.status}`,
+      });
+      await telemetry.writeEvent({
+        event_type: "export_failed",
+        template_slug: templateSlug,
+        process: DEFAULT_PROCESS,
+        session_hash: sh,
+        error_code: `CAD_WORKER_${upstream.status}`,
+        duration_ms: Date.now() - requestStart,
+      });
       return;
     }
+    await telemetry.writeEvent({
+      event_type: "cad_completed",
+      template_slug: templateSlug,
+      process: DEFAULT_PROCESS,
+      session_hash: sh,
+      duration_ms: Date.now() - cadStart,
+    });
     store.update(jobId, { status: "running", progress: 80 });
     const data = await upstream.json();
     const result = ExportResponseSchema.parse(data);
     store.update(jobId, { status: "done", progress: 100, result });
+    await telemetry.completeExport(jobId, {
+      status: "done",
+      r2Keys: { dxf: result.artifacts.dxf.s3_key, pdf: result.artifacts.pdf.s3_key },
+    });
+    await telemetry.writeEvent({
+      event_type: "export_completed",
+      template_slug: templateSlug,
+      process: DEFAULT_PROCESS,
+      session_hash: sh,
+      duration_ms: Date.now() - requestStart,
+    });
   } catch (err) {
-    store.update(jobId, {
-      status: "failed",
-      progress: 0,
-      error: err instanceof Error ? err.message : "unknown error",
+    const message = err instanceof Error ? err.message : "unknown error";
+    store.update(jobId, { status: "failed", progress: 0, error: message });
+    await telemetry.completeExport(jobId, { status: "failed", errorMessage: message });
+    await telemetry.writeEvent({
+      event_type: "export_failed",
+      template_slug: templateSlug,
+      process: DEFAULT_PROCESS,
+      session_hash: sh,
+      error_code: "CAD_ERROR",
+      duration_ms: Date.now() - requestStart,
     });
   }
 }
 
 export interface ExportRoutesOptions {
   readonly store?: JobStore;
+  /** Override для тестів (NOOP/recording). Дефолт — drizzle через app.db. */
+  readonly telemetry?: Telemetry;
 }
 
 export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPluginAsyncZod {
   const store = options.store ?? new JobStore();
 
   return async (app) => {
+    // Best-effort телеметрія (ADR-032). За замовчуванням — drizzle через app.db
+    // (декорований dbPlugin, зареєстрованим раніше у server.ts).
+    const telemetry = options.telemetry ?? createTelemetry(app.db, app.log);
+
     app.post(
       "/exports",
       {
@@ -129,12 +199,43 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
           ...validateExportBends(req.body, spec),
           ...validateExportPerforation(req.body),
         ];
+        // Телеметрія (ADR-032): session_hash з IP+добовий salt — сирий IP не
+        // зберігається. params — знімок геометрії (не PII).
+        const sh = sessionHash(req.ip);
+        const templateSlug = req.body.template_slug;
+        const params = req.body.parameters as Record<string, unknown>;
         if (errors.length > 0) {
+          await telemetry.writeEvent({
+            event_type: "validation_rejected",
+            template_slug: templateSlug,
+            process: DEFAULT_PROCESS,
+            session_hash: sh,
+            params,
+            error_code: errors[0]?.code ?? "VALIDATION_ERROR",
+          });
           return reply.code(422).send(buildProblem(errors, "/exports"));
         }
         const job = store.create();
-        // background: не await — щоб клієнт одразу отримав jobId.
-        void runJob(store, job.id, req.body);
+        await telemetry.insertExport({
+          id: job.id,
+          templateSlug,
+          sessionHash: sh,
+          formats: ["dxf", "pdf"],
+        });
+        await telemetry.writeEvent({
+          event_type: "export_requested",
+          template_slug: templateSlug,
+          process: DEFAULT_PROCESS,
+          session_hash: sh,
+          params,
+        });
+        // background: не await runJob — щоб клієнт одразу отримав jobId.
+        void runJob(store, job.id, req.body, {
+          telemetry,
+          templateSlug,
+          sessionHash: sh,
+          requestStart: Date.now(),
+        });
         return reply.code(202).send({ id: job.id, status: job.status });
       },
     );
