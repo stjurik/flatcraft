@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
@@ -23,4 +24,12 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+// Sentry (ADR-032): build-плагін інструментує код; runtime-init — у
+// instrumentation*.ts, гейтований DSN. MVP: без source-map upload (нема org/
+// authToken), без телеметрії Sentry-у-Sentry.
+export default withSentryConfig(config, {
+  silent: true,
+  telemetry: false,
+  disableLogger: true,
+  sourcemaps: { disable: true },
+});
