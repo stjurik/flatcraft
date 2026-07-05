@@ -189,16 +189,19 @@ export const modelDrafts = pgTable(
 );
 
 // ─── exports ────────────────────────────────────────────────────────────────
+// Phase 3.3 (ADR-032): персист замість in-memory JobStore. У soft-launch (ADR-020)
+// нема auth/drafts → user_id/draft_id NULLABLE (заповнюються з Phase 3). Нові
+// template_slug/process/session_hash роблять рядок осмисленим без draft'а і дають
+// join з `events`.
 export const exports = pgTable(
   "exports",
   {
     id: id(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    draftId: uuid("draft_id")
-      .notNull()
-      .references(() => modelDrafts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    draftId: uuid("draft_id").references(() => modelDrafts.id, { onDelete: "cascade" }),
+    templateSlug: text("template_slug"),
+    process: text("process").notNull().default("sheet_metal"),
+    sessionHash: text("session_hash"),
     formats: text("formats").array().notNull(),
     status: text("status").notNull().default("queued"),
     r2Keys: jsonb("r2_keys"),
@@ -210,6 +213,10 @@ export const exports = pgTable(
   (t) => ({
     userCreatedAtIdx: index("exports_user_created_at_idx").on(t.userId, t.createdAt.desc()),
     statusIdx: index("exports_status_idx").on(t.status),
+    templateCreatedAtIdx: index("exports_template_created_at_idx").on(
+      t.templateSlug,
+      t.createdAt.desc(),
+    ),
   }),
 );
 
@@ -302,3 +309,29 @@ export const auditLog = pgTable("audit_log", {
   metadata: jsonb("metadata"),
   createdAt: createdAt(),
 });
+
+// ─── events (Phase 3.3, ADR-032) ─────────────────────────────────────────────
+// Append-only телеметрія, БЕЗ PII (docs/11_OBSERVABILITY.md). Слабкий зв'язок з
+// exports/templates через template_slug + params (не строгий FK, тому й нема
+// FK-колонок). `params` — знімок геометрії виробу (технічні дані, не PII).
+// `session_hash` — добовий salt (непереслідуваний, ADR-032 п.6). Retention 12 міс
+// (scheduled job). Пише лише api (worker не має доступу до Postgres).
+export const events = pgTable(
+  "events",
+  {
+    id: id(),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    eventType: text("event_type").notNull(),
+    templateSlug: text("template_slug"),
+    process: text("process").notNull().default("sheet_metal"),
+    params: jsonb("params"),
+    errorCode: text("error_code"),
+    durationMs: integer("duration_ms"),
+    sessionHash: text("session_hash"),
+  },
+  (t) => ({
+    tsIdx: index("events_ts_idx").on(t.ts.desc()),
+    typeTsIdx: index("events_type_ts_idx").on(t.eventType, t.ts.desc()),
+    templateTsIdx: index("events_template_idx").on(t.templateSlug, t.ts.desc()),
+  }),
+);
