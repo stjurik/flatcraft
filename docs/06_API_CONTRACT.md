@@ -332,6 +332,23 @@ errors:
 
 - Історія користувача (paginated, останні 30 днів).
 
+### Observability (Phase 3.3, ADR-032) — preview
+
+**Фаза 3.3 НЕ додає нових публічних endpoints.** Телеметрія пишеться server-side:
+
+- `POST /v1/exports`, `GET /v1/exports/{id}`, `GET /v1/exports/{id}/events`, `GET /v1/exports` —
+  контракт **незмінний**; додається лише persistence (in-memory `JobStore` → таблиця `exports`,
+  той самий respond-shape). Клієнт нічого не помічає.
+- Події `events` (`export_requested` / `validation_rejected` / `export_completed` /
+  `export_failed`) емітить api у своїх хендлерах — це не роут, а серверний запис (`docs/11 §6`).
+- **Внутрішній контракт worker→api→`events`:** worker повідомляє `cad_started` / `cad_completed`
+  (з `duration_ms`) через наявний worker→api-callback (той самий канал, що вже несе результат
+  експорту), **не** через новий публічний роут. Payload — `packages/types/src/events/` (Zod,
+  `docs/11 §5`); джерело істини спільне для api й worker (як внутрішній BullMQ job payload, §11).
+- `web_vital` — тонкий beacon web→api (custom event), не публічний ресурс.
+
+Read-API для `events` у MVP немає: дані споживають digest-cron і майбутня адмінка (ad-hoc SQL).
+
 ---
 
 ## 6. Donations
@@ -399,6 +416,10 @@ response 201:
 - Readiness: 200 якщо БД + Redis доступні.
 
 ### GET /metrics (Prometheus exposition format, тільки з internal IP)
+
+> **Примітка (ADR-032):** продуктова телеметрія Phase 3.3 йде в Postgres-таблицю `events`, **не**
+> в Prometheus-стек (анти-ціль 14 §5). `/metrics` лишається щонайбільше мінімальним ops-liveness
+> (без Grafana/колектора); за непотреби може лишитись нереалізованим.
 
 ---
 

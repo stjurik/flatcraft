@@ -19,6 +19,10 @@ users ──┬─< model_drafts >──┬── templates
 materials ─< material_thicknesses >─< template_compatibility >── templates
 ```
 
+> **Phase 3.3 (ADR-032)** додає append-only `events` (телеметрія, без PII) — слабко пов'язана з
+> `exports`/`templates` через `template_slug` + `params`, не строгий FK. Див. `### events` нижче
+> та `docs/11_OBSERVABILITY.md`.
+
 ---
 
 ## 2. Сутності
@@ -177,6 +181,36 @@ PK `(template_id, material_id)`.
 | `created_at` / `completed_at` | `timestamptz` |                                                 |
 
 **Індекс:** `(user_id, created_at DESC)`, `status` для черги.
+
+> **Phase 3.3 (ADR-032):** in-memory `JobStore` (`apps/api/src/routes/exports.ts`) → persist у цю
+> таблицю через drizzle-репо з тим самим інтерфейсом (SSE-flow незмінний). Робить історію
+> експортів довговічною — сировина для калібрування / статистики / аудиту (R-12 mitigation 5).
+> Міграція — Phase 3.3 PR 2 (drizzle-kit, вручну).
+
+---
+
+### events
+
+> **Preview (Phase 3.3, ADR-032).** Append-only телеметрія, без PII. Специфікація —
+> `docs/11_OBSERVABILITY.md §3-4`. Фактична `schema.ts` + міграція — Phase 3.3 PR 2 (міграцію
+> створює yurii вручну, CLAUDE.md §6).
+
+| Поле            | Тип           | Constraint              | Опис                                                                                                                                    |
+| --------------- | ------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | `uuid`        | PK                      | uuid v7                                                                                                                                 |
+| `ts`            | `timestamptz` | DEFAULT now()           | час події                                                                                                                               |
+| `event_type`    | `text`        | NOT NULL                | `export_requested` \| `validation_rejected` \| `export_completed` \| `export_failed` \| `cad_started` \| `cad_completed` \| `web_vital` |
+| `template_slug` | `text`        | NULL                    | напр. `l_bracket` (NULL для `web_vital`)                                                                                                |
+| `process`       | `text`        | DEFAULT `'sheet_metal'` | майбутній process-layer (14 §3)                                                                                                         |
+| `params`        | `jsonb`       | NULL                    | знімок параметрів виробу — **технічні дані, не PII**                                                                                    |
+| `error_code`    | `text`        | NULL                    | напр. `RADIUS_NOT_ALLOWED`                                                                                                              |
+| `duration_ms`   | `integer`     | NULL                    | для `cad_*` / `export_*`                                                                                                                |
+| `session_hash`  | `text`        | NULL                    | **добовий salt**, непереслідуваний                                                                                                      |
+
+**Індекси:** `(ts DESC)`, `(event_type, ts DESC)`, `(template_slug, ts DESC)`.
+
+**No-PII інваріант:** жодного email/IP; `params` — тільки геометрія. Retention 12 міс (§7). Тест
+«no-PII keys» — обов'язковий у PR 2.
 
 ---
 
@@ -340,11 +374,12 @@ const BendSpec = z.object({ direction: z.enum(["up", "down"]).default("down") })
 
 ## 7. Ретенція даних (GDPR)
 
-| Дані              | Тривалість                        | Видалення                                                                               |
-| ----------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
-| Email + аккаунт   | до видалення користувачем         | DSR `/account/delete` → soft-delete; через 30 днів — hard-delete + анонімізація exports |
-| IP у sessions     | 24 години                         | scheduled job обнуляє `ip_first_seen` після 24h                                         |
-| Logs              | 30 днів                           | logrotate видаляє файли > 30 дн                                                         |
-| DXF/PDF/STEP у R2 | 90 днів від останнього скачування | scheduled job видаляє та оновлює exports.r2_keys                                        |
-| Backups           | 30 днів rolling                   | окремий R2 bucket з encryption-at-rest                                                  |
-| audit_log         | 1 рік                             | для security investigations                                                             |
+| Дані                  | Тривалість                        | Видалення                                                                               |
+| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
+| Email + аккаунт       | до видалення користувачем         | DSR `/account/delete` → soft-delete; через 30 днів — hard-delete + анонімізація exports |
+| IP у sessions         | 24 години                         | scheduled job обнуляє `ip_first_seen` після 24h                                         |
+| Logs                  | 30 днів                           | logrotate видаляє файли > 30 дн                                                         |
+| DXF/PDF/STEP у R2     | 90 днів від останнього скачування | scheduled job видаляє та оновлює exports.r2_keys                                        |
+| Backups               | 30 днів rolling                   | окремий R2 bucket з encryption-at-rest                                                  |
+| audit_log             | 1 рік                             | для security investigations                                                             |
+| `events` (телеметрія) | 12 місяців                        | scheduled job видаляє рядки > 12 міс (ADR-032, `docs/11`)                               |
