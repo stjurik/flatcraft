@@ -4,7 +4,9 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AnalyticsScripts } from "../components/analytics-scripts";
 import { SiteLinks } from "../components/site-links";
+import { WebVitals } from "../components/web-vitals";
 import "./globals.css";
 
 /**
@@ -62,6 +64,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="uk" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="flex min-h-screen flex-col">
+        <AnalyticsScripts />
+        <WebVitals />
         <header
           data-testid="site-header"
           className="bg-bg-elevated border-border xs:px-4 sticky top-0 z-30 flex h-14 items-center justify-between border-b md:px-6"
