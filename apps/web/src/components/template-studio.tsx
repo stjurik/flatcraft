@@ -16,9 +16,10 @@ import {
   viewportQuality,
   type MaterialSelection,
 } from "@flatcraft/ui";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { z } from "zod";
 
+import { firstIssueCode, track } from "../lib/analytics";
 import { bendMatrixIssues } from "../lib/bend-matrix";
 
 import { ExportButton } from "./export-button";
@@ -148,7 +149,24 @@ export function TemplateStudio<T extends Record<string, unknown>>({
 
   const [parameters, setParametersState] = useState<T>(initialResolved);
 
+  // Воронка docs/11 §8 — крокові прапорці «дійшов до кроку» (fire-once на сесію
+  // студії). `lastConstraint` — щоб `validation_error_shown` не спамив на кожен
+  // keystroke, а лише при зміні constraint'а.
+  const studioOpenedRef = useRef(false);
+  const paramChangedRef = useRef(false);
+  const lastConstraintRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (studioOpenedRef.current) return;
+    studioOpenedRef.current = true;
+    track("studio_opened", { template: templateSlug, mode });
+  }, [templateSlug, mode]);
+
   const setParameters = (next: T) => {
+    if (!paramChangedRef.current) {
+      paramChangedRef.current = true;
+      track("param_changed", { template: templateSlug });
+    }
     // product-mode: завжди мерджимо поверх fixed (захист від випадкового
     // override через AutoForm).
     if (mode === "product" && product) {
@@ -197,6 +215,21 @@ export function TemplateStudio<T extends Record<string, unknown>>({
       parameters,
     } as unknown as Parameters<typeof validatePerforation>[0]);
   }, [templateSlug, parameters]);
+
+  // Ключова метрика R-10 (docs/11 §8): який constraint блокує найчастіше.
+  // Шлемо при зміні первинного constraint'а; скидаємо, коли помилок нема.
+  useEffect(() => {
+    const code =
+      firstIssueCode(matrixIssues) ??
+      firstIssueCode(profileIssues) ??
+      firstIssueCode(perforationIssues);
+    if (code === undefined) {
+      lastConstraintRef.current = undefined;
+    } else if (code !== lastConstraintRef.current) {
+      lastConstraintRef.current = code;
+      track("validation_error_shown", { template: templateSlug, constraint: code });
+    }
+  }, [matrixIssues, profileIssues, perforationIssues, templateSlug]);
 
   const exportDisabled =
     !isValid || matrixIssues.length > 0 || profileIssues.length > 0 || perforationIssues.length > 0;

@@ -4,7 +4,9 @@ import type { ExportJobEvent, ExportRequest, ExportResponse } from "@flatcraft/t
 import { Button } from "@flatcraft/ui";
 import { useEffect, useRef, useState } from "react";
 
+import { track } from "../lib/analytics";
 import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
+
 import { PostExportDonateNudge } from "./post-export-donate-nudge";
 
 type ExportState =
@@ -29,6 +31,8 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
 
   const handleEvent = (ev: ExportJobEvent) => {
     if (ev.status === "done" && ev.result) {
+      // Воронка docs/11 §8: фінальний крок — успішний експорт.
+      track("export_done", { template: request.template_slug });
       setState({ status: "done", result: ev.result });
     } else if (ev.status === "failed") {
       setState({ status: "error", message: ev.error ?? "Експорт не вдався" });
@@ -42,6 +46,8 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
   };
 
   const click = async () => {
+    // Воронка docs/11 §8: намір експортувати (до серверного результату).
+    track("export_clicked", { template: request.template_slug });
     closeRef.current?.();
     setState({ status: "queued", jobId: "", progress: 0 });
     try {

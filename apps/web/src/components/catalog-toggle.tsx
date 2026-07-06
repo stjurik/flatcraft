@@ -2,7 +2,9 @@
 
 import { SegmentedControl, type SegmentedControlOption } from "@flatcraft/ui";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
+
+import { track } from "../lib/analytics";
 
 type TabValue = "products" | "parts";
 
@@ -29,6 +31,15 @@ export function CatalogToggle({ value, counts }: CatalogToggleProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
+
+  // Воронка docs/11 §8: перший крок — перегляд каталогу (fire-once на mount).
+  // CatalogToggle рендериться на кожному вигляді `/templates`.
+  const catalogFiredRef = useRef(false);
+  useEffect(() => {
+    if (catalogFiredRef.current) return;
+    catalogFiredRef.current = true;
+    track("catalog");
+  }, []);
 
   const options: ReadonlyArray<SegmentedControlOption<TabValue>> = [
     {
