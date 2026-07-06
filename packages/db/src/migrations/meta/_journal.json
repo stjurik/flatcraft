@@ -15,6 +15,13 @@
       "when": 1782143647862,
       "tag": "0001_glossy_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783351838097,
+      "tag": "0002_gray_wolf_cub",
+      "breakpoints": true
     }
   ]
 }
