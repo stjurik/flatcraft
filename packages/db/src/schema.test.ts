@@ -104,12 +104,56 @@ describe("schema — model_drafts і exports", () => {
     expect(cfg.columns.find((c) => c.name === "user_id")?.notNull).toBe(false);
   });
 
-  it("exports.user_id NOT NULL і formats — text[]", () => {
+  it("exports.user_id/draft_id nullable (soft-launch persist, ADR-032) + нові телеметрія-колонки", () => {
     const cfg = getTableConfig(schema.exports);
     expect(cfg.name).toBe("exports");
-    expect(cfg.columns.find((c) => c.name === "user_id")?.notNull).toBe(true);
+    // Phase 3.3: soft-launch без auth/drafts → nullable (заповнюються з Phase 3).
+    expect(cfg.columns.find((c) => c.name === "user_id")?.notNull).toBe(false);
+    expect(cfg.columns.find((c) => c.name === "draft_id")?.notNull).toBe(false);
+    const colNames = cfg.columns.map((c) => c.name);
+    expect(colNames).toEqual(expect.arrayContaining(["template_slug", "process", "session_hash"]));
     const formats = cfg.columns.find((c) => c.name === "formats");
     expect(formats?.columnType).toBe("PgArray");
+  });
+});
+
+describe("schema — events (Phase 3.3, ADR-032)", () => {
+  it("append-only телеметрія: без FK і без PII-колонок (email/ip/user_id)", () => {
+    const cfg = getTableConfig(schema.events);
+    expect(cfg.name).toBe("events");
+    expect(cfg.foreignKeys).toHaveLength(0);
+    const colNames = cfg.columns.map((c) => c.name);
+    expect(colNames).toEqual(
+      expect.arrayContaining([
+        "id",
+        "ts",
+        "event_type",
+        "template_slug",
+        "process",
+        "params",
+        "error_code",
+        "duration_ms",
+        "session_hash",
+      ]),
+    );
+    expect(colNames).not.toContain("email");
+    expect(colNames).not.toContain("ip");
+    expect(colNames).not.toContain("user_id");
+  });
+
+  it("event_type NOT NULL і три ts-індекси", () => {
+    const cfg = getTableConfig(schema.events);
+    expect(cfg.columns.find((c) => c.name === "event_type")?.notNull).toBe(true);
+    const idxNames = cfg.indexes.map((i) => i.config.name);
+    expect(idxNames).toEqual(
+      expect.arrayContaining(["events_ts_idx", "events_type_ts_idx", "events_template_idx"]),
+    );
+  });
+
+  it("params — jsonb, duration_ms — integer nullable", () => {
+    const cfg = getTableConfig(schema.events);
+    expect(cfg.columns.find((c) => c.name === "params")?.dataType).toBe("json");
+    expect(cfg.columns.find((c) => c.name === "duration_ms")?.notNull).toBe(false);
   });
 });
 

@@ -341,10 +341,11 @@ errors:
   той самий respond-shape). Клієнт нічого не помічає.
 - Події `events` (`export_requested` / `validation_rejected` / `export_completed` /
   `export_failed`) емітить api у своїх хендлерах — це не роут, а серверний запис (`docs/11 §6`).
-- **Внутрішній контракт worker→api→`events`:** worker повідомляє `cad_started` / `cad_completed`
-  (з `duration_ms`) через наявний worker→api-callback (той самий канал, що вже несе результат
-  експорту), **не** через новий публічний роут. Payload — `packages/types/src/events/` (Zod,
-  `docs/11 §5`); джерело істини спільне для api й worker (як внутрішній BullMQ job payload, §11).
+- **Внутрішній контракт (cad-таймінг):** worker **не має доступу до Postgres** — усі події,
+  включно з `cad_started` / `cad_completed` (з `duration_ms`), пише **api**, вимірюючи worker
+  round-trip синхронного `/export` (Phase 3.3 PR 2, рішення D3; worker без змін). Payload —
+  `packages/types/src/events/` (Zod, `docs/11 §5`), спільне джерело істини для api й майбутнього
+  worker-репортингу (як внутрішній BullMQ job payload, §11).
 - `web_vital` — тонкий beacon web→api (custom event), не публічний ресурс.
 
 Read-API для `events` у MVP немає: дані споживають digest-cron і майбутня адмінка (ad-hoc SQL).
