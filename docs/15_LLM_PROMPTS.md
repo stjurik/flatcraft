@@ -61,7 +61,10 @@ A. ADR-032 у docs/03_DECISIONS.md. Рішення (кожне ALT/CHOICE/RATION
       ВИБІР: Sentry з beforeSend PII-фільтром (інваріант CLAUDE.md §8).
    3. JobStore in-memory → таблиця exports (уже в data model). Retention артефактів у R2.
    4. Продуктова аналітика: Plausible vs Umami vs нічого. Критерій: cookie-less,
-      GDPR без banner-ускладнень (ADR-006), self-hosted опція.
+      GDPR без banner-ускладнень (ADR-006), self-hosted опція, RAM-бюджет MS21.
+      ВИБІР: Umami self-hosted (окрема БД у наявному Postgres) — ADR-032 §4,
+      фінальне рішення 2026-07-05. Plausible відхилено (CE = ClickHouse ~2 ГБ RAM;
+      Cloud = кошти + дані поза UA).
    5. Digest: cron у worker → Discord webhook (інфра ADR-023 вже є) vs email vs дашборд.
       Формат digest-markdown: top-5 validation_error по constraint, failed exports,
       p95 export_duration vs бюджет §9, deviation-репорти (Phase 3.4+), Sentry summary.
@@ -74,12 +77,12 @@ B. docs/11_OBSERVABILITY.md — специфікація:
      export_failed, cad_started, cad_completed, web_vital) + Zod-схема payload'ів
      (preview, без коду у packages/);
    - хто пише: Fastify onSend-hook / worker; хто читає: digest-cron, admin;
-   - воронка Plausible: catalog → studio_opened → param_changed →
+   - воронка Umami: catalog → studio_opened → param_changed →
      validation_error_shown → export_clicked → export_done;
    - формат щотижневого digest + правило «кожен пункт → issue або accepted noise».
 C. docs/02_ROADMAP.md — секція «Phase 3.3 — Observability foundation» з PR-checklist:
    PR 1 (цей), PR 2 events+exports tables, PR 3 Sentry ×3, PR 4 digest-cron,
-   PR 5 Plausible + web-vitals, PR 6 progress-log.
+   PR 5 Umami + web-vitals, PR 6 progress-log.
 D. docs/05_DATA_MODEL.md — preview: events, зміни exports (persist).
 E. docs/06_API_CONTRACT.md — preview: без нових публічних endpoints у 3.3
    (events пишуться server-side), позначити внутрішній контракт worker→events.

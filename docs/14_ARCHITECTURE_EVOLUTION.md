@@ -130,7 +130,7 @@ Process (sheet_metal | fdm_print | cnc_machining)
 
 ### 4.2. Рівень 2 — продуктова аналітика (бачити, де користувач страждає)
 
-- Plausible або Umami self-hosted (Phase 5.2), cookie-less, GDPR-friendly.
+- **Umami self-hosted** (ADR-032 §4 — фінальне рішення 2026-07-05; було «Plausible або Umami»), cookie-less, GDPR-friendly.
 - Воронка: `catalog → studio_opened → param_changed → validation_error_shown → export_clicked → export_done`.
 - **Ключова метрика — `validation_error_shown` з розбивкою по constraint:** який ліміт найчастіше блокує користувачів → який шаблон потребує ширшої параметризації. Це прямий вхід для R-10 (шаблони не задовольняють реальні потреби) — зараз він оцінюється інтуїцією.
 
@@ -167,7 +167,7 @@ Process (sheet_metal | fdm_print | cnc_machining)
 
 ## 5. Анти-цілі (що свідомо НЕ робимо)
 
-На MS21 (2 vCPU / 4 GB) і 10 users/day **не потрібні**: microservices, Kubernetes, Kafka/event-sourcing, Prometheus+Grafana-стек, OpenTelemetry-колектор, ML-пайплайни. Sentry (SaaS free tier) + Postgres-таблиця events + Plausible + Discord webhook покривають 100% потреб MVP і v1.x. Складність — головний ворог solo-проєкту (R-07).
+На MS21 (2 vCPU / 4 GB) і 10 users/day **не потрібні**: microservices, Kubernetes, Kafka/event-sourcing, Prometheus+Grafana-стек, OpenTelemetry-колектор, ML-пайплайни. Sentry (SaaS free tier) + Postgres-таблиця events + Umami (self-hosted) + Discord webhook покривають 100% потреб MVP і v1.x. Складність — головний ворог solo-проєкту (R-07).
 
 ---
 
@@ -175,7 +175,7 @@ Process (sheet_metal | fdm_print | cnc_machining)
 
 | Фаза                              | Зміст                                                                             | Чому в цьому порядку                                                                      |
 | --------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **3.3 Observability foundation**  | events + exports у Postgres, Sentry ×3, digest → Discord, воронка Plausible       | Дає дані для всіх подальших рішень; мала (≈1 тиждень); потрібна ДО публічного soft-launch |
+| **3.3 Observability foundation**  | events + exports у Postgres, Sentry ×3, digest → Discord, воронка Umami           | Дає дані для всіх подальших рішень; мала (≈1 тиждень); потрібна ДО публічного soft-launch |
 | **3.4 Feedback loop**             | QR → `/f/{export_id}` + `export_feedback` + перший цикл калібрування K            | Замикає R-01; залежить від 3.3 (exports у БД)                                             |
 | **3.5 Template Registry**         | реєстр + generic studio/viewport + conformance-suite; міграція 6 шаблонів по 1 PR | Знімає копі-паст-дрейф до того, як шаблонів стане 10+                                     |
 | **3.6 Process layer (docs-only)** | ADR: ієрархія Process→…→Feedback, artifacts-список, process_slug                  | Дешева страховка майбутнього; коду мінімум                                                |

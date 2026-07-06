@@ -130,7 +130,7 @@
 
 **Definition of Done:** кожен експорт лишає рядки в `events`+`exports` (Postgres, не in-memory);
 краші web/api/worker видно в Sentry (з PII-фільтром); щотижневий digest падає в Discord; воронка
-Plausible міряє, який constraint блокує користувачів.
+Umami міряє, який constraint блокує користувачів.
 
 Патерн фази (як Phase 3.0): PR 1 docs-only (ADR-gate) → імплементаційні PR → фінальний
 progress-log PR.
@@ -150,8 +150,8 @@ progress-log PR.
 - [ ] **3.3 PR 4.** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
       `build_digest(rows) → str` з unit-тестами (порожній / типовий / deviation тиждень); формат —
       `docs/11 §9`. (промпт B5)
-- [ ] **3.3 PR 5.** Plausible (cookie-less) + web-vitals custom events; воронка
-      `catalog→…→export_done`; звірка з бюджетами §9. (14 §4.2)
+- [ ] **3.3 PR 5.** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
+      `catalog→…→export_done`; звірка з бюджетами §9. (14 §4.2, ADR-032 §4)
 - [ ] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` + ротація CLAUDE.md §13 (після
       merge імплементаційних PR).
 
