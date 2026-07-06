@@ -6,14 +6,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Стабимо `window` (web-suite без jsdom) з опційним `plausible`-моком. */
-function stubWindow(plausible?: unknown): void {
-  vi.stubGlobal("window", plausible === undefined ? {} : { plausible });
+/** Стабимо `window` (web-suite без jsdom) з опційним `umami`-моком. */
+function stubWindow(umamiTrack?: unknown): void {
+  vi.stubGlobal("window", umamiTrack === undefined ? {} : { umami: { track: umamiTrack } });
 }
 
 describe("track", () => {
-  it("no-op коли window.plausible відсутній (скрипт не завантажено)", () => {
-    stubWindow(); // window є, plausible нема
+  it("no-op коли window.umami відсутній (скрипт не завантажено)", () => {
+    stubWindow(); // window є, umami нема
     expect(() => track("catalog")).not.toThrow();
   });
 
@@ -22,20 +22,21 @@ describe("track", () => {
     expect(() => track("studio_opened")).not.toThrow();
   });
 
-  it("викликає plausible з ім'ям події та props", () => {
+  it("викликає umami.track з ім'ям події та data", () => {
     const spy = vi.fn();
     stubWindow(spy);
     track("validation_error_shown", { constraint: "RADIUS_NOT_ALLOWED", template: "z_bracket" });
     expect(spy).toHaveBeenCalledWith("validation_error_shown", {
-      props: { constraint: "RADIUS_NOT_ALLOWED", template: "z_bracket" },
+      constraint: "RADIUS_NOT_ALLOWED",
+      template: "z_bracket",
     });
   });
 
-  it("без props — не додає ключ props", () => {
+  it("без props — викликає track лише з ім'ям події", () => {
     const spy = vi.fn();
     stubWindow(spy);
     track("export_clicked");
-    expect(spy).toHaveBeenCalledWith("export_clicked", undefined);
+    expect(spy).toHaveBeenCalledWith("export_clicked");
   });
 
   it("fail-closed: props з PII-ключем → нічого не шлемо", () => {
