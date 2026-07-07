@@ -270,4 +270,4 @@ ADR-023 / CLAUDE.md §6). Ядро — pure-функція `build_digest(rows) �
 | PR 3 | Sentry ×3 (web/api/worker) + `beforeSend` PII-тести          | ✅                  |
 | PR 4 | Digest-cron → Discord webhook                                | ✅ (cron — Ansible) |
 | PR 5 | Umami + web-vitals                                           | ✅                  |
-| PR 6 | Progress-log (`docs/13` + ротація CLAUDE.md §13)             | ⏳                  |
+| PR 6 | Progress-log (`docs/13` + ротація CLAUDE.md §13)             | ✅                  |
