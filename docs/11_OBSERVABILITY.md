@@ -256,11 +256,11 @@ ADR-023 / CLAUDE.md §6). Ядро — pure-функція `build_digest(rows) �
 
 ## 11. Статус реалізації (Phase 3.3, `docs/02_ROADMAP.md`)
 
-| PR   | Зміст                                                        | Статус |
-| ---- | ------------------------------------------------------------ | ------ |
-| PR 1 | ADR-032 + цей файл + Roadmap + preview Data Model/API (docs) | ✅     |
-| PR 2 | `events` + persist `exports` у Postgres (+ Zod payload'и)    | ⏳     |
-| PR 3 | Sentry ×3 (web/api/worker) + `beforeSend` PII-тести          | ⏳     |
-| PR 4 | Digest-cron → Discord webhook                                | ⏳     |
-| PR 5 | Umami + web-vitals                                           | ⏳     |
-| PR 6 | Progress-log (`docs/13` + ротація CLAUDE.md §13)             | ⏳     |
+| PR   | Зміст                                                        | Статус              |
+| ---- | ------------------------------------------------------------ | ------------------- |
+| PR 1 | ADR-032 + цей файл + Roadmap + preview Data Model/API (docs) | ✅                  |
+| PR 2 | `events` + persist `exports` у Postgres (+ Zod payload'и)    | ⏳                  |
+| PR 3 | Sentry ×3 (web/api/worker) + `beforeSend` PII-тести          | ⏳                  |
+| PR 4 | Digest-cron → Discord webhook                                | ✅ (cron — Ansible) |
+| PR 5 | Umami + web-vitals                                           | ⏳                  |
+| PR 6 | Progress-log (`docs/13` + ротація CLAUDE.md §13)             | ⏳                  |

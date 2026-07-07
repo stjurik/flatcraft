@@ -16,7 +16,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:int": "vitest run --config vitest.int.config.ts",
-    "openapi": "tsx scripts/generate-openapi.ts"
+    "openapi": "tsx scripts/generate-openapi.ts",
+    "digest": "tsx src/scripts/weekly-digest.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.0",
