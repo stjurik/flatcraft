@@ -29,4 +29,26 @@ describe("parseEnv", () => {
   it("кидає на невалідному NODE_ENV", () => {
     expect(() => parseEnv({ NODE_ENV: "staging" })).toThrow();
   });
+
+  // Ansible-шаблон env.prod.j2 рендерить `SENTRY_DSN=` пустим рядком, коли
+  // vault_sentry_dsn не задано. Без preprocess'у Zod .url() кидає на "" → api
+  // у crash-loop → deploy падає з "container is unhealthy" (інцидент 07.07.2026).
+  it("трактує порожній SENTRY_DSN як не задано", () => {
+    const env = parseEnv({ SENTRY_DSN: "" });
+    expect(env.SENTRY_DSN).toBeUndefined();
+  });
+
+  it("приймає валідний SENTRY_DSN", () => {
+    const env = parseEnv({ SENTRY_DSN: "https://key@sentry.io/1" });
+    expect(env.SENTRY_DSN).toBe("https://key@sentry.io/1");
+  });
+
+  it("кидає на невалідному SENTRY_DSN (не-URL)", () => {
+    expect(() => parseEnv({ SENTRY_DSN: "not-a-url" })).toThrow();
+  });
+
+  it("трактує порожній SENTRY_ENVIRONMENT як не задано", () => {
+    const env = parseEnv({ SENTRY_ENVIRONMENT: "" });
+    expect(env.SENTRY_ENVIRONMENT).toBeUndefined();
+  });
 });
