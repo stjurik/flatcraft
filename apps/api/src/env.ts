@@ -15,8 +15,11 @@ const EnvSchema = z.object({
   APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   CAD_WORKER_URL: z.string().url().default("http://localhost:5000"),
   // Sentry (ADR-032). Порожній DSN → SDK не ініціалізується (dev/CI/тести).
-  SENTRY_DSN: z.string().url().optional(),
-  SENTRY_ENVIRONMENT: z.string().min(1).optional(),
+  // Ansible-шаблон env.prod.j2 рендерить `SENTRY_DSN=` (порожній рядок), коли
+  // vault_sentry_dsn не задано; трактуємо як undefined, інакше .url() кидає
+  // Zod-помилку на старті процесу і api не встигає навіть listen().
+  SENTRY_DSN: z.preprocess((v) => (v === "" ? undefined : v), z.string().url().optional()),
+  SENTRY_ENVIRONMENT: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
 });
 
 export type Env = z.infer<typeof EnvSchema> & { LOG_LEVEL: (typeof LOG_LEVELS)[number] };

@@ -8,7 +8,11 @@ import * as Sentry from "@sentry/nextjs";
 import { redactSentryPii } from "./lib/sentry-pii.js";
 
 export async function register(): Promise<void> {
-  const dsn = process.env["SENTRY_DSN"] ?? process.env["NEXT_PUBLIC_SENTRY_DSN"];
+  // `||` (не `??`): порожній рядок з Ansible-шаблону не має вигравати над
+  // NEXT_PUBLIC_SENTRY_DSN — інакше SDK не ініціалізується попри валідний
+  // публічний DSN (той самий сценарій, що зламав api 07.07.2026, дивись
+  // apps/api/src/env.ts).
+  const dsn = process.env["SENTRY_DSN"] || process.env["NEXT_PUBLIC_SENTRY_DSN"];
   if (!dsn) return;
   if (process.env["NEXT_RUNTIME"] === "nodejs" || process.env["NEXT_RUNTIME"] === "edge") {
     const environment = process.env["SENTRY_ENVIRONMENT"];

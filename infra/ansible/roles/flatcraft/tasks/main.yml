@@ -70,18 +70,55 @@
   become: true
   become_user: "{{ app_user }}"
 
-- name: Docker compose up -d
-  community.docker.docker_compose_v2:
-    project_src: "{{ app_dir }}"
-    files:
-      - "infra/compose/docker-compose.prod.yml"
-    env_files:
-      - "{{ app_dir }}/.env.prod"
-    state: present
-    remove_orphans: true
-    pull: never # вже зробили вище
-  become: true
-  become_user: "{{ app_user }}"
+- name: Docker compose up -d (з дампом логів при fatal)
+  # Причина обгортки block/rescue: без дампу логів модуль docker_compose_v2
+  # повертає лише "container X is unhealthy" без stack-trace застосунку.
+  # Інцидент 07.07.2026: 2 послідовні deploy-и падали з цим повідомленням;
+  # реальну причину (Zod-помилка на порожньому SENTRY_DSN) знайшли лише через
+  # 4 доби через SSH до сервера. Rescue-таск дампить `docker compose logs`
+  # трьох app-сервісів у stdout ansible-run'у — регресія такого класу видна
+  # одразу у CI-логах без прод-SSH.
+  block:
+    - name: Docker compose up -d
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        files:
+          - "infra/compose/docker-compose.prod.yml"
+        env_files:
+          - "{{ app_dir }}/.env.prod"
+        state: present
+        remove_orphans: true
+        pull: never # вже зробили вище
+      become: true
+      become_user: "{{ app_user }}"
+  rescue:
+    - name: Capture service logs on compose failure
+      ansible.builtin.shell:
+        cmd: |
+          docker compose \
+            --env-file {{ app_dir }}/.env.prod \
+            -f {{ app_dir }}/infra/compose/docker-compose.prod.yml \
+            logs {{ item }} --tail=80 2>&1 || true
+        executable: /bin/sh
+      loop:
+        - api
+        - web
+        - cad-worker
+      register: flatcraft_failed_compose_logs
+      changed_when: false
+      become: true
+      become_user: "{{ app_user }}"
+
+    - name: Print captured service logs
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ flatcraft_failed_compose_logs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Re-raise original compose failure
+      ansible.builtin.fail:
+        msg: "docker compose up -d failed — service logs dumped above"
 
 - name: Wait until api healthcheck reports healthy
   # Чому: блокуємо повернення Ansible'у успіху до того, як стек реально готовий
