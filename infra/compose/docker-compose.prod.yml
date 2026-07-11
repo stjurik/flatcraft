@@ -86,7 +86,12 @@ services:
   # ─── CAD worker (Python FastAPI + CadQuery) ─────────────────────────────
   cad-worker:
     image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-cad-worker:${APP_VERSION:-staging}
-    restart: unless-stopped
+    # `on-failure:5` замість `unless-stopped` для app-сервісів: обмежуємо
+    # crash-loop 5-ма спробами, щоб зламаний деплой не рестартував тисячі
+    # разів (інцидент 07.07.2026: api зробив 6297 рестартів за 4 доби через
+    # Zod-помилку у SENTRY_DSN). Postgres/redis/caddy лишаються unless-stopped —
+    # це stateful/infra-шар, які мають рестартитись після ребуту хоста.
+    restart: "on-failure:5"
     # CadQuery + OpenCascade тримають 800-1200 MB у пам'яті на render.
     mem_limit: 1500m
     depends_on:
@@ -122,7 +127,7 @@ services:
   # ─── API (Fastify) ──────────────────────────────────────────────────────
   api:
     image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-api:${APP_VERSION:-staging}
-    restart: unless-stopped
+    restart: "on-failure:5"
     mem_limit: 512m
     depends_on:
       postgres:
@@ -171,7 +176,7 @@ services:
   # ─── Web (Next.js standalone) ───────────────────────────────────────────
   web:
     image: ${IMAGE_PREFIX:-ghcr.io/stjurik}/flatcraft-web:${APP_VERSION:-staging}
-    restart: unless-stopped
+    restart: "on-failure:5"
     mem_limit: 512m
     depends_on:
       api:
