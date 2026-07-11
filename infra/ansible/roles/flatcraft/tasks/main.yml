@@ -104,7 +104,7 @@
         - api
         - web
         - cad-worker
-      register: failed_compose_logs
+      register: flatcraft_failed_compose_logs
       changed_when: false
       become: true
       become_user: "{{ app_user }}"
@@ -112,7 +112,7 @@
     - name: Print captured service logs
       ansible.builtin.debug:
         msg: "{{ item.stdout_lines }}"
-      loop: "{{ failed_compose_logs.results }}"
+      loop: "{{ flatcraft_failed_compose_logs.results }}"
       loop_control:
         label: "{{ item.item }}"
 
