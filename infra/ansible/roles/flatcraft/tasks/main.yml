@@ -166,6 +166,29 @@
   changed_when: "'CREATED' in flatcraft_umami_db_result.stdout"
   become: true
 
+# ─── 4c. Flush handlers + re-wait (fix для race з CI smoke-check) ─────────
+# Handler `Restart flatcraft stack` без цього виконується наприкінці play
+# (після `Wait until api healthy`), і зовнішній smoke curl у deploy-staging.yml
+# ловить 502 у 30-секундному вікні restart→healthy.
+# Інцидент 2026-07-12: run 29200710675 упав з `api /health → 502`
+# через 3с після restart. Фікс — flush handlers ТУТ + повторний wait ДО того,
+# як play завершиться, щоб CI-smoke бачив уже здоровий стек.
+- name: Flush handlers so any Restart runs before final wait
+  ansible.builtin.meta: flush_handlers
+
+- name: Re-wait until api healthcheck healthy (post-handler restart)
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      for i in $(seq 1 30); do
+        status=$(docker inspect --format '{{ '{{' }}.State.Health.Status{{ '}}' }}' flatcraft-api-1 2>/dev/null || echo missing)
+        [ "$status" = "healthy" ] && exit 0
+        sleep 2
+      done
+      echo "api never became healthy post-handler" >&2; exit 1
+    executable: /bin/sh
+  changed_when: false
+
 # ─── 5. Docker image cleanup (старі images > 7 днів) ───────────────────────
 # Чому ПІСЛЯ healthcheck'у: prune видаляє ТІЛЬКИ untagged/unused images
 # (старі версії, замінені свіжими). Якщо deploy провалився раніше — старий
