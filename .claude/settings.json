@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"try{require.resolve\\('next/web-vitals'\\);console.log\\('next/web-vitals OK'\\)}catch\\(e\\){console.log\\('next/web-vitals:',e.message.slice\\(0,60\\)\\)}\")",
+      "Bash(node -e \"try{console.log\\('resolved:',require.resolve\\('next/web-vitals'\\)\\)}catch\\(e\\){console.log\\('ERR',e.message.slice\\(0,80\\)\\)}\")",
+      "Bash(node -e \"const p=require\\('next/package.json'\\);console.log\\(JSON.stringify\\(p.exports['./web-vitals']||'NONE'\\)\\)\")",
+      "Bash(pnpm vitest *)",
+      "Bash(git -C /home/yurii/hart reset -q)",
+      "Bash(git -C /home/yurii/hart add apps/web/src/lib/analytics.ts apps/web/src/lib/analytics.test.ts apps/web/src/components/analytics-scripts.tsx apps/web/src/components/web-vitals.tsx apps/web/src/app/layout.tsx .env.example)",
+      "Bash(git -C /home/yurii/hart status --porcelain)",
+      "Bash(git -C /home/yurii/hart commit -q -F -)",
+      "Bash(git -C /home/yurii/hart log --oneline -1)",
+      "Bash(git -C /home/yurii/hart add apps/web/src/components/export-button.tsx apps/web/src/components/template-studio.tsx apps/web/src/components/catalog-toggle.tsx)",
+      "Bash(git -c core.editor=true rebase --continue)"
+    ]
+  }
+}
