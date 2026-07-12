@@ -967,7 +967,170 @@ git push
 
 ---
 
-## §7. Перший день у проді — health checklist
+## §7. Телеметрія (Phase 3.3-B activation)
+
+Код Phase 3.3 (ADR-032) — в main. Активація в проді потребує 7 мануальних кроків нижче; після них Sentry / Umami / weekly digest оживуть від самих env-значень без правок коду.
+
+### 7.1. Cloudflare DNS для Umami
+
+У CF dashboard додати A/CNAME запис:
+
+- **Name:** `analytics`
+- **Target:** такий самий, як `staging` (той самий origin IP; CF proxied — HTTPS обслуговує CF Origin Cert)
+- **Proxy:** Proxied (помаранчева хмарка)
+- **TTL:** Auto
+
+### 7.2. Sentry — 2 проєкти
+
+`sentry.io/organizations/<org>/projects/new/`:
+
+1. **flatcraft-web** — платформа Browser JS (Next.js client bundle).
+2. **flatcraft-server** — платформа Node.js; спільний для `api` (Fastify) і `cad-worker` (Python).
+
+> Один DSN для api+worker, бо `beforeSend`-фільтр PII і рівень таг'ювання (`sentry.environment`, `release`) однакові. Різні runtime'и потрапляють у Sentry з окремим тегом `runtime.name` — фільтрувати легко.
+
+Скопіювати DSN кожного. У vault:
+
+```yaml
+# infra/ansible/group_vars/all.vault.yml
+vault_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<flatcraft-server-id>" # для api + worker
+vault_next_public_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<flatcraft-web-id>" # для web-клієнта
+```
+
+> Web-клієнт має **окремий** публічний DSN (інлайниться у bundle під час build).
+
+### 7.3. Discord webhook для digest
+
+Discord Server → канал `#digest-flatcraft` → Edit Channel → Integrations → Webhooks → New Webhook → Copy URL → у vault:
+
+```yaml
+vault_digest_webhook_url: "https://discord.com/api/webhooks/<id>/<token>"
+```
+
+> Це **окремий** webhook від monitoring (`vault_discord_webhook_url` уже існує для алертів backup/disk).
+
+### 7.4. UMAMI_APP_SECRET
+
+```bash
+openssl rand -base64 32
+# → у vault: vault_umami_app_secret: "..."
+```
+
+### 7.5. Deploy (перший — БД + Umami-контейнер стартують)
+
+```bash
+ansible-playbook -i inventory.staging.ini site.yml --tags deploy
+```
+
+Що відбувається:
+
+1. Compose тягне `ghcr.io/umami-software/umami:postgresql-v2.19.0` (~150 MB, ~30-60 с).
+2. Umami-контейнер стартує → крашиться (БД `umami` ще не існує) → restart.
+3. Ansible-task «Ensure umami database» → створює БД → `docker restart umami`.
+4. Umami піднімається, виконує свою schema-migration, стає healthy.
+5. Дефолт-адмін: `admin` / `umami`. **Одразу змінити** через UI.
+
+Ансибль-run падає лише якщо щось справді зламано — БД-таск ідемпотентний.
+
+### 7.6. Umami UI: створити website, отримати `website_id`
+
+`https://analytics.hart.crimea.ua/` → login → Settings → Websites → Add:
+
+- **Name:** hart.crimea.ua (staging)
+- **Domain:** staging.hart.crimea.ua
+
+Скопіювати UUID (`Website ID`). У vault:
+
+```yaml
+vault_umami_website_id: "<uuid>"
+```
+
+### 7.7. Повторний deploy — інлайн `website_id` у web-bundle
+
+```bash
+# Пересобрати web-image, бо NEXT_PUBLIC_* інлайняться під час build.
+gh workflow run release.yml --ref main
+# і дочекатися:
+gh run watch
+# → auto-trigger deploy-staging.yml
+```
+
+Або локально: `docker compose build web && docker compose up -d web`.
+
+### 7.8. Acceptance-перевірка (недільний ритуал після 1-го тижня)
+
+- **Umami dashboard** (`analytics.hart.crimea.ua`) — воронка `catalog → studio_opened → param_changed → validation_error_shown → export_clicked → export_done` показує реальні цифри.
+- **Sentry** — тестова помилка з `throw new Error('smoke')` у dev-guard route → з'являється у `flatcraft-web` (для web) і `flatcraft-server` (для api/worker, розрізняються тегом `runtime.name`), з `beforeSend` PII-фільтром (email/IP порожні).
+- **Discord `#digest-flatcraft`** — щонеділі 18:00 Europe/Kyiv падає markdown-digest з top-5 validation_error, failed exports, p95 export_duration.
+
+Якщо будь-що з цих трьох не працює через тиждень → GitHub issue з тегом `observability-broken`.
+
+---
+
+## §8. Go-live checklist (soft-launch)
+
+Перемикання бойового домену `hart.crimea.ua` з placeholder-стану (порожній 200) на робочий стек. Виконати після успішного тижня staging + повного проходу §7.
+
+### 8.1. Мануальні кроки
+
+1. **CF DNS — `hart.crimea.ua` root:**
+   - Створити A запис `@` → той самий origin IP, що й `staging`. Proxied.
+   - Створити A запис `api` → той самий origin IP. Proxied.
+2. **Caddyfile — додати production vhost'и** (окремим PR через `Edit(infra/**)` gate; **НЕ у цьому PR**):
+   ```
+   hart.crimea.ua {
+       tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
+       import security_headers
+       reverse_proxy web:3000 { flush_interval -1 }
+   }
+   api.hart.crimea.ua {
+       tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
+       import security_headers
+       # ... той самий блок як для api-staging
+   }
+   ```
+3. **`all.yml` — оновити `app_domain` / `api_domain`** з `staging.hart.crimea.ua` на `hart.crimea.ua`. Re-render env.prod, redeploy.
+4. **NEXT_PUBLIC_UMAMI_SRC** лишається на `analytics.hart.crimea.ua` (той самий домен обслуговує обидва — staging і prod).
+5. **DNS TTL** — після `dig +short hart.crimea.ua` (з чужого DNS-resolver'а) віддає CF-anycast, чекати 60-300s propagation.
+
+### 8.2. Smoke-тести після перемикання
+
+- [ ] `curl -fsS https://hart.crimea.ua/` → 200, HTML з `<title>hart · Креслення листового металу за 60 секунд</title>`.
+- [ ] `curl -fsS https://hart.crimea.ua/templates` → 200, `<title>Каталог · hart</title>`, 5 карток.
+- [ ] У браузері: відкрити студію (напр. `/templates/l_bracket`), змінити параметр → 3D preview оновлюється, `Export DXF+PDF` → отримати presigned URL, обидва файли завантажуються.
+- [ ] Umami dashboard: у `Realtime` з'являються hit'и на `hart.crimea.ua` (не тільки `staging`).
+- [ ] `curl -fsS https://api.hart.crimea.ua/health` → `{"status":"ok"}`.
+
+### 8.3. KPI перший тиждень (Roadmap §KPI MVP)
+
+Джерело:
+
+- **users з експортом ≥ 10** — Umami dashboard, unique visitor'и з `event=export_done`. Мета — `≥ 10` за 7 днів.
+- **p95 export_duration < 5c** — Discord digest пункт `p95 export_duration_ms` для `event_type=export_completed`.
+- **error rate < 1%** — Sentry issues / total requests × 100. Порожньо або 0 issues — OK.
+
+Якщо після 7 днів:
+
+- users < 10 → продукт незнайомий; писати про запуск у пости/канали (окрема задача).
+- p95 > 5c → shortcut CPU/RAM peak; переглянути ADR-011 tier'у.
+- error rate > 1% → issue кожного топа-помилки, окрема гілка bugfix.
+
+### 8.4. Rollback
+
+Якщо після go-live виявлено критичну проблему:
+
+1. **CF DNS — швидкий rollback:** видалити A/CNAME записи `hart.crimea.ua` і `api.hart.crimea.ua` → домен повертається до попереднього стану (порожній 200 з CF-default або через WAF-rule «Under construction»). Час: <60s (CF cache).
+2. **Ansible rollback** до попереднього sha:
+   ```bash
+   gh workflow run deploy-staging.yml -f version=sha-<pre-go-live>
+   ```
+   (Runbook §4.)
+
+Post-mortem у `docs/13_PROGRESS_LOG.md` як окремий hotfix-запис (за конвенцією `Feature X.Y.hotfix-Z`).
+
+---
+
+## §9. Перший день у проді — health checklist
 
 Через ~24 год після першого deploy:
 

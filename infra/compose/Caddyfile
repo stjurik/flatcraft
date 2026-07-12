@@ -44,6 +44,18 @@ staging.hart.crimea.ua {
 	}
 }
 
+# ─── Umami (аналітика, ADR-032 §4) ──────────────────────────────────────────
+# Публічно віддає лише `/script.js` (трекер) і `/api/send` (прийом подій);
+# `/` (dashboard) захищений email/паролем Umami (ADR-032 §4). Той самий CF
+# Origin Cert, що й для основного сайту. DNS у CF: `analytics.hart.crimea.ua`
+# proxied → CF Origin.
+analytics.hart.crimea.ua {
+	tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
+	import security_headers
+
+	reverse_proxy umami:3000
+}
+
 # ─── API (Fastify) ──────────────────────────────────────────────────────────
 api-staging.hart.crimea.ua {
 	tls /etc/caddy/cf-origin/cert.pem /etc/caddy/cf-origin/key.pem
