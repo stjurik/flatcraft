@@ -205,9 +205,9 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 
 - [ ] **5.1.** Sentry SDK у web + api + worker; `beforeSend` фільтр PII
 - [ ] **5.2.** Plausible/Umami self-hosted або хмарний акаунт
-- [ ] **5.3.** Cookie banner (мінімальний, GDPR-сумісний — наш власний компонент)
-- [ ] **5.4.** Privacy Policy + ToS + Cookie Policy (UA + EN, шаблон у `legal/`)
-- [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete`
+- [x] **5.3.** ~~Cookie banner~~ — **банер не потрібен**: Umami self-hosted cookie-less (ADR-032 §4, ADR-006). У Footer/SiteLinks — стислий рядок «Без трекінг-cookies»; секція `#cookies` у `/privacy`. — 2026-07-12 (draft)
+- [x] **5.4.** Privacy Policy + ToS **draft** (`/privacy`, `/terms` UA + `/privacy/en`, `/terms/en` EN). Кожна сторінка містить банер «Драфт, не є юридичною консультацією; фінальна версія — після рев'ю юристом». Легальний рев'ю юристом — окрема задача перед публічним soft-launch. — 2026-07-12 (draft)
+- [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete` — **відкладено до Phase 3 (auth)**. Без акаунтів немає ідентифіковного суб'єкта → відповідних DSR-функцій експортувати/видаляти теж немає (події зберігаються без PII, ADR-032).
 - [x] **5.6.** Cloud-сервер + DNS + R2 — **код готовий** (Phase 5A: `infra/compose/docker-compose.prod.yml` + `Caddyfile` з CF Origin Cert, ADR-014). Сам сервер створює yurii за runbook'ом `docs/08_DEPLOYMENT.md` §0. — 2026-05-18
 - [x] **5.7.** Ansible-плейбук — 6 ролей (base/docker/firewall/flatcraft/backups/monitoring) на Debian 12 (Phase 5C). `--syntax-check` і `ansible-lint --profile production` зелені у CI. — 2026-05-18
 - [x] **5.8.** Backup-скрипт: cron 03:00 → `pg_dump -Fc` (docker exec з PGPASSWORD) → age encrypt → rclone у R2 `flatcraft-backups`. Recovery flow задокументовано (`docs/08_DEPLOYMENT.md` §5.5). — 2026-05-18 (hotfix 2026-05-22 на double-compression і auth)

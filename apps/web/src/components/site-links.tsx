@@ -34,9 +34,9 @@ const COLUMNS: ReadonlyArray<ColumnDef> = [
   {
     title: "Юридичне",
     items: [
-      { label: "Privacy", href: "/soon" },
-      { label: "Terms", href: "/soon" },
-      { label: "Cookies", href: "/soon" },
+      { label: "Privacy", href: "/privacy" },
+      { label: "Terms", href: "/terms" },
+      { label: "Cookies", href: "/privacy#cookies" },
     ],
   },
 ];
@@ -48,39 +48,45 @@ const COLUMNS: ReadonlyArray<ColumnDef> = [
  */
 export function SiteLinks() {
   return (
-    <nav
-      data-testid="site-links"
-      aria-label="Карта сайту"
-      className="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8"
-    >
-      {COLUMNS.map((col) => (
-        <div key={col.title} className="flex flex-col gap-2">
-          <h2 className="text-fg text-sm font-semibold uppercase tracking-wide">{col.title}</h2>
-          <ul className="flex flex-col gap-1">
-            {col.items.map((item) => (
-              <li key={`${col.title}-${item.label}`}>
-                {item.external ? (
-                  <a
-                    href={item.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-fg-muted hover:text-fg min-h-tap inline-flex items-center text-sm"
-                  >
-                    {item.label}
-                  </a>
-                ) : (
-                  <Link
-                    href={item.href}
-                    className="text-fg-muted hover:text-fg min-h-tap inline-flex items-center text-sm"
-                  >
-                    {item.label}
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </nav>
+    <div className="flex flex-col gap-4">
+      <nav
+        data-testid="site-links"
+        aria-label="Карта сайту"
+        className="grid grid-cols-1 gap-6 sm:grid-cols-3 sm:gap-8"
+      >
+        {COLUMNS.map((col) => (
+          <div key={col.title} className="flex flex-col gap-2">
+            <h2 className="text-fg text-sm font-semibold uppercase tracking-wide">{col.title}</h2>
+            <ul className="flex flex-col gap-1">
+              {col.items.map((item) => (
+                <li key={`${col.title}-${item.label}`}>
+                  {item.external ? (
+                    <a
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-fg-muted hover:text-fg min-h-tap inline-flex items-center text-sm"
+                    >
+                      {item.label}
+                    </a>
+                  ) : (
+                    <Link
+                      href={item.href}
+                      className="text-fg-muted hover:text-fg min-h-tap inline-flex items-center text-sm"
+                    >
+                      {item.label}
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+      {/* Cookie-нотис (WP3 legal-мінімум): Umami cookie-less → banner непотрібен. */}
+      <p data-testid="site-cookie-note" className="text-fg-subtle text-xs">
+        Без трекінг-cookies (аналітика Umami self-hosted, cookie-less).
+      </p>
+    </div>
   );
 }
