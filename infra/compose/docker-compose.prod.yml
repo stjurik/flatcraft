@@ -202,6 +202,42 @@ services:
       start_period: 30s
     logging: *default-logging
 
+  # ─── Umami (аналітика self-hosted, ADR-032 §4) ──────────────────────────
+  # Окрема БД `umami` у нашому Postgres-контейнері (ADR-032 §4 — не новий
+  # datastore). Створення БД — Ansible-task у ролі flatcraft (idempotent через
+  # `docker exec ... psql`). Umami сам виконує свою schema-migration на старті.
+  # `TRACKER_SCRIPT_NAME=script` → скрипт віддається як `/script.js`
+  # (узгоджено з `NEXT_PUBLIC_UMAMI_SRC` у web-стеку; коротка назва менше
+  # блокується ad-blocker'ами). Внутрішня телеметрія Umami вимкнена
+  # (`DISABLE_TELEMETRY=1`) — GDPR-обіцянка «дані в UA».
+  # mem_limit 192m — див. RAM-таблицю у PLAN.md.
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-v2.19.0
+    restart: "on-failure:5"
+    mem_limit: 192m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${UMAMI_APP_SECRET}
+      NODE_ENV: production
+      TRACKER_SCRIPT_NAME: script
+      DISABLE_TELEMETRY: "1"
+    networks:
+      - internal # для конекту до postgres
+      - web # для reverse-proxy від caddy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- --spider http://127.0.0.1:3000/api/heartbeat || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging: *default-logging
+
   # ─── Caddy (reverse-proxy + TLS termination з CF Origin Cert, ADR-014) ──
   caddy:
     image: caddy:2-alpine

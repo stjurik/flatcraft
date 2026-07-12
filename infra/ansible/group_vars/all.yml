@@ -36,6 +36,14 @@ s3_bucket_backups: flatcraft-backups
 # ─── Sentry env tag ────────────────────────────────────────────────────────
 sentry_environment: staging
 
+# ─── Umami (ADR-032 §4, Phase 3.3-B) ───────────────────────────────────────
+# Domain для tracker-script; треба CF DNS proxied A/CNAME → origin IP.
+# Компоуз-image закріплено у docker-compose.prod.yml (pinned semver).
+umami_domain: analytics.hart.crimea.ua
+# Override за потреби (напр. якщо треба blob-CDN за межами analytics-домену).
+# Дефолт зібрано у env.prod.j2: `https://{{ umami_domain }}/script.js`.
+umami_tracker_src: ""
+
 # ─── Admin seed ────────────────────────────────────────────────────────────
 seed_admin_email: admin@hart.crimea.ua
 

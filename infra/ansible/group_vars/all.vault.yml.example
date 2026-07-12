@@ -29,8 +29,26 @@ vault_auth_secret: "__REPLACE_openssl_rand_hex_32__"
 # ─── Admin seed (Phase 3) ───────────────────────────────────────────────────
 vault_seed_admin_password: "__REPLACE_openssl_rand_hex_16__"
 
-# ─── Sentry (порожнє до Phase 5.1) ──────────────────────────────────────────
+# ─── Sentry (ADR-032; порожнє до створення проєктів у Sentry UI) ───────────
+# Три окремі DSN — по одному на кожен сервіс (web/api/worker). У Sentry
+# створити три проєкти (Node.js для api, Next.js для web, Python для worker).
+# vault_sentry_dsn — server-side DSN для api+worker; NEXT_PUBLIC_SENTRY_DSN —
+# окремий (публічний, інлайниться у web-bundle).
 vault_sentry_dsn: ""
+vault_next_public_sentry_dsn: ""
+
+# ─── Umami (ADR-032 §4, Phase 3.3-B) ────────────────────────────────────────
+# APP_SECRET: `openssl rand -base64 32`. Обов'язковий для старту Umami.
+# WEBSITE_ID: створюється у Umami UI після першого deploy → website settings
+#             → Tracking code → UUID → сюди → повторний deploy для інлайнінгу
+#             у web-bundle. До того NEXT_PUBLIC_UMAMI_WEBSITE_ID='' → track no-op.
+vault_umami_app_secret: "__REPLACE_openssl_rand_base64_32__"
+vault_umami_website_id: ""
+
+# ─── Weekly digest (ADR-032; окремий webhook від monitoring) ────────────────
+# Discord webhook для щотижневого digest'а платформи (неділя 18:00 Europe/Kyiv).
+# ADR-032 §digest, ADR-023: звичайний POST, НЕ `pnpm discord:apply`.
+vault_digest_webhook_url: "https://discord.com/api/webhooks/__REPLACE_with_digest_webhook__"
 
 # ─── GHCR — для `docker login` при `docker compose pull` приватних образів ─
 vault_ghcr_username: "__REPLACE_github_username__"
