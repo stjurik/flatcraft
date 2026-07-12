@@ -980,23 +980,24 @@ git push
 - **Proxy:** Proxied (помаранчева хмарка)
 - **TTL:** Auto
 
-### 7.2. Sentry — 3 проєкти
+### 7.2. Sentry — 2 проєкти
 
 `sentry.io/organizations/<org>/projects/new/`:
 
-1. **hart-web** — платформа Next.js.
-2. **hart-api** — платформа Node.js (Fastify).
-3. **hart-cad-worker** — платформа Python.
+1. **flatcraft-web** — платформа Browser JS (Next.js client bundle).
+2. **flatcraft-server** — платформа Node.js; спільний для `api` (Fastify) і `cad-worker` (Python).
+
+> Один DSN для api+worker, бо `beforeSend`-фільтр PII і рівень таг'ювання (`sentry.environment`, `release`) однакові. Різні runtime'и потрапляють у Sentry з окремим тегом `runtime.name` — фільтрувати легко.
 
 Скопіювати DSN кожного. У vault:
 
 ```yaml
 # infra/ansible/group_vars/all.vault.yml
-vault_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<hart-api-id>" # для api + worker
-vault_next_public_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<hart-web-id>" # для web-клієнта
+vault_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<flatcraft-server-id>" # для api + worker
+vault_next_public_sentry_dsn: "https://<key>@<org>.ingest.sentry.io/<flatcraft-web-id>" # для web-клієнта
 ```
 
-> API і worker шарять DSN (`vault_sentry_dsn`) — сервер-стек однорідний по `beforeSend`-фільтру PII. Web-клієнт має **окремий** публічний DSN (інлайниться у bundle під час build).
+> Web-клієнт має **окремий** публічний DSN (інлайниться у bundle під час build).
 
 ### 7.3. Discord webhook для digest
 
@@ -1059,7 +1060,7 @@ gh run watch
 ### 7.8. Acceptance-перевірка (недільний ритуал після 1-го тижня)
 
 - **Umami dashboard** (`analytics.hart.crimea.ua`) — воронка `catalog → studio_opened → param_changed → validation_error_shown → export_clicked → export_done` показує реальні цифри.
-- **Sentry** — тестова помилка з `throw new Error('smoke')` у dev-guard route → з'являється у web/api/worker проєкті з `beforeSend` PII-фільтром (email/IP порожні).
+- **Sentry** — тестова помилка з `throw new Error('smoke')` у dev-guard route → з'являється у `flatcraft-web` (для web) і `flatcraft-server` (для api/worker, розрізняються тегом `runtime.name`), з `beforeSend` PII-фільтром (email/IP порожні).
 - **Discord `#digest-flatcraft`** — щонеділі 18:00 Europe/Kyiv падає markdown-digest з top-5 validation_error, failed exports, p95 export_duration.
 
 Якщо будь-що з цих трьох не працює через тиждень → GitHub issue з тегом `observability-broken`.

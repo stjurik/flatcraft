@@ -10,8 +10,10 @@
 #   * Жодних `ports:` крім Caddy → внутрішній трафік не виходить за docker-мережу.
 #   * Два named bridge networks: `internal` (db/redis/worker) і `web` (caddy↔api/web).
 #     Caddy НЕ має доступу до postgres/redis, postgres/redis НЕ доступні з web-net.
-#   * `mem_limit` на кожному сервісі — сума ≤ 3.5 GB, лишається запас + 2 GB swap (Ansible base role).
-#   * Healthcheck на всіх 6 сервісах; `depends_on: service_healthy` для коректного boot order.
+#   * `mem_limit` на кожному сервісі — сума ~3.6 GB hard cap (512+256+1500+512+512+256+128),
+#     реальний peak ~2.4 GB; лишається запас у RAM + 2 GB swap (Ansible base role).
+#     Peak-и не одночасні: cad-worker peak-ить у момент експорту, web/api idle між request'ами.
+#   * Healthcheck на всіх 7 сервісах; `depends_on: service_healthy` для коректного boot order.
 #   * Образи з `${IMAGE_PREFIX}/flatcraft-<service>:${APP_VERSION}` — release pinning через APP_VERSION.
 
 name: flatcraft
@@ -210,11 +212,12 @@ services:
   # (узгоджено з `NEXT_PUBLIC_UMAMI_SRC` у web-стеку; коротка назва менше
   # блокується ad-blocker'ами). Внутрішня телеметрія Umami вимкнена
   # (`DISABLE_TELEMETRY=1`) — GDPR-обіцянка «дані в UA».
-  # mem_limit 192m — див. RAM-таблицю у PLAN.md.
+  # mem_limit 256m: idle Umami ~200 MB (Next.js SSR); 192m ризикувало
+  # OOM-loop при першому відкритті dashboard'а.
   umami:
     image: ghcr.io/umami-software/umami:postgresql-v2.19.0
     restart: "on-failure:5"
-    mem_limit: 192m
+    mem_limit: 256m
     depends_on:
       postgres:
         condition: service_healthy
