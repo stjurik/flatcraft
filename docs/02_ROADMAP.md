@@ -135,25 +135,25 @@ Umami міряє, який constraint блокує користувачів.
 Патерн фази (як Phase 3.0): PR 1 docs-only (ADR-gate) → імплементаційні PR → фінальний
 progress-log PR.
 
-- [ ] **3.3 PR 1.** ADR-032 + `docs/11_OBSERVABILITY.md` + ця секція Roadmap + preview у Data
-      Model / API Contract. **Docs-only** (цей PR).
-- [ ] **3.3 PR 2.** `events` + persist `exports` у Postgres: `packages/db/src/schema.ts`
+- [x] **3.3 PR 1.** ADR-032 + `docs/11_OBSERVABILITY.md` + ця секція Roadmap + preview у Data
+      Model / API Contract. **Docs-only.** — 2026-07-06 (#54)
+- [x] **3.3 PR 2.** `events` + persist `exports` у Postgres: `packages/db/src/schema.ts`
       (+ міграція — yurii вручну), `packages/types/src/events/` (Zod payload'и — спільне джерело
       api/worker), запис `export_requested`/`validation_rejected`/`export_completed`/`export_failed`
       в `apps/api` (заміна in-memory `JobStore` на drizzle-репо з тим самим інтерфейсом),
       `cad_started`/`cad_completed` з `duration_ms` у `workers/cad`. **No-PII тест обов'язковий.**
-      (промпт B1)
-- [ ] **3.3 PR 3.** Sentry ×3 (`@sentry/nextjs` web, `@sentry/node` Fastify-plugin api,
+      (промпт B1) — 2026-07-06 (#55)
+- [x] **3.3 PR 3.** Sentry ×3 (`@sentry/nextjs` web, `@sentry/node` Fastify-plugin api,
       `sentry-sdk` worker); `beforeSend` PII-фільтр з unit-тестом у кожному сервісі (інваріант §8);
       errors 100 % / traces 0; DSN через env. Нові top-level залежності — з явним OK (§6).
-      (промпт B2)
-- [ ] **3.3 PR 4.** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
+      (промпт B2) — 2026-07-06 (#56)
+- [x] **3.3 PR 4.** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
       `build_digest(rows) → str` з unit-тестами (порожній / типовий / deviation тиждень); формат —
-      `docs/11 §9`. (промпт B5)
-- [ ] **3.3 PR 5.** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
-      `catalog→…→export_done`; звірка з бюджетами §9. (14 §4.2, ADR-032 §4)
-- [ ] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` + ротація CLAUDE.md §13 (після
-      merge імплементаційних PR).
+      `docs/11 §9`. (промпт B5) — 2026-07-06 (#60)
+- [x] **3.3 PR 5.** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
+      `catalog→…→export_done`; звірка з бюджетами §9. (14 §4.2, ADR-032 §4) — 2026-07-06 (#58)
+- [x] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` + ротація CLAUDE.md §13 (після
+      merge імплементаційних PR). — 2026-07-06 (#59)
 
 **Наступні підфази треку** (окремі ADR-gate PR, не в цій фазі): **3.4** виробничий фідбек
 (`/f/{export_id}` + `export_feedback`, замикає R-01), **3.5** Template Registry (ADR-033), **3.6**
@@ -203,8 +203,8 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 
 **Definition of Done:** домен `hart.crimea.ua`, SSL через Cloudflare, GDPR-compliance, Privacy/ToS опубліковані, Sentry прокладено, перші 10 живих юзерів.
 
-- [ ] **5.1.** Sentry SDK у web + api + worker; `beforeSend` фільтр PII
-- [ ] **5.2.** Plausible/Umami self-hosted або хмарний акаунт
+- [x] **5.1.** Sentry SDK у web + api + worker; `beforeSend` фільтр PII — код Phase 3.3 PR 3 (#56, 2026-07-06); **активовано на staging 2026-07-12** (PR #63 vault + #65 deploy race fix)
+- [x] **5.2.** Plausible/Umami self-hosted або хмарний акаунт — **Umami self-hosted** (ADR-032 §4), код Phase 3.3 PR 5 (#58, 2026-07-06); **активовано на staging 2026-07-12** (PR #63, #65)
 - [x] **5.3.** ~~Cookie banner~~ — **банер не потрібен**: Umami self-hosted cookie-less (ADR-032 §4, ADR-006). У Footer/SiteLinks — стислий рядок «Без трекінг-cookies»; секція `#cookies` у `/privacy`. — 2026-07-12 (draft)
 - [x] **5.4.** Privacy Policy + ToS **draft** (`/privacy`, `/terms` UA + `/privacy/en`, `/terms/en` EN). Кожна сторінка містить банер «Драфт, не є юридичною консультацією; фінальна версія — після рев'ю юристом». Легальний рев'ю юристом — окрема задача перед публічним soft-launch. — 2026-07-12 (draft)
 - [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete` — **відкладено до Phase 3 (auth)**. Без акаунтів немає ідентифіковного суб'єкта → відповідних DSR-функцій експортувати/видаляти теж немає (події зберігаються без PII, ADR-032).
