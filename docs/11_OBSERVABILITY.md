@@ -66,15 +66,16 @@ CREATE INDEX events_template_idx ON events (template_slug, ts DESC);
 
 ## 4. Словник `event_type`
 
-| `event_type`          | Хто емітить             | Коли                                 | Ключові поля                           |
-| --------------------- | ----------------------- | ------------------------------------ | -------------------------------------- |
-| `export_requested`    | api (Fastify hook)      | прийнято `POST /exports` (після Zod) | template_slug, params, session_hash    |
-| `validation_rejected` | api (gate ADR-019/026)  | серверний gate відхилив (422)        | template_slug, params, error_code      |
-| `export_completed`    | api                     | job done, артефакти в R2             | template_slug, duration_ms             |
-| `export_failed`       | api                     | job failed (cad-worker/мережа)       | template_slug, error_code, duration_ms |
-| `cad_started`         | api (worker round-trip) | старт CAD-операції                   | template_slug                          |
-| `cad_completed`       | api (worker round-trip) | кінець CAD-операції                  | template_slug, duration_ms             |
-| `web_vital`           | web → api               | тік FCP/TTI/mesh-update              | params (metric+value), session_hash    |
+| `event_type`          | Хто емітить             | Коли                                 | Ключові поля                                            |
+| --------------------- | ----------------------- | ------------------------------------ | ------------------------------------------------------- |
+| `export_requested`    | api (Fastify hook)      | прийнято `POST /exports` (після Zod) | template_slug, params, session_hash                     |
+| `validation_rejected` | api (gate ADR-019/026)  | серверний gate відхилив (422)        | template_slug, params, error_code                       |
+| `export_completed`    | api                     | job done, артефакти в R2             | template_slug, duration_ms                              |
+| `export_failed`       | api                     | job failed (cad-worker/мережа)       | template_slug, error_code, duration_ms                  |
+| `cad_started`         | api (worker round-trip) | старт CAD-операції                   | template_slug                                           |
+| `cad_completed`       | api (worker round-trip) | кінець CAD-операції                  | template_slug, duration_ms                              |
+| `web_vital`           | web → api               | тік FCP/TTI/mesh-update              | params (metric+value), session_hash                     |
+| `feedback_submitted`  | api (Phase 3.4)         | `POST /feedback/{export_id}` OK      | template_slug, params (outcome + has\_\*), session_hash |
 
 Кореляції, що дає словник:
 
@@ -234,9 +235,23 @@ ADR-023 / CLAUDE.md §6). Ядро — pure-функція `build_digest(rows) �
 | export (DXF) | …   | 3 c    | ✅/⚠️  |
 | export (PDF) | …   | 5 c    | …      |
 
-## 4. Виробничий фідбек (Phase 3.4+)
+## 4. Виробничий фідбек (Phase 3.4, ADR-032 §feedback / R-01 mitigation 4)
 
-| export_id | outcome | deviation_mm | коментар | ← порожньо до Phase 3.4
+Джерело: `POST /feedback/{export_id}` (див. `docs/06_API_CONTRACT.md`). Digest агрегує
+`export_feedback` таблицю за 7 днів у три метрики:
+
+- **outcome-розподіл по шаблонах:** {slug} → made/deviations/failed rate.
+- **Deviation-репорти** (outcome!=made): скільки, топ-5 за коротким summary (перші 80 символів
+  `deviation_description`, sanitized). Це прямий вхід у калібрування K-фактора (R-01).
+- **Failed rate по шаблонах:** якщо >10% failed за 7 днів → P1-issue «шаблон {slug} має системний
+  дефект».
+
+Приклад:
+
+| slug             | made | deviations | failed | приклад deviation               |
+| ---------------- | ---- | ---------- | ------ | ------------------------------- |
+| l_bracket        | 8    | 1          | 0      | «полиця +0.3 мм»                |
+| perforated_panel | 3    | 0          | 1      | «отвори не збіглись з монтажем» |
 
 ## 5. Sentry summary
 

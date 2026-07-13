@@ -62,8 +62,8 @@ describe("EventPayloadSchema — discriminated union", () => {
     ).toBe(false);
   });
 
-  it("покриває рівно 7 типів подій", () => {
-    expect(EVENT_TYPES).toHaveLength(7);
+  it("покриває рівно 8 типів подій (додано feedback_submitted у Phase 3.4)", () => {
+    expect(EVENT_TYPES).toHaveLength(8);
   });
 });
 

@@ -19,6 +19,7 @@ export const EVENT_TYPES = [
   "cad_started",
   "cad_completed",
   "web_vital",
+  "feedback_submitted",
 ] as const;
 
 export const EventTypeSchema = z.enum(EVENT_TYPES);
@@ -91,6 +92,20 @@ export const EventPayloadSchema = z.discriminatedUnion("event_type", [
     params: z.object({
       metric: z.enum(["FCP", "TTI", "mesh_update"]),
       value_ms: z.number().nonnegative(),
+    }),
+    ...baseShape,
+  }),
+  // Виробничий фідбек з /f/{export_id} (Phase 3.4, R-01 mitigation 4).
+  // params містить agregat (outcome + чи є deviation) — БЕЗ вмісту коментаря
+  // і БЕЗ export_id (це деталі, які живуть у `export_feedback` таблиці).
+  // Мета події — digest бачить розподіл outcome і deviation-rate по шаблонах.
+  z.object({
+    event_type: z.literal("feedback_submitted"),
+    params: z.object({
+      outcome: z.enum(["made", "deviations", "failed"]),
+      has_deviation_description: z.boolean(),
+      has_comment: z.boolean(),
+      locale: z.enum(["uk", "en"]),
     }),
     ...baseShape,
   }),

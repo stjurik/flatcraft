@@ -26,11 +26,16 @@ export interface DurationRow {
   readonly budgetMs: number;
 }
 
+/**
+ * Виробничий фідбек з `export_feedback` таблиці (Phase 3.4, ADR-032 §feedback).
+ * Відображаємо коротко: template_slug + outcome + короткий фрагмент deviation_description
+ * (перші 80 символів, вже sanitized upstream). Ідентифікатори (exportId) не виводимо у
+ * канал — лише агрегати. Довгі коментарі — у Postgres, доступ адміну через SQL.
+ */
 export interface FeedbackRow {
-  readonly exportId: string;
-  readonly outcome: string;
-  readonly deviationMm: number | null;
-  readonly comment: string;
+  readonly templateSlug: string | null;
+  readonly outcome: "made" | "deviations" | "failed";
+  readonly deviationSummary: string | null;
 }
 
 export interface SentryIssueRow {
@@ -126,18 +131,13 @@ export function buildDigest(data: DigestData): string {
     "",
   );
 
-  lines.push("## 4. Виробничий фідбек (Phase 3.4+)");
+  lines.push("## 4. Виробничий фідбек (Phase 3.4, R-01 mitigation 4)");
   lines.push(
     data.feedback.length === 0
       ? EMPTY
       : mdTable(
-          ["export_id", "outcome", "deviation_mm", "коментар"],
-          data.feedback.map((f) => [
-            f.exportId,
-            f.outcome,
-            f.deviationMm === null ? "—" : String(f.deviationMm),
-            f.comment || "—",
-          ]),
+          ["template", "outcome", "deviation (перші 80 симв.)"],
+          data.feedback.map((f) => [f.templateSlug ?? "—", f.outcome, f.deviationSummary || "—"]),
         ),
     "",
   );
