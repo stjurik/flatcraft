@@ -9,7 +9,7 @@
 ```ts
 // packages/templates/src/definition.ts (новий пакет, ADR-033 §1)
 import { z } from "zod";
-import type { ShapeCommand } from "@flatcraft/ui/3d-viewport/geometry";
+import type { ShapeCommand } from "@flatcraft/cad-engine/geometry"; // ПЕРЕЇЖДЖАЄ з @flatcraft/ui у PR 2 (ADR-033 §1: react-free реєстр)
 import type { ReactNode } from "react";
 import type { ProfileValidator } from "@flatcraft/cad-engine/validators";
 
@@ -40,6 +40,13 @@ export interface TemplateDefinition<Params> {
 
 export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_holes";
 ```
+
+### Deps `packages/templates` (ADR-033 §1)
+
+- **Runtime deps:** `@flatcraft/types` + `@flatcraft/cad-engine`. **НЕ** `@flatcraft/ui`.
+- **Type-only deps:** `zod`, `react` (лише `type { ReactNode }` для `kind: 'composed'` — TS-strip'ає при компіляції, у runtime-bundle `apps/api` не потрапляє).
+- **Наслідок для міграції:** тип `ShapeCommand` у PR 2 переїжджає з `packages/ui/src/3d-viewport/geometry.ts` у `packages/cad-engine/src/geometry/*` (це data-контракт для sceneBuilder-ів, не UI-код). `packages/ui` стає споживачем реєстру (generic-viewport), а не залежністю.
+- **Обов'язковий інваріант (§5):** import реєстру у `apps/api` НЕ тягне `react`/`react-dom`. Захищено §3.5.
 
 ### Registry (compile-time typed)
 
@@ -184,6 +191,22 @@ for (const slug of Object.keys(TEMPLATE_REGISTRY)) {
 
 Закриває F7 (`l_bracket`, `enclosed_shelf` тепер мають coverage).
 
+### 3.5. React-free import у `apps/api` (bundle inclusion)
+
+`packages/templates` — data-пакет. Реєстр повинен вантажитись у `apps/api` (Node.js, Fastify) БЕЗ React у бандлі. Порушення інваріанта = React у request-path сервера (bundle-size, startup, стороння runtime-залежність).
+
+```ts
+// apps/api/tests/registry-bundle.test.ts (додається у PR 2 разом з реєстром)
+import { parseImportGraph } from "./helpers/import-graph"; // esbuild-metafile або madge
+
+test("registry import у apps/api НЕ тягне react/react-dom", async () => {
+  const graph = await parseImportGraph("apps/api/src/routes/exports.ts");
+  expect(graph.modules).not.toEqual(expect.arrayContaining(["react", "react-dom"]));
+});
+```
+
+Реалізація: bundle `apps/api` через esbuild з `--metafile`, парсити метафайл, перевіряти відсутність `react*` у списку модулів. Альтернативно — `madge --json`. Fail-closed CI.
+
 ## 4. Definition of Done нового шаблону
 
 **Чекліст для промпту «Додай шаблон `<slug>`»:**
@@ -218,6 +241,7 @@ for (const slug of Object.keys(TEMPLATE_REGISTRY)) {
 | Products ADR-027                         | ADR-027        | `def.products?: ProductDefinition[]` — те саме shape'ом (`fixed`, `userEditableFields`)                  |
 | Browser-safe entry `packages/cad-engine` | CLAUDE.md §13  | `packages/templates` НЕ імпортує `node:*`; `fs`-loader — тільки через subpath `/node`                    |
 | Server-side validation ADR-019           | ADR-019        | Fastify-gate викликає `def.validators` через registry ДО постановки job'а в BullMQ                       |
+| React-free реєстр                        | ADR-033 §1     | conformance §3.5 — import-graph `apps/api/src/routes/exports.ts` не містить `react`/`react-dom`          |
 
 Порушення будь-якого — конформанс-суита червона у CI.
 
@@ -225,16 +249,16 @@ for (const slug of Object.keys(TEMPLATE_REGISTRY)) {
 
 Порядок PR-ів (обгрунтовано у C1 §4 і ADR-033 §CONSEQUENCES):
 
-| PR  | Зміст                                                                                                        |
-| --- | ------------------------------------------------------------------------------------------------------------ |
-| 1   | ADR-033 + `docs/12_TEMPLATE_CONTRACT.md` + Roadmap 3.5 checklist (**цей PR**, docs-only)                     |
-| 2   | `packages/templates` — новий пакет: `TemplateDefinition`, `TEMPLATE_REGISTRY` (порожній), conformance-suite  |
-| 3   | Мігрувати `perforated_panel` (найпростіший, вже після ADR-031-уніфікації)                                    |
-| 4   | Мігрувати `corner_angle` (grid-based, дублює `l_bracket` profile)                                            |
-| 5   | Мігрувати `l_bracket` (canonical); ExportRequest переходить на superRefine (F1 закривається)                 |
-| 6   | Мігрувати `z_bracket` (2 bends, array)                                                                       |
-| 7   | Мігрувати `wall_shelf` (переніс refine `front_lip_mm` у definition; F1 остаточно закрито)                    |
-| 8   | Мігрувати `enclosed_shelf` (найскладніший — cross-shape + nested opts; F2 закрито render-gate'ом)            |
-| 9   | Cleanup: видалити `apps/web/src/components/*-{studio,editor,viewport}.tsx` × 18 файлів, `SLUGS_WITH_*` set-и |
+| PR  | Зміст                                                                                                                                                                                                                                                                            |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | ADR-033 + `docs/12_TEMPLATE_CONTRACT.md` + Roadmap 3.5 checklist (**цей PR**, docs-only)                                                                                                                                                                                         |
+| 2   | `packages/templates` — новий пакет: `TemplateDefinition`, `TEMPLATE_REGISTRY` (порожній), conformance-suite (у т.ч. §3.5 react-free); **перенесення `ShapeCommand` з `packages/ui/src/3d-viewport/geometry.ts` у `packages/cad-engine`** (споживачі-import'и `apps/web` оновити) |
+| 3   | Мігрувати `perforated_panel` (найпростіший, вже після ADR-031-уніфікації)                                                                                                                                                                                                        |
+| 4   | Мігрувати `corner_angle` (grid-based, дублює `l_bracket` profile)                                                                                                                                                                                                                |
+| 5   | Мігрувати `l_bracket` (canonical); ExportRequest переходить на superRefine (F1 закривається)                                                                                                                                                                                     |
+| 6   | Мігрувати `z_bracket` (2 bends, array)                                                                                                                                                                                                                                           |
+| 7   | Мігрувати `wall_shelf` (переніс refine `front_lip_mm` у definition; F1 остаточно закрито)                                                                                                                                                                                        |
+| 8   | Мігрувати `enclosed_shelf` (найскладніший — cross-shape + nested opts; F2 закрито render-gate'ом)                                                                                                                                                                                |
+| 9   | Cleanup: видалити `apps/web/src/components/*-{studio,editor,viewport}.tsx` × 18 файлів, `SLUGS_WITH_*` set-и                                                                                                                                                                     |
 
 **Правило кожного PR №3-8:** conformance-suite для ЦЬОГО шаблону зелена; існуючі шаблони — все ще працюють через `if slug in TEMPLATE_REGISTRY: registry-path else: legacy-path` (dual-run під час міграції). E2e для всіх шаблонів зелений після КОЖНОГО PR.
