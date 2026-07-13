@@ -1037,6 +1037,103 @@ Umami (self-hosted) + Discord webhook покривають 100 % потреб MV
 
 ---
 
+## ADR-033: Template Registry contract — єдиний реєстр шаблонів + conformance-suite
+
+**Статус:** Proposed (2026-07-13). Docs-only gate Phase 3.5 (`docs/02_ROADMAP.md`, промпт A2/B4 з `docs/15_LLM_PROMPTS.md`).
+
+**Контекст:**
+
+- 14 §1.2, §2 і C1-інвентаризація (`docs/promts/inputs/c1-template-inventory.md`, 2026-07-13) показали: додавання шаблону №7 сьогодні торкається **~12 місць у 5 workspace**. Вартість «нового виробу» — ~ 20 файлів + 3 тестові набори + оновлення 4-х hardcoded set-ів у `template-studio.tsx:29-35,90-107`.
+- Дрейф уже фактичний. C1 фіксує **8 поведінкових розбіжностей** з file:line:
+  - F1 `WallShelfParametersBaseSchema` у ExportRequest замість refined → server пропускає `front_lip_mm` constraint.
+  - F2 `enclosed-shelf-viewport.tsx` без `validateProfile` (порушує інваріант ADR-026).
+  - F3 `perforated-panel-editor.tsx:59-62` замінює `bendMatrixIssues` → server кидає при експорті.
+  - F4 `bends`-контракт має **3 різні форми** (scalar / array-2 / array-4 / array-1-2 / array-3-4).
+  - F5 Scene-builder розколотий між `packages/ui/src/3d-viewport/geometry.ts` (3 шаблони) і inline у `-scene.tsx` (2 шаблони).
+  - F6 `enclosed_shelf` не експортовано з Python `templates/__init__.py:__all__`.
+  - F7 `l_bracket` і `enclosed_shelf` — немає dedicated e2e-spec.
+  - F8 `perforated_panel` — SegmentedControl над AutoForm, patternless.
+- Мета — новий шаблон = **1 TS-модуль + 1 Python-модуль + снапшоти + автогенерований spec**. Нуль правок у `apps/web`, `apps/api`. «Різні вироби по-різному відображаються/обраховуються» має стати **структурно неможливим**.
+
+**Рішення (6 підпунктів, кожне ALT/CHOICE/RATIONALE/CONSEQUENCES).**
+
+### 1. Де живе реєстр — новий `packages/templates` vs розширення `packages/types`
+
+- _ALT-A:_ окремий пакет `packages/templates` — містить `TemplateDefinition`, реєстр, sceneBuilder-и, validators.
+- _ALT-B:_ розширити `packages/types/src/templates/` — додати сам definition-контракт поряд зі схемами.
+- _CHOICE:_ **ALT-A** (`packages/templates`).
+- _RATIONALE:_ `packages/types` за конвенцією browser-safe і містить **лише Zod-схеми** без runtime-залежностей (три.js, React, CadQuery). `sceneBuilder` тягне `three.js` — недоречно в `types`. `packages/ui` вже залежить від `three.js`, але містить UI-компоненти, а реєстр — це data. Окремий пакет тримає межу «data vs UI» чистою. Deps: `packages/templates` → `packages/types` + `packages/cad-engine` (validators + spec). Це джерело істини, з якого `apps/web`, `apps/api`, `workers/cad` (парити) читають.
+- _CONSEQUENCES:_ (+) один точковий import у web/api; (+) definition можна тестувати без React/three; (−) новий workspace = +tsconfig, +vitest, +CI-крок; (−) міграція C1-об'єктів (`hole_grid.ts`, частина `geometry.ts`) потребує перенесення (окремі PR).
+
+### 2. Доля `discriminatedUnion` у `ExportRequest`
+
+- _ALT-A:_ зберегти `discriminatedUnion` — генерувати його з реєстру у compile-time (codegen або TS-мапа).
+- _ALT-B:_ відмовитись від union — `ExportRequest = { slug: string, params: unknown }`, дискримінація у registry-lookup runtime.
+- _ALT-C:_ використовувати generic `z.object({ slug, params: z.unknown() }).superRefine((v, ctx) => registry[v.slug].schema.parse(v.params))`.
+- _CHOICE:_ **ALT-C** (`superRefine` через registry).
+- _RATIONALE:_ ALT-A вимагає **breaking-change для F1** (`WallShelfParametersBaseSchema` → refined) або codegen-стеку. ALT-B втрачає Zod-parse на межі API — гірший error message. ALT-C дає точний Zod-error, дозволяє **refined-схеми у registry** (не Base), і працює з будь-якою кількістю шаблонів без discriminatedUnion-обмежень. Type-narrow досягається через окремий `TemplateSlug`-літерал union, генерований з `Object.keys(TEMPLATE_REGISTRY)` через `satisfies` (compile-time).
+- _CONSEQUENCES:_ (+) F1 виправляється — server бачить `front_lip_mm` constraint; (+) `enclosed_shelf` / `perforated_panel` не мають Base-варіанту, вимога знімається; (−) TS-inferrence на `ExportRequest.params` потребує narrow-функції `narrowParams(slug, params)` — тонкий helper.
+
+### 3. Generic editor через AutoForm + `.describe()` vs збереження ручних editor'ів
+
+- _ALT-A:_ повний generic — `<AutoForm schema={def.schema} defaults={def.defaults} onChange={...} />`, ручних editor-файлів немає.
+- _ALT-B:_ generic + слоти для special controls (F8 SegmentedControl, F3 custom validator hint) через `def.ui.extraControls?: ExtraControlSpec[]`.
+- _ALT-C:_ зберегти ручні editor'и, обгорнути реєстром лише definition (мінімальний крок).
+- _CHOICE:_ **ALT-B** (generic + декларативні extra-controls).
+- _RATIONALE:_ ALT-A ламає F8 (SegmentedControl `hole_shape` не мапиться на AutoForm-полe без extra) і F5 (wall-shelf summary тексти). ALT-C нічого не міняє (18 файлів лишаються). ALT-B декларує extra-controls у definition (`{ kind: 'segmented', field: 'hole_shape', options: [...] }`), і generic-editor їх рендерить. Це закриває F8 без hard-code'у.
+- _CONSEQUENCES:_ (+) 18 файлів (`*-editor.tsx`) видаляються; (+) validation chain (`bendMatrixIssues + profileIssues + zodIssuesToFieldErrors + validatePerforation`) уніфікується у AutoForm через `def.validators: Validator[]` — F3 закрито; (−) contract'у розширюється (extra-controls kind-union); (−) для складніших UX (product-mode `visibleFields`) definition потребує опційного `def.ui.visibleFields?: string[]`.
+
+### 4. Generic viewport через sceneBuilder-реєстр
+
+- _ALT-A:_ definition має `def.ui.sceneBuilder: (params, thickness) => ShapeCommand[]` — generic-viewport будує `ExtrudeGeometry`.
+- _ALT-B:_ definition має `def.ui.render: (params, thickness) => ReactNode` — повна свобода R3F-JSX.
+- _ALT-C:_ реєстр з двома kind-ами: `{ kind: 'extrude', shapeBuilder }` для L/Z/wall/corner, `{ kind: 'composed', node }` для enclosed/perforated.
+- _CHOICE:_ **ALT-C** (два kind-и sceneBuilder).
+- _RATIONALE:_ ALT-A не тримає F5 (enclosed_shelf/perforated_panel — BoxGeometry-композиція, не 2D-shape sweep). ALT-B — занадто вільно, вбиває інваріант «нема per-slug коду в apps/web». ALT-C фіксує **два дозволених патерни** у контракті, і кожен новий шаблон обирає один. Це знімає F5.
+- _CONSEQUENCES:_ (+) `packages/ui/src/3d-viewport/geometry.ts` перетворюється на утиліти для `kind:'extrude'`; (+) `enclosed-shelf-scene.tsx`/`perforated-panel-scene.tsx` переносяться у definition; (+) F2 закривається — generic-viewport ЗАВЖДИ викликає `validateProfile()` через `def.validators`; (−) якщо з'явиться 3-й патерн (наприклад, procedural mesh), контракт розширюється (новий kind).
+
+### 5. Python-реєстр + parity-тест slug-ів
+
+- _ALT-A:_ ручний реєстр у `workers/cad/flatcraft_cad/templates/__init__.py` (`TEMPLATES: dict[str, type[Template]]`).
+- _ALT-B:_ автоматична реєстрація через `__init_subclass__` у `base.py:Template`.
+- _CHOICE:_ **ALT-A** (ручний dict).
+- _RATIONALE:_ ALT-B ламає explicit-import у Python (файл, який не імпортовано, не реєструється) — потрібен явний `from ... import *` у `__init__`, що додає магії. ALT-A закриває F6: якщо `enclosed_shelf` відсутній у dict, parity-тест з TS-реєстром негайно fail'ить у CI.
+- _CONSEQUENCES:_ (+) Parity-тест `test_templates_registry_parity`: `set(TS_REGISTRY.keys()) == set(PY_REGISTRY.keys())` (експортовано у JSON через `tools/scripts/export-registry.ts` під час prebuild); (+) F6 закривається; (−) prebuild-крок додає ~0.5с.
+
+### 6. Conformance-suite — параметризований набір, автогенерований з реєстру
+
+Для кожного slug у реєстрі CI ганяє КОЖНУ з перевірок:
+
+1. **Schema parity TS↔Python** — property-based (fast-check + hypothesis), як у Hotfix 2.10.e (150+ iter): згенерований TS-об'єкт валідно парситься Pydantic'ом і навпаки.
+2. **DXF/PDF детермінізм** — фіксований seed → фіксовані байти (снапшот-тест, patrern з `workers/cad`).
+3. **Render-gate** — на невалідних параметрах generic-viewport показує fallback, не крашиться (`R3FErrorBoundary` — backstop, ADR-026).
+4. **e2e smoke** — Playwright: відкрити `/templates/{slug}` → змінити параметр → export button reachable. Це **автогенерується з реєстру** — закриває F7 (`l_bracket`, `enclosed_shelf` тепер мають spec).
+
+Suite **fail-closed:** новий шаблон без усіх 4-х проходжень — червоний CI. Реєстр без conformance = червоний CI. Це і є структурна гарантія «шаблон не може бути доданий наполовину».
+
+**Інваріанти, які контракт НЕ сміє ламати (перерахую явно):**
+
+- **Байт-у-байт DXF/PDF** (CLAUDE.md §2.4) — снапшот-тести підтвердять. Ізометрія у PDF (ADR-025) і 2 шари DXF (ADR-024) — інваріанти.
+- **Render-gate ADR-026** — generic-viewport обов'язково викликає `validateProfile` перед mount'ом; ErrorBoundary — backstop.
+- **Products ADR-027** — `TemplateDefinition` має опційний `def.products: ProductDefinition[]` (`slug`, `fixed`, `userEditableFields`); products lookup — `apps/web` бере з реєстру.
+- **Browser-safe entry `packages/cad-engine`** — реєстр не тягне `node:*`; scene-builder-и — pure на браузерних API.
+- **Серверна валідація ADR-019** — `def.validators` викликаються Fastify-gate ДО постановки job'а в BullMQ.
+
+**Наслідки:**
+
+- Phase 3.5 стає **7 PR-ів** (per-template + registry-package): PR 2 — реєстр + conformance-suite (без міграцій шаблонів). PR 3-8 — по одному шаблону, від простого до складного (C1 §4 порядок: `perforated_panel` → `corner_angle` → `l_bracket` → `z_bracket` → `wall_shelf` → `enclosed_shelf`). E2e зелені після КОЖНОГО PR.
+- Після завершення Phase 3.5: `apps/web/src/components/*-{studio,editor,viewport}.tsx` × 18 файлів **видалено**; `TemplateStudioSlug` union автогенерований; `SLUGS_WITH_*` set-и — методи `def.capabilities: string[]`. F2 (render-gate), F5 (scene split), F6 (Python **all**), F7 (e2e coverage), F8 (SegmentedControl) — усі закриті контрактом.
+- ADR-033 базовий для **ADR-034 Process layer** (14 §3): `TemplateDefinition.process_slug` стає першим полем `Process`-абстракції.
+- Vendor-неутральність: `TemplateDefinition` не знає про sheet-metal specifics (bend_matrix, k_factor) — вони делеговані до `def.validators` і `def.process_slug`. Це готує ґрунт для 3D-друку / CNC як окремих processes.
+
+**Альтернативи (загальні для рішення):**
+
+- **Data-driven через YAML** (замість TypeScript-об'єктів у реєстрі) — відхилено: втрачається type-safety на TS-side, шаблон-схема Zod у YAML не серіалізується.
+- **Codegen з YAML-single-source** — розглядалося, відкладено як анти-ціль solo-проєкту (R-07): підтримка codegen'у — окрема робота, і TS/Python дублювання схем усе одно лишається (Pydantic ≠ Zod).
+- **Мікросервіс на template** — відхилено як явну анти-ціль 14 §5 (мікросервіси на 4 GB RAM).
+
+---
+
 _Шаблон нової ADR:_
 
 ```
