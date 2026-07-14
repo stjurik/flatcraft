@@ -31,6 +31,18 @@ COPY . .
 # Без цього браузер бере fallback localhost:4000 (apps/web/src/lib/api.ts).
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+# Umami-трекер (ADR-032): без цих build-arg'ів AnalyticsScripts рендерить null →
+# скрипт `/script.js` не потрапляє у HTML → 0 pageview'ів у Umami. Runtime-env
+# у compose/Ansible тут НЕ допомагає (NEXT_PUBLIC читається лише на build-time).
+ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
+ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=${NEXT_PUBLIC_UMAMI_WEBSITE_ID}
+ARG NEXT_PUBLIC_UMAMI_SRC
+ENV NEXT_PUBLIC_UMAMI_SRC=${NEXT_PUBLIC_UMAMI_SRC}
+# Sentry client-DSN — той самий build-time-inlining (латентно був відсутній).
+ARG NEXT_PUBLIC_SENTRY_DSN
+ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN}
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT
+ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=${NEXT_PUBLIC_SENTRY_ENVIRONMENT}
 # Next.js standalone output вимагає `output: 'standalone'` у next.config.ts.
 RUN pnpm --filter @flatcraft/web... build
 
