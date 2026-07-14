@@ -82,10 +82,19 @@ cat docs/promts/autorun/_autonomous-header.md docs/promts/autorun/a1.md | claude
 ```
 РЕЖИМ: АВТОНОМНИЙ HEADLESS-ПРОГІН. Це доповнення МОДИФІКУЄ промпт нижче:
 
+0. БАЗА ГІЛКИ — ПЕРШИЙ КРОК, до будь-яких правок. Робоча гілка МУСИТЬ
+   відгалужуватись від свіжого origin/main, інакше squash-merge затягне у main
+   чужі коміти базової гілки (клас помилки: fix-гілка від feature-гілки):
+     git fetch origin main
+     test "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)" \
+       || { echo "STOP: невірна база — гілка не від origin/main tip"; exit 1; }
+   Не збіглось → СТОП, далі не працюй: перестворись від origin/main
+   (git checkout -B <branch> origin/main) і повтори перевірку.
 1. Кроки «покажи ПЛАН і дочекайся OK від yurii» НЕ виконувати як паузу.
    Замість цього: запиши план у файл PLAN.md у корені гілки ПЕРШИМ commit'ом.
 2. Працюй без пауз до завершення всіх деліверейблів промпту.
-3. Фінал — ЗАВЖДИ: gh pr create --draft --fill (саме --draft). НЕ мерджити,
+3. Фінал — ЗАВЖДИ: gh pr create --draft --fill --base main (саме --draft і
+   явний --base main, щоб PR не пішов проти чужої базової гілки). НЕ мерджити,
    НЕ пушити в main, НЕ починати наступний PR фази.
 4. Якщо зустрів блокер, суперечність з ADR/інваріантом або рішення, яке в промпті
    позначене «узгодь з yurii» — НЕ вгадуй: запиши суть у BLOCKED.md, закоміть,
