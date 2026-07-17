@@ -350,6 +350,38 @@ errors:
 
 Read-API для `events` у MVP немає: дані споживають digest-cron і майбутня адмінка (ad-hoc SQL).
 
+### Manufacturing feedback (Phase 3.4, ADR-032 §feedback / R-01 mitigation 4)
+
+Замикає self-improvement loop: користувач сканує QR у PDF → відкриває мобільну форму → залишає фідбек про якість деталі → digest агрегує deviation-репорти → калібрування K-фактора.
+
+#### POST /feedback/{exportId}
+
+Приймає фідбек з форми `/f/{exportId}` (web). Без auth. Rate-limit — 20/год/IP.
+
+**Params:**
+
+- `exportId` — UUID з `exports.id`.
+
+**Body (JSON):**
+
+```json
+{
+  "outcome": "made" | "deviations" | "failed",
+  "deviation_description": "полиця +0.3 мм",   // ≤ 500 chars, optional
+  "comment": "…",                              // ≤ 1000 chars, required if outcome="failed"
+  "locale": "uk" | "en"                        // default "uk"
+}
+```
+
+**Відповіді:**
+
+- `200 { "status": "received" }` — записано у `export_feedback` + подія `feedback_submitted` у `events`.
+- `400` — Zod-валідація (наприклад, `comment` порожній при `outcome=failed`).
+- `404 { "error": "export_not_found" }` — невідомий `exportId` (щоб не підказувати, які UUID валідні).
+- `429` — перевищено 20/год/IP.
+
+**Приватність:** без PII у `events` — параметри події лише агрегатні (`outcome`, `has_deviation_description: bool`, `has_comment: bool`, `locale`). Сам вміст коментаря + опис відхилення живе тільки у `export_feedback` таблиці (retention 12 міс) — доступ адміну через SQL, не через API.
+
 ---
 
 ## 6. Donations

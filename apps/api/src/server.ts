@@ -23,6 +23,7 @@ import { createLoggerOptions } from "./logger.js";
 import { dbPlugin } from "./plugins/db.js";
 import rateLimitPlugin from "./plugins/rate-limit.js";
 import { buildExportRoutes } from "./routes/exports.js";
+import { buildFeedbackRoutes } from "./routes/feedback.js";
 import type { JobStore } from "./lib/job-store.js";
 import type { Telemetry } from "./lib/telemetry.js";
 import { healthRoutes } from "./routes/health.js";
@@ -77,6 +78,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   await app.register(
     buildExportRoutes({
       ...(options.jobStore ? { store: options.jobStore } : {}),
+      ...(options.telemetry ? { telemetry: options.telemetry } : {}),
+    }),
+  );
+  await app.register(
+    buildFeedbackRoutes({
       ...(options.telemetry ? { telemetry: options.telemetry } : {}),
     }),
   );

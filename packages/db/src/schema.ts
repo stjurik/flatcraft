@@ -335,3 +335,37 @@ export const events = pgTable(
     templateTsIdx: index("events_template_idx").on(t.templateSlug, t.ts.desc()),
   }),
 );
+
+// ─── export_feedback (Phase 3.4, ADR-032 §feedback / R-01 mitigation 4) ─────
+// Виробничий фідбек з форми `/f/{export_id}` — читається з QR-коду у PDF.
+// Мобільна форма без auth: 3 поля (виготовлено / відхилення / коментар).
+// Мета — замкнути self-improvement loop: користувач замовив креслення →
+// виробництво зробило деталь → залишили відгук → digest бачить deviation
+// репорти → K-фактор калібрується.
+// Rate-limit — IP-based на стороні api (не тут). Без PII.
+export const exportFeedback = pgTable(
+  "export_feedback",
+  {
+    id: id(),
+    exportId: uuid("export_id")
+      .notNull()
+      .references(() => exports.id, { onDelete: "cascade" }),
+    // Обов'язковий; enum-варіанти узгоджені з формою (див. `docs/promts/inputs/c4-feedback-copy.md`):
+    // "made" = вийшла ✅, "deviations" = з відхиленнями ⚠️, "failed" = не вийшла ❌.
+    outcome: text("outcome").notNull(),
+    // Опис відхилень від креслення — вільна форма ≤ 500 символів (валідується у api).
+    // NULL допустимо для outcome="made".
+    deviationDescription: text("deviation_description"),
+    // Довільний коментар — вільна форма ≤ 1000 символів (валідується у api).
+    // Обов'язковий для outcome="failed", інакше опційний.
+    comment: text("comment"),
+    // Локаль форми на момент відправки (для аналітики UA vs EN). "uk"|"en".
+    locale: text("locale").notNull().default("uk"),
+    sessionHash: text("session_hash"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    exportIdx: index("export_feedback_export_idx").on(t.exportId),
+    outcomeCreatedAtIdx: index("export_feedback_outcome_idx").on(t.outcome, t.createdAt.desc()),
+  }),
+);

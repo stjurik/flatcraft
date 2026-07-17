@@ -41,10 +41,19 @@ const DEVIATION_WEEK: DigestData = {
   ...TYPICAL_WEEK,
   feedback: [
     {
-      exportId: "abc-123",
-      outcome: "виготовлено",
-      deviationMm: 1.5,
-      comment: "полиця на 1.5мм коротша",
+      templateSlug: "l_bracket",
+      outcome: "deviations",
+      deviationSummary: "полиця +0.3 мм",
+    },
+    {
+      templateSlug: "perforated_panel",
+      outcome: "failed",
+      deviationSummary: "отвори не збіглись",
+    },
+    {
+      templateSlug: "wall_shelf",
+      outcome: "made",
+      deviationSummary: null,
     },
   ],
 };
@@ -73,7 +82,10 @@ describe("buildDigest", () => {
 
   it("тиждень з deviation-репортом → секція фідбеку заповнена", () => {
     const md = buildDigest(DEVIATION_WEEK);
-    expect(md).toContain("| abc-123 | виготовлено | 1.5 | полиця на 1.5мм коротша |");
+    expect(md).toContain("| l_bracket | deviations | полиця +0.3 мм |");
+    expect(md).toContain("| perforated_panel | failed | отвори не збіглись |");
+    // outcome="made" з null-summary — прочерк:
+    expect(md).toContain("| wall_shelf | made | — |");
     // Лише Sentry-секція порожня (валідація/failed/тривалості/фідбек — заповнені).
     expect(md.match(/_\(порожньо\)_/g)?.length).toBe(1);
   });
