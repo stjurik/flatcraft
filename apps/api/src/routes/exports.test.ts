@@ -310,6 +310,28 @@ describe("POST /exports — async flow", () => {
     expect(forwarded).not.toHaveProperty("material_code");
   });
 
+  it("issue #70: export_id (== job.id) форвардиться у cad-worker для QR-permalink", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const create = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: VALID_REQUEST,
+    });
+    expect(create.statusCode).toBe(202);
+    const jobId = create.json<{ id: string }>().id;
+    await flushAsync();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0];
+    const forwarded = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(forwarded.export_id).toBe(jobId);
+  });
+
   it("perforated_panel: невідомий ключ обрізається, hole_shape+hole_size форвардяться", async () => {
     // ADR-031: уніфікований шаблон — один ключ hole_size_mm + hole_shape.
     // ExportRequestSchema (z.object) відкидає невідомі ключі (legacy

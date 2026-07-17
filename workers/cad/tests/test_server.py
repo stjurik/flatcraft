@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from tempfile import NamedTemporaryFile
 
 import boto3
 import pytest
@@ -566,3 +567,87 @@ class TestPerforatedPanelExport:
             .decode("utf-8")
         )
         assert small.count("\nLWPOLYLINE\n") > big.count("\nLWPOLYLINE\n")
+
+
+class TestExportIdPermalink:
+    """Issue #70: export_id → QR-permalink {BASE_URL}/f/{export_id} у PDF."""
+
+    def test_export_id_плюс_base_url_дає_permalink_у_pdf(
+        self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BASE_URL", "https://hart.crimea.ua")
+        export_id = "00000000-1111-2222-3333-444444444444"
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "export_id": export_id,
+            },
+        )
+        assert res.status_code == 200, res.text
+        pdf_key = res.json()["artifacts"]["pdf"]["s3_key"]
+        s3 = boto3.client("s3", region_name="us-east-1")
+        pdf_bytes = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=pdf_key)["Body"].read()
+
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf_bytes)
+            f.flush()
+            text = PdfReader(f.name).pages[0].extract_text() or ""
+        # QR-текстова мітка обрізана до 48 символів (_draw_qr) — перевіряємо
+        # префікс permalink, повний export_id закодований лише у самому QR-зображенні.
+        assert "QR: https://hart.crimea.ua/f/" in text
+        assert "flatcraft://" not in text
+
+    def test_без_export_id_лишається_fallback_scheme(
+        self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BASE_URL", "https://hart.crimea.ua")
+        res = client.post(
+            "/export",
+            json={"template_slug": "l_bracket", "parameters": VALID_PARAMS, "thickness_mm": 2},
+        )
+        assert res.status_code == 200, res.text
+        pdf_key = res.json()["artifacts"]["pdf"]["s3_key"]
+        s3 = boto3.client("s3", region_name="us-east-1")
+        pdf_bytes = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=pdf_key)["Body"].read()
+
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf_bytes)
+            f.flush()
+            text = PdfReader(f.name).pages[0].extract_text() or ""
+        assert "flatcraft://l_bracket/" in text
+        # BETA-watermark footer (feedback@hart.crimea.ua) теж містить домен —
+        # перевіряємо саме відсутність QR-permalink шляху, а не домену взагалі.
+        assert "QR: https://hart.crimea.ua/f/" not in text
+
+    def test_export_id_без_base_url_env_теж_fallback(
+        self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BASE_URL", raising=False)
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "export_id": "00000000-1111-2222-3333-444444444444",
+            },
+        )
+        assert res.status_code == 200, res.text
+        pdf_key = res.json()["artifacts"]["pdf"]["s3_key"]
+        s3 = boto3.client("s3", region_name="us-east-1")
+        pdf_bytes = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=pdf_key)["Body"].read()
+
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf_bytes)
+            f.flush()
+            text = PdfReader(f.name).pages[0].extract_text() or ""
+        assert "flatcraft://l_bracket/" in text
