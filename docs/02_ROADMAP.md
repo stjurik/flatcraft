@@ -211,20 +211,19 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 
 ---
 
-## Phase 3.4. Виробничий фідбек — QR у PDF (Architecture Evolution track, статус: draft, ще не в main)
+## Phase 3.4. Виробничий фідбек — QR у PDF (Architecture Evolution track, завершено 2026-07-17)
 
 > Замикає R-01 mitigation 4 (K-фактор калібрування). Специфікація — промпт B3
-> (`docs/15_LLM_PROMPTS.md`).
+> (`docs/15_LLM_PROMPTS.md`). Повний запис — `docs/13_PROGRESS_LOG.md` «Feature 3.4».
 
-- **PR #69** (форма `/f/{exportId}` + `POST /feedback` + `export_feedback` таблиця
-  - digest-секція «Виробничий фідбек») — **OPEN / DRAFT**, заблокований на ручній
-    drizzle-міграції (HARD-STOP за задумом, аналог pattern PR #55).
-- **Issue #70** (follow-up: `export_id` у PDF → реальний QR-URL замість fallback
-  `flatcraft://…`, regen 12 снапшотів) — **OPEN**, не розпочато; залежить від
-  merge #69.
-- Немає власного запису у `docs/13_PROGRESS_LOG.md` — фіча ще не на main
-  (перевірено housekeeping 2026-07-17, `docs/promts/inputs/housekeeping-audit.md` п.1).
-  `docs/04_RISKS.md` R-01 mitigation 4 лишається без позначки ✅ до merge.
+- [x] **PR #69** (`4a7d94d`, merged 2026-07-17) — форма `/f/{exportId}` + `POST /feedback` +
+      `export_feedback` таблиця + digest-секція «Виробничий фідбек». Drizzle-міграція
+      `0003_amazing_old_lace.sql` — explicit instruction (`master-unblock-run.md`).
+- [x] **PR #75 / issue #70** (`34a2127`, merged 2026-07-17) — `export_id` у PDF → реальний
+      QR-URL `{BASE_URL}/f/{export_id}` замість непрацюючого fallback `flatcraft://…`. DXF-снапшоти
+      не regen'ились (DXF QR не приймає; PDF byte-снапшотів у репо нема — детермінізм тестується
+      подвійною генерацією).
+- `docs/04_RISKS.md` R-01 mitigation 4 → ✅ реалізовано.
 
 ---
 

@@ -21,7 +21,7 @@
 1. Watermark на DXF: «Розгортка з емпіричного K-фактора, перевіряйте перед різкою. У випадку розбіжностей — повідомте на feedback@…»
 2. Phase 5 пілот з ESI: 5 тестових деталей різної геометрії → заміри → калібрування таблиці.
 3. У PDF-креслі — окрема нота для виробника: «K=0.40, deviation tolerance ±2мм per bend».
-4. ✅ **Реалізовано (Phase 3.4, 2026-07-13):** `POST /feedback/{export_id}` + мобільна форма `/f/{export_id}` (доступна через QR у PDF). 3 поля: outcome (made/deviations/failed) + deviation_description (мм + де) + comment. Записує рядок у `export_feedback` таблицю (packages/db) + подію `feedback_submitted` у `events`. Weekly digest (ADR-032) агрегує deviation-репорти. Це замикає self-improvement loop для калібрування K-фактора.
+4. ✅ **Реалізовано (Phase 3.4, PR #69 `4a7d94d` 2026-07-17 + PR #75/issue #70 `34a2127` 2026-07-17):** `POST /feedback/{export_id}` + мобільна форма `/f/{export_id}` — тепер **справді доступна через QR у PDF** (issue #70 замінив непрацюючий fallback `flatcraft://<slug>/<article>` на реальний `{BASE_URL}/f/{export_id}`; до #70 QR вів у нікуди). 3 поля: outcome (made/deviations/failed) + deviation_description (мм + де) + comment. Записує рядок у `export_feedback` таблицю (packages/db) + подію `feedback_submitted` у `events`. Weekly digest (ADR-032) агрегує deviation-репорти. Це замикає self-improvement loop для калібрування K-фактора.
 
 **Owner:** замовник (потрібен інженер з виробництва).
 

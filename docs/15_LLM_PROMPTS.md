@@ -222,11 +222,9 @@ Sample rate: errors 100%, traces 0 (MS21-ресурси). Docker env — infra/c
 
 ### B3. QR-фідбек з виробництва (Phase 3.4)
 
-> **Статус (housekeeping 2026-07-17): НЕ виконано.** PR #69 (форма +
-> `POST /feedback` + `export_feedback`) — `OPEN`/`DRAFT`, заблокований на
-> ручній drizzle-міграції. Follow-up issue #70 (QR-URL у PDF) — `OPEN`, не
-> розпочато. `docs/04_RISKS.md` R-01 mitigation 4 — без ✅. Деталі:
-> `docs/promts/inputs/housekeeping-audit.md` п.1.
+> **Статус (2026-07-17): виконано.** PR #69 (`4a7d94d`) + PR #75/issue #70
+> (`34a2127`) — обидва merged. `docs/04_RISKS.md` R-01 mitigation 4 → ✅.
+> Повний запис — `docs/13_PROGRESS_LOG.md` «Feature 3.4».
 
 ```
 Реалізуй виробничий feedback-loop за ADR-032 §feedback (див. 14 §4.3, R-01 mitigation 4).
