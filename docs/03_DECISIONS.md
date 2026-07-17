@@ -2,6 +2,46 @@
 
 > Кожне нетривіальне технічне рішення фіксуємо тут. Коротко: контекст → рішення → наслідки → альтернативи. Якщо рішення скасовано — статус `Superseded by ADR-N`.
 
+## Індекс
+
+> Підтримується кожним новим ADR (додати рядок при створенні). Джерело дат — заголовок `**Статус:**` у самому записі; де його нема — позначено «дата не зафіксована» (не вигадувати).
+
+| №       | Назва                                                                              | Статус                                                          | Дата                |
+| ------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------- |
+| ADR-001 | Монорепо на pnpm + Turborepo                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-002 | Two-language CAD pipeline (TS + Python)                                            | Accepted                                                        | 2026-05-08          |
+| ADR-003 | Drizzle ORM, не Prisma                                                             | Accepted                                                        | 2026-05-08          |
+| ADR-004 | BullMQ для черги CAD-задач                                                         | Accepted                                                        | 2026-05-08          |
+| ADR-005 | Single VPS на DigitalOcean для MVP                                                 | Superseded by ADR-011                                           | 2026-05-08          |
+| ADR-006 | GDPR-by-design з першого дня                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-007 | Auth.js (NextAuth) для автентифікації                                              | Accepted                                                        | 2026-05-08          |
+| ADR-008 | Cloudflare R2 для long-term storage                                                | Accepted                                                        | 2026-05-08          |
+| ADR-009 | TDD з першого дня, цільове покриття 80%                                            | Accepted                                                        | 2026-05-08          |
+| ADR-010 | Логування — pino з redact, без structured stack у консоль                          | Accepted                                                        | 2026-05-08          |
+| ADR-011 | Mirohost Cloud замість DigitalOcean                                                | Accepted (supersedes ADR-005)                                   | 2026-05-14          |
+| ADR-012 | UUID v4 у схемі, v7 — окремою міграцією після Postgres 18                          | Accepted                                                        | 2026-05-16          |
+| ADR-013 | Browser-side preview через three.js Shape, OpenCascade.js відкладено               | Accepted                                                        | 2026-05-17          |
+| ADR-014 | Caddy + Cloudflare Origin Certificate замість Let's Encrypt                        | Accepted                                                        | 2026-05-22          |
+| ADR-015 | Drizzle міграції + seed у entrypoint api-контейнера                                | Accepted                                                        | 2026-05-28          |
+| ADR-016 | Visual design system — warm industrial, single light theme, mobile-first           | Accepted                                                        | 2026-05-30          |
+| ADR-017 | Group metadata у Zod через `.describe("group:G\|label:L")`                         | Accepted                                                        | 2026-05-30          |
+| ADR-018 | `material_code` доставляється до API, але обрізається перед cad-worker'ом          | Accepted                                                        | 2026-05-30          |
+| ADR-019 | Server-side validation як інваріант export-pipeline                                | Accepted                                                        | дата не зафіксована |
+| ADR-020 | Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)                      | Accepted                                                        | 2026-06-04          |
+| ADR-021 | Drawing polish — auto-layout corner picker + єдина конвенція осей + UA-одиниці BOM | Accepted                                                        | 2026-06-05          |
+| ADR-022 | Клієнтська валідація матриці гибу через bake'ed snapshot                           | Accepted                                                        | 2026-06-08          |
+| ADR-023 | Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile | Accepted                                                        | 2026-06-11          |
+| ADR-024 | Production-grade DXF — рівно 2 шари + color-coded cut paths                        | Accepted                                                        | 2026-06-15          |
+| ADR-025 | Ізометрія у PDF через OCC hidden-line-removal (вектор, детермінований)             | Accepted                                                        | 2026-06-16          |
+| ADR-026 | R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params  | Accepted                                                        | 2026-06-16          |
+| ADR-027 | Products як preset базового шаблону                                                | Accepted (відновлено housekeeping 2026-07-17, джерело — PR #28) | 2026-06-22          |
+| ADR-028 | Валідація перфорації (pitch > розмір отвору) як окремий gate                       | Accepted                                                        | 2026-06-24          |
+| ADR-029 | Клієнтський перемикач форми отвору над двома шаблонами (без злиття)                | Superseded by ADR-031                                           | 2026-06-26          |
+| ADR-030 | Перфо-монтажна панель — ребриста (4 фланці + кутові отвори), не опційно            | Accepted (розширено ADR-031)                                    | 2026-06-25          |
+| ADR-031 | Уніфікація перфо-панелі в ОДИН параметричний шаблон (форма отвору — параметр)      | Accepted (supersedes ADR-029, розширює ADR-030)                 | 2026-06-26          |
+| ADR-032 | Observability & self-improvement loop                                              | Accepted                                                        | 2026-07-05          |
+| ADR-033 | Template Registry contract — єдиний реєстр шаблонів + conformance-suite            | Proposed                                                        | 2026-07-13          |
+
 ---
 
 ## ADR-001: Монорепо на pnpm + Turborepo
@@ -728,6 +768,348 @@ assertion'ах — legs `leg >= t+r` (inclusive), z/wall flanges + offset + shel
   (L3, окремий PR): більший scope, не потрібен для усунення крашу.
 - Прибрати assertion'и з `geometry.ts` (не кидати) — відхилено: throw там — корисний
   інваріант для unit-тестів білдерів; гасимо його gate'ом, а не послабленням контракту.
+
+---
+
+## ADR-027: Products як preset базового шаблону
+
+**Статус:** Accepted (2026-06-22)
+
+**Примітка (housekeeping 2026-07-17):** текст відновлено ДОСЛІВНО з коміту `90f1639` (гілка `docs/phase-3-architecture`, PR #28). Уточнення щодо причини відсутності на main: PR #28 **ніколи не мержився** (досі `OPEN`, останній рух 2026-06-22) — це не випадок «втрачено при merge», а «ADR ніколи не потрапляв на main через власний PR». Сама реалізація Phase 3.0 (Products Catalog) усе одно відбулась — через окрему серію merged PR (#32, #37-#44, 2026-06-23), що зробило #28-#31 стейл-дублікатами (деталі: `docs/promts/inputs/housekeeping-audit.md` п.2).
+
+**Контекст.** До Phase 3.0 каталог `/templates` показує 5 параметричних деталей
+(`l_bracket`/`z_bracket`/`corner_angle`/`wall_shelf`/`perforated_panel`) — інженерна
+аудиторія: повна Zod-схема, всі поля редаговані. Бізнес-мета розширення — UX-shift
+від CAD-інструменту до сервісу для DIY/малого бізнесу. Додаємо нову сутність «виріб»
+(`product`) як **preset базового шаблону з обмеженим набором редагованих полів**:
+користувач конфігурує лише relevant параметри (наприклад, ширину панелі), решта
+зафіксовані виробником продукту (форма отвору, товщина, матеріал).
+
+Перші два вироби Phase 3.0:
+
+1. **Декоративна перфо-панель** — на основі нового шаблону `perforated_panel_square`
+   (рішення 6: новий шаблон, не extension), preset з фіксованим shape=square.
+2. **Кастомна настінна полиця** (`wall-shelf-custom`) — на основі нового шаблону
+   `enclosed_shelf` (4-сегментний box з опційними перфо-боковинами і ребром
+   жорсткості), preset з фіксованою товщиною/радіусом/перфо-параметрами.
+
+Це рішення фіксує **архітектурний контракт products-layer** перед стартом 8-PR
+імплементації — щоб подальші sub-PR'и виконувалися детерміновано і не вертали
+питання, що вже обговорені.
+
+**Рішення.** Сім архітектурних виборів нижче — прийняті як єдиний пакет, бо
+взаємозалежні (зокрема 1+2 та 5+6+7). Кожний з власними ALT/CHOICE/RATIONALE/
+CONSEQUENCES; trade-off аналіз із трьох осей (розгортання / масштабування /
+підтримка) проведений окремо у дискусійному циклі — тут лишається стиснутий sumар.
+
+### Рішення 1. `products` як окрема drizzle-таблиця vs дискримінатор `type` у `templates`
+
+**Альтернативи.** A) розширити `templates` колонкою `type: 'part' | 'product'` +
+nullable product-only поля. B) окрема таблиця `products` зі слабкою прив'язкою до
+templates через slug (без FK).
+
+**Вибір.** **B** — окрема таблиця.
+
+**Обґрунтування.**
+
+- Семантичні відмінності: parts мають повну Zod-схему та auto-generated PNG; products
+  — фото/render готового виробу та fixed_parameters/visible_fields. Один рядок
+  templates із nullable колонками обох категорій (~50% NULL-density) лишався б
+  напівпорожнім для кожної категорії.
+- Ризик зростання templates до 50+ полів: кожна нова product-фіча у варіанті A
+  додає `ALTER TABLE templates` і впливає на існуючі 5 part-рядків. У B — parts
+  стабільні.
+- Композиція у Phase 3.1 (composite products) — третя категорія, що потребує ще
+  одного дискримінатора у A → cartesian-bloat. У B — `products.components jsonb`
+  додається ізольовано.
+- Без FK constraint навмисно: templates можуть жити лише у seed/Python-коді
+  (slug як ідентифікатор у worker'і), FK вимагав би гарантованого DB-присутності.
+
+**Наслідки.**
+
+- (+) NULL-density 0% в обох таблицях; кожна Drizzle-модель чисто типізована.
+- (+) Existing `GET /v1/templates` API лишається стабільним; products додаються як
+  новий endpoint без зміни legacy-контракту.
+- (+) Окремий index `products_published_idx` чистий; query plan простий.
+- (−) Дві CRUD-функції замість однієї; перевірка цілісності `base_template_slug`
+  делегована Zod-validator'у seed'а (a не FK).
+- (−) JOIN `products → templates` неможливий на SQL-рівні — resolved в API через
+  два запити; для двох продуктів irrelevant, при 50+ — `IN`-batch query.
+
+### Рішення 2. URL routing — `/products/[slug]` vs `/templates/[slug]` для виробів
+
+**Альтернативи.** A) все під `/templates/[slug]`, тип розрізняється у API response
+(дискримінатор). B) окремий route `/products/[slug]`; каталог-URL лишається
+`/templates` (umbrella з `?tab=products|parts`).
+
+**Вибір.** **B** — окремий `/products/[slug]`.
+
+**Обґрунтування.**
+
+- SEO семантика: Google розрізняє `/templates/*` (інженерні «креслення») від
+  `/products/*` (готові вироби) у Search Console — різні запити та різні rich
+  results (schema.org/Product vs CreativeWork). Один URL-pattern для обох — втрачає
+  цю диференціацію.
+- Shareability: «Дивись який вирід я зробив: hart.crimea.ua/products/...» —
+  одразу зрозуміло, що це готовий товар. URL читабельний.
+- API consistency: дзеркало Рішення 1 — `GET /v1/templates/:slug` і `GET /v1/products/:slug`
+  мають чисті response shapes; жодного дискримінатор-narrow на клієнті.
+- Bug isolation: 404 з `/products/foo` одразу вказує на product-каталог; під одним
+  URL-pattern діагностика складніша.
+
+**Наслідки.**
+
+- (+) Caталог `/templates` лишається umbrella-page; toggle `?tab=` — shallow routing
+  без перезавантаження.
+- (+) Sitemap.xml розділяє два логічні набори; CDN TTL можна налаштувати окремо.
+- (+) Existing 9 e2e на `/templates/[slug]` лишаються зеленими (additive change).
+- (−) +1 новий Next.js route + +1 API endpoint (~200 LOC).
+- (−) `<TemplateStudio>` обертається обидвома page-компонентами (`templates/[slug]`
+  і `products/[slug]`) — shared layer через Рішення 3.
+
+### Рішення 3. Studio component — shared з `mode` prop vs два окремі studio
+
+**Альтернативи.** A) для кожного шаблону створити другу копію студії з product-
+логікою (`<PerforatedPanelProductStudio>` тощо). B) `mode: 'part' | 'product'`
+prop у існуючих 5 студіях + `visibleFields`/`fixedParameters`/`productMeta` props.
+
+**Вибір.** **B** — shared з `mode` prop.
+
+**Обґрунтування.**
+
+- Економія коду: AutoForm уже інтроспектує Zod-схему, додавання filter'у через
+  `visible_fields` (рішення 4) — +5 LOC; копіювання повної студії — ~300 LOC × 3
+  нових файлів дубляжу.
+- UX consistency by design: один компонент = одна ментальна модель; розсинхрон
+  між part-studio і product-studio (типова проблема варіанту A) неможливий.
+- TypeScript discriminated union props (`{mode: 'part', ...} | {mode: 'product',
+productMeta, visibleFields, fixedParameters}`) — narrow змушує передати правильні
+  props; неможливо випадково передати product у part-flow.
+- Bug fix у shared логіці (валідація, export-button) — в одному файлі автоматично
+  відображається в обох режимах.
+
+**Наслідки.**
+
+- (+) 5 студій лишаються по одному файлу на шаблон; +~80 LOC mode-логіки на студію.
+- (+) Існуючі 5 \*-editor компонентів не торкаються (новий prop опційний).
+- (+) Composite products (Phase 3.1) додається як `mode: 'composite'` — той самий
+  компонент, ще одна гілка narrow'у.
+- (−) Більша когнітивна складність компонента — кожен contributor пам'ятає, який
+  код виконується в якому режимі. Mitigation: TS-наратив + `assertNever(mode)`
+  у default case.
+- (−) Ризик випадкового coupling: поле для product-mode може ненавмисно
+  використатися у part-mode. Покривається unit-тестами на mode='part' regression.
+
+### Рішення 4. AutoForm розширення — `visible_fields` prop vs preprocess schema
+
+**Альтернативи.** A) preprocess: `derivedSchema = baseSchema.pick(visibleFieldsMap)`
+перед передачею у AutoForm. B) `visible_fields?: string[]` prop у AutoForm,
+схема не торкається, filter застосовується після інтроспекції.
+
+**Вибір.** **B** — prop-based.
+
+**Обґрунтування.**
+
+- Pure data transformation: AutoForm отримує оригінальну схему + список фільтра;
+  не мутує Zod-структуру, легше дебажити.
+- Cross-field валідатори (`.refine()`, наприклад wall_shelf `front_lip` 0 або ≥5)
+  не ламаються — Zod-схема цілісна, refine коректно референсує всі поля. У варіанті
+  A `pick()` може видалити поля, на які `refine` посилається → runtime-fail.
+- Legacy AutoForm (без prop) працює без змін — `visible_fields=undefined` → весь
+  schema (зворотна сумісність 5 part-editor'ів).
+- Conditional visibility (`useMemo(() => computeVisibleFields(state), [state])`) —
+  природний React pattern; динамічна preprocess Zod-схема потребує `useMemo` +
+  deep cloning, гірше масштабується.
+
+**Наслідки.**
+
+- (+) Зміна `@flatcraft/ui/parameter-form/`: +1 опційний prop, +1 рядок фільтру.
+- (+) Default values, group metadata (ADR-017), `.refine()` лишаються нетронутими.
+- (−) Studio робить explicit merge `submittedValues + fixed_parameters → POST` — це
+  не унікально до B, але треба пам'ятати, що сервер чекає повний об'єкт.
+- (−) `visible_fields: string[]` не type-safe (можна передати неіснуюче ім'я).
+  MVP: runtime warning + Zod-валідатор на seed cross-перевіряє поля проти
+  `template.parameters_schema`. Type-safe upgrade (`keyof TShape`) — окремий PR.
+
+### Рішення 5. `enclosed_shelf` — новий базовий шаблон vs extension `wall_shelf`
+
+**Альтернативи.** A) розширити `wall_shelf` опційними полями `left_side_mm`/
+`right_side_mm`/`top_rib_mm` + cross-field валідатори. B) окремий шаблон
+`enclosed_shelf` зі своєю schemа/builder/scene/studio.
+
+**Вибір.** **B** — новий шаблон.
+
+**Обґрунтування.**
+
+- Геометрична різниця принципова: `wall_shelf` — U-channel (3 сегменти, 1-2 гиби);
+  `enclosed_shelf` — 4-5-сегментний box (back+bottom+2 sides+optional rib, 4-5 гибів).
+  Спільність pipeline ~30% (тільки generic export-layer reuse), не 95%.
+- Cross-field складність експоненційна: wall_shelf уже має `front_lip` 0 або ≥5;
+  додавання `sides`/`rib` створило б 8-dimension cartesian (mode × front_lip × sides
+  × rib). Test coverage непідйомний.
+- Snapshot regeneration ризик: будь-яка зміна `wall_shelf` default body перегенерує
+  DXF/PDF snapshot fixtures (CLAUDE.md §2.4 інваріант). Новий шаблон — нульовий
+  ризик для existing wall_shelf.
+- `buildWallShelfShapeCommands` (geometry.ts, 13 unit) — pure builder для 1-2 inner
+  bends. Перетворення на 2-режимну функцію (U vs box) ламає всі assertion'и
+  одночасно.
+
+**Наслідки.**
+
+- (+) Парадигма CLAUDE.md §4 моноpепо («окремий шаблон = окремий файл по кожному
+  шару») лишається консистентною.
+- (+) `validateProfile` (ADR-026) для enclosed_shelf — окремий case у одному
+  switch'і; wall_shelf branch не торкається.
+- (+) Snapshot байт-стабільність wall_shelf гарантована.
+- (−) Дубляж pipeline (~500 LOC: Pydantic + Zod + builder + unfold + scene + studio
+  - editor). Mitigation: generic exporters (`_export_flat_dxf`, `_draw_unfold_generic`)
+    з Phase 2.10.a уже покривають export-layer reuse.
+- (−) ExportRequest discriminatedUnion +1 варіант → 6 templates загалом; pattern
+  встановлений Phase 2.10 — без сюрпризів.
+
+### Рішення 6. perforated_panel square holes — extension `hole_shape` vs новий шаблон
+
+**Альтернативи.** A) extension через `hole_shape: 'circle' | 'square'` (default
+`'circle'`) у `perforated_panel` — backward-compat, ~30 LOC. B) окремий шаблон
+`perforated_panel_square` зі своєю pipeline.
+
+**Вибір.** **B** — новий шаблон ⚠ (контр до master prompt'у, який припускав A).
+
+**Обґрунтування (попри більший LOC).**
+
+- Regression isolation: existing `perforated_panel` snapshot fixtures (Phase 2.10.d)
+  лишаються байт-у-байт стабільними нульовою зміною коду. У варіанті A є ризик
+  Pydantic serialization `hole_shape` defaults впливає на JSON-payload hash → PDF
+  text «Ø8» vs «8×8» при default migration.
+- CAM-перевірка окремо per template: LWPOLYLINE 4-vertex entity (square) vs CIRCLE
+  entity (circle) — Lantek/SigmaNest можуть обробляти по-різному (Risk 6 у PR).
+  Один файл per template дозволяє isolated CAM-pilot перевірку на справжньому
+  виробництві перед merge.
+- Lineage у каталозі: `perforated_panel` і `perforated_panel_square` як два окремі
+  base templates — користувач (інженер, не product-консумер) розрізняє у списку
+  шаблонів. Products маскують це деталь implementation: декоративна перфо-панель
+  — продукт, користувач не бачить slug.
+- ADR consistency з Рішенням 5: «принципова різниця → новий шаблон» застосовується
+  тут до DXF entity type як критичної відмінності для CAM-софту.
+
+**Свідомо приймаємо trade-off проти DRY-principle:**
+
+- A коштувала б ~30 LOC vs ~400 LOC у B (95% дубляжу через generic exporters).
+- A забезпечила б instant 3-rd shape extension (hex/slot/oval) через enum.
+- B при 5+ shape варіантах призведе до template-bloat у каталозі (5 шаблонів-перфо).
+  Mitigation: тригер re-think у Phase 3.5+ (див. «Trigger перегляду» нижче).
+
+**Наслідки.**
+
+- (+) Нульова regression для `perforated_panel`; existing 5 part-shelf тестів і
+  Phase 2.10.d snapshots green без змін.
+- (+) Окремий CAM-pilot перевірочний крок для square — isolated.
+- (+) discriminatedUnion +1 варіант → 7 templates з enclosed_shelf.
+- (−) ~400 LOC дубляжу (Zod + Pydantic + builder + scene + studio + editor + tests).
+- (−) Якщо post-launch evidence покаже, що 3-й/4-й shape потрібен, доведеться
+  re-architect на extension (А) — болісніше за raw-rebuild.
+- (−) `industry_names`, `bend-machine-esi.yaml`, validation matrix — те ж саме
+  reuse, нульова специфіка нового шаблону.
+
+### Рішення 7. Composite products (наприклад, мангал з 4 перфо + 2 кутника) — у scope Phase 3.0 чи відкладено
+
+**Альтернативи.** A) повна підтримка composite у Phase 3.0: BOM-агрегація, ZIP-export,
+multi-DXF, assembly preview. B) відкладено до Phase 3.1: Phase 3.0 — single-base
+products only. C) hybrid — infrastructure готова (BOM stub + ZIP utility + Studio
+mode='composite'), але без real composite products у seed.
+
+**Вибір.** **B** — відкладено до Phase 3.1.
+
+**Обґрунтування.**
+
+- Перші два вироби Phase 3.0 — single-base-template products. Composite потребує
+  окремої архітектурної роботи (BOM aggregation, ZIP packaging, assembly instructions
+  PDF, cross-component validation, R3F assembly positioning) — не блокує MVP.
+- Avoid over-engineering для unproven use case: ми не знаємо, чи композити справді
+  потрібні користувачам, перш ніж soft-launch. Build infrastructure for known use
+  cases (2 single products); composite додається коли є evidence попиту.
+- Variant C (hybrid: infrastructure без implementation) розглядався — відхилений,
+  бо ~400 LOC dead-code до Phase 3.1, API-shape lock-in без real-flow validation,
+  і testing gap (unit-only без integration). Migration cost у Phase 3.1 від pure
+  B → composite = ~1 тиждень refactoring (non-breaking: discriminator додається
+  до ProductSchema, existing single products NULL для composite-полів) — прийнятна
+  ціна за збереження YAGNI у Phase 3.0.
+
+**Trigger переходу на Phase 3.1 (composite).** Активуємо, якщо:
+
+- Discord/email фідбек: >5 unique users просять «вирід з кількох частин одним
+  експортом».
+- Аналітика: >20% користувачів роблять 2+ експорти на одному session (proxy для
+  assembly use case).
+- Виробничий пілот: замовники просять «kit з мангала: 4 панелі + 2 кутника».
+- Кількість single products перевищить 10 (assembly use case стає прогнозованим).
+
+**Наслідки.**
+
+- (+) Phase 3.0 фокусується на доставці 2 products за 3.5 тижні (target 2026-07-16).
+- (+) API ABI Phase 3.0 lock на single shape; composite додається через discriminator
+  у Phase 3.1 (non-breaking).
+- (+) Test surface і documentation у межах одного PR-набору (8 PR'ів за планом).
+- (−) Якщо post-launch фідбек одразу requestує composite → +2-3 тижні чекати
+  Phase 3.1. Manageable: workaround через окремі експорти + manual assembly,
+  фідбек channel існує.
+- (−) Phase 3.1 не отримує заздалегідь спроектованої архітектури — деякі рішення
+  (S3 file structure для multi-artifact, R2 paths) робляться coordinated з real
+  composite use case. Замість «pre-design правильно з першого разу» — «evidence-
+  driven design з невеликим refactoring cost».
+
+### Загальні наслідки рішень 1-7
+
+Зміни, які чекають у sub-PR'ах Phase 3.0 (PR 2-9, див. Roadmap):
+
+- **Data model (PR 2):** нова таблиця `products` (8 колонок), Zod-схеми
+  `ProductSummary`/`ProductDetail`, pure helpers `resolveProductParams` і
+  `filterSchemaByVisibleFields`. Drizzle migration `0001_*.sql`. Seed-структура
+  `seed-products.ts`.
+- **API (PR 2):** endpoints `GET /v1/products` і `GET /v1/products/:slug`;
+  розширення `POST /v1/exports` приймати або `template_slug+parameters`, або
+  `product_slug+userInput` (server резолвить fixed_parameters перед forward у
+  cad-worker).
+- **UI (PR 3-4, 6, 8):** новий `<SegmentedControl>` primitive; `templates/page.tsx`
+  додає toggle Вироби|Деталі (default Вироби, бо це primary use case soft-launch);
+  shared `<TemplateStudio mode>` обертає 5 існуючих студій; `/products/[slug]`
+  route рендерить product з resolved params.
+- **Templates (PR 5, 7):** новий шаблон `perforated_panel_square` (повна piipeline,
+  Рішення 6); новий шаблон `enclosed_shelf` (4-5-сегментний box, опційні
+  перфо-боковини і ребро жорсткості, Рішення 5).
+- **Тести:** pytest 249 → ~290-310; cad-engine TS 63 → ~85; ui TS 70 → ~95;
+  web TS 47 → ~70; api TS 35 → ~50; e2e 92 → ~115. Existing — green throughout
+  усіх PR (regression-guard інваріант).
+- **Виробничий процес додавання 3-го виробу post-Phase-3.0:** тільки seed entry
+  у `products` + render PNG (через extended `generate-product-previews.ts` з Phase
+  2.16.b). Без коду — за умови, що base_template уже існує.
+
+### Альтернативи, які активно відкинуті (поза 7 основними)
+
+- **Окремий домен `products.hart.crimea.ua`.** Відхилено: дроблення SEO authority,
+  додаткова DNS+CF Caddyfile конфігурація, +Origin Cert. Жодних практичних переваг
+  для MVP.
+- **`products` із FK на `templates.id`.** Відхилено: templates можуть бути визначені
+  лише у seed/Python-коді (slug — primary identifier у worker'і). FK constraint
+  вимагав би гарантованого DB-присутності templates → ламає поточну архітектуру.
+- **Render-prop pattern для Studio** (`<Studio render={mode => ...}/>`). Відхилено:
+  ускладнення без виграшу — лише інша форма того самого `if (mode)`.
+- **Composite через окрему таблицю `bundles`** (третя entity besides templates і
+  products). Відхилено: занадто рано вводити третю abstraction перш ніж evidence.
+  Composite як extension products — natural ramp-up у Phase 3.1.
+- **Generic `<ShapeBuilder>` з runtime config** (один Python builder, читає JSON-
+  config «N сегментів, M гибів»). Відхилено: occurence-driven refactoring. Поки
+  5-7 шаблонів — окремі builders простіші для junior'а. Потенційне Phase 6+
+  архітектурне рішення при template-pool >20.
+
+### Trigger перегляду ADR
+
+- Рішення 6: якщо `perforated_panel_square` дубляж стане непідйомним при додаванні
+  3-го shape (hex/slot/oval) — re-architect на extension (A) з міграційним PR'ом.
+- Рішення 7: при спрацюванні composite-тригерів (вище) — створюємо ADR-028
+  «Composite products як extension products».
+- Рішення 3: якщо `mode='product'` логіка набухне >150 LOC у одній студії —
+  розділення на дві студії стає виправданим (re-architect).
 
 ---
 
