@@ -6,6 +6,58 @@
 
 ---
 
+## Feature 3.4 — QR-фідбек з виробництва (2026-07-17)
+
+- **Завершено** (2026-07-17, ADR-032 §feedback, R-01 mitigation 4): замикає self-improvement loop —
+  користувач замовляє креслення → сканує QR у PDF → мобільна форма `/f/{exportId}` → фідбек →
+  digest бачить deviation-репорти → калібрування K-фактора. Два PR, обидва merged:
+  - **PR #69** (`4a7d94d`, merged 2026-07-17): C4 UX-copy (`docs/promts/inputs/c4-feedback-copy.md`,
+    Варіант 1 ★ — тепліший); `feedback_submitted` у `EventPayload` (агрегат: outcome +
+    has_deviation_description + has_comment + locale, **без вмісту** — GDPR/ADR-032 §6);
+    `export_feedback` таблиця (`export_id` FK cascade на `exports.id`, `outcome`,
+    `deviation_description ≤500`, `comment ≤1000`, `locale`, `session_hash`) + drizzle-міграція
+    `0003_amazing_old_lace.sql` (CREATE TABLE + 1 FK + 2 індекси, згенеровано вручну yurii через
+    `master-unblock-run.md` крок 4, explicit instruction за CLAUDE.md §6); `POST /feedback/:exportId`
+    (Zod, `comment` обов'язковий при `outcome=failed`, rate-limit **20/год/IP**, **404** на невідомий
+    `export_id`); `apps/api/src/lib/digest.ts` — секція «Виробничий фідбек» з реальними метриками;
+    `apps/web/src/app/f/[exportId]/{page,en/page,feedback-form}.tsx` (UA+EN, мобільна-перша
+    max-w-md, 3 поля, 44px tap-target, dark-mode, `aria-live` toast).
+  - **PR #75 / issue #70** (`34a2127`, merged 2026-07-17): QR у PDF раніше тримав fallback
+    `flatcraft://<slug>/<article>` (не працює на телефонах) — follow-up підключив реальний
+    permalink. `export_id` (== `job.id` == `exports.id`) генерується в `apps/api` перед форвардом
+    у cad-worker (`packages/types` `ExportRequestSchema` +`export_id` optional; Python
+    `ExportRequest` +`export_id: UUID | None`); `_permalink_url()` у `workers/cad/.../server.py`
+    будує `{BASE_URL}/f/{export_id}` і підключений до всіх 6 `export_<tpl>_pdf(permalink_url=...)`.
+    Без `export_id`/`BASE_URL` — старий fallback лишається (зворотна сумісність). `BASE_URL` у
+    cad-worker — `${APP_BASE_URL}` (`infra/compose/docker-compose.prod.yml`), не окремий
+    prod-секрет. **DXF-снапшоти не regen'ились** — DXF-функції `permalink_url` не приймають
+    (ADR-024: QR/TEXT лише у PDF), і в репо взагалі нема committed PDF byte-снапшотів (детермінізм
+    PDF тестується подвійною генерацією тих самих params, не проти фікстури) — тож «свідомий
+    byte-flip» із плану issue не знадобився.
+- **Фінальні рішення PR #69 (2026-07-13, yurii, опитування Q1-Q5):**
+
+  | #   | Тема                               | Обрано                                                                 |
+  | --- | ---------------------------------- | ---------------------------------------------------------------------- |
+  | Q1  | UX-copy                            | **Варіант 1** (тепліший)                                               |
+  | Q2  | QR-URL зміна — цей PR чи follow-up | **Окремий follow-up (issue #70)**, обов'язковий одразу після merge #69 |
+  | Q3  | Rate-limit `/feedback`             | **20/год/IP**                                                          |
+  | Q4  | 404 vs 200 на unknown `export_id`  | **404** (export_id = UUID, неперебірний)                               |
+  | Q5  | `locale` default                   | **`"uk"`**                                                             |
+
+- **Інваріанти (must-not-break):** `404` на невідомий `export_id`; rate-limit 20/год/IP на
+  `POST /feedback/:exportId`; подія `feedback_submitted` — агрегатні параметри, без PII/вмісту
+  (ADR-032 §6); digest-секція «Виробничий фідбек» з deviation-репортами; QR-permalink —
+  server-side, cad-worker, не web; DXF без QR/permalink (ADR-024).
+- **Тести:** `workers/cad` **339 pytest** (+3 `TestExportIdPermalink`); `apps/api` **67 unit** (+7
+  за обидва PR: 6 feedback-route + 1 export_id-forwarding); `packages/types` **146**; `apps/web`
+  **67 unit** + 3 нові Playwright e2e (`feedback-form.spec.ts` — mount+submit→200, required-gate,
+  404→error banner). `pnpm typecheck`/`lint`/`format` — усі 11 workspace-задач зелені. Гілки
+  `feat/phase-3-4-qr-feedback`, `fix/issue-70`.
+- **R-01 mitigation 4** (`docs/04_RISKS.md`) → ✅ реалізовано (PR #69 `4a7d94d` + PR #75
+  `34a2127`, 2026-07-17).
+
+---
+
 ## Feature 3.3 — Observability foundation (телеметрія перед soft-launch) (2026-07-06)
 
 - **Завершено** (2026-07-06, ADR-032): до Phase 3.3 платформа була **сліпа** (14 §1.4) — логи в stdout, історія експортів in-memory, нуль аналітики й фідбеку. Фаза дала фундамент даних для всіх подальших рішень про шаблони/процеси («кожен експорт = експеримент, результат якого збираємо»). Стек **свідомо мінімальний** (анти-цілі 14 §5): Postgres `events` + Sentry (SaaS free) + Umami self-hosted + Discord webhook — **жодного** Prometheus/Grafana/OTel/Kafka/K8s. Реалізовано **6 PR** (docs-gate → імплементація → progress-log):
