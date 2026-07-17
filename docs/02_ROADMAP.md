@@ -217,8 +217,8 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 > (`docs/15_LLM_PROMPTS.md`).
 
 - **PR #69** (форма `/f/{exportId}` + `POST /feedback` + `export_feedback` таблиця
-  + digest-секція «Виробничий фідбек») — **OPEN / DRAFT**, заблокований на ручній
-  drizzle-міграції (HARD-STOP за задумом, аналог pattern PR #55).
+  - digest-секція «Виробничий фідбек») — **OPEN / DRAFT**, заблокований на ручній
+    drizzle-міграції (HARD-STOP за задумом, аналог pattern PR #55).
 - **Issue #70** (follow-up: `export_id` у PDF → реальний QR-URL замість fallback
   `flatcraft://…`, regen 12 снапшотів) — **OPEN**, не розпочато; залежить від
   merge #69.

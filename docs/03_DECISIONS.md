@@ -6,41 +6,41 @@
 
 > Підтримується кожним новим ADR (додати рядок при створенні). Джерело дат — заголовок `**Статус:**` у самому записі; де його нема — позначено «дата не зафіксована» (не вигадувати).
 
-| №       | Назва                                                                                | Статус                                                        | Дата                 |
-| ------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------- |
-| ADR-001 | Монорепо на pnpm + Turborepo                                                          | Accepted                                                         | 2026-05-08             |
-| ADR-002 | Two-language CAD pipeline (TS + Python)                                               | Accepted                                                         | 2026-05-08             |
-| ADR-003 | Drizzle ORM, не Prisma                                                                 | Accepted                                                         | 2026-05-08             |
-| ADR-004 | BullMQ для черги CAD-задач                                                            | Accepted                                                         | 2026-05-08             |
-| ADR-005 | Single VPS на DigitalOcean для MVP                                                     | Superseded by ADR-011                                            | 2026-05-08             |
-| ADR-006 | GDPR-by-design з першого дня                                                           | Accepted                                                         | 2026-05-08             |
-| ADR-007 | Auth.js (NextAuth) для автентифікації                                                  | Accepted                                                         | 2026-05-08             |
-| ADR-008 | Cloudflare R2 для long-term storage                                                    | Accepted                                                         | 2026-05-08             |
-| ADR-009 | TDD з першого дня, цільове покриття 80%                                                | Accepted                                                         | 2026-05-08             |
-| ADR-010 | Логування — pino з redact, без structured stack у консоль                             | Accepted                                                         | 2026-05-08             |
-| ADR-011 | Mirohost Cloud замість DigitalOcean                                                    | Accepted (supersedes ADR-005)                                    | 2026-05-14             |
-| ADR-012 | UUID v4 у схемі, v7 — окремою міграцією після Postgres 18                              | Accepted                                                         | 2026-05-16             |
-| ADR-013 | Browser-side preview через three.js Shape, OpenCascade.js відкладено                   | Accepted                                                         | 2026-05-17             |
-| ADR-014 | Caddy + Cloudflare Origin Certificate замість Let's Encrypt                            | Accepted                                                         | 2026-05-22             |
-| ADR-015 | Drizzle міграції + seed у entrypoint api-контейнера                                    | Accepted                                                         | 2026-05-28             |
-| ADR-016 | Visual design system — warm industrial, single light theme, mobile-first               | Accepted                                                         | 2026-05-30             |
-| ADR-017 | Group metadata у Zod через `.describe("group:G\|label:L")`                             | Accepted                                                         | 2026-05-30             |
-| ADR-018 | `material_code` доставляється до API, але обрізається перед cad-worker'ом              | Accepted                                                         | 2026-05-30             |
-| ADR-019 | Server-side validation як інваріант export-pipeline                                    | Accepted                                                         | дата не зафіксована    |
-| ADR-020 | Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)                          | Accepted                                                         | 2026-06-04             |
-| ADR-021 | Drawing polish — auto-layout corner picker + єдина конвенція осей + UA-одиниці BOM      | Accepted                                                         | 2026-06-05             |
-| ADR-022 | Клієнтська валідація матриці гибу через bake'ed snapshot                               | Accepted                                                         | 2026-06-08             |
-| ADR-023 | Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile      | Accepted                                                         | 2026-06-11             |
-| ADR-024 | Production-grade DXF — рівно 2 шари + color-coded cut paths                            | Accepted                                                         | 2026-06-15             |
-| ADR-025 | Ізометрія у PDF через OCC hidden-line-removal (вектор, детермінований)                  | Accepted                                                         | 2026-06-16             |
-| ADR-026 | R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params        | Accepted                                                         | 2026-06-16             |
-| ADR-027 | Products як preset базового шаблону                                                    | Accepted (відновлено housekeeping 2026-07-17, джерело — PR #28) | 2026-06-22             |
-| ADR-028 | Валідація перфорації (pitch > розмір отвору) як окремий gate                           | Accepted                                                         | 2026-06-24             |
-| ADR-029 | Клієнтський перемикач форми отвору над двома шаблонами (без злиття)                     | Superseded by ADR-031                                            | 2026-06-26             |
-| ADR-030 | Перфо-монтажна панель — ребриста (4 фланці + кутові отвори), не опційно                 | Accepted (розширено ADR-031)                                     | 2026-06-25             |
-| ADR-031 | Уніфікація перфо-панелі в ОДИН параметричний шаблон (форма отвору — параметр)           | Accepted (supersedes ADR-029, розширює ADR-030)                  | 2026-06-26             |
-| ADR-032 | Observability & self-improvement loop                                                  | Accepted                                                         | 2026-07-05             |
-| ADR-033 | Template Registry contract — єдиний реєстр шаблонів + conformance-suite                | Proposed                                                         | 2026-07-13             |
+| №       | Назва                                                                              | Статус                                                          | Дата                |
+| ------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------- |
+| ADR-001 | Монорепо на pnpm + Turborepo                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-002 | Two-language CAD pipeline (TS + Python)                                            | Accepted                                                        | 2026-05-08          |
+| ADR-003 | Drizzle ORM, не Prisma                                                             | Accepted                                                        | 2026-05-08          |
+| ADR-004 | BullMQ для черги CAD-задач                                                         | Accepted                                                        | 2026-05-08          |
+| ADR-005 | Single VPS на DigitalOcean для MVP                                                 | Superseded by ADR-011                                           | 2026-05-08          |
+| ADR-006 | GDPR-by-design з першого дня                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-007 | Auth.js (NextAuth) для автентифікації                                              | Accepted                                                        | 2026-05-08          |
+| ADR-008 | Cloudflare R2 для long-term storage                                                | Accepted                                                        | 2026-05-08          |
+| ADR-009 | TDD з першого дня, цільове покриття 80%                                            | Accepted                                                        | 2026-05-08          |
+| ADR-010 | Логування — pino з redact, без structured stack у консоль                          | Accepted                                                        | 2026-05-08          |
+| ADR-011 | Mirohost Cloud замість DigitalOcean                                                | Accepted (supersedes ADR-005)                                   | 2026-05-14          |
+| ADR-012 | UUID v4 у схемі, v7 — окремою міграцією після Postgres 18                          | Accepted                                                        | 2026-05-16          |
+| ADR-013 | Browser-side preview через three.js Shape, OpenCascade.js відкладено               | Accepted                                                        | 2026-05-17          |
+| ADR-014 | Caddy + Cloudflare Origin Certificate замість Let's Encrypt                        | Accepted                                                        | 2026-05-22          |
+| ADR-015 | Drizzle міграції + seed у entrypoint api-контейнера                                | Accepted                                                        | 2026-05-28          |
+| ADR-016 | Visual design system — warm industrial, single light theme, mobile-first           | Accepted                                                        | 2026-05-30          |
+| ADR-017 | Group metadata у Zod через `.describe("group:G\|label:L")`                         | Accepted                                                        | 2026-05-30          |
+| ADR-018 | `material_code` доставляється до API, але обрізається перед cad-worker'ом          | Accepted                                                        | 2026-05-30          |
+| ADR-019 | Server-side validation як інваріант export-pipeline                                | Accepted                                                        | дата не зафіксована |
+| ADR-020 | Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)                      | Accepted                                                        | 2026-06-04          |
+| ADR-021 | Drawing polish — auto-layout corner picker + єдина конвенція осей + UA-одиниці BOM | Accepted                                                        | 2026-06-05          |
+| ADR-022 | Клієнтська валідація матриці гибу через bake'ed snapshot                           | Accepted                                                        | 2026-06-08          |
+| ADR-023 | Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile | Accepted                                                        | 2026-06-11          |
+| ADR-024 | Production-grade DXF — рівно 2 шари + color-coded cut paths                        | Accepted                                                        | 2026-06-15          |
+| ADR-025 | Ізометрія у PDF через OCC hidden-line-removal (вектор, детермінований)             | Accepted                                                        | 2026-06-16          |
+| ADR-026 | R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params  | Accepted                                                        | 2026-06-16          |
+| ADR-027 | Products як preset базового шаблону                                                | Accepted (відновлено housekeeping 2026-07-17, джерело — PR #28) | 2026-06-22          |
+| ADR-028 | Валідація перфорації (pitch > розмір отвору) як окремий gate                       | Accepted                                                        | 2026-06-24          |
+| ADR-029 | Клієнтський перемикач форми отвору над двома шаблонами (без злиття)                | Superseded by ADR-031                                           | 2026-06-26          |
+| ADR-030 | Перфо-монтажна панель — ребриста (4 фланці + кутові отвори), не опційно            | Accepted (розширено ADR-031)                                    | 2026-06-25          |
+| ADR-031 | Уніфікація перфо-панелі в ОДИН параметричний шаблон (форма отвору — параметр)      | Accepted (supersedes ADR-029, розширює ADR-030)                 | 2026-06-26          |
+| ADR-032 | Observability & self-improvement loop                                              | Accepted                                                        | 2026-07-05          |
+| ADR-033 | Template Registry contract — єдиний реєстр шаблонів + conformance-suite            | Proposed                                                        | 2026-07-13          |
 
 ---
 
