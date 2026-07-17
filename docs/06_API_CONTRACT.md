@@ -382,6 +382,10 @@ Read-API для `events` у MVP немає: дані споживають digest
 
 **Приватність:** без PII у `events` — параметри події лише агрегатні (`outcome`, `has_deviation_description: bool`, `has_comment: bool`, `locale`). Сам вміст коментаря + опис відхилення живе тільки у `export_feedback` таблиці (retention 12 міс) — доступ адміну через SQL, не через API.
 
+#### QR-permalink у PDF → export_id (issue #70)
+
+`POST /exports` (внутрішній wire-контракт api→cad-worker, не публічний): api генерує `export_id` (== `job.id` == майбутній `exports.id`) ДО форварду тіла у cad-worker і додає його як поле `export_id: uuid` (Zod `ExportRequestSchema`, optional — web-клієнт його не надсилає, лише api при форварді). cad-worker (`ExportRequest` Pydantic, `export_id: UUID | None`) використовує його для QR у PDF: `{BASE_URL}/f/{export_id}` замість fallback `flatcraft://<slug>/<article>` (не працює на телефонах). Без `export_id` або без env `BASE_URL` — fallback лишається (зворотна сумісність). `BASE_URL` — те саме значення, що `APP_BASE_URL` у api (`infra/compose/docker-compose.prod.yml`), окрема env-змінна для cad-worker-контейнера. DXF — без змін (ADR-024: жодного QR/TEXT у DXF, лише PDF).
+
 ---
 
 ## 6. Donations

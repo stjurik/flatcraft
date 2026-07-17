@@ -12,6 +12,7 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID
 
 import boto3
 from fastapi import FastAPI, HTTPException
@@ -80,6 +81,20 @@ class ExportRequest(BaseModel):
     parameters: dict[str, Any]
     thickness_mm: float = Field(gt=0, le=10)
     k_factor: float = Field(default=0.4, gt=0.0, le=1.0)
+    # Issue #70: генерується apps/api (== persisted exports.id) перед форвардом
+    # сюди. Дозволяє QR у PDF вести на {BASE_URL}/f/{export_id} замість
+    # непрацюючого fallback-scheme flatcraft://<slug>/<article>.
+    export_id: UUID | None = None
+
+
+def _permalink_url(export_id: UUID | None) -> str | None:
+    """`{BASE_URL}/f/{export_id}` для QR у PDF, або None (fallback у export/pdf.py)."""
+    if export_id is None:
+        return None
+    base_url = os.environ.get("BASE_URL")
+    if not base_url:
+        return None
+    return f"{base_url.rstrip('/')}/f/{export_id}"
 
 
 class ExportArtifact(BaseModel):
@@ -126,7 +141,13 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         bend_radius_mm=params.bend_radius_mm,
         bend_direction=params.bend_direction,
     ).read_bytes()
-    pdf = export_l_bracket_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
+    pdf = export_l_bracket_pdf(
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        solid=solid,
+        permalink_url=_permalink_url(req.export_id),
+    ).read_bytes()
     return dxf, pdf
 
 
@@ -147,7 +168,13 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         bend_radius_mm=params.bend_radius_mm,
         bend_directions=tuple(b.direction for b in params.bends),
     ).read_bytes()
-    pdf = export_z_bracket_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
+    pdf = export_z_bracket_pdf(
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        solid=solid,
+        permalink_url=_permalink_url(req.export_id),
+    ).read_bytes()
     return dxf, pdf
 
 
@@ -168,7 +195,13 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
         bend_radius_mm=params.bend_radius_mm,
         bend_direction=params.bend_direction,
     ).read_bytes()
-    pdf = export_corner_angle_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
+    pdf = export_corner_angle_pdf(
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        solid=solid,
+        permalink_url=_permalink_url(req.export_id),
+    ).read_bytes()
     return dxf, pdf
 
 
@@ -189,7 +222,13 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
         bend_radius_mm=params.bend_radius_mm,
         bend_directions=tuple(b.direction for b in params.bends),
     ).read_bytes()
-    pdf = export_wall_shelf_pdf(params, unfolded, tmpdir / "out.pdf", solid=solid).read_bytes()
+    pdf = export_wall_shelf_pdf(
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        solid=solid,
+        permalink_url=_permalink_url(req.export_id),
+    ).read_bytes()
     return dxf, pdf
 
 
@@ -210,7 +249,11 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
     unfolded = unfold_perforated_panel(params, req.k_factor)
     dxf = export_perforated_panel_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
     pdf = export_perforated_panel_pdf(
-        params, unfolded, tmpdir / "out.pdf", solid=solid
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        solid=solid,
+        permalink_url=_permalink_url(req.export_id),
     ).read_bytes()
     return dxf, pdf
 
@@ -231,7 +274,9 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
     _ = build_enclosed_shelf(params)  # 3D-валідація геометрії, у PDF поки не вживаємо
     unfolded = unfold_enclosed_shelf(params, req.k_factor)
     dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
-    pdf = export_enclosed_shelf_pdf(params, unfolded, tmpdir / "out.pdf").read_bytes()
+    pdf = export_enclosed_shelf_pdf(
+        params, unfolded, tmpdir / "out.pdf", permalink_url=_permalink_url(req.export_id)
+    ).read_bytes()
     return dxf, pdf
 
 

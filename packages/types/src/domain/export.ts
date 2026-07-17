@@ -22,6 +22,11 @@ import { ZBracketParametersSchema } from "../templates/z-bracket.js";
 
 const MaterialCodeSchema = z.string().min(1).max(64);
 const ThicknessMmSchema = z.number().positive().max(10);
+// Issue #70: генерується у Fastify (job.id) перед форвардом у cad-worker —
+// web-клієнт це поле НІКОЛИ не надсилає, тому optional. cad-worker використовує
+// його для QR-permalink `{BASE_URL}/f/{export_id}` у PDF (fallback без нього —
+// непрацюючий `flatcraft://<slug>/<article>` scheme).
+const ExportIdSchema = z.string().uuid().optional();
 
 export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
   z.object({
@@ -29,24 +34,28 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
     parameters: LBracketParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
   z.object({
     template_slug: z.literal("z_bracket"),
     parameters: ZBracketParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
   z.object({
     template_slug: z.literal("corner_angle"),
     parameters: CornerAngleParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
   z.object({
     template_slug: z.literal("wall_shelf"),
     parameters: WallShelfParametersBaseSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
   // ADR-031: ОДИН параметричний шаблон перфо-панелі (форма отвору — параметр).
   z.object({
@@ -54,6 +63,7 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
     parameters: PerforatedPanelParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
   // Phase 3.0 PR 7c (ADR-027 Рішення 5): cross-розгортка enclosed_shelf.
   z.object({
@@ -61,6 +71,7 @@ export const ExportRequestSchema = z.discriminatedUnion("template_slug", [
     parameters: EnclosedShelfParametersSchema,
     material_code: MaterialCodeSchema,
     thickness_mm: ThicknessMmSchema,
+    export_id: ExportIdSchema,
   }),
 ]);
 

@@ -110,6 +110,10 @@ services:
       CAD_WORKER_CONCURRENCY: ${CAD_WORKER_CONCURRENCY:-1}
       CAD_WORKER_TIMEOUT_SECONDS: ${CAD_WORKER_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Issue #70: QR у PDF → {BASE_URL}/f/{export_id}. Той самий публічний
+      # origin, що й api APP_BASE_URL (не окрема змінна) — уникаємо дублювання
+      # конфігу двох сервісів з однаковим значенням.
+      BASE_URL: ${APP_BASE_URL}
     networks:
       - internal
     healthcheck:

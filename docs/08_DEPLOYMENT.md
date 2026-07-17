@@ -845,6 +845,18 @@ docker compose --env-file .env.prod -f infra/compose/docker-compose.prod.yml res
 
 Якщо OOM повторюється — upgrade Mirohost тариф (більше RAM).
 
+### 5.7. QR-permalink у PDF (issue #70) — без нового секрету
+
+cad-worker бере `BASE_URL` зі свого `environment:` у `infra/compose/docker-compose.prod.yml`
+(`BASE_URL: ${APP_BASE_URL}`) — те саме значення, що вже використовує `api` як
+`APP_BASE_URL`, окрема змінна лише тому, що worker — інший контейнер/процес.
+**Нового prod-секрету не треба** — якщо `APP_BASE_URL` вже стоїть у `.env.prod`
+(а він стоїть, це foundational var), QR у щойно згенерованих PDF одразу веде на
+`{APP_BASE_URL}/f/{export_id}` після наступного деплою/рестарту cad-worker.
+Без `BASE_URL` (або якщо `export_id` не передано з `api`) — воркер тихо
+повертається до старого fallback `flatcraft://<slug>/<article>` (не працює на
+телефонах, лише зворотна сумісність зі старими job'ами).
+
 ---
 
 ## §6. Ротація secrets

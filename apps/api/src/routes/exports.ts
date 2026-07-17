@@ -95,7 +95,13 @@ async function runJob(
     // ADR-018: web→api приймає material_code, але cad-worker Pydantic має
     // extra="forbid" — strip перед форвардом. material_code знадобиться при
     // drafts-persistence (Phase 3+); поки лише доходить до API.
-    const cadBody = stripMaterialCode(body);
+    // Issue #70: export_id = jobId (== persisted exports.id) — worker вживає
+    // його для QR-permalink {BASE_URL}/f/{export_id} у PDF замість fallback
+    // непрацюючого flatcraft:// scheme.
+    const cadBody = {
+      ...(stripMaterialCode(body) as Record<string, unknown>),
+      export_id: jobId,
+    };
     const upstream = await fetch(`${env.CAD_WORKER_URL}/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
