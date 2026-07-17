@@ -18,6 +18,15 @@
 
 Після MVP — окремий roadmap у `docs/02_ROADMAP_v1.md` (поки не створюємо).
 
+> **Легенда — дві системи нумерації (housekeeping 2026-07-17):** `Phase 0-5` вище —
+> історичний MVP-план (соло-спринти до soft-launch). `Phase 3.x` нижче — окремий
+> **Architecture Evolution track** (`docs/14_ARCHITECTURE_EVOLUTION.md §6`, підфази
+> 3.0-3.6): пост-MVP еволюція шаблонів/процесів, стартувала паралельно, номерується
+> десятковим продовженням «Phase 3», але **не пов'язана** з історичною умовною
+> «Phase 3. Auth & Limits» (яка відкладена за ADR-020 і лишається у своєму місці
+> нижче за старою нумерацією). Читай `3.x` завжди як «Architecture Evolution
+> track», а голе `Phase 3` (без крапки) — як стару MVP-фазу авторизації.
+
 ---
 
 ## Phase 0. Setup (1 тиждень)
@@ -121,6 +130,45 @@
 
 ---
 
+## Phase 3.0. Products Catalog (Architecture Evolution track, завершено 2026-06-23)
+
+> **Контекст (ADR-027):** UX-shift від CAD-інструменту до сервісу. Нова сутність
+> `product` — preset базового шаблону з обмеженим набором редагованих полів; перші
+> два вироби — декоративна перфо-панель і кастомна настінна полиця.
+
+- Реалізовано: `products` drizzle-таблиця, `/products/[slug]` route, двомодовий
+  каталог `/templates` (Вироби|Деталі), новий базовий шаблон `enclosed_shelf`,
+  `TemplateStudio mode` prop. 9 merged PR (#32, #37-#44, усі 2026-06-23).
+- **Примітка (housekeeping 2026-07-17):** оригінальні докс/архітектурні PR
+  #28-#31 («Phase 3.0 PR 1-4») лишились `OPEN`/stale — реалізація пішла через
+  паралельну серію PR вище, яка їх фактично поглинула. Рекомендація —
+  закрити #28-#31 як superseded (див. PR description, «Опитування»).
+- Немає власного запису у `docs/13_PROGRESS_LOG.md` (борг, поза scope цього
+  run'у) — джерело фактів: merged PR вище + ADR-027.
+
+---
+
+## Phase 3.1. Перфо-монтажна панель — ребра жорсткості + кутові отвори (Architecture Evolution track, завершено 2026-06-25)
+
+> ADR-030. Повний запис — `docs/13_PROGRESS_LOG.md` «Feature 3.1».
+
+- `perforated_panel_square` переосмислено з плоского листа на ребристу
+  монтажну панель (4 фланці 90°, кутові Ø5.5, R5 на вільних кутах ребер,
+  кріпильні розміри у PDF).
+
+---
+
+## Phase 3.2. Уніфікація перфо-панелі в ОДИН шаблон (Architecture Evolution track, завершено 2026-06-26)
+
+> ADR-031 (supersedes ADR-029, розширює ADR-030). Повний запис —
+> `docs/13_PROGRESS_LOG.md` «Feature 3.2».
+
+- `perforated_panel` + `perforated_panel_square` злито в ОДИН ребристий
+  шаблон `perforated_panel`; форма отвору — звичайний параметр `hole_shape`
+  (circle\|square). Прибрано дублювання по всьому стеку.
+
+---
+
 ## Phase 3.3. Observability foundation (Architecture Evolution track)
 
 > Трек **Architecture Evolution** (`docs/14_ARCHITECTURE_EVOLUTION.md §6`): підфази 3.3–3.6 —
@@ -135,25 +183,24 @@ Umami міряє, який constraint блокує користувачів.
 Патерн фази (як Phase 3.0): PR 1 docs-only (ADR-gate) → імплементаційні PR → фінальний
 progress-log PR.
 
-- [ ] **3.3 PR 1.** ADR-032 + `docs/11_OBSERVABILITY.md` + ця секція Roadmap + preview у Data
-      Model / API Contract. **Docs-only** (цей PR).
-- [ ] **3.3 PR 2.** `events` + persist `exports` у Postgres: `packages/db/src/schema.ts`
+- [x] **3.3 PR 1 (#54).** ADR-032 + `docs/11_OBSERVABILITY.md` + ця секція Roadmap + preview у Data
+      Model / API Contract. **Docs-only.** — 2026-07-06
+- [x] **3.3 PR 2 (#55).** `events` + persist `exports` у Postgres: `packages/db/src/schema.ts`
       (+ міграція — yurii вручну), `packages/types/src/events/` (Zod payload'и — спільне джерело
       api/worker), запис `export_requested`/`validation_rejected`/`export_completed`/`export_failed`
       в `apps/api` (заміна in-memory `JobStore` на drizzle-репо з тим самим інтерфейсом),
-      `cad_started`/`cad_completed` з `duration_ms` у `workers/cad`. **No-PII тест обов'язковий.**
-      (промпт B1)
-- [ ] **3.3 PR 3.** Sentry ×3 (`@sentry/nextjs` web, `@sentry/node` Fastify-plugin api,
-      `sentry-sdk` worker); `beforeSend` PII-фільтр з unit-тестом у кожному сервісі (інваріант §8);
-      errors 100 % / traces 0; DSN через env. Нові top-level залежності — з явним OK (§6).
-      (промпт B2)
-- [ ] **3.3 PR 4.** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
-      `build_digest(rows) → str` з unit-тестами (порожній / типовий / deviation тиждень); формат —
-      `docs/11 §9`. (промпт B5)
-- [ ] **3.3 PR 5.** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
-      `catalog→…→export_done`; звірка з бюджетами §9. (14 §4.2, ADR-032 §4)
-- [ ] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` + ротація CLAUDE.md §13 (після
-      merge імплементаційних PR).
+      `cad_started`/`cad_completed` з `duration_ms` у `workers/cad`. No-PII тест. — 2026-07-06
+- [x] **3.3 PR 3 (#56).** Sentry ×3 (`@sentry/nextjs` web, `@sentry/node` Fastify-plugin api,
+      `sentry-sdk` worker); `beforeSend`/`redact_pii` PII-фільтр з unit-тестом у кожному сервісі
+      (інваріант §8); DSN через env (**прод-активація — окремо, env ще не виставлено**). — 2026-07-06
+- [x] **3.3 PR 4 (#57).** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
+      `buildDigest(rows) → str` з unit-тестами (порожній / типовий / deviation тиждень); формат —
+      `docs/11 §9`. — 2026-07-06
+- [x] **3.3 PR 5 (#58).** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
+      `catalog→…→export_done`; звірка з бюджетами §9. (**деплой Umami-контейнера в проді —
+      окремо, ще не зроблено**, compose/Ansible PR відсутній). — 2026-07-06
+- [x] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` (Feature 3.3) + ротація
+      CLAUDE.md §13. — 2026-07-06
 
 **Наступні підфази треку** (окремі ADR-gate PR, не в цій фазі): **3.4** виробничий фідбек
 (`/f/{export_id}` + `export_feedback`, замикає R-01), **3.5** Template Registry (ADR-033), **3.6**
@@ -161,6 +208,71 @@ Process layer (ADR-034). Деталі — `docs/14 §6`, промпти — `doc
 
 **Тести:** docs-only PR — `prettier --check` по `.md` зелений. Імплементаційні PR — TDD, наявні
 e2e (SSE-flow) лишаються зеленими після кожного PR.
+
+---
+
+## Phase 3.4. Виробничий фідбек — QR у PDF (Architecture Evolution track, статус: draft, ще не в main)
+
+> Замикає R-01 mitigation 4 (K-фактор калібрування). Специфікація — промпт B3
+> (`docs/15_LLM_PROMPTS.md`).
+
+- **PR #69** (форма `/f/{exportId}` + `POST /feedback` + `export_feedback` таблиця
+  - digest-секція «Виробничий фідбек») — **OPEN / DRAFT**, заблокований на ручній
+    drizzle-міграції (HARD-STOP за задумом, аналог pattern PR #55).
+- **Issue #70** (follow-up: `export_id` у PDF → реальний QR-URL замість fallback
+  `flatcraft://…`, regen 12 снапшотів) — **OPEN**, не розпочато; залежить від
+  merge #69.
+- Немає власного запису у `docs/13_PROGRESS_LOG.md` — фіча ще не на main
+  (перевірено housekeeping 2026-07-17, `docs/promts/inputs/housekeeping-audit.md` п.1).
+  `docs/04_RISKS.md` R-01 mitigation 4 лишається без позначки ✅ до merge.
+
+---
+
+## Phase 3.5. Template Registry (Architecture Evolution track)
+
+> Трек **Architecture Evolution**: ADR-033 (Template Registry contract) + C1-інвентаризація
+> (`docs/promts/inputs/c1-template-inventory.md`) → 9 PR-ів. Мета вектора — новий шаблон =
+> **1 TS-модуль + 1 Python-модуль + снапшоти + автогенерований spec**, нуль правок у
+> `apps/web`, `apps/api`. «Різні вироби по-різному відображаються/обраховуються» стає
+> структурно неможливим (conformance-suite fail-closed).
+
+**Definition of Done:** усі 6 шаблонів працюють через `TEMPLATE_REGISTRY`; 18 файлів
+`apps/web/src/components/*-{studio,editor,viewport}.tsx` видалено; `TemplateStudioSlug` union
+автогенерований з ключів реєстру; conformance-suite (schema parity TS↔Python + DXF/PDF
+детермінізм + render-gate + e2e smoke) — зелена після кожного PR.
+
+Патерн: PR 1 docs-only (цей) → PR 2 registry-пакет + suite → PR 3-8 міграція шаблонів
+**ПО ОДНОМУ** → PR 9 cleanup.
+
+- [x] **3.5 PR 1.** ADR-033 + `docs/12_TEMPLATE_CONTRACT.md` + ця секція Roadmap. **Docs-only.**
+      (**Примітка housekeeping 2026-07-17:** зміст присутній на main, але `git blame` веде на
+      `74ff1c0`/PR #71 — не власний PR, ймовірний побічний ефект squash-merge з невірної бази
+      гілки, той самий клас помилки, що адресує `chore/guard-branch-base`. ADR-033 сам має
+      статус `Proposed`, не `Accepted` — формально не затверджено.)
+- [ ] **3.5 PR 2.** `packages/templates` — новий пакет: `TemplateDefinition` type, `TEMPLATE_REGISTRY`
+      (порожній), conformance-suite (4 перевірки автогенеровані з реєстру); dual-run адаптер
+      `if slug in TEMPLATE_REGISTRY: registry-path else: legacy-path` (для міграції по одному).
+      Python: `workers/cad/flatcraft_cad/templates/registry.py` з порожнім `TEMPLATES` dict + parity-тест TS↔Python slug-set.
+- [ ] **3.5 PR 3.** Мігрувати `perforated_panel` (найпростіший — grid-based, вже після ADR-031).
+      Видалити `perforated-panel-{studio,editor,viewport,scene}.tsx`. Conformance-suite ✅.
+- [ ] **3.5 PR 4.** Мігрувати `corner_angle` (grid-based, дублює `l_bracket` profile — C1 F4).
+- [ ] **3.5 PR 5.** Мігрувати `l_bracket` (canonical). `ExportRequest` переходить на
+      `superRefine` через registry (ADR-033 §2, ALT-C) — F1 (`WallShelfParametersBaseSchema`)
+      закривається.
+- [ ] **3.5 PR 6.** Мігрувати `z_bracket` (2 bends, array).
+- [ ] **3.5 PR 7.** Мігрувати `wall_shelf` (перенести refine `front_lip_mm` у definition;
+      F1 остаточно закривається — server бачить constraint).
+- [ ] **3.5 PR 8.** Мігрувати `enclosed_shelf` (найскладніший — cross-shape + nested opts).
+      F2 закривається — render-gate ЗАВЖДИ через `def.validators`.
+- [ ] **3.5 PR 9.** Cleanup: видалити 18 файлів `*-{studio,editor,viewport}.tsx`, `SLUGS_WITH_*`
+      set-и, hardcoded `TemplateStudioSlug` union; переконатись, що C1 F1-F8 усі закриті.
+
+**Інваріанти, які контракт НЕ сміє ламати** (ADR-033 §Інваріанти):
+байт-у-байт DXF/PDF; render-gate ADR-026; products ADR-027; browser-safe entry `cad-engine`;
+серверна валідація ADR-019.
+
+**Тести:** docs-only PR — `prettier --check`. Імплементаційні PR — conformance-suite для
+відповідного шаблону + наявні e2e для всіх шаблонів (dual-run) — зелені після КОЖНОГО PR.
 
 ---
 
@@ -203,8 +315,12 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 
 **Definition of Done:** домен `hart.crimea.ua`, SSL через Cloudflare, GDPR-compliance, Privacy/ToS опубліковані, Sentry прокладено, перші 10 живих юзерів.
 
-- [ ] **5.1.** Sentry SDK у web + api + worker; `beforeSend` фільтр PII
-- [ ] **5.2.** Plausible/Umami self-hosted або хмарний акаунт
+- [x] **5.1.** Sentry SDK у web + api + worker; `beforeSend`/`redact_pii` фільтр PII — код
+      реалізовано у Phase 3.3 PR 3 (#56, 2026-07-06); **прод-активація (SENTRY_DSN env) —
+      окремо, ще не зроблено** (housekeeping 2026-07-17).
+- [x] **5.2.** Umami self-hosted (cookie-less, обрано над Plausible — ADR-032 §4) — код
+      реалізовано у Phase 3.3 PR 5 (#58, 2026-07-06); **деплой контейнера в проді — окремо,
+      compose/Ansible PR ще не зроблено** (housekeeping 2026-07-17).
 - [x] **5.3.** ~~Cookie banner~~ — **банер не потрібен**: Umami self-hosted cookie-less (ADR-032 §4, ADR-006). У Footer/SiteLinks — стислий рядок «Без трекінг-cookies»; секція `#cookies` у `/privacy`. — 2026-07-12 (draft)
 - [x] **5.4.** Privacy Policy + ToS **draft** (`/privacy`, `/terms` UA + `/privacy/en`, `/terms/en` EN). Кожна сторінка містить банер «Драфт, не є юридичною консультацією; фінальна версія — після рев'ю юристом». Легальний рев'ю юристом — окрема задача перед публічним soft-launch. — 2026-07-12 (draft)
 - [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete` — **відкладено до Phase 3 (auth)**. Без акаунтів немає ідентифіковного суб'єкта → відповідних DSR-функцій експортувати/видаляти теж немає (події зберігаються без PII, ADR-032).

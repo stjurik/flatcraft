@@ -213,6 +213,11 @@ flatcraft/
 - Staging preflight checklist (manual setup до Ansible): `docs/09_STAGING_PREFLIGHT.md`
 - Discord config (community-сервер як IaC): `infra/discord/` + ADR-023; manual-кроки — `infra/discord/MANUAL_SETUP.md`
 - Design system: `docs/10_DESIGN_SYSTEM.md` (ADR-016)
+- Observability (телеметрія, events, digest): `docs/11_OBSERVABILITY.md` (ADR-032)
+- Template Registry contract: `docs/12_TEMPLATE_CONTRACT.md` (ADR-033)
+- Стратегія еволюції архітектури (registry/process/feedback): `docs/14_ARCHITECTURE_EVOLUTION.md`
+- Бібліотека LLM-промптів і маршрутизація по моделях: `docs/15_LLM_PROMPTS.md`
+- Автономні запуски (headless, guard-правила): `docs/16_AUTONOMOUS_RUNS.md`
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
 
