@@ -97,6 +97,13 @@ E. docs/06_API_CONTRACT.md — preview: без нових публічних end
 
 ### A2. ADR-033 Template Registry (Phase 3.5, docs-only gate)
 
+> **Статус (housekeeping 2026-07-17): docs-gate виконано.** ADR-033 і
+> `docs/12_TEMPLATE_CONTRACT.md` присутні на main (ADR-033 сам має статус
+> `Proposed`, не `Accepted`). Зміст потрапив на main непрямо — `git blame`
+> веде на `74ff1c0`/PR #71, не власний PR (ймовірний побічний ефект
+> squash-merge з невірної бази, клас помилки `chore/guard-branch-base`).
+> Імплементаційні PR 2-9 (реєстр + міграція 6 шаблонів) — НЕ розпочато.
+
 ```
 [Phase 3.5 — PR 1: Template Registry contract (ADR-033 + docs/12 + міграційний план)]
 
@@ -214,6 +221,12 @@ Sample rate: errors 100%, traces 0 (MS21-ресурси). Docker env — infra/c
 ```
 
 ### B3. QR-фідбек з виробництва (Phase 3.4)
+
+> **Статус (housekeeping 2026-07-17): НЕ виконано.** PR #69 (форма +
+> `POST /feedback` + `export_feedback`) — `OPEN`/`DRAFT`, заблокований на
+> ручній drizzle-міграції. Follow-up issue #70 (QR-URL у PDF) — `OPEN`, не
+> розпочато. `docs/04_RISKS.md` R-01 mitigation 4 — без ✅. Деталі:
+> `docs/promts/inputs/housekeeping-audit.md` п.1.
 
 ```
 Реалізуй виробничий feedback-loop за ADR-032 §feedback (див. 14 §4.3, R-01 mitigation 4).
