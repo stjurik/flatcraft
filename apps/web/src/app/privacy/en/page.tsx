@@ -34,7 +34,9 @@ const SECTIONS: ReadonlyArray<Section> = [
     title: "2. No tracking cookies",
     body:
       "Analytics is Umami self-hosted in our data centre (cookie-less: no tracking cookie is set, no external " +
-      "service receives your browser fingerprint). No GDPR consent banner is required. Technical cookies " +
+      "service receives your browser fingerprint). No GDPR consent banner is required. The only cookie on the " +
+      "platform is `hart_locale` (functional, not analytical): remembers your language choice " +
+      "(Ukrainian/English), valid for 1 year, no personal data. Technical cookies " +
       "(auth session, CSRF token) will appear later when we add sign-up (Roadmap Phase 3).",
   },
   {

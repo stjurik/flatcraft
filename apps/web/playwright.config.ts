@@ -12,6 +12,12 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
     trace: "on-first-retry",
+    // Явний Accept-Language захищає наявні uk e2e від auto-редіректу
+    // middleware'а (ADR-037 §3): без цього Chromium headless шле мову
+    // раннера (типово en-US на GH Actions) і `/` редіректило б на `/en`
+    // до того, як тест встигне щось перевірити. EN-редірект перевіряється
+    // окремим тестом через `test.use({ locale: "en-US" })`.
+    locale: "uk-UA",
   },
   projects: [
     {

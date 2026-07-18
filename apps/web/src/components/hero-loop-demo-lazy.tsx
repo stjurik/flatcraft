@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+
 /**
  * Dynamic ssr:false wrapper для `HeroLoopDemo` — R3F bundle важкий
  * (~300КБ gzip), вантажиться поза critical path. Skeleton — той самий
@@ -18,6 +20,10 @@ const HeroLoopDemoInner = dynamic(() => import("./hero-loop-demo").then((m) => m
   ),
 });
 
-export function HeroLoopDemoLazy() {
-  return <HeroLoopDemoInner />;
+interface HeroLoopDemoLazyProps {
+  readonly locale?: Locale;
+}
+
+export function HeroLoopDemoLazy({ locale = DEFAULT_LOCALE }: HeroLoopDemoLazyProps = {}) {
+  return <HeroLoopDemoInner locale={locale} />;
 }

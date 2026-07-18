@@ -3,11 +3,17 @@
 import { Activity, LBracketScene, useReducedMotion } from "@flatcraft/ui";
 import { useEffect, useRef, useState } from "react";
 
+import { dictionaries } from "../i18n/dictionaries";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import { HERO_LOOP_PERIOD_MS, nextDemoParams } from "../lib/hero-loop";
 
 const DESKTOP_TICK_MS = 100;
 const MOBILE_TICK_MS = 200;
 const MOBILE_MQ = "(max-width: 767px)";
+
+interface HeroLoopDemoProps {
+  readonly locale?: Locale;
+}
 
 /**
  * Hero loop-демо: live 3D-перегляд, що автоматично прокручує L-кронштейн
@@ -23,7 +29,8 @@ const MOBILE_MQ = "(max-width: 767px)";
  * hover). prefers-reduced-motion — не запускає RAF взагалі, рендерить
  * статичний бракет за початковими параметрами.
  */
-export function HeroLoopDemo() {
+export function HeroLoopDemo({ locale = DEFAULT_LOCALE }: HeroLoopDemoProps = {}) {
+  const dict = dictionaries[locale].home;
   const reduced = useReducedMotion();
   const [params, setParams] = useState(() => nextDemoParams(0));
   const pausedRef = useRef(false);
@@ -71,11 +78,7 @@ export function HeroLoopDemo() {
         Live demo
       </span>
 
-      <div
-        className="h-full w-full"
-        role="img"
-        aria-label="Демо: автоматична зміна параметрів L-кронштейна"
-      >
+      <div className="h-full w-full" role="img" aria-label={dict.heroDemoAria}>
         <LBracketScene parameters={params} thicknessMm={2.0} />
       </div>
 
@@ -84,8 +87,7 @@ export function HeroLoopDemo() {
           data-testid="hero-loop-reduced-caption"
           className="bg-bg-elevated/90 text-fg-muted absolute bottom-3 left-3 right-3 rounded-sm px-3 py-2 text-xs"
         >
-          Параметри інтерактивні у редакторі — а тут показуємо статичний бракет (ваш браузер просить
-          менше анімації).
+          {dict.heroReducedCaption}
         </p>
       ) : null}
     </div>
