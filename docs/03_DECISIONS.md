@@ -1725,6 +1725,13 @@ error-messages, PDF-генерація worker'а) — поза scope, мігру
 
 **4. Словники — `apps/web/src/i18n/dictionaries.ts`, типізовані ключі, namespace на зону.**
 
+- _Альтернативи:_ окремий файл-словник на кожну зону (`home.ts`, `about.ts`,
+  `catalog.ts`, ...) замість одного `dictionaries.ts` з namespace-ами всередині
+  — менше git-конфліктів при паралельній розробці кількох зон, але важче
+  звірити повноту проти `i18n-inventory.md` (10+ файлів замість одного місця
+  правди); дублювати DB-контент (`template.nameUk`/`nameEn`) у словнику теж
+  (замість читання напряму з API) — відхилено, порушує «одне джерело істини
+  для даних» (CLAUDE.md §3), API вже повертає обидва варіанти напряму.
 - _Вибір:_ один файл, namespace-и `common` (footer/site-links/switcher), `home`,
   `about`, `soon`, `catalog` (+ `templateCard`/`productCard`), `templateDetail`,
   `productDetail`, `exportFlow`, `og`. DB-контент (`template.nameUk`/`nameEn`,
@@ -1746,6 +1753,16 @@ error-messages, PDF-генерація worker'а) — поза scope, мігру
 
 **5. Межа Etap A / Etap B — студії залишаються НЕТОРКНУТИМИ.**
 
+- _Альтернативи:_ частково перекласти студії (лише текстові JSX-лейбли, БЕЗ
+  AutoForm `.describe()`-метаданих і Zod-повідомлень) — відхилено: розмиває
+  чіткий handoff-пункт для Registry-міграції (Run 7), і `.describe()`
+  метадані все одно підуть під нову `TemplateDefinition`-схему, тобто
+  часткова робота була б викинута; НЕ готувати dictionary-ready `locale`-prop
+  на `export-button.tsx`/`post-export-donate-nudge.tsx` зараз (повністю
+  відкласти до Etap B) — відхилено, бо ці 2 компоненти генеричні (не
+  прив'язані до конкретного шаблону), підготовка backward-compatible
+  optional-prop практично безкоштовна і закриває частину майбутньої роботи
+  заздалегідь.
 - _Вибір:_ `*-studio.tsx` × 6 (AutoForm-лейбли, Zod-повідомлення) — **нуль diff**.
   `template-studio.tsx` (спільний shell, НЕ per-template) і `export-button.tsx` /
   `post-export-donate-nudge.tsx` отримують опційний `locale` prop (default `"uk"`,
@@ -1767,6 +1784,14 @@ error-messages, PDF-генерація worker'а) — поза scope, мігру
 
 **6. Мова PDF/креслень — відкладено, поза Etap A.**
 
+- _Альтернативи:_ локалізувати підписи PDF зараз через мовний параметр у
+  CadQuery-генераторі — відхилено: суттєва робота у Python-worker'і, вимагає
+  нових снапшот-тестів і ризикує детермінізмом байт-у-байт (CLAUDE.md §2.4),
+  непропорційно для Etap A; client-side SVG/overlay поверх готового PDF
+  (накласти перекладений текст без зміни worker'а) — відхилено: крихко,
+  підписи стають нередагованими шаром поверх растру, і фактичний вміст файлу
+  (той, що йде на верстат) лишається українським — оверлей був би оманливим
+  для користувача.
 - _Вибір:_ PDF-генерація (`workers/cad/flatcraft_cad/export/pdf.py`) лишається
   українською. Не входить у жоден Etap цього ADR.
 - _Обґрунтування:_ ISO/EN ISO 7200-креслення (CLAUDE.md §7) значною мірою
@@ -1776,6 +1801,40 @@ error-messages, PDF-генерація worker'а) — поза scope, мігру
 - _Наслідки:_ (−) EN-користувач після export отримує UA-підписану PDF — відомий
   gap, **«Опитування» PR**: чи потрібен окремий тікет у T2/T4 (`docs/02_ROADMAP.md`)
   для EN PDF після Registry (де снапшот-інфраструктура вже буде змінюватись).
+
+**7. hreflang/alternates + sitemap — follow-up (2026-07-18, Стадія 3 зауваження зони D).**
+
+- _Контекст:_ Незалежне рев'ю `agy` (Master Run 8, Стадія 3, PR #80) виявило,
+  що `i18n-inventory.md` (зона 4) явно вказував прогалину — «hreflang/alternates
+  відсутні, ADR-037 має закрити» — а сам ADR цього не робив. Follow-up PR
+  закриває gap без зміни рішень 1-6.
+- _Альтернативи:_ покластися лише на `sitemap.xml` без `<link rel="alternate">`
+  у кожній сторінці — відхилено, Google явно рекомендує обидва канали
+  одночасно (сторінка — основний сигнал, sitemap — доповнення для великих
+  сайтів); окремий `[locale]`-route-group з централізованою alternates-логікою
+  замість per-page `metadata`/`generateMetadata` — відхилено, означало б
+  переписати routing (рішення 2 вже відхилило єдиний `[locale]`-сегмент).
+- _Вибір:_ `apps/web/src/i18n/hreflang.ts` — `localeAlternates(locale, ukPath,
+enPath)` (загальний випадок, напр. `/privacy`+`/privacy/en`) і
+  `mirroredAlternates(locale, ukPath)` (зручний варіант для `/en/*`-дзеркал,
+  EN-шлях виводиться через наявний `toEnPath`). Кожна з 16 локалізованих
+  сторінок (8 uk + 8 en: `/`, `/about`, `/soon`, `/templates`,
+  `/templates/[slug]`, `/products/[slug]`, `/privacy`, `/terms`) отримує
+  `alternates: {canonical, languages: {uk, en, "x-default": uk}}`. Новий
+  `app/sitemap.ts` (Next.js convention) додає ті самі reciprocal alternates
+  на рівні sitemap-запису для кожного uk/en URL (включно з динамічними
+  `/templates/[slug]`, `/products/[slug]` — slug з `fetchPublishedTemplates`/
+  `fetchPublishedProducts`). `/f/[exportId]` — свідомо ПОЗА scope (private
+  noindex QR-посилання, ADR-032 §feedback, не публічний контент).
+- _Обґрунтування:_ `x-default` = uk-шлях — узгоджено з `DEFAULT_LOCALE` (§2);
+  `canonical` — сама поточна локаль (кожна мовна версія канонічна сама на
+  себе, hreflang зв'язує еквіваленти, не позначає дублікат).
+- _Наслідки:_ (+) коректний SEO-сигнал для двомовного контенту, замикає
+  прогалину з inventory. (−) 16 файлів торкнуто (лише додавання одного поля
+  `alternates` у наявний `metadata`-об'єкт, без структурних змін); sitemap
+  робить 2 API-виклики (templates/products) при кожному crawl-запиті
+  `/sitemap.xml` (Next кешує за замовчуванням, окремого TTL не додавали —
+  прийнятний trade-off для розміру каталогу MVP).
 
 **Наслідки (загальні):**
 

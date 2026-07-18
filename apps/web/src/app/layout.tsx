@@ -7,6 +7,7 @@ import { HtmlLangSync } from "../components/html-lang-sync";
 import { LocalizedFooter, SiteHeaderHomeLink } from "../components/site-chrome";
 import { WebVitals } from "../components/web-vitals";
 import { dictionaries } from "../i18n/dictionaries";
+import { SITE_URL } from "../lib/site-url";
 import "./globals.css";
 
 /**
@@ -26,7 +27,6 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
-const SITE_URL = "https://hart.crimea.ua";
 const dict = dictionaries.uk;
 
 /**

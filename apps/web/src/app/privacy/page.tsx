@@ -11,10 +11,13 @@
  */
 import Link from "next/link";
 
+import { localeAlternates } from "../../i18n/hreflang";
+
 export const metadata = {
   title: "Політика приватності · hart.crimea.ua",
   description:
     "Як платформа поводиться з даними: без трекінг-cookies, без обов'язкової реєстрації, дані в Україні.",
+  alternates: localeAlternates("uk", "/privacy", "/privacy/en"),
 };
 
 interface Section {
