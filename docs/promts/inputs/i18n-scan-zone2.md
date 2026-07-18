@@ -1,0 +1,45 @@
+| Файл:рядок                                          | Точний UA-текст                                                                                                                   | Тип        |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `apps/web/src/app/templates/page.tsx:9`             | Каталог · hart                                                                                                                    | static     |
+| `apps/web/src/app/templates/page.tsx:10-12`         | Каталог готових виробів і параметричних шаблонів з листового металу. Налаштуйте розміри, скачайте DXF + PDF.                      | static     |
+| `apps/web/src/app/templates/page.tsx:48`            | шаблони                                                                                                                           | static     |
+| `apps/web/src/app/templates/page.tsx:50`            | вироби                                                                                                                            | static     |
+| `apps/web/src/app/templates/page.tsx:60`            | Каталог                                                                                                                           | static     |
+| `apps/web/src/app/templates/page.tsx:65`            | Каталог                                                                                                                           | static     |
+| `apps/web/src/app/templates/page.tsx:68-69`         | Готові вироби з мінімальною конфігурацією або параметричні шаблони для повної свободи — у будь-якому випадку отримаєте DXF + PDF. | static     |
+| `apps/web/src/app/templates/page.tsx:98`            | API повернув ${reason.status} (${kind}).                                                                                          | static     |
+| `apps/web/src/app/templates/page.tsx:100`           | Не вдалося завантажити ${kind} з API.                                                                                             | static     |
+| `apps/web/src/app/templates/page.tsx:147`           | Не вдалося завантажити каталог                                                                                                    | static     |
+| `apps/web/src/app/templates/page.tsx:151`           | dev hint: запустіть                                                                                                               | static     |
+| `apps/web/src/app/templates/page.tsx:161`           | Поки немає опублікованих виробів.                                                                                                 | static     |
+| `apps/web/src/app/templates/page.tsx:162`           | Поки немає опублікованих шаблонів.                                                                                                | static     |
+| `apps/web/src/app/templates/page.tsx:165`           | Перший продукт додамо у PR 6 — декоративну перфо-панель.                                                                          | static     |
+| `apps/web/src/app/templates/page.tsx:166`           | Зайдіть пізніше — ми постійно додаємо нові шаблони.                                                                               | static     |
+| `apps/web/src/app/templates/page.tsx:176`           | dev hint: запустіть                                                                                                               | static     |
+| `apps/web/src/app/templates/[slug]/page.tsx:35`     | ${template.nameUk} · hart                                                                                                         | dynamic/DB |
+| `apps/web/src/app/templates/[slug]/page.tsx:35`     | Шаблон не знайдено · hart                                                                                                         | static     |
+| `apps/web/src/app/templates/[slug]/page.tsx:49`     | ← Усі шаблони                                                                                                                     | static     |
+| `apps/web/src/app/templates/[slug]/page.tsx:55`     | {template.nameUk}                                                                                                                 | dynamic/DB |
+| `apps/web/src/app/templates/[slug]/page.tsx:58`     | {template.descriptionUk}                                                                                                          | dynamic/DB |
+| `apps/web/src/app/templates/[slug]/page.tsx:142`    | Студія для slug «${slug}» з'явиться у наступних фазах.                                                                            | static     |
+| `apps/web/src/app/products/[slug]/page.tsx:34`      | ${product.name} · hart                                                                                                            | dynamic/DB |
+| `apps/web/src/app/products/[slug]/page.tsx:34`      | Виріб не знайдено · hart                                                                                                          | static     |
+| `apps/web/src/app/products/[slug]/page.tsx:47`      | ← Усі вироби                                                                                                                      | static     |
+| `apps/web/src/app/products/[slug]/page.tsx:53`      | {product.name}                                                                                                                    | dynamic/DB |
+| `apps/web/src/app/products/[slug]/page.tsx:56`      | {product.description}                                                                                                             | dynamic/DB |
+| `apps/web/src/app/products/[slug]/page.tsx:119-120` | Студія для базового шаблону «{product.baseTemplateSlug}» з&apos;явиться у наступних PR Phase 3.0.                                 | static     |
+| `apps/web/src/components/template-card.tsx:30`      | Налаштувати: ${template.nameUk}                                                                                                   | dynamic/DB |
+| `apps/web/src/components/template-card.tsx:38`      | {template.nameUk}                                                                                                                 | dynamic/DB |
+| `apps/web/src/components/template-card.tsx:55`      | {template.nameUk}                                                                                                                 | dynamic/DB |
+| `apps/web/src/components/template-card.tsx:60`      | {template.descriptionUk}                                                                                                          | dynamic/DB |
+| `apps/web/src/components/template-card.tsx:66`      | Налаштувати →                                                                                                                     | static     |
+| `apps/web/src/components/site-links.tsx:19`         | Продукт                                                                                                                           | static     |
+| `apps/web/src/components/site-links.tsx:21`         | Шаблони                                                                                                                           | static     |
+| `apps/web/src/components/site-links.tsx:22`         | Про проєкт                                                                                                                        | static     |
+| `apps/web/src/components/site-links.tsx:23`         | Розблокувати                                                                                                                      | static     |
+| `apps/web/src/components/site-links.tsx:27`         | Спільнота                                                                                                                         | static     |
+| `apps/web/src/components/site-links.tsx:35`         | Юридичне                                                                                                                          | static     |
+| `apps/web/src/components/site-links.tsx:54`         | Карта сайту                                                                                                                       | static     |
+| `apps/web/src/components/site-links.tsx:88`         | Без трекінг-cookies (аналітика Umami self-hosted, cookie-less).                                                                   | static     |
+| `packages/ui/src/components/footer.tsx:40-41`       | Соціальна платформа для виробів з листового металу. Без CAD-навичок — DXF, PDF, STEP безкоштовно.                                 | static     |
+| `packages/ui/src/components/footer.tsx:52`          | Підтримати ЗСУ                                                                                                                    | static     |
