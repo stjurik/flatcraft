@@ -21,8 +21,9 @@ issue і виправлення без локальної сесії; дрібн
 **Черга:**
 
 1. **Запуск `docs/promts/master-ai-bugfix-flow.md`** (Архітектор; перший у черзі всього
-   Roadmap) → ADR-035 + workflows `ai-triage`/`ai-fix`/`ai-review` + issue-форми +
-   `docs/17_AI_BUGFIX_FLOW.md`. Мануальні кроки (OAuth-токен, лейбли) — у «Чергу yurii».
+   Roadmap). Run створить: ADR-035, workflows `ai-triage`/`ai-fix`/`ai-review`,
+   issue-форми, docs/17 (інструкція флоу — файлу ще нема). Мануальні кроки
+   (OAuth-токен, лейбли) — у «Чергу yurii».
 2. **Активація потоку «digest/Sentry → issue → ai-fix»**: пункти недільного digest'а і
    Sentry-issues заводяться через цей конвеєр (правило «issue або accepted noise», ADR-036 §2).
    Acceptance — тестовий прогін повного циклу на реальному дрібному issue.
@@ -44,8 +45,8 @@ issue і виправлення без локальної сесії; дрібн
    `packages/templates` + conformance-suite (PR 2 за `docs/12` §1-3, §5) → Етап 2 —
    міграція 6 шаблонів **по одному PR** (порядок: `perforated_panel` → `l_bracket` →
    `z_bracket` → `corner_angle` → `wall_shelf` → `enclosed_shelf`) → видалення
-   per-template файлів → Етап 3 — конвеєр нової Деталі (`docs/18_NEW_PART_SPEC.md` +
-   `docs/promts/new-part-run.md`).
+   per-template файлів → Етап 3 — конвеєр нової Деталі (run створить docs/18-специфікацію
+   та переюзабельний промпт new-part-run — цих файлів ще нема).
    _Умова старту:_ **після першого тижня телеметрії** (digest-acceptance, T3 п.1) —
    дані можуть змінити порядок міграції шаблонів.
 2. **Дві нові Деталі за специфікаціями yurii** (окремий майбутній run `new-part-run` ×2) —
