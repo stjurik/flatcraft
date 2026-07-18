@@ -1,333 +1,129 @@
-# 02. Roadmap — flatcraft
+# 02. Roadmap — hart.crimea.ua (модель 2.0: треки + ритми)
 
-> Roadmap — це список **спринтів по 1–2 тижні**. Кожен спринт = одна користувацька цінність + критерії приймання + тести.
-> Принципи: TDD, спочатку валідатор → потім UI, спочатку 1 шаблон end-to-end → потім решта.
-
-## Стадії
-
-| Стадія                                           | Терміни (соло-розробник, junior + Claude Code) | Мета                                                                                                       |
-| ------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Phase 0. Setup**                               | 1 тиждень                                      | Локальне середовище, CI, перший «hello world» end-to-end                                                   |
-| **Phase 1. CAD core**                            | 3 тижні                                        | Валідатор гибки + розгортка + експорт DXF одного шаблону (L-кронштейн)                                     |
-| **Phase 2. UX MVP**                              | 3 тижні                                        | 3D-редактор + форма параметрів + експорт DXF/PDF + 5 шаблонів                                              |
-| **Phase X.1. Beta-mode tweaks**                  | 1–2 дні ✅                                     | IP rate-limit + PDF «BETA» watermark + post-export ЗСУ-CTA + /about (ADR-020)                              |
-| **Phase 3. Auth & Limits** _(v1.1, conditional)_ | 2 тижні                                        | Реєстрація, лічильник 10 безкоштовних, гість-режим — **активується лише при тригерах ADR-020**             |
-| **Phase 4. Donations** _(v1.1, conditional)_     | 1 тиждень                                      | Monobank Banka link + ручне підтвердження + продовження ліміту — **активується лише при тригерах ADR-020** |
-| **Phase 5. Hardening + Launch**                  | 2 тижні                                        | GDPR, Privacy Policy, Sentry, prod-deploy на Mirohost Cloud, домен, SSL                                    |
-| **Total**                                        | ≈ 12 тижнів                                    | Public MVP                                                                                                 |
-
-Після MVP — окремий roadmap у `docs/02_ROADMAP_v1.md` (поки не створюємо).
-
-> **Легенда — дві системи нумерації (housekeeping 2026-07-17):** `Phase 0-5` вище —
-> історичний MVP-план (соло-спринти до soft-launch). `Phase 3.x` нижче — окремий
-> **Architecture Evolution track** (`docs/14_ARCHITECTURE_EVOLUTION.md §6`, підфази
-> 3.0-3.6): пост-MVP еволюція шаблонів/процесів, стартувала паралельно, номерується
-> десятковим продовженням «Phase 3», але **не пов'язана** з історичною умовною
-> «Phase 3. Auth & Limits» (яка відкладена за ADR-020 і лишається у своєму місці
-> нижче за старою нумерацією). Читай `3.x` завжди як «Architecture Evolution
-> track», а голе `Phase 3` (без крапки) — як стару MVP-фазу авторизації.
+> **Призначення файлу:** карта черг розробки. П'ять треків, кожен — мета → черга
+> «наступний PR/run» → гейт yurii. Без дат і спринтів: пропускна здатність визначається
+> увагою yurii на гейтах, пріоритети коригують ритми (див. §Ритми). Модель — **ADR-036**.
+>
+> **Історія** (завершені фази, повні описи): `docs/13_PROGRESS_LOG.md`.
+> **Стратегія** (діагноз, рекомендації registry/process/feedback): `docs/14_ARCHITECTURE_EVOLUTION.md`.
+> Цикл: трек → перший пункт черги → run/PR (промпт з `docs/promts/*` або `docs/15`) →
+> гейт yurii (merge + acceptance) → запис у `docs/13` → ритми коригують черги.
 
 ---
 
-## Phase 0. Setup (1 тиждень)
+## Треки
 
-**Definition of Done:** `pnpm dev` піднімає весь стек локально. CI на GitHub Actions проганяє lint+test на push.
+### T1. Стабілізація — конвеєр «дані → issue → ai-fix»
 
-- [x] **0.1.** Скелет монорепо (`apps/web`, `apps/api`, `workers/cad`, `packages/*`) — 2026-05-15
-- [x] **0.2.** `docker-compose.yml`: Postgres + Redis + MinIO + Mailpit (web/api/cad — локально) — 2026-05-16
-- [x] **0.3.** Drizzle init: 12 таблиць згідно docs/05, перша міграція, seed (7 матеріалів × 10 товщин + 5 шаблонів-placeholder) — 2026-05-16
-- [x] **0.4.** Fastify hello-world з health-check (`/health`), pino logger з PII-redact, Zod-валідація env, fastify-type-provider-zod — 2026-05-16
-- [x] **0.5.** Next.js 15 App Router + Tailwind, R3F куб (`dynamic ssr:false`), Playwright e2e — 2026-05-16
-- [x] **0.6.** GitHub Actions CI: install/lint/typecheck/test/build/e2e з Postgres service — 2026-05-16
-- [x] **0.7.** Pre-commit hook (lefthook): lint + typecheck + format на staged, test на pre-push — 2026-05-16
-- [x] **0.8.** README.md з інструкцією «як запустити локально за 5 хвилин» — 2026-05-16
+**Мета:** кожен сигнал телеметрії (digest, Sentry, виробничий фідбек) перетворюється на
+issue і виправлення без локальної сесії; дрібний борг не накопичується.
 
-**Тести:** smoke-test, що health-check API повертає 200, web відкривається на `localhost:3000`.
+**Черга:**
 
----
+1. **Запуск `docs/promts/master-ai-bugfix-flow.md`** (Архітектор; перший у черзі всього
+   Roadmap) → ADR-035 + workflows `ai-triage`/`ai-fix`/`ai-review` + issue-форми +
+   `docs/17_AI_BUGFIX_FLOW.md`. Мануальні кроки (OAuth-токен, лейбли) — у «Чергу yurii».
+2. **Активація потоку «digest/Sentry → issue → ai-fix»**: пункти недільного digest'а і
+   Sentry-issues заводяться через цей конвеєр (правило «issue або accepted noise», ADR-036 §2).
+   Acceptance — тестовий прогін повного циклу на реальному дрібному issue.
+3. **TD-01** (бампнути версії GitHub Actions — дедлайн-warning; див. §Tech-debt) —
+   кандидат на перший тестовий ai-fix issue.
+4. **TD-02** (guard проти stale `*.js` поряд з `.ts` у `packages/*/src/`; див. §Tech-debt).
 
-## Phase 1. CAD core (3 тижні)
+**Гейт yurii:** merge run-PR + secret/лейбли (черга yurii); далі — merge кожного fix-PR
+після ai-review-вердикту.
 
-**Definition of Done:** з командного рядка можна запустити `cad-worker` із параметрами L-кронштейна → отримати валідний DXF, який відкривається у LibreCAD.
+### T2. Registry — «специфікація → нова Деталь» (ADR-033)
 
-- [x] **1.1.** `packages/cad-engine/data/bend-machine-esi.yaml` — завантажено з `docs/07_BEND_MACHINE_SPEC.md` (Phase 0.1)
-- [x] **1.2.** `packages/cad-engine/src/spec.ts` — Zod-завантажувач + 9 тестів — 2026-05-16
-- [x] **1.3.** `packages/cad-engine/src/validators/` — sheet/bend/holes + 19 тестів — 2026-05-16
-- [x] **1.4.** `packages/cad-engine/src/k-factor.ts` — base × multiplier(R/S) + 8 тестів — 2026-05-16
-- [x] **1.5.** `workers/cad/flatcraft_cad/templates/l_bracket.py` — Pydantic + CadQuery + 16 тестів — 2026-05-16
-- [x] **1.6.** `workers/cad/flatcraft_cad/unfold.py` — bend allowance + L-розгортка + 15 тестів — 2026-05-16
-- [x] **1.7.** `workers/cad/flatcraft_cad/export/dxf.py` — 5 шарів (LASER_CUT/INNER_CUTS/BEND_LINES/BEND_TEXT/DIM) + детермінізм — 2026-05-16
-- [x] **1.8.** Снепшоти DXF — 3 фікстури, байт-у-байт регресія через post-write нормалізацію — 2026-05-16
+**Мета:** новий шаблон = 1 TS-модуль + 1 Python-модуль + снапшоти; нуль правок у
+`apps/web`/`apps/api`; додавання Деталі — відтворюваний конвеєр за специфікацією.
 
-**Тести:** pytest з фікстурами для 3 розмірів L-кронштейна; перевіряємо, що валідатор кидає правильні помилки на занадто товсту/тонку заготовку, на закороткий полиць, на недозволений радіус.
+**Черга:**
 
----
+1. **Запуск `docs/promts/master-registry-track.md`** (Master Run 7): Етап 1 —
+   `packages/templates` + conformance-suite (PR 2 за `docs/12` §1-3, §5) → Етап 2 —
+   міграція 6 шаблонів **по одному PR** (порядок: `perforated_panel` → `l_bracket` →
+   `z_bracket` → `corner_angle` → `wall_shelf` → `enclosed_shelf`) → видалення
+   per-template файлів → Етап 3 — конвеєр нової Деталі (`docs/18_NEW_PART_SPEC.md` +
+   `docs/promts/new-part-run.md`).
+   _Умова старту:_ **після першого тижня телеметрії** (digest-acceptance, T3 п.1) —
+   дані можуть змінити порядок міграції шаблонів.
+2. **Дві нові Деталі за специфікаціями yurii** (окремий майбутній run `new-part-run` ×2) —
+   acceptance всієї registry-системи.
 
-## Phase 2. UX MVP (3 тижні)
+**Гейт yurii:** ADR-033 `Proposed → Accepted` при merge плану Run 7; заповнені
+docs/18-специфікації двох Деталей; merge кожного етапу.
 
-**Definition of Done:** користувач відкриває сайт, вибирає шаблон, крутить повзунки, бачить 3D-прев'ю в реальному часі, скачує DXF + PDF.
+### T3. Launch — публічний soft-launch
 
-- [x] **2.1.** Сторінка `/templates` — каталог шаблонів. API `GET /templates` (Fastify+drizzle, 3 integration + 10 schema), web page (server component, Playwright e2e). L-bracket опубліковано, решта 4 — приховані до Phase 2.10. — 2026-05-16
-- [x] **2.2.** Сторінка `/templates/[slug]` — API `GET /templates/:slug` (Detail з defaultParameters), web Studio (controlled editor + R3F viewport з live ExtrudeGeometry). L-bracket — лише slug з повним flow до Phase 2.10. — 2026-05-16
-- [x] **2.3.** `packages/ui/src/3d-viewport/` — LBracketScene + pure-builder buildLBracketShapeCommands (5 unit-тестів). apps/web bunny консумує через dynamic ssr:false. — 2026-05-16
-- [x] **2.4.** `packages/ui/src/parameter-form/` — `introspectSchema(zodObject)` (13 unit) + AutoForm з NumberField/EnumField/LiteralField. L-bracket editor мігровано. Селектори матеріалу/товщини — окремо (Phase 3.5 / окремий MaterialPicker). — 2026-05-17
-- [x] **2.5.** Live-валідація з підсвіченням обмежень — zodIssuesToFieldErrors (6 unit) + AutoForm errors prop (border-red + aria-invalid + inline `<ul>` під полем). 2 нові Playwright e2e. — 2026-05-17
-- [x] **2.6.** Debounce 100мс на mesh-rebuild — `useDebouncedValue` у `@flatcraft/ui` (6 unit). OpenCascade.js bridge відкладено (ADR-013): three.js Shape + ExtrudeGeometry достатньо для MVP, точна геометрія — CadQuery server-side. — 2026-05-17
-- [x] **2.7.** Кнопка Export — sync HTTP-flow (BullMQ async — Phase 2.8). Python FastAPI POST /export (6 pytest, 96% cov), Fastify POST /exports (5 unit з mock fetch), Web ExportButton (3 e2e з mock'ed API). L-bracket: web → api → cad-worker → S3 presigned URL. — 2026-05-17
-- [x] **2.8.** Async export pipeline з SSE прогресом. API: in-memory JobStore (7 unit) + POST/GET/SSE /exports (6 нових unit). Web: EventSource у ExportButton + progress bar (2 нові e2e). BullMQ distributed — Phase 5. — 2026-05-17
-- [x] **2.9.** PDF з розгорткою + bend table + BOM + QR через ReportLab (compute_bom pure-функція з 3 unit). /export повертає ExportResponse.artifacts.{dxf,pdf}. Ізометрія 3D — пропущено до Phase 5 (потребує WebGL→PNG pipeline). — 2026-05-18
-- [x] **2.10.** Решта 4 шаблонів (Z-кронштейн, кутник, полиця, перфо-панель) — кожен як окремий PR. — 2026-05-18
-  - [x] **2.10.a.** Z-кронштейн — Zod + Pydantic схеми, CadQuery builder, unfold (2 гиби), DXF/PDF з generic exporters, Studio/Editor/Viewport, ExportRequest discriminatedUnion, 3 e2e. — 2026-05-18
-  - [x] **2.10.b.** Кутник (corner_angle) — auto-grid отворів (rows × cols × 2 полиці) замість ручних координат L-bracket. `_distribute` pure-функція, `Hole2D` додано до unfold, DXF/PDF малюють CIRCLE на INNER_CUTS, R3F рендерить cylinder-отвори для preview. 97 pytest (99% cov), 32 db tests, 4 нових e2e (19 разом). — 2026-05-18
-  - [x] **2.10.c.** Полиця настінна (wall_shelf) — U-channel back+shelf+(optional)lip. front_lip=0 → 2 сегменти/1 гиб, ≥5 → 3 сегменти/2 гиби. Auto-grid mounting holes на back. Cross-field constraint "0 або ≥5" через `WallShelfParametersBaseSchema` + refine wrapper (base використовується у discriminatedUnion). 118 pytest (99% cov), 33 db tests, 4 нові e2e (23 разом). — 2026-05-18
-  - [x] **2.10.d.** Перфо-панель (perforated_panel) — плоский лист без гибів, centered grid отворів за pitch_x/pitch_y/margin. Layout автоматичний: `n_cols = floor((length - 2*margin)/pitch) + 1`, eff_margin перераховується для симетрії. Reuse `_export_flat_dxf(holes, bend_lines=())` без модифікацій. Окремий PDF без bend table — натомість Hole grid summary. 137 pytest (99% cov), 34 db tests, 4 нові e2e (27 разом). — 2026-05-18
-  - [x] **2.10.e (Hotfix).** Validator-bypass у export-pipeline + напрям згину. **P0:** Z-bracket t=5/R=2.5 проскочив експорт (матриця t=5 → R∈{4.0,5.0}), порушено CLAUDE.md §7 п.2. Root cause H1+H2: `validateBend` коректний, але викликався лише браузер-side; Fastify-export форвардив без matrix-перевірки, Python перевіряв радіус проти глобального набору. Фікс: серверний gate `apps/api` (ADR-019, 422 RFC 9457 `RADIUS_NOT_ALLOWED`) + Python parity-валідатор (`flatcraft_cad/validate`, той самий YAML). Property-based парітет fast-check+hypothesis ×1000. Напрям згину (`bend_direction`/`bends[]`, дефолт `down`) у моделі + PDF bend-table колонка ↓/↑ + DXF text + 30мм overlap-fix; редактори приховують поле (no UI/UX). ADR-019, R-12. 145 pytest, 254 TS unit. Гілка `hotfix/2-10-e-validator-and-bend-direction`. — 2026-06-03
+**Мета:** з staging-бети — у публічний продукт з виміряним першим тижнем.
 
-**Phase 2 повністю закрита: 5 шаблонів end-to-end (web → api → cad-worker → S3).**
+**Черга:**
 
-**Тести:** Playwright e2e — відкрити сторінку → змінити параметр → побачити оновлення 3D → клікнути Export → отримати DXF.
+1. **Digest-acceptance — неділя 2026-07-19, 18:00 Europe/Kyiv**: перший автоматичний
+   digest у Discord (перевірка формату `docs/11` §9 + перше застосування правила
+   «issue або accepted noise»).
+2. **Go-live PR за `docs/08_DEPLOYMENT.md` §8** (go-live checklist: prod-домен, WAF,
+   рішення по BETA-watermark, smoke-тести) — закриває колишній пункт Phase 5.10.
+3. **KPI-тиждень**: перший тиждень публічного трафіку → звірка з §KPI нижче у
+   найближчому digest/huddle.
+4. **Юрист для `/privacy` + `/terms`**: рев'ю draft-текстів (зараз обидві сторінки з
+   банером «Драфт», колишній пункт Phase 5.4) → зняття draft-банера.
 
-- [x] **2.11.** Design system foundation (ADR-016, `docs/10_DESIGN_SYSTEM.md`). Warm-industrial OKLCH-токени у `globals.css` (38 шт, light theme only), Tailwind 3.4 mapping з mobile-first breakpoints (xs 360 → xl), self-hosted Inter + JetBrains Mono через next/font/google, primitive `<Button>` (CVA з варіантом `zsu`), composite `<Logo>` / `<UkraineStripe>` / `<Footer>` у `@flatcraft/ui`, `/styleguide` (dev-only, 12 секцій, contrast-table з обчисленим `contrastRatio()`). TDD `contrastRatio` (10 unit, OKLCH→sRGB→WCAG), 6 Playwright e2e (3 viewports без console-errors + UkraineStripe 2px інваріант + tap-target ≥44px + dev-gate). R-02 переписано на progressive enhancement → Phase 2.14. — 2026-05-30
+**Гейт yurii:** рішення go-live; контакт з юристом; оцінка KPI-тижня.
 
-- [x] **2.12.a.** Editor form polish (ADR-017 group metadata + ADR-018 material_code strip). `GET /materials` endpoint (JOIN materials↔material_thicknesses, нержавійка без 10мм; 4 integration tests). `MaterialChoice` Zod-схема у `@flatcraft/types/domain/materials.ts`. AutoForm (`@flatcraft/ui/parameter-form`) розширено: `parseDescription()` helper читає Zod `.describe("group:G|label:L")` → `FieldDescriptor.group/label`, рендерить fieldset/legend секції з токенами Phase 2.11 (5 нових unit). `MaterialSection` (controlled material+thickness selects, перша секція форми). 5 шаблонів отримали `.describe()`-метадані з UA-групами. ExportRequest тепер вимагає `material_code` (3 нові unit), API strip'ить його перед cad-worker forward (1 новий unit). Студії підняли material+thickness у state, ExportButton переписано на `<Button>` primitive з токенами. JSON debug-блоки приховано за `IS_DEV`. 7 нових e2e (legends, default values, dynamic thickness options, request body intercept, 3 viewports). — 2026-05-31
+### T4. Еволюція платформи — process layer і новий процес
 
-- [x] **2.12.b.** Landing redesign (`docs/10_DESIGN_SYSTEM.md §7 Hero pattern`). Hero з headline «Креслення листового металу за 60 секунд», CTA на /templates, secondary anchor «Як це працює ↓». `HeroLoopDemo` — детермінований 16-сек цикл, що прокручує L-кронштейн через 4 фази (legA→legB→bend_radius→width), pure `nextDemoParams(tMs)` (12 unit, TDD), RAF driver з tick 100мс/200мс desktop/mobile, hover-пауза, `useReducedMotion` hook у `@flatcraft/ui` → статичний бракет при reduced-motion. Dynamic ssr:false з skeleton (no CLS). Секція «Як це працює» з 3 step-cards (LayoutGrid/Sliders/FileDown). Trust-row з 3 блоками (Gift / Heart→UNITED24 / Github→repo). `SiteLinks` (app-local, 3 колонки) у Footer через новий `linksSlot` prop. Placeholder сторінка `/soon` для майбутніх лінків. lucide-icons (Activity, Gift, Heart, Github, LayoutGrid, Sliders, LucideIcon type) додано у `@flatcraft/ui/icons.ts`. 12 нових Playwright e2e (hero structure, CTA navigation, anchor scroll, step-cards, trust-blocks, RAF canvas, prefers-reduced-motion caption, console-clean × 3 viewports, tap-targets ≥44px, /soon). Нуль регресій → 53/53 e2e ✓. og:image — TODO у Phase 2.16. — 2026-05-31
+**Мета:** 3D-друк і мехобробка додаються як плагіни-вертикалі, не форки (стратегія
+`docs/14` §3). Обидва пункти — **ПІСЛЯ T2** (registry — база для process layer).
 
-- [x] **2.13.** Каталог `/templates` redesign (`docs/10_DESIGN_SYSTEM.md §8 Card pattern`). Замість плоского zinc-grid'а — токенізовані cards у warm-industrial стилі: `<article>` wrapper з `shadow-md → shadow-lg` на hover, ДВА окремі link'и (clickable h3-title + explicit `<Button variant="default">` «Налаштувати →»), thumb-region `aspect-[4/3] bg-surface-sunken` з inline SVG-схемами. `TemplateThumb` dispatcher (6 unit, TDD) з 5 схематичними виробами (L-форма, Z-форма, L+grid holes, U-channel+mounts, rect+3×3 grid) + fallback `<Box>`. `stroke="currentColor"` дозволяє group-hover тоном з картки. Mini-hero на сторінці (warm bg + heading-h1), grid на `bg-surface-sunken`. Error/empty states — токенізовані; dev-hints (`pnpm db:seed`, `pnpm api dev`) під `IS_DEV`. Vitest jsx config: `esbuild.jsx = "automatic"` для тестів з JSX. 7 нових Playwright e2e (existing 5-cards тест збережено; +CTA navigation, title-link navigation, tap-targets ≥44, console-clean × 3 viewports). 5 старих «картка → деталь» тестів адаптовано: клік по `template-card-cta` замість всього card-wrapper. 59/59 e2e ✓. — 2026-05-31
+**Черга:**
 
-- [x] **2.14.a.** Mobile-friendly studio + progressive 3D (R-02 mitigation, `docs/10_DESIGN_SYSTEM.md §9`). Pure `viewportQuality({isMobile, reduced})` helper у `@flatcraft/ui/lib/` (5 unit, TDD) з матрицею: desktop `dpr=[1,2]`/zoom/rotate/100ms/curve=12; mobile `dpr=[1,1.5]`/no-zoom (pinch conflict)/rotate/250ms/curve=8; reduced `dpr=[1,1]`/no-zoom/no-rotate/400ms/curve=6. `useIsMobile` hook у `@flatcraft/ui/hooks/` (matchMedia, SSR-safe). Застосовано до всіх 5 scenes (Canvas dpr cap + OrbitControls zoom/rotate) + 5 студій (adaptive debounce замість hardcoded 100). L-bracket scene також отримує `curveSegments` адаптивно. `<StudioPreviewAnchor>` (lg:hidden) — anchor «↓ Подивитися 3D-прев'ю» для швидкого скролу до `#studio-viewport`. Token cleanup у 5 viewport-wrappers (`zinc-* → bg-surface-sunken border-border`). 9 нових Playwright e2e на 360×640 + 1280×800 viewport (5 шаблонів × console-clean + scroll-to-anchor + tap-targets selects/export ≥44 + anchor lg:hidden). 68/68 e2e ✓ (нуль регресій). Round bend cross-section на 4 BoxGeometry-scenes (Z, corner_angle, wall_shelf) — окремий PR Phase 2.14.b. — 2026-06-01
+1. **Run A3** (`docs/15_LLM_PROMPTS.md` §A3, docs-only gate) → ADR-034 «Manufacturing
+   process layer»: ієрархія Process → Template → Product → Draft → Export → Artifact →
+   Feedback; artifacts як список `{kind, mime, r2_key}`; `templates.process_slug`.
+2. **FDM-друк v1.2** — перший новий процес (2-3 шаблони, STL/3MF + PDF-паспорт) —
+   після прийняття ADR-034.
 
-- [x] **2.14.b.** Round-bend cross-section для Z-bracket і wall-shelf scenes. Аудит показав, що з 4 box-based scenes реально потребують rewrite **тільки 2**: corner_angle уже reuse'є `buildLBracketShapeCommands` (round bend є), perforated_panel — плоский лист без гибів. Нові pure shape-builders у `packages/ui/src/3d-viewport/geometry.ts`: `buildZBracketShapeCommands` (2 inner concave bends — bottom→middle і middle→top) і `buildWallShelfShapeCommands` (1 або 2 inner bends — back→shelf завжди; shelf→lip умовно при front_lip>0). 13 нових unit tests (TDD: command counts, control point coordinates, throws на invalid geometry). Обидві scene-обгортки переписано з 3×BoxGeometry union на один `ExtrudeGeometry+Shape` (як L-bracket). Wall-shelf scene зберігає mounting-hole cylinders, переcцентровані відносно нового bounding box. `curveSegments` адаптивний (з viewportQuality) — застосовується до всіх 3 ExtrudeGeometry-scenes тепер. 68/68 e2e ✓ (нуль регресій). — 2026-06-01
+**Гейт yurii:** merge ADR-034; рішення про старт v1.2.
 
-- [x] **2.16.a.** Open Graph image для лендінга (`apps/web/src/app/opengraph-image.tsx`). Next.js App Router file-convention — Next автоматично рендерить файл, додає `<meta property="og:image">` і `twitter:image` з повним набором атрибутів (width/height/type/alt). Дизайн 1200×630: warm-bg + wordmark `hart.crimea.ua` + headline «Креслення листового металу за 60 секунд.» + sub «Без CAD-навичок · DXF + PDF · 10 експортів/міс безкоштовно» + ember-stripe + схематичний L-bracket SVG праворуч + 4px UkraineStripe знизу. **Bundled Inter TTF** (Regular/SemiBold/Bold, OFL ліцензія) у `_og-fonts/` (private route з підкреслення, Satori не має вбудованих шрифтів і Cyrillic потребує explicitly bundled font). OG metadata у `layout.tsx`: `metadataBase`, `openGraph` (uk_UA locale, website type, siteName), `twitter` (summary_large_image). 3 нові Playwright e2e: PNG magic-bytes на `/opengraph-image`, OG/twitter meta-теги у `<head>`. 71/71 e2e ✓. — 2026-06-01
+### T5. Інфраструктура — відкриті рішення
 
-- [x] **2.16.b.** Реальні preview-PNG для каталога. `tools/scripts/generate-template-previews.ts` — Playwright headless Chromium (2× DPR) обходить 5 студій на локальному стеку, чекає R3F canvas, робить скріншот `[data-testid="<slug>-viewport"]` (з border + bg-surface-sunken — консистентно з карткою). 5 PNG у `apps/web/public/template-previews/` (~12-27KB кожен, 1280×720). `pnpm --filter @flatcraft/web preview:generate` — manual run при зміні geometry/colors. Seed (`packages/db/src/seed.ts`) розширено полем `previewImageUrl: "/template-previews/<slug>.png"` для всіх 5 шаблонів; upsert у `seedTemplates` уже синхронізує DB при re-deploy через api-entrypoint (ADR-015). **Schema relaxation:** `TemplateSummarySchema.previewImageUrl` — `z.string().url().nullable()` → `z.string().min(1).nullable()` (відносні шляхи `/template-previews/*` теж валідні для `<img src>`). Existing `templates.spec.ts` e2e оновлено: тепер очікує `<img src="/template-previews/<slug>.png">` замість inline SVG-thumb. SVG-thumb dispatcher лишається як fallback, якщо `previewImageUrl=null` (legacy/майбутні шаблони). — 2026-06-01
+**Мета:** зняти два відкриті інфраструктурні рішення даними, не інтуїцією.
+_(Джерело обох пунктів — аналіз 2026-07-14, сесія архітектора поза репо; висновки
+переносяться в ADR при прийнятті. Цим run'ом рішення НЕ приймаються — ADR-036.)_
 
----
+**Черга:**
 
-## Phase X.1. Beta-mode tweaks (завершено 2026-06-04)
+1. **Рішення repo-visibility**: варіанти — public+MIT (статус-кво, CLAUDE.md §2.6) /
+   **★private** (рекомендація аналізу 2026-07-14) / private з подальшим re-open після
+   launch. Зачіпає принцип «Open Source MIT з першого коміту» → прийняття лише окремим
+   ADR з фіксацією наслідків (ліцензія, GitHub Actions-ліміти, контриб'ютори).
+2. **A8: staging/CI-runner + uptime-експеримент** — self-hosted runner + збір uptime-даних
+   протягом кварталу → рішення про міні-ПК / переїзд prod (пов'язано з R-11, single-server).
 
-**Контекст:** soft-launch без auth/donations (ADR-020). Готує продукт до публічного релізу за 1–2 дні замість 3 тижнів Phase 3+4.
-
-- [x] **X.1.A.** IP-based rate-limit на `POST /exports`: 30/год/IP + burst-ban (50), глобально 100/хв лишається. 429 RFC 9457 з україномовним detail. `apps/api/src/plugins/rate-limit.ts`. Unit (config/builder) + integration (30 → 202, 31й → 429). — 2026-06-04
-- [x] **X.1.B.** PDF footer watermark «BETA · feedback@hart.crimea.ua» на всіх 5 шаблонах. `_draw_beta_watermark` (7pt курсив #707070, 18pt від низу), прапор `BETA_WATERMARK` для вимкнення при v1.0. +3 pytest. — 2026-06-04
-- [x] **X.1.C.** Post-export ЗСУ-CTA (`PostExportDonateNudge`) у success-стані ExportButton: Monobank банка + UNITED24, без auto-redirect/modal. 5 Playwright e2e. — 2026-06-04
-- [x] **X.1.D.** Справжня `/about` (4 секції: hero, що це, безкоштовно-чому, підтримати ЗСУ, фідбек) замість `/soon`-заглушки. SiteLinks «Про проєкт» → /about. 6 Playwright e2e. — 2026-06-04
-- [x] **X.1.E.** Документація: ADR-020, API contract §0 rate-limit + 🚧 v1.1-маркери на Auth/Account/Donations/Admin, Roadmap re-sequence, RISKS R-03. — 2026-06-04
-
----
-
-## Phase 2.9.b. Drawing polish (завершено 2026-06-05)
-
-**Контекст:** закриває 5 залишкових пунктів аудиту креслень (ADR-021). Інкрементальні правки рендерера + pure-модулі `export/layout/` і `export/dimensions.py`, кожен покритий юніт-тестами. Детермінізм збережено; perf ~48мс PDF (бюджет 5с).
-
-- [x] **2.9.b.B.** Bend badges — номер гибу посеред лінії розгортки: PDF (коло Ø5мм + цифра) + DXF (midpoint `#N` TEXT на BEND_TEXT). Pure `place_bend_badges` (short-line leader, overlap avoidance). +11 pytest. — 2026-06-05
-- [x] **2.9.b.C.** Габарит готового (зігнутого) виробу у header усіх 5 шаблонів. Pure `compute_finished_dimensions` + `format_dimensions`, єдина конвенція осей (X×Y профіль, Z=width; перфо Z=товщина). +16 pytest. — 2026-06-05
-- [x] **2.9.b.D.** BOM UA-одиниці: маса г→кг, новий рядок «Площа фарбування (м²)». 5 дубльованих блоків → pure `bom_text_lines`. +6 pytest. — 2026-06-05
-- [x] **2.9.b.E.** Auto-layout corner picker — pure `pick_annotation_corner` (4 кути, BR-fallback). BOM слідує за низом таблиці гибів. +12 pytest. — 2026-06-05
-- [x] **2.9.b.F.** Ø-виноски отворів: PDF (виноска+«Ø8»), DXF (`add_diameter_dim` на шарі DIM_HOLES). `should_dim_individual_holes` cap=10 → перфо: один dim + «×N отворів». +10 pytest. — 2026-06-05
-- [x] **2.9.b.docs.** ADR-021. Baseline 151 → 206 pytest. — 2026-06-05
+**Гейт yurii:** обидва рішення — huddle + окремий ADR.
 
 ---
 
-## Phase 3.0. Products Catalog (Architecture Evolution track, завершено 2026-06-23)
+## Ритми
 
-> **Контекст (ADR-027):** UX-shift від CAD-інструменту до сервісу. Нова сутність
-> `product` — preset базового шаблону з обмеженим набором редагованих полів; перші
-> два вироби — декоративна перфо-панель і кастомна настінна полиця.
+### Неділя — digest (≤15 хв)
 
-- Реалізовано: `products` drizzle-таблиця, `/products/[slug]` route, двомодовий
-  каталог `/templates` (Вироби|Деталі), новий базовий шаблон `enclosed_shelf`,
-  `TemplateStudio mode` prop. 9 merged PR (#32, #37-#44, усі 2026-06-23).
-- **Примітка (housekeeping 2026-07-17):** оригінальні докс/архітектурні PR
-  #28-#31 («Phase 3.0 PR 1-4») лишились `OPEN`/stale — реалізація пішла через
-  паралельну серію PR вище, яка їх фактично поглинула. Рекомендація —
-  закрити #28-#31 як superseded (див. PR description, «Опитування»).
-- Немає власного запису у `docs/13_PROGRESS_LOG.md` (борг, поза scope цього
-  run'у) — джерело фактів: merged PR вище + ADR-027.
+1. Відкрити щотижневий digest у Discord (cron нд 18:00 Europe/Kyiv, ADR-032 §5).
+2. **Кожен пункт** digest'а → GitHub-issue (лейбл `ai-fix`, коли T1 конвеєр запущено)
+   **АБО** явний запис «accepted noise: причина» у digest-треді.
+3. Переглянути закріплений issue «Черга yurii» — викреслити виконане, перевірити
+   актуальність.
+4. За потреби — лейбл `ai-approved` на тріажені плани (T1 конвеєр).
 
----
+### 1-е число місяця — huddle (промпт A4)
 
-## Phase 3.1. Перфо-монтажна панель — ребра жорсткості + кутові отвори (Architecture Evolution track, завершено 2026-06-25)
-
-> ADR-030. Повний запис — `docs/13_PROGRESS_LOG.md` «Feature 3.1».
-
-- `perforated_panel_square` переосмислено з плоского листа на ребристу
-  монтажну панель (4 фланці 90°, кутові Ø5.5, R5 на вільних кутах ребер,
-  кріпильні розміри у PDF).
-
----
-
-## Phase 3.2. Уніфікація перфо-панелі в ОДИН шаблон (Architecture Evolution track, завершено 2026-06-26)
-
-> ADR-031 (supersedes ADR-029, розширює ADR-030). Повний запис —
-> `docs/13_PROGRESS_LOG.md` «Feature 3.2».
-
-- `perforated_panel` + `perforated_panel_square` злито в ОДИН ребристий
-  шаблон `perforated_panel`; форма отвору — звичайний параметр `hole_shape`
-  (circle\|square). Прибрано дублювання по всьому стеку.
-
----
-
-## Phase 3.3. Observability foundation (Architecture Evolution track)
-
-> Трек **Architecture Evolution** (`docs/14_ARCHITECTURE_EVOLUTION.md §6`): підфази 3.3–3.6 —
-> незалежні від умовної «Phase 3. Auth & Limits» нижче (та відкладена, ADR-020). 3.3 — **перша й
-> пріоритетна**, бо дає дані для всіх подальших рішень і потрібна **до** публічного soft-launch
-> (платформа зараз сліпа, 14 §1.4). ADR-032; специфікація — `docs/11_OBSERVABILITY.md`.
-
-**Definition of Done:** кожен експорт лишає рядки в `events`+`exports` (Postgres, не in-memory);
-краші web/api/worker видно в Sentry (з PII-фільтром); щотижневий digest падає в Discord; воронка
-Umami міряє, який constraint блокує користувачів.
-
-Патерн фази (як Phase 3.0): PR 1 docs-only (ADR-gate) → імплементаційні PR → фінальний
-progress-log PR.
-
-- [x] **3.3 PR 1 (#54).** ADR-032 + `docs/11_OBSERVABILITY.md` + ця секція Roadmap + preview у Data
-      Model / API Contract. **Docs-only.** — 2026-07-06
-- [x] **3.3 PR 2 (#55).** `events` + persist `exports` у Postgres: `packages/db/src/schema.ts`
-      (+ міграція — yurii вручну), `packages/types/src/events/` (Zod payload'и — спільне джерело
-      api/worker), запис `export_requested`/`validation_rejected`/`export_completed`/`export_failed`
-      в `apps/api` (заміна in-memory `JobStore` на drizzle-репо з тим самим інтерфейсом),
-      `cad_started`/`cad_completed` з `duration_ms` у `workers/cad`. No-PII тест. — 2026-07-06
-- [x] **3.3 PR 3 (#56).** Sentry ×3 (`@sentry/nextjs` web, `@sentry/node` Fastify-plugin api,
-      `sentry-sdk` worker); `beforeSend`/`redact_pii` PII-фільтр з unit-тестом у кожному сервісі
-      (інваріант §8); DSN через env (**прод-активація — окремо, env ще не виставлено**). — 2026-07-06
-- [x] **3.3 PR 4 (#57).** Digest-cron (неділя 18:00 Europe/Kyiv) → Discord webhook; pure
-      `buildDigest(rows) → str` з unit-тестами (порожній / типовий / deviation тиждень); формат —
-      `docs/11 §9`. — 2026-07-06
-- [x] **3.3 PR 5 (#58).** Umami self-hosted (cookie-less) + web-vitals custom events; воронка
-      `catalog→…→export_done`; звірка з бюджетами §9. (**деплой Umami-контейнера в проді —
-      окремо, ще не зроблено**, compose/Ansible PR відсутній). — 2026-07-06
-- [x] **3.3 PR 6.** Progress-log: запис у `docs/13_PROGRESS_LOG.md` (Feature 3.3) + ротація
-      CLAUDE.md §13. — 2026-07-06
-
-**Наступні підфази треку** (окремі ADR-gate PR, не в цій фазі): **3.4** виробничий фідбек
-(`/f/{export_id}` + `export_feedback`, замикає R-01), **3.5** Template Registry (ADR-033), **3.6**
-Process layer (ADR-034). Деталі — `docs/14 §6`, промпти — `docs/15`.
-
-**Тести:** docs-only PR — `prettier --check` по `.md` зелений. Імплементаційні PR — TDD, наявні
-e2e (SSE-flow) лишаються зеленими після кожного PR.
-
----
-
-## Phase 3.4. Виробничий фідбек — QR у PDF (Architecture Evolution track, завершено 2026-07-17)
-
-> Замикає R-01 mitigation 4 (K-фактор калібрування). Специфікація — промпт B3
-> (`docs/15_LLM_PROMPTS.md`). Повний запис — `docs/13_PROGRESS_LOG.md` «Feature 3.4».
-
-- [x] **PR #69** (`4a7d94d`, merged 2026-07-17) — форма `/f/{exportId}` + `POST /feedback` +
-      `export_feedback` таблиця + digest-секція «Виробничий фідбек». Drizzle-міграція
-      `0003_amazing_old_lace.sql` — explicit instruction (`master-unblock-run.md`).
-- [x] **PR #75 / issue #70** (`34a2127`, merged 2026-07-17) — `export_id` у PDF → реальний
-      QR-URL `{BASE_URL}/f/{export_id}` замість непрацюючого fallback `flatcraft://…`. DXF-снапшоти
-      не regen'ились (DXF QR не приймає; PDF byte-снапшотів у репо нема — детермінізм тестується
-      подвійною генерацією).
-- `docs/04_RISKS.md` R-01 mitigation 4 → ✅ реалізовано.
-
----
-
-## Phase 3.5. Template Registry (Architecture Evolution track)
-
-> Трек **Architecture Evolution**: ADR-033 (Template Registry contract) + C1-інвентаризація
-> (`docs/promts/inputs/c1-template-inventory.md`) → 9 PR-ів. Мета вектора — новий шаблон =
-> **1 TS-модуль + 1 Python-модуль + снапшоти + автогенерований spec**, нуль правок у
-> `apps/web`, `apps/api`. «Різні вироби по-різному відображаються/обраховуються» стає
-> структурно неможливим (conformance-suite fail-closed).
-
-**Definition of Done:** усі 6 шаблонів працюють через `TEMPLATE_REGISTRY`; 18 файлів
-`apps/web/src/components/*-{studio,editor,viewport}.tsx` видалено; `TemplateStudioSlug` union
-автогенерований з ключів реєстру; conformance-suite (schema parity TS↔Python + DXF/PDF
-детермінізм + render-gate + e2e smoke) — зелена після кожного PR.
-
-Патерн: PR 1 docs-only (цей) → PR 2 registry-пакет + suite → PR 3-8 міграція шаблонів
-**ПО ОДНОМУ** → PR 9 cleanup.
-
-- [x] **3.5 PR 1.** ADR-033 + `docs/12_TEMPLATE_CONTRACT.md` + ця секція Roadmap. **Docs-only.**
-      (**Примітка housekeeping 2026-07-17:** зміст присутній на main, але `git blame` веде на
-      `74ff1c0`/PR #71 — не власний PR, ймовірний побічний ефект squash-merge з невірної бази
-      гілки, той самий клас помилки, що адресує `chore/guard-branch-base`. ADR-033 сам має
-      статус `Proposed`, не `Accepted` — формально не затверджено.)
-- [ ] **3.5 PR 2.** `packages/templates` — новий пакет: `TemplateDefinition` type, `TEMPLATE_REGISTRY`
-      (порожній), conformance-suite (4 перевірки автогенеровані з реєстру); dual-run адаптер
-      `if slug in TEMPLATE_REGISTRY: registry-path else: legacy-path` (для міграції по одному).
-      Python: `workers/cad/flatcraft_cad/templates/registry.py` з порожнім `TEMPLATES` dict + parity-тест TS↔Python slug-set.
-- [ ] **3.5 PR 3.** Мігрувати `perforated_panel` (найпростіший — grid-based, вже після ADR-031).
-      Видалити `perforated-panel-{studio,editor,viewport,scene}.tsx`. Conformance-suite ✅.
-- [ ] **3.5 PR 4.** Мігрувати `corner_angle` (grid-based, дублює `l_bracket` profile — C1 F4).
-- [ ] **3.5 PR 5.** Мігрувати `l_bracket` (canonical). `ExportRequest` переходить на
-      `superRefine` через registry (ADR-033 §2, ALT-C) — F1 (`WallShelfParametersBaseSchema`)
-      закривається.
-- [ ] **3.5 PR 6.** Мігрувати `z_bracket` (2 bends, array).
-- [ ] **3.5 PR 7.** Мігрувати `wall_shelf` (перенести refine `front_lip_mm` у definition;
-      F1 остаточно закривається — server бачить constraint).
-- [ ] **3.5 PR 8.** Мігрувати `enclosed_shelf` (найскладніший — cross-shape + nested opts).
-      F2 закривається — render-gate ЗАВЖДИ через `def.validators`.
-- [ ] **3.5 PR 9.** Cleanup: видалити 18 файлів `*-{studio,editor,viewport}.tsx`, `SLUGS_WITH_*`
-      set-и, hardcoded `TemplateStudioSlug` union; переконатись, що C1 F1-F8 усі закриті.
-
-**Інваріанти, які контракт НЕ сміє ламати** (ADR-033 §Інваріанти):
-байт-у-байт DXF/PDF; render-gate ADR-026; products ADR-027; browser-safe entry `cad-engine`;
-серверна валідація ADR-019.
-
-**Тести:** docs-only PR — `prettier --check`. Імплементаційні PR — conformance-suite для
-відповідного шаблону + наявні e2e для всіх шаблонів (dual-run) — зелені після КОЖНОГО PR.
-
----
-
-## Phase 3. Auth & Limits (v1.1, conditional) — 2 тижні
-
-> ⏸ **Відкладено (ADR-020).** Активується лише коли спрацюють тригери: >5 ботів/тиждень на CF WAF, або >3 unique users просять «зберегти draft». До того — soft-launch (Phase X.1).
-
-**Definition of Done:** новий користувач реєструється email/Google, бачить лічильник «X з 10 безкоштовних на цей місяць», після ліміту — кнопка «розблокувати донатом».
-
-- [ ] **3.1.** Auth.js Credentials provider + Google OAuth у `apps/api`
-- [ ] **3.2.** Argon2id для паролів (`@node-rs/argon2`)
-- [ ] **3.3.** JWT (15хв) + refresh cookie HttpOnly
-- [ ] **3.4.** Rate-limit middleware (Fastify rate-limit): 100 req/min/IP, 5 export/хв/user
-- [ ] **3.5.** Таблиця `usage_quota` (drizzle): підрахунок експортів по `user_id` + `month`
-- [ ] **3.6.** Гість: дозвіл на 3D-редактор, заборона на `/exports` (HTTP 401 + UI підказка)
-- [ ] **3.7.** Watermark на 3D-прев'ю для гостей
-- [ ] **3.8.** Адмінка: список користувачів, лічильники, ручне розширення ліміту (для пілотів)
-
-**Тести:** інтеграційні тести проти реальної Postgres у Docker — TDD сценарії: реєстрація, логін, логаут, перевищення rate-limit, перевищення monthly quota.
-
----
-
-## Phase 4. Donations (v1.1, conditional) — 1 тиждень
-
-> ⏸ **Відкладено (ADR-020).** Активується коли >$50/міс приходить на ЗСУ через банку. До того — почесна система: прямі лінки у post-export CTA і на /about, без unlock-flow.
-
-**Definition of Done:** після ліміту користувач бачить кнопку «Розблокувати на місяць → 200 грн на ЗСУ», клікає → переходить на банку Monobank → завантажує квитанцію → адмін підтверджує → ліміт продовжено.
-
-- [ ] **4.1.** Сторінка `/unlock` з кнопками «Monobank Banka» (link), «UNITED24» (link), «USDT» (адреса гаманця)
-- [ ] **4.2.** Форма «я задонатив» (load receipt + email + amount) → `donation_claims` table
-- [ ] **4.3.** Адмін-сторінка для верифікації claim (одна кнопка «Approve» → продовжує quota на 30 днів)
-- [ ] **4.4.** Email-сповіщення про підтвердження (через Postmark або Resend)
-- [ ] **4.5.** _v1.1:_ Monobank Acquiring webhook для автопідтвердження
-
-**Тести:** unit на логіку продовження ліміту (timezone-safe, на 30 днів від моменту підтвердження).
-
----
-
-## Phase 5. Hardening + Launch (2 тижні)
-
-**Definition of Done:** домен `hart.crimea.ua`, SSL через Cloudflare, GDPR-compliance, Privacy/ToS опубліковані, Sentry прокладено, перші 10 живих юзерів.
-
-- [x] **5.1.** Sentry SDK у web + api + worker; `beforeSend`/`redact_pii` фільтр PII — код
-      реалізовано у Phase 3.3 PR 3 (#56, 2026-07-06); **прод-активація (SENTRY_DSN env) —
-      окремо, ще не зроблено** (housekeeping 2026-07-17).
-- [x] **5.2.** Umami self-hosted (cookie-less, обрано над Plausible — ADR-032 §4) — код
-      реалізовано у Phase 3.3 PR 5 (#58, 2026-07-06); **деплой контейнера в проді — окремо,
-      compose/Ansible PR ще не зроблено** (housekeeping 2026-07-17).
-- [x] **5.3.** ~~Cookie banner~~ — **банер не потрібен**: Umami self-hosted cookie-less (ADR-032 §4, ADR-006). У Footer/SiteLinks — стислий рядок «Без трекінг-cookies»; секція `#cookies` у `/privacy`. — 2026-07-12 (draft)
-- [x] **5.4.** Privacy Policy + ToS **draft** (`/privacy`, `/terms` UA + `/privacy/en`, `/terms/en` EN). Кожна сторінка містить банер «Драфт, не є юридичною консультацією; фінальна версія — після рев'ю юристом». Легальний рев'ю юристом — окрема задача перед публічним soft-launch. — 2026-07-12 (draft)
-- [ ] **5.5.** GDPR Data Subject Request endpoint: `/account/export-data`, `/account/delete` — **відкладено до Phase 3 (auth)**. Без акаунтів немає ідентифіковного суб'єкта → відповідних DSR-функцій експортувати/видаляти теж немає (події зберігаються без PII, ADR-032).
-- [x] **5.6.** Cloud-сервер + DNS + R2 — **код готовий** (Phase 5A: `infra/compose/docker-compose.prod.yml` + `Caddyfile` з CF Origin Cert, ADR-014). Сам сервер створює yurii за runbook'ом `docs/08_DEPLOYMENT.md` §0. — 2026-05-18
-- [x] **5.7.** Ansible-плейбук — 6 ролей (base/docker/firewall/flatcraft/backups/monitoring) на Debian 12 (Phase 5C). `--syntax-check` і `ansible-lint --profile production` зелені у CI. — 2026-05-18
-- [x] **5.8.** Backup-скрипт: cron 03:00 → `pg_dump -Fc` (docker exec з PGPASSWORD) → age encrypt → rclone у R2 `flatcraft-backups`. Recovery flow задокументовано (`docs/08_DEPLOYMENT.md` §5.5). — 2026-05-18 (hotfix 2026-05-22 на double-compression і auth)
-- [x] **5.9.** Staging environment — CI/CD pipeline (`.github/workflows/release.yml` + `deploy-staging.yml`, Phase 5D) + runbook (`docs/08_DEPLOYMENT.md`, Phase 5E). **Перший реальний staging-deploy виконано й автоматизовано** (Phase 5F, 2026-05-28): стек живий на `staging.hart.crimea.ua`, повний CI-флоу `release.yml`→`deploy-staging.yml` провалідовано end-to-end; додано migrate+seed у entrypoint (ADR-015). — 2026-05-22 (deploy 2026-05-28)
-- [ ] **5.10.** Production deploy + smoke tests + перші реальні замовлення з пілотним підрядником
+- Запуск: промпт **A4** з `docs/15_LLM_PROMPTS.md` у звичайному чаті сильної моделі
+  (це діалог, не headless — `docs/16` §9).
+- Вхід: останні 4 digest'и + поточний цей файл.
+- Вихід: **корекція черг треків** (переставити/додати/зняти пункти) — правка цього файлу
+  (docs-PR або прямий commit yurii).
 
 ---
 
@@ -344,21 +140,62 @@ e2e (SSE-flow) лишаються зеленими після кожного PR.
 
 ## Tech-debt / Maintenance backlog
 
-> Не блокує MVP, але варто закрити, коли дійдуть руки. Кожен пункт — короткий «що + чому».
+> Не блокує роботу, закривається через T1-конвеєр (кандидати на перші ai-fix issues).
 
 - [ ] **TD-01.** Бампнути версії GitHub Actions (`actions/checkout@v4`, `docker/*`, `actions/setup-python@v5` тощо). **Чому:** CI кидає попередження — Node.js 20 actions deprecated, з 16 червня 2026 примусово Node.js 24, з 16 вересня 2026 Node.js 20 прибирають з runner'а. Поки лише warning, але дедлайн фіксований.
 - [ ] **TD-02.** Унеможливити stale скомпільовані `*.js`/`*.js.map` поряд із `.ts` у `packages/*/src/`. **Чому:** vitest при `import "./foo.js"` резолвить буквальний `.js` і підхоплює stale-білд замість свіжого `.ts` — локальні прогони показують неправдиві результати (плутанина у Phase 2.16.b: тест «бачив» стару Zod-схему з `url()`, хоча `.ts` уже мав `min(1)`). Файли untracked (CI чистий), проблема лише локальна. Варіанти: lefthook/pre-commit guard, що падає на stray `src/**/*.js`; `clean`-крок у dev-командах; або гарантувати, що жоден `tsc` не запускається без `outDir: dist`.
 
 ---
 
-## Що НЕ входить у MVP (post-launch)
+## Не робимо
 
-- Калькулятор вартості
-- Інтеграція з прайсом виробника (CSV/API)
-- Телеграм-бот / Discord-бот для нотифікацій
-- Маркетплейс кількох виробників
-- Завантаження користувацьких STEP/STL
-- Mobile app
-- AI-помічник «опиши що тобі треба → отримай шаблон»
-- Польська/німецька локалізація
-- Власний платіжний шлюз
+**Інфраструктурні анти-цілі** (`docs/14` §5): на MS21 (2 vCPU / 4 GB) і 10 users/day —
+жодних microservices, Kubernetes, Kafka/event-sourcing, Prometheus+Grafana-стеку,
+OpenTelemetry-колектора, ML-пайплайнів. Sentry (free tier) + Postgres `events` + Umami
+(self-hosted) + Discord webhook покривають 100 % потреб MVP і v1.x. Складність — головний
+ворог solo-проєкту (R-07).
+
+**Продуктові анти-цілі** (поза scope, post-launch): калькулятор вартості; інтеграція з
+прайсом виробника (CSV/API); Телеграм/Discord-бот нотифікацій; маркетплейс кількох
+виробників; завантаження користувацьких STEP/STL; mobile app; AI-помічник «опиши що
+треба → отримай шаблон»; польська/німецька локалізація; власний платіжний шлюз.
+
+---
+
+## Умовні фази (⏸ ADR-020, активуються тригерами)
+
+- **Auth & Limits** (колишня «Phase 3», ~2 тижні): Auth.js + Argon2id + JWT/refresh,
+  `usage_quota` «10 безкоштовних/міс», гість-режим, адмінка. Разом з нею — GDPR DSR
+  endpoints (`/account/export-data`, `/account/delete`; колишній пункт 5.5 — без
+  акаунтів немає ідентифіковного суб'єкта). **Тригери:** >5 ботів/тиждень на CF WAF;
+  АБО >3 unique users просять «зберегти draft».
+- **Donations** (колишня «Phase 4», ~1 тиждень): `/unlock`, `donation_claims`,
+  адмін-верифікація, email-сповіщення. **Тригер:** >$50/міс приходить на ЗСУ через банку.
+- Ендпоінти/таблиці обох фаз лишаються спроєктованими у `docs/06_API_CONTRACT.md` /
+  `docs/05_DATA_MODEL.md` як `v1.1+ planned`.
+
+---
+
+## Архів завершених фаз
+
+> Повні описи, тестові числа і рішення — у `docs/13_PROGRESS_LOG.md` (append-only
+> журнал). Тут — лише навігаційна таблиця. Чекбокс-історія доступна у git-історії
+> цього файлу (до 2026-07-18).
+
+| Фаза                                                                                      | Завершено            | PR                                                  | Джерело                                      |
+| ----------------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------- | -------------------------------------------- |
+| Phase 0. Setup (монорепо, CI, lefthook)                                                   | 2026-05-16           | —                                                   | `docs/13` «Phase 0 — Foundation»             |
+| Phase 1. CAD core (валідатори, unfold, DXF)                                               | 2026-05-16           | —                                                   | `docs/13` «Phase 1 — CAD core»               |
+| Phase 2. UX MVP (5 шаблонів end-to-end, 2.10.a-e, design system 2.11-2.16)                | 2026-06-03           | —                                                   | `docs/13` «Phase 2 — Templates & UI»         |
+| Phase X.1. Beta-mode tweaks (rate-limit, watermark, ЗСУ-CTA, /about)                      | 2026-06-04           | —                                                   | `docs/13` «Soft-launch (Phase X.1)», ADR-020 |
+| Phase 2.9.b. Drawing polish (badges, розміри, BOM UA)                                     | 2026-06-05           | —                                                   | `docs/13` «Drawing polish», ADR-021          |
+| Discord IaC                                                                               | 2026-06-11           | —                                                   | `docs/13` «Discord IaC», ADR-023             |
+| Hotfix 2.9.d. Production-grade DXF                                                        | 2026-06-15           | —                                                   | `docs/13` «Hotfix 2.9.d», ADR-024            |
+| Feature 2.9.e. Ізометрія у PDF                                                            | 2026-06-16           | —                                                   | `docs/13` «Feature 2.9.e», ADR-025           |
+| Hotfix 2.9.f. R3F render-gate                                                             | 2026-06-16           | —                                                   | `docs/13` «Hotfix 2.9.f», ADR-026            |
+| Phase 5. Infrastructure (5A-5F: prod-compose, Ansible, backups, staging live; решта → T3) | 2026-05-28 (staging) | —                                                   | `docs/13` «Phase 5 — Infrastructure»         |
+| Phase 3.0. Products Catalog                                                               | 2026-06-23           | #32, #37-#44                                        | ADR-027 (запис у docs/13 — борг)             |
+| Phase 3.1. Перфо-панель: ребра + кутові отвори                                            | 2026-06-25           | —                                                   | `docs/13` «Feature 3.1», ADR-030             |
+| Phase 3.2. Уніфікація перфо-панелі (hole_shape)                                           | 2026-06-26           | —                                                   | `docs/13` «Feature 3.2», ADR-031             |
+| Phase 3.3. Observability foundation (+активація на staging 2026-07-12)                    | 2026-07-06           | #54-#56, #58-#60; активація #63/#65, hotfix #71-#72 | `docs/13` «Feature 3.3», ADR-032             |
+| Phase 3.4. Виробничий фідбек — QR у PDF                                                   | 2026-07-17           | #69, #75                                            | `docs/13` «Feature 3.4», ADR-032 §feedback   |
