@@ -9,10 +9,13 @@
  */
 import Link from "next/link";
 
+import { localeAlternates } from "../../i18n/hreflang";
+
 export const metadata = {
   title: "Умови користування · hart.crimea.ua",
   description:
     "Соціальний non-profit проєкт; безкоштовне користування у межах ліміту; креслення рекомендаційні.",
+  alternates: localeAlternates("uk", "/terms", "/terms/en"),
 };
 
 interface Section {

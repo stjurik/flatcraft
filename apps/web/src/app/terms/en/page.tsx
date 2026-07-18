@@ -3,9 +3,12 @@
  */
 import Link from "next/link";
 
+import { localeAlternates } from "../../../i18n/hreflang";
+
 export const metadata = {
   title: "Terms of Service · hart.crimea.ua",
   description: "Non-profit social project; free use within a monthly quota; drawings are advisory.",
+  alternates: localeAlternates("en", "/terms", "/terms/en"),
 };
 
 interface Section {

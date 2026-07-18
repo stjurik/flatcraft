@@ -7,10 +7,13 @@
  */
 import Link from "next/link";
 
+import { localeAlternates } from "../../../i18n/hreflang";
+
 export const metadata = {
   title: "Privacy Policy · hart.crimea.ua",
   description:
     "How the platform handles data: no tracking cookies, no mandatory sign-up, data hosted in Ukraine.",
+  alternates: localeAlternates("en", "/privacy", "/privacy/en"),
 };
 
 interface Section {

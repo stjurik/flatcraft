@@ -1,9 +1,11 @@
 import { CatalogContent, parseTab } from "../../components/catalog-content";
 import { dictionaries } from "../../i18n/dictionaries";
+import { mirroredAlternates } from "../../i18n/hreflang";
 
 export const metadata = {
   title: dictionaries.uk.catalog.metaTitle,
   description: dictionaries.uk.catalog.metaDescription,
+  alternates: mirroredAlternates("uk", "/templates"),
 };
 
 interface SearchParams {

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { SITE_URL } from "../../src/lib/site-url";
+
 // ADR-037 — Etap A: лендінг/about/soon/каталог/картки/деталі шаблону
 // (breadcrumb-only)/OG. Студії (усередині templates/[slug], products/[slug])
 // СВІДОМО лишаються українськими (§5) — тести цього файлу цього не
@@ -153,4 +155,76 @@ test.describe("i18n Etap A — EN дзеркала (ADR-037)", () => {
       expect(errors, errors.join("\n")).toEqual([]);
     });
   }
+});
+
+// ADR-037 §7 follow-up (Master Run 8 Стадія 3 зауваження зони D) — hreflang
+// reciprocal alternates. 3 сторінки покривають усі 3 routing-патерни:
+// статична дзеркалена (/), динамічна дзеркалена (/templates/[slug]) і
+// суфіксна легасі-схема (/privacy + /privacy/en). Кожна — в обох локалях
+// (3 × 2 = 6 тестів).
+test.describe("hreflang alternates (ADR-037 §7)", () => {
+  // Next.js резолвить bare "/" проти metadataBase БЕЗ trailing slash
+  // (href="https://hart.crimea.ua", не ".../"), тому порівнюємо точним
+  // абсолютним URL (через той самий SITE_URL, що й код), а не суфіксним
+  // regex — уникає і цього edge-case, і випадкових substring-збігів.
+  function absoluteUrl(path: string): string {
+    return path === "/" ? SITE_URL : `${SITE_URL}${path}`;
+  }
+
+  const PAGES = [
+    { uk: "/", en: "/en" },
+    { uk: "/templates/l_bracket", en: "/en/templates/l_bracket" },
+    { uk: "/privacy", en: "/privacy/en" },
+  ] as const;
+
+  for (const { uk, en } of PAGES) {
+    for (const [label, ownPath] of [
+      ["uk", uk],
+      ["en", en],
+    ] as const) {
+      test(`${uk} ⇄ ${en} — <link rel="alternate"> на ${label}-версії`, async ({ page }) => {
+        await page.goto(ownPath);
+        await expect(page.locator('link[rel="alternate"][hreflang="uk"]')).toHaveAttribute(
+          "href",
+          absoluteUrl(uk),
+        );
+        await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveAttribute(
+          "href",
+          absoluteUrl(en),
+        );
+        await expect(page.locator('link[rel="alternate"][hreflang="x-default"]')).toHaveAttribute(
+          "href",
+          absoluteUrl(uk),
+        );
+        await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+          "href",
+          absoluteUrl(ownPath),
+        );
+      });
+    }
+  }
+});
+
+test.describe("sitemap.xml (ADR-037 §7 follow-up)", () => {
+  test("віддає XML з uk+en URL і reciprocal alternates для статичної і динамічної сторінки", async ({
+    request,
+  }) => {
+    const res = await request.get("/sitemap.xml");
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toMatch(/xml/);
+    const body = await res.text();
+
+    // Статична дзеркалена пара — обидва URL присутні як окремі <url>-записи.
+    expect(body).toContain(`<loc>${SITE_URL}/templates</loc>`);
+    expect(body).toContain(`<loc>${SITE_URL}/en/templates</loc>`);
+    // Динамічна пара (slug з реального seed) — доводить, що API-виклик у
+    // sitemap() дійсно резолвиться, а не мовчки повертає порожній список.
+    expect(body).toContain(`<loc>${SITE_URL}/templates/l_bracket</loc>`);
+    expect(body).toContain(`<loc>${SITE_URL}/en/templates/l_bracket</loc>`);
+    // Reciprocal hreflang на рівні sitemap (не лише <link> на сторінці).
+    expect(body).toContain(`hreflang="en" href="${SITE_URL}/en/templates/l_bracket"`);
+    expect(body).toContain(`hreflang="uk" href="${SITE_URL}/templates/l_bracket"`);
+    // /f/[exportId] — свідомо поза scope (private noindex QR-посилання).
+    expect(body).not.toContain("/f/");
+  });
 });

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { TemplateDetailContent } from "../../../components/template-detail-content";
 import { dictionaries } from "../../../i18n/dictionaries";
+import { mirroredAlternates } from "../../../i18n/hreflang";
 import { fetchMaterials, fetchTemplate } from "../../../lib/api";
 
 interface PageProps {
@@ -13,6 +14,7 @@ export async function generateMetadata({ params }: PageProps) {
   const template = await fetchTemplate(slug).catch(() => null);
   return {
     title: template ? `${template.nameUk} · hart` : dictionaries.uk.templateDetail.notFoundTitle,
+    alternates: mirroredAlternates("uk", `/templates/${slug}`),
   };
 }
 
