@@ -4,6 +4,8 @@ import type { ExportJobEvent, ExportRequest, ExportResponse } from "@flatcraft/t
 import { Button } from "@flatcraft/ui";
 import { useEffect, useRef, useState } from "react";
 
+import { dictionaries } from "../i18n/dictionaries";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import { track } from "../lib/analytics";
 import { ApiError, createExport, subscribeExportEvents } from "../lib/api";
 
@@ -20,9 +22,20 @@ interface ExportButtonProps {
   /** Готовий ExportRequest payload — discriminated на template_slug. */
   readonly request: ExportRequest;
   readonly disabled?: boolean;
+  /**
+   * ADR-037 §5 — опційний, дефолт `"uk"`: dictionary-ready для майбутнього
+   * wiring зі студій (`*-studio.tsx` × 6, СВІДОМО не чіпаються цим PR).
+   * Наявні call-сайти не передають `locale` → live-поведінка незмінна.
+   */
+  readonly locale?: Locale;
 }
 
-export function ExportButton({ request, disabled = false }: ExportButtonProps) {
+export function ExportButton({
+  request,
+  disabled = false,
+  locale = DEFAULT_LOCALE,
+}: ExportButtonProps) {
+  const dict = dictionaries[locale].exportFlow;
   const [state, setState] = useState<ExportState>({ status: "idle" });
   const closeRef = useRef<(() => void) | null>(null);
 
@@ -35,7 +48,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
       track("export_done", { template: request.template_slug });
       setState({ status: "done", result: ev.result });
     } else if (ev.status === "failed") {
-      setState({ status: "error", message: ev.error ?? "Експорт не вдався" });
+      setState({ status: "error", message: ev.error ?? dict.exportFailed });
     } else {
       setState({
         status: ev.status === "running" ? "running" : "queued",
@@ -64,7 +77,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
           ? `API ${err.status}: ${err.message}`
           : err instanceof Error
             ? err.message
-            : "Невідома помилка";
+            : dict.unknownError;
       setState({ status: "error", message });
     }
   };
@@ -84,7 +97,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
         disabled={isDisabled}
         onClick={click}
       >
-        {isBusy ? `Експорт… ${progress}%` : "Експортувати DXF + PDF"}
+        {isBusy ? dict.exporting(progress) : dict.exportCta}
       </Button>
 
       {isBusy ? (
@@ -111,7 +124,7 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
               rel="noopener noreferrer"
               className="text-primary hover:text-primary-hover underline"
             >
-              Завантажити DXF ({Math.round(state.result.artifacts.dxf.bytes / 1024)} КБ)
+              {dict.downloadDxf(Math.round(state.result.artifacts.dxf.bytes / 1024))}
             </a>
             <a
               data-testid="export-download-link-pdf"
@@ -120,11 +133,11 @@ export function ExportButton({ request, disabled = false }: ExportButtonProps) {
               rel="noopener noreferrer"
               className="text-primary hover:text-primary-hover underline"
             >
-              Завантажити PDF ({Math.round(state.result.artifacts.pdf.bytes / 1024)} КБ)
+              {dict.downloadPdf(Math.round(state.result.artifacts.pdf.bytes / 1024))}
             </a>
           </div>
           {/* Phase X.1 C: ненав'язливе ЗСУ-нагадування ПІД download-лінками. */}
-          <PostExportDonateNudge />
+          <PostExportDonateNudge locale={locale} />
         </>
       ) : null}
 

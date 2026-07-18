@@ -4,6 +4,8 @@ import { SegmentedControl, type SegmentedControlOption } from "@flatcraft/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useTransition } from "react";
 
+import { dictionaries } from "../i18n/dictionaries";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import { track } from "../lib/analytics";
 
 type TabValue = "products" | "parts";
@@ -14,6 +16,7 @@ interface CatalogToggleProps {
     readonly products: number;
     readonly parts: number;
   };
+  readonly locale?: Locale;
 }
 
 /**
@@ -25,12 +28,15 @@ interface CatalogToggleProps {
  * хвилює лише transition при кліку.
  *
  * `?tab=products` — default (не зберігається у URL), `?tab=parts` — explicit.
- * Це робить початковий URL `/templates` чистим.
+ * Це робить початковий URL `/templates` чистим. `locale` (ADR-037 §2)
+ * будує URL на `/en/templates` замість `/templates`.
  */
-export function CatalogToggle({ value, counts }: CatalogToggleProps) {
+export function CatalogToggle({ value, counts, locale = DEFAULT_LOCALE }: CatalogToggleProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
+  const dict = dictionaries[locale].catalog;
+  const basePath = locale === "en" ? "/en/templates" : "/templates";
 
   // Воронка docs/11 §8: перший крок — перегляд каталогу (fire-once на mount).
   // CatalogToggle рендериться на кожному вигляді `/templates`.
@@ -44,13 +50,13 @@ export function CatalogToggle({ value, counts }: CatalogToggleProps) {
   const options: ReadonlyArray<SegmentedControlOption<TabValue>> = [
     {
       value: "products",
-      label: `Вироби · ${counts.products}`,
-      ariaLabel: `Готові вироби (${counts.products})`,
+      label: dict.toggleProductsLabel(counts.products),
+      ariaLabel: dict.toggleProductsAria(counts.products),
     },
     {
       value: "parts",
-      label: `Деталі · ${counts.parts}`,
-      ariaLabel: `Параметричні шаблони деталей (${counts.parts})`,
+      label: dict.togglePartsLabel(counts.parts),
+      ariaLabel: dict.togglePartsAria(counts.parts),
     },
   ];
 
@@ -63,7 +69,7 @@ export function CatalogToggle({ value, counts }: CatalogToggleProps) {
       params.set("tab", next);
     }
     const query = params.toString();
-    const url = query ? `/templates?${query}` : "/templates";
+    const url = query ? `${basePath}?${query}` : basePath;
     startTransition(() => {
       router.replace(url, { scroll: false });
     });
@@ -74,7 +80,7 @@ export function CatalogToggle({ value, counts }: CatalogToggleProps) {
       value={value}
       onValueChange={handleChange}
       options={options}
-      ariaLabel="Вид каталогу"
+      ariaLabel={dict.toggleAria}
       testId="catalog-toggle"
       className="mt-4"
     />

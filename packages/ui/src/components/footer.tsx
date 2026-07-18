@@ -7,6 +7,10 @@ import { UkraineStripe } from "./ukraine-stripe.js";
 interface FooterProps {
   /** Monobank Banka або UNITED24 — посилання на банку ЗСУ. */
   zsuDonateUrl?: string;
+  /** Позиціонування під лого (uk-дефолт нижче). ADR-037: apps/web передає EN-варіант. */
+  tagline?: string;
+  /** Текст donate-кнопки (uk-дефолт нижче). ADR-037: apps/web передає EN-варіант. */
+  donateLabel?: string;
   /**
    * Опційний контент, що рендериться над основним блоком (Logo + donate).
    * Призначено для site-map / nav-links (apps/web SiteLinks). Контент
@@ -16,6 +20,9 @@ interface FooterProps {
 }
 
 const DEFAULT_ZSU_URL = "https://send.monobank.ua/jar/A1u3M7VqQz";
+const DEFAULT_TAGLINE =
+  "Соціальна платформа для виробів з листового металу. Без CAD-навичок — DXF, PDF, STEP безкоштовно.";
+const DEFAULT_DONATE_LABEL = "Підтримати ЗСУ";
 
 /**
  * Базовий футер: UkraineStripe (2px) одразу над content-блоком, далі
@@ -23,7 +30,12 @@ const DEFAULT_ZSU_URL = "https://send.monobank.ua/jar/A1u3M7VqQz";
  * stack на xs, two-col на md+. Опційний `linksSlot` (SiteLinks)
  * рендериться вище основного блоку, теж усередині bg-bg-elevated.
  */
-export function Footer({ zsuDonateUrl = DEFAULT_ZSU_URL, linksSlot }: FooterProps = {}) {
+export function Footer({
+  zsuDonateUrl = DEFAULT_ZSU_URL,
+  tagline = DEFAULT_TAGLINE,
+  donateLabel = DEFAULT_DONATE_LABEL,
+  linksSlot,
+}: FooterProps = {}) {
   const year = new Date().getFullYear();
 
   return (
@@ -36,10 +48,7 @@ export function Footer({ zsuDonateUrl = DEFAULT_ZSU_URL, linksSlot }: FooterProp
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 md:flex-row md:items-center md:justify-between md:gap-4">
           <div className="flex flex-col gap-2">
             <Logo size="md" />
-            <p className="text-fg-muted max-w-md text-sm">
-              Соціальна платформа для виробів з листового металу. Без CAD-навичок — DXF, PDF, STEP
-              безкоштовно.
-            </p>
+            <p className="text-fg-muted max-w-md text-sm">{tagline}</p>
             <p className="text-fg-subtle text-xs">© {year} hart.crimea.ua · MIT License</p>
           </div>
           <Button asChild variant="zsu" size="md">
@@ -49,7 +58,7 @@ export function Footer({ zsuDonateUrl = DEFAULT_ZSU_URL, linksSlot }: FooterProp
               rel="noopener noreferrer"
               data-testid="zsu-donate"
             >
-              Підтримати ЗСУ
+              {donateLabel}
             </a>
           </Button>
         </div>

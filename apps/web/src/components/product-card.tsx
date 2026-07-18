@@ -2,6 +2,9 @@ import type { ProductSummary } from "@flatcraft/types";
 import { Button } from "@flatcraft/ui";
 import Link from "next/link";
 
+import { dictionaries } from "../i18n/dictionaries";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+
 interface ProductCardProps {
   readonly product: ProductSummary;
   /**
@@ -10,6 +13,7 @@ interface ProductCardProps {
    * мапу замість додаткового JOIN у API).
    */
   readonly baseTemplateNameBySlug: ReadonlyMap<string, string>;
+  readonly locale?: Locale;
 }
 
 /**
@@ -19,9 +23,18 @@ interface ProductCardProps {
  * але дзеркалить product-аспекти: «На основі: <base_template>» замість slug'у,
  * `previewImageUrl` обов'язково — для published-продукту seed має згенерований
  * рендер (PR 8). Якщо відсутній — placeholder (для drafts).
+ *
+ * `locale` (ADR-037 §4) перекладає ЛИШЕ статичну обгортку — `product.name`/
+ * `.description` немає `_en`-поля у схемі (на відміну від templates), тому
+ * DB-контент лишається UA на обох локалях (задокументовано, «Опитування» PR).
  */
-export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProps) {
-  const href = `/products/${product.slug}`;
+export function ProductCard({
+  product,
+  baseTemplateNameBySlug,
+  locale = DEFAULT_LOCALE,
+}: ProductCardProps) {
+  const dict = dictionaries[locale].productCard;
+  const href = locale === "en" ? `/en/products/${product.slug}` : `/products/${product.slug}`;
   const baseTemplateName =
     baseTemplateNameBySlug.get(product.baseTemplateSlug) ?? product.baseTemplateSlug;
 
@@ -34,7 +47,7 @@ export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProp
       <Link
         href={href}
         prefetch
-        aria-label={`Налаштувати: ${product.name}`}
+        aria-label={dict.configureAria(product.name)}
         data-testid="product-card-thumb-link"
         className="focus-visible:ring-primary focus-visible:outline-none focus-visible:ring-2"
       >
@@ -46,7 +59,7 @@ export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProp
               className="h-full w-full object-cover"
             />
           ) : (
-            <ProductCardPlaceholder />
+            <ProductCardPlaceholder label={dict.placeholderSoon} />
           )}
         </div>
       </Link>
@@ -68,13 +81,13 @@ export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProp
         ) : null}
 
         <p className="text-fg-subtle font-mono text-xs" data-testid="product-card-base-template">
-          На основі: <span className="text-fg-muted">{baseTemplateName}</span>
+          {dict.basedOnLabel} <span className="text-fg-muted">{baseTemplateName}</span>
         </p>
 
         <div className="mt-3 flex items-center justify-between gap-3">
           <Button asChild variant="default" size="md">
             <Link href={href} prefetch data-testid="product-card-cta">
-              Налаштувати →
+              {dict.cta}
             </Link>
           </Button>
           <span className="text-fg-subtle font-mono text-xs" data-testid="product-card-slug">
@@ -86,7 +99,7 @@ export function ProductCard({ product, baseTemplateNameBySlug }: ProductCardProp
   );
 }
 
-function ProductCardPlaceholder() {
+function ProductCardPlaceholder({ label }: { label: string }) {
   return (
     <div className="text-fg-subtle/40 flex flex-col items-center gap-1">
       <svg
@@ -101,7 +114,7 @@ function ProductCardPlaceholder() {
         <rect x="8" y="8" width="48" height="48" rx="2" />
         <line x1="8" y1="20" x2="56" y2="20" />
       </svg>
-      <span className="font-mono text-xs">рендер скоро</span>
+      <span className="font-mono text-xs">{label}</span>
     </div>
   );
 }
