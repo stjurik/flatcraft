@@ -6,45 +6,45 @@
 
 > Підтримується кожним новим ADR (додати рядок при створенні). Джерело дат — заголовок `**Статус:**` у самому записі; де його нема — позначено «дата не зафіксована» (не вигадувати).
 
-| №       | Назва                                                                              | Статус                                                                  | Дата                |
-| ------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------- |
-| ADR-001 | Монорепо на pnpm + Turborepo                                                       | Accepted                                                                | 2026-05-08          |
-| ADR-002 | Two-language CAD pipeline (TS + Python)                                            | Accepted                                                                | 2026-05-08          |
-| ADR-003 | Drizzle ORM, не Prisma                                                             | Accepted                                                                | 2026-05-08          |
-| ADR-004 | BullMQ для черги CAD-задач                                                         | Accepted                                                                | 2026-05-08          |
-| ADR-005 | Single VPS на DigitalOcean для MVP                                                 | Superseded by ADR-011                                                   | 2026-05-08          |
-| ADR-006 | GDPR-by-design з першого дня                                                       | Accepted                                                                | 2026-05-08          |
-| ADR-007 | Auth.js (NextAuth) для автентифікації                                              | Accepted                                                                | 2026-05-08          |
-| ADR-008 | Cloudflare R2 для long-term storage                                                | Accepted                                                                | 2026-05-08          |
-| ADR-009 | TDD з першого дня, цільове покриття 80%                                            | Accepted                                                                | 2026-05-08          |
-| ADR-010 | Логування — pino з redact, без structured stack у консоль                          | Accepted                                                                | 2026-05-08          |
-| ADR-011 | Mirohost Cloud замість DigitalOcean                                                | Accepted (supersedes ADR-005)                                           | 2026-05-14          |
-| ADR-012 | UUID v4 у схемі, v7 — окремою міграцією після Postgres 18                          | Accepted                                                                | 2026-05-16          |
-| ADR-013 | Browser-side preview через three.js Shape, OpenCascade.js відкладено               | Accepted                                                                | 2026-05-17          |
-| ADR-014 | Caddy + Cloudflare Origin Certificate замість Let's Encrypt                        | Accepted                                                                | 2026-05-22          |
-| ADR-015 | Drizzle міграції + seed у entrypoint api-контейнера                                | Accepted                                                                | 2026-05-28          |
-| ADR-016 | Visual design system — warm industrial, single light theme, mobile-first           | Accepted                                                                | 2026-05-30          |
-| ADR-017 | Group metadata у Zod через `.describe("group:G\|label:L")`                         | Accepted                                                                | 2026-05-30          |
-| ADR-018 | `material_code` доставляється до API, але обрізається перед cad-worker'ом          | Accepted                                                                | 2026-05-30          |
-| ADR-019 | Server-side validation як інваріант export-pipeline                                | Accepted                                                                | дата не зафіксована |
-| ADR-020 | Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)                      | Accepted                                                                | 2026-06-04          |
-| ADR-021 | Drawing polish — auto-layout corner picker + єдина конвенція осей + UA-одиниці BOM | Accepted                                                                | 2026-06-05          |
-| ADR-022 | Клієнтська валідація матриці гибу через bake'ed snapshot                           | Accepted                                                                | 2026-06-08          |
-| ADR-023 | Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile | Accepted                                                                | 2026-06-11          |
-| ADR-024 | Production-grade DXF — рівно 2 шари + color-coded cut paths                        | Accepted                                                                | 2026-06-15          |
-| ADR-025 | Ізометрія у PDF через OCC hidden-line-removal (вектор, детермінований)             | Accepted                                                                | 2026-06-16          |
-| ADR-026 | R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params  | Accepted                                                                | 2026-06-16          |
-| ADR-027 | Products як preset базового шаблону                                                | Accepted (відновлено housekeeping 2026-07-17, джерело — PR #28)         | 2026-06-22          |
-| ADR-028 | Валідація перфорації (pitch > розмір отвору) як окремий gate                       | Accepted                                                                | 2026-06-24          |
-| ADR-029 | Клієнтський перемикач форми отвору над двома шаблонами (без злиття)                | Superseded by ADR-031                                                   | 2026-06-26          |
-| ADR-030 | Перфо-монтажна панель — ребриста (4 фланці + кутові отвори), не опційно            | Accepted (розширено ADR-031)                                            | 2026-06-25          |
-| ADR-031 | Уніфікація перфо-панелі в ОДИН параметричний шаблон (форма отвору — параметр)      | Accepted (supersedes ADR-029, розширює ADR-030)                         | 2026-06-26          |
-| ADR-032 | Observability & self-improvement loop                                              | Accepted                                                                | 2026-07-05          |
-| ADR-033 | Template Registry contract — єдиний реєстр шаблонів + conformance-suite            | Proposed                                                                | 2026-07-13          |
-| ADR-034 | Manufacturing process layer                                                        | Зарезервовано (run A3 не запущено, `docs/15` §A3)                       | —                   |
-| ADR-035 | AI bugfix flow (GitHub Actions)                                                    | Зарезервовано (run не запущено, `docs/promts/master-ai-bugfix-flow.md`) | —                   |
-| ADR-036 | Модель розробки 2.0 — треки, ритми, мультиагентний конвеєр                         | Accepted                                                                | 2026-07-18          |
-| ADR-037 | i18n-архітектура — власні словники + `/en/*` routing (Etap A)                      | Accepted                                                                | 2026-07-20          |
+| №       | Назва                                                                              | Статус                                                          | Дата                |
+| ------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------- |
+| ADR-001 | Монорепо на pnpm + Turborepo                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-002 | Two-language CAD pipeline (TS + Python)                                            | Accepted                                                        | 2026-05-08          |
+| ADR-003 | Drizzle ORM, не Prisma                                                             | Accepted                                                        | 2026-05-08          |
+| ADR-004 | BullMQ для черги CAD-задач                                                         | Accepted                                                        | 2026-05-08          |
+| ADR-005 | Single VPS на DigitalOcean для MVP                                                 | Superseded by ADR-011                                           | 2026-05-08          |
+| ADR-006 | GDPR-by-design з першого дня                                                       | Accepted                                                        | 2026-05-08          |
+| ADR-007 | Auth.js (NextAuth) для автентифікації                                              | Accepted                                                        | 2026-05-08          |
+| ADR-008 | Cloudflare R2 для long-term storage                                                | Accepted                                                        | 2026-05-08          |
+| ADR-009 | TDD з першого дня, цільове покриття 80%                                            | Accepted                                                        | 2026-05-08          |
+| ADR-010 | Логування — pino з redact, без structured stack у консоль                          | Accepted                                                        | 2026-05-08          |
+| ADR-011 | Mirohost Cloud замість DigitalOcean                                                | Accepted (supersedes ADR-005)                                   | 2026-05-14          |
+| ADR-012 | UUID v4 у схемі, v7 — окремою міграцією після Postgres 18                          | Accepted                                                        | 2026-05-16          |
+| ADR-013 | Browser-side preview через three.js Shape, OpenCascade.js відкладено               | Accepted                                                        | 2026-05-17          |
+| ADR-014 | Caddy + Cloudflare Origin Certificate замість Let's Encrypt                        | Accepted                                                        | 2026-05-22          |
+| ADR-015 | Drizzle міграції + seed у entrypoint api-контейнера                                | Accepted                                                        | 2026-05-28          |
+| ADR-016 | Visual design system — warm industrial, single light theme, mobile-first           | Accepted                                                        | 2026-05-30          |
+| ADR-017 | Group metadata у Zod через `.describe("group:G\|label:L")`                         | Accepted                                                        | 2026-05-30          |
+| ADR-018 | `material_code` доставляється до API, але обрізається перед cad-worker'ом          | Accepted                                                        | 2026-05-30          |
+| ADR-019 | Server-side validation як інваріант export-pipeline                                | Accepted                                                        | дата не зафіксована |
+| ADR-020 | Soft-launch без auth/donations (Phase 3+4 → v1.1 conditional)                      | Accepted                                                        | 2026-06-04          |
+| ADR-021 | Drawing polish — auto-layout corner picker + єдина конвенція осей + UA-одиниці BOM | Accepted                                                        | 2026-06-05          |
+| ADR-022 | Клієнтська валідація матриці гибу через bake'ed snapshot                           | Accepted                                                        | 2026-06-08          |
+| ADR-023 | Discord як infrastructure-as-code — декларативний TS-config + idempotent reconcile | Accepted                                                        | 2026-06-11          |
+| ADR-024 | Production-grade DXF — рівно 2 шари + color-coded cut paths                        | Accepted                                                        | 2026-06-15          |
+| ADR-025 | Ізометрія у PDF через OCC hidden-line-removal (вектор, детермінований)             | Accepted                                                        | 2026-06-16          |
+| ADR-026 | R3F render-gate + ErrorBoundary як defense-in-depth проти крашу на invalid params  | Accepted                                                        | 2026-06-16          |
+| ADR-027 | Products як preset базового шаблону                                                | Accepted (відновлено housekeeping 2026-07-17, джерело — PR #28) | 2026-06-22          |
+| ADR-028 | Валідація перфорації (pitch > розмір отвору) як окремий gate                       | Accepted                                                        | 2026-06-24          |
+| ADR-029 | Клієнтський перемикач форми отвору над двома шаблонами (без злиття)                | Superseded by ADR-031                                           | 2026-06-26          |
+| ADR-030 | Перфо-монтажна панель — ребриста (4 фланці + кутові отвори), не опційно            | Accepted (розширено ADR-031)                                    | 2026-06-25          |
+| ADR-031 | Уніфікація перфо-панелі в ОДИН параметричний шаблон (форма отвору — параметр)      | Accepted (supersedes ADR-029, розширює ADR-030)                 | 2026-06-26          |
+| ADR-032 | Observability & self-improvement loop                                              | Accepted                                                        | 2026-07-05          |
+| ADR-033 | Template Registry contract — єдиний реєстр шаблонів + conformance-suite            | Proposed                                                        | 2026-07-13          |
+| ADR-034 | Manufacturing process layer                                                        | Зарезервовано (run A3 не запущено, `docs/15` §A3)               | —                   |
+| ADR-035 | AI bugfix flow v2 — issue → тріаж → фікс (Actions) → локальне мультиагентне рев'ю  | Accepted                                                        | 2026-07-19          |
+| ADR-036 | Модель розробки 2.0 — треки, ритми, мультиагентний конвеєр                         | Accepted                                                        | 2026-07-18          |
+| ADR-037 | i18n-архітектура — власні словники + `/en/*` routing (Etap A)                      | Accepted                                                        | 2026-07-20          |
 
 ---
 
@@ -1518,6 +1518,146 @@ Suite **fail-closed:** новий шаблон без усіх 4-х проход
 - **Data-driven через YAML** (замість TypeScript-об'єктів у реєстрі) — відхилено: втрачається type-safety на TS-side, шаблон-схема Zod у YAML не серіалізується.
 - **Codegen з YAML-single-source** — розглядалося, відкладено як анти-ціль solo-проєкту (R-07): підтримка codegen'у — окрема робота, і TS/Python дублювання схем усе одно лишається (Pydantic ≠ Zod).
 - **Мікросервіс на template** — відхилено як явну анти-ціль 14 §5 (мікросервіси на 4 GB RAM).
+
+---
+
+## ADR-035: AI bugfix flow v2 — issue → тріаж → фікс (Actions) → локальне мультиагентне рев'ю → merge yurii
+
+**Статус:** Accepted (2026-07-19, Master Run 9, docs+infra-only setup-run)
+
+**Контекст:** `docs/14` §4.4 замикає self-improvement loop правилом «кожен пункт digest'а/Sentry
+стає issue АБО accepted noise» — але після заведення issue виправлення досі вимагає ручної
+Claude Code-сесії. ADR-036 §3 передбачив цю прогалину явно: «оркестрація (запуск run'ів) поки
+ручна — на yurii, до запуску ai-bugfix-flow» і зарезервував цей номер. Конвеєр дрібних
+виправлень (typo, UX-текст, дрібний off-by-one) не вимагає повної ваги master-run-протоколу
+(docs/16) — але вимагає ті самі гейти: людина в контурі на approve і на merge, TDD-регресія
+обов'язкова (культура 2.10.e), захист від runaway-агента. `docs/promts/master-ai-bugfix-flow.md`
+— другий (після Run 8) реальний прогін ADR-036-конвеєра, і перший, що виносить частину роботи
+з локальної сесії у GitHub Actions.
+
+**Рішення** (кожна — альтернатива / вибір / обґрунтування / наслідки):
+
+**1. Лейбл-гейт (`ai-fix`) — тригер лише для власників write-доступу.**
+
+- _Альтернативи:_ тригер на КОЖЕН новий issue (`on: issues: [opened]`) — найпростіше, але
+  автоматично виконує тріаж на текст від БУДЬ-ЯКОГО відвідувача публічного репо, без гейту;
+  тригер на коментар з `@claude`-згадкою (стандартний патерн `claude-code-action`) — той самий
+  проблема: коментувати може будь-хто.
+- _Вибір:_ `on: issues: [labeled]` + job-рівня `if: github.event.label.name == 'ai-fix'`
+  (аналогічно `ai-approved` для fix-стадії). У GitHub лейбли на issue може ставити лише
+  користувач із **write**-доступом до репо (публічний viewer/non-collaborator — не може).
+- _Обґрунтування:_ лейбл — це вже вбудований у GitHub permission-check, безкоштовний і не
+  вимагає власного allow-list акаунтів. Це основна лінія захисту від prompt-injection: без
+  лейбла issue-текст (untrusted input, будь-хто може написати issue у публічному репо) НІКОЛИ
+  не потрапляє агенту.
+- _Наслідки:_ (+) нуль додаткової інфраструктури для гейту; (−) yurii — єдина людина, що може
+  запустити конвеєр (прийнятно, single-maintainer, R-07).
+
+**2. Двостадійність тріаж → `ai-plan-ready`/`ai-architectural`/`ai-need-info` → `ai-approved` → фікс.**
+
+- _Альтернативи:_ одна стадія «лейбл → одразу фікс» — швидше, але агент починає писати код
+  без людини, що прочитала план (ризик костиля на неправильному root-cause); тріаж і фікс в
+  одному job'і одного workflow — не дає yurii паузи для approve між планом і виконанням.
+- _Вибір:_ два окремі workflow на два окремі лейбли. `ai-triage.yml` (label `ai-fix`) лише
+  коментує і ставить наступний лейбл (`ai-plan-ready` / `ai-architectural` / `ai-need-info`) —
+  **нуль прав на запис коду**. `ai-fix.yml` (label `ai-approved`, ставить yurii ПІСЛЯ читання
+  плану) — імплементація.
+- _Обґрунтування:_ дзеркалить прийнятий двостадійний патерн (Архітектор план → Будівельник
+  код, ADR-036 §3); пауза між тріажем і approve — та сама точка контролю, що в
+  `docs/16` §1 «gate переноситься з чату на PR-review», тут — з чату на лейбл.
+- _Наслідки:_ (+) yurii завжди читає план ДО того, як щось почне писати код; ARCHITECTURAL-кейси
+  зупиняються на тріажі, нуль витраченого фікс-бюджету. (−) на один issue — мінімум 2 ручні дії
+  (approve лейбла двічі: implicit через label вибір, і потім merge).
+
+**3. Рев'ю — ЛОКАЛЬНЕ мультиагентне (Claude+agy), НЕ окремий `ai-review.yml` у Actions.**
+
+- _Альтернативи:_ третій workflow `ai-review.yml` (сильна Claude-модель у Actions, тригер на
+  `pull_request` від fix-гілки) — симетрично з тріаж/фікс, але: (a) `agy`-квоти прив'язані до
+  локального Google-логіна yurii — Actions runner фізично не може викликати `agy`, отже
+  рев'ю в CI було б Claude-only, без вендорної диверсифікації (ADR-036 §3 мета); (b) дублювати
+  Claude-рев'ю в CI, коли Claude-Будівельник вже писав фікс тим самим вендором — подвійна
+  витрата OAuth-квоти на 2 виклики одного вендора замість 1 незалежного крос-вендорного.
+- _Вибір:_ рев'ю — `docs/promts/ai-review-local.md`, переюзабельний промпт, який yurii запускає
+  ОДНІЄЮ командою локально у свіжій Claude Code-сесії. Оркестратор викликає `agy` (Рев'юер +
+  Тест-інженер, обидва read-only) і сам верифікує/оформлює тести — точна дзеркальна структура
+  Стадії 3 Master Run 8 (`docs/promts/agy-orchestration-recommendations.md`).
+- _Обґрунтування:_ CLAUDE.md §2 «Junior-friendly», «без розумних абстракцій без потреби» —
+  третій workflow заради симетрії, коли він не може дати обіцяну вендорну диверсифікацію,
+  порушує цей принцип. Локальний запуск — той самий Claude, що вже пройшов Стадію 3 Run 8,
+  жодного нового коду не пишеться, лише новий переюзабельний промпт-документ.
+- _Наслідки:_ (+) справжня крос-вендорна незалежність (Claude пише код, Gemini рев'ює,
+  Claude верифікує вердикт Gemini); нуль подвійної CI-витрати. (−) рев'ю НЕ автоматичне —
+  yurii мусить сам запустити команду для кожного `ai-fix`-PR (прийнятний trade-off: merge і так
+  завжди ручний). **v3-тригер (явно занотовано, не зараз):** якщо репо стане приватним І з'явиться
+  self-hosted runner з доступом до `agy`-логіна (A8, `docs/14`) — тріаж/рев'ю можуть переїхати
+  на `agy` у CI повністю; це окреме майбутнє рішення, не частина цього ADR.
+
+**4. `agy` — дозволи НЕ розширюємо; новий журнал `docs/promts/inputs/agy-stats.md`.**
+
+- _Альтернативи:_ звузити `write_file(*)` назад до `write_file(docs/promts/inputs/*)` зараз —
+  Run 8 вже показав, що вужчий glob технічно не спрацював (два підтверджені інциденти
+  scope-creep, issue #78); розширити дозволи `agy` (напр. `command(git)`) для зручності —
+  свідомо відхилено, збільшує blast radius без потреби для ЦІЄЇ ролі (Рев'юер/Тест-інженер —
+  read-only за задумом).
+- _Вибір:_ усі чинні правила `agy` з Run 8 лишаються БЕЗ ЗМІН (headless `agy -p`; файлова
+  передача diff — stdin не працює; без bash; запис лише у `docs/promts/inputs/`; `git status`
+  ПІСЛЯ кожного виклику). Додається лише журнал `docs/promts/inputs/agy-stats.md` — один рядок
+  на кожен виклик (дата, задача, модель, результат ok/scope-creep/timeout/auth, вердикт
+  підтверджений, кейсів прийнято/відхилено).
+- _Обґрунтування:_ два інциденти scope-creep за один run (Master Run 8) — це вже патерн, не
+  випадковість, але недостатньо даних, щоб обирати між «продовжити з git-status-перевіркою» і
+  «розслідувати glob-механізм» (Опитування PR #81, ще не вирішено yurii). Журнал — дешевий спосіб
+  накопичити статистику на кілька bugfix-прогонів, перш ніж приймати архітектурне рішення
+  (worktree-ізоляція `agy`, чи інше) для v3.
+- _Наслідки:_ (+) рішення про majorфутуру `agy`-ізоляцію спирається на дані, не на один інцидент;
+  нуль нового ризику цим ADR. (−) ручна дисципліна (оркестратор мусить не забути дописати рядок)
+  — як і `git status`-правило, це процес, не механічний гейт.
+
+**5. SECURITY — issue-текст = untrusted input.**
+
+Issue у публічному репо може написати будь-хто (навіть якщо лейбл ставить лише yurii — сам
+ТЕКСТ issue не гейтований, і саме він потрапляє в промпт агента). Це відомий клас атак на
+CI-агентів (prompt injection через оброблюваний контент). Мітигації, застосовані в обох
+workflow (`ai-triage.yml`, `ai-fix.yml`):
+
+1. **Лейбл-гейт** (рішення 1) — основна лінія: без явної дії write-access-користувача текст
+   ніколи не доходить до агента.
+2. **Мінімальні `permissions:`** — `ai-triage.yml`: `contents: read, issues: write` (лише
+   коментар+лейбл, без права писати код); `ai-fix.yml`: `contents: write, issues: write,
+pull-requests: write` (тільки те, що реально потрібно для гілки+PR; жодних `secrets:`,
+   `actions:`, `packages:` за замовчуванням).
+3. **Pinned SHA для `anthropics/claude-code-action`** (не version-тег `@v1`, як решта
+   `.github/workflows/*.yml` у репо, — свідомий виняток: це єдина дія в репо, що виконує
+   агента над untrusted issue-текстом, елевований поріг довіри до supply-chain виправданий).
+   `actions/checkout` лишається на репо-конвенції `@v5` (не обробляє untrusted текст).
+4. **Заборонені шляхи** для fix-стадії (рішення C у промпті) — навіть якщо injection обійде
+   інструкції промпту, мітигація подвійна: (a) `settings` JSON з `permissions.deny` — механічна
+   заборона на рівні Claude Code tool-permissions; (b) окремий verification-step
+   (`tools/scripts/check-forbidden-paths.sh`), що валить job, якщо забороненй шлях таки
+   змінився.
+5. **`concurrency`** — один run на issue (`group: ai-{triage,fix}-<issue-number>`,
+   `cancel-in-progress: true`) — захист від паралельного спаму лейблами на той самий issue.
+6. **`--max-turns`** (`claude_args`) — стеля ходів проти runaway-витрати підписки/квоти:
+   тріаж ~40 (лише читання+коментар), фікс ~150 (TDD-цикл важчий).
+
+**Наслідки (загальні):**
+
+- Нові файли: `.github/workflows/{ai-triage,ai-fix}.yml`, `.github/ISSUE_TEMPLATE/{bug_report,
+improvement}.yml`, `docs/promts/ai-review-local.md`, `docs/17_AI_BUGFIX_FLOW.md`,
+  `tools/scripts/check-forbidden-paths.sh` (+тест-скрипт), `docs/promts/inputs/agy-stats.md`
+  (порожній журнал, перший рядок — на першому реальному прогоні).
+- Нові GitHub-лейбли (мануально, чеклист PR): `ai-fix`, `ai-plan-ready`, `ai-approved`,
+  `ai-architectural`, `ai-need-info`.
+- Новий repo secret (мануально): `CLAUDE_CODE_OAUTH_TOKEN`.
+- `docs/promts/master-ai-bugfix-flow.md` (v2) включено у PR — конвенція `docs/promts`.
+- ARCHITECTURAL-межа під час Registry-міграції (Run 7): доки триває, тріаж зобов'язаний
+  класифікувати фікси у файлах студій/шаблонів як ARCHITECTURAL (уникнути зустрічних правок,
+  `docs/17` §«Конфлікт з Run 7»).
+
+**Альтернативи (загальні):** повністю ручний bugfix-процес (статус-кво до цього ADR) —
+відхилено, дрібні фікси й далі споживали б повноцінну Claude Code-сесію непропорційно до
+розміру задачі; повна автоматизація без гейтів (auto-merge зелених ai-fix PR) — відхилено,
+суперечить ADR-036 §5 «гейти незмінні».
 
 ---
 
