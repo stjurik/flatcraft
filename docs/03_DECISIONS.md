@@ -1622,10 +1622,12 @@ workflow (`ai-triage.yml`, `ai-fix.yml`):
 
 1. **Лейбл-гейт** (рішення 1) — основна лінія: без явної дії write-access-користувача текст
    ніколи не доходить до агента.
-2. **Мінімальні `permissions:`** — `ai-triage.yml`: `contents: read, issues: write` (лише
-   коментар+лейбл, без права писати код); `ai-fix.yml`: `contents: write, issues: write,
-pull-requests: write` (тільки те, що реально потрібно для гілки+PR; жодних `secrets:`,
-   `actions:`, `packages:` за замовчуванням).
+2. **Мінімальні `permissions:`** — `ai-triage.yml`: `contents: read, issues: write, id-token:
+write` (лише коментар+лейбл, без права писати код); `ai-fix.yml`: `contents: write, issues:
+write, pull-requests: write, id-token: write` (тільки те, що реально потрібно для гілки+PR;
+   жодних `secrets:`, `actions:`, `packages:` за замовчуванням). `id-token: write` обов'язковий
+   для `claude-code-action` (OIDC-обмін); це дозвіл на видачу посвідчення самому workflow, НЕ
+   запис у репо.
 3. **Pinned SHA для `anthropics/claude-code-action`** (не version-тег `@v1`, як решта
    `.github/workflows/*.yml` у репо, — свідомий виняток: це єдина дія в репо, що виконує
    агента над untrusted issue-текстом, елевований поріг довіри до supply-chain виправданий).

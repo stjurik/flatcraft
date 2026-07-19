@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   issues: write
+  id-token: write # обов'язково для OIDC-обміну claude-code-action (не запис у репо)
 
 concurrency:
   group: ai-triage-${{ github.event.issue.number }}
