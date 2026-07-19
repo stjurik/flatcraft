@@ -189,15 +189,16 @@ flatcraft/
 
 Завжди вказуйте: **де** (apps/path), **що використати** (бібліотеки), **що повернути** (response shape), **які тести**, **який доку-файл оновити**.
 
-## 11. Цикл розробки (sprint loop)
+## 11. Цикл розробки 2.0 (треки + ритми)
 
-1. Беремо найвищий пункт з `docs/02_ROADMAP.md`.
-2. Створюємо issue в GitHub з критеріями приймання.
-3. Branch `feat/<short-name>`.
-4. TDD: тест → код → рефактор.
-5. PR → автотести → code review (навіть soло — самоогляд через 12 годин на свіжу голову).
-6. Merge → tag → deploy → перевіряємо на staging → продакшн.
-7. Update Roadmap + DECISIONS, якщо щось змінилось.
+    1. Roadmap (`docs/02`) — п'ять треків-черг без дат (ADR-036). Беремо перший пункт черги відповідного треку.
+    2. Одиниця роботи — run/PR за готовим промптом (`docs/promts/*`, `docs/15`); ролі й моделі — `docs/15` §0(Архітектор / Будівельник / Рев'юер /Розвідник).
+    3. Гілка від свіжого `origin/main` (merge-base guard,`docs/16` §3 крок 0). TDD: тест → код → рефактор.
+    4. Фінал run'у — draft PR: план у description + розділи «Опитування» і «Як перевірити очима». Мануальні кроки — ОБОВ'ЯЗКОВО у закріплений issue «Черга yurii» (джерело істини; PR-чеклист — дубль).
+    5. Незалежне рев'ю AI-PR — Рев'юер (сильна Claude-модель, окрема сесія; Gemini — після перевірки доступу, ADR-036 §3).
+    6. Merge — ЛИШЕ yurii (виняток — разова явна згода у конкретному run'і). Deploy — за `docs/08_DEPLOYMENT.md`.
+    7. Ритми: неділя — digest ≤15 хв, кожен пункт → issue АБО «accepted noise» у digest-треді; 1-е число — huddle A4 (вхід: 4 digest + Roadmap; вихід: корекція черг треків).
+    8. Закритий пункт черги = запис у `docs/13_PROGRESS_LOG.md` + ротація §13.
 
 ## 12. Ключові посилання
 
@@ -218,6 +219,7 @@ flatcraft/
 - Стратегія еволюції архітектури (registry/process/feedback): `docs/14_ARCHITECTURE_EVOLUTION.md`
 - Бібліотека LLM-промптів і маршрутизація по моделях: `docs/15_LLM_PROMPTS.md`
 - Автономні запуски (headless, guard-правила): `docs/16_AUTONOMOUS_RUNS.md`
+- AI bugfix flow (issue → тріаж → фікс → мультиагентне рев'ю): `docs/17_AI_BUGFIX_FLOW.md` (ADR-035)
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
 
@@ -225,13 +227,13 @@ flatcraft/
 
 > Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
 
-**Де ми зараз (2026-07-17):** staging.hart.crimea.ua live, MVP feature-complete. Master run 4-5 закрили docs-борг: ADR-027 відновлено, Roadmap синхронізовано з фактом (секції Phase 3.0/3.1/3.2/3.4), 4 stale-PR (#28-#31) закрито. **Phase 3.4 (виробничий фідбек, ADR-032 §feedback) завершено** — форма `/f/{exportId}` + `POST /feedback` (PR #69) + реальний QR-permalink у PDF замість fallback-схеми (PR #75/issue #70) — R-01 mitigation 4 закрито. **Телеметрія активована на staging 2026-07-12** (Umami live + Sentry env + digest-webhook; PR #63/#65, hotfix #71-#72); недільний digest-acceptance — 2026-07-19. Перфо-панель — ОДИН шаблон `perforated_panel` (`hole_shape`, ADR-031). Render-gate проти крашу R3F (ADR-026); DXF production-grade (2 шари, ADR-024); PDF з ізометрією (ADR-025). Discord IaC (ADR-023) чекає manual-setup. Наступний фокус — публічний soft-launch.
+**Де ми зараз (2026-07-21):** staging.hart.crimea.ua live, MVP feature-complete + **EN-версія (i18n Etap A, ADR-037)**: власні типізовані словники, `/en/*` дзеркала маркетингових поверхонь, hreflang/canonical + sitemap на 16 сторінок; студії лишаються UA — Etap B після Registry. **Master Run 8 — перший бойовий прогін мультиагентного конвеєра ADR-036**: agy (Gemini 3.1 Pro) як незалежний Рев'юер, метрика 2/2 підтверджених знахідок; 2 інциденти самовільного запису agy → правило git-status-після-виклику, курс на worktree-ізоляцію. Phase 3.4 (виробничий фідбек, R-01 mitigation 4) завершено. Телеметрія активна на staging з 2026-07-12 (Umami + Sentry + digest). Перфо-панель — ОДИН шаблон `perforated_panel` (ADR-031). Render-gate (ADR-026); DXF 2 шари (ADR-024); PDF з ізометрією (ADR-025). Discord IaC (ADR-023) чекає manual-setup. Наступний фокус — **Run 7 (Template Registry)** → публічний soft-launch.
 
 **Останні 3 milestones:**
 
+- **Feature i18n Etap A — EN-версія платформи** (2026-07-18, ADR-037, Master Run 8): перший живий прогін конвеєра ADR-036 з `agy`/Gemini-Рев'юером. Власні типізовані словники (`apps/web/src/i18n/*`), middleware Accept-Language + функціональна `hart_locale` cookie (без PII, SameSite=Lax), `LocaleSwitcher` 44px, 6 нових `/en/*` сторінок; hreflang/canonical (`i18n/hreflang.ts`, x-default=uk) + `app/sitemap.ts` на всіх 16 локалізованих сторінках — follow-up за зауваженням agy. PR **#79** (3cbdc9e, Розвідник: 4 agy-скани, 0/32 розбіжностей), **#80** (0506f8a, ADR-037 + імплементація, e2e 138/138), **hreflang-follow-up** (bcd4552, +6 e2e). Вердикт конвеєра: 3✅/1⚠️; метрика agy-Рев'юера 2/2. Знахідки: `agy -p` не читає stdin (файлова передача); 2× самовільний запис agy → git-restore + правило «git status після кожного write-виклику agy». uk-URL/тексти незмінні; `/f/[exportId]` поза hreflang (noindex). Гілки `docs/i18n-inventory`, `feat/i18n-stage-a`, `fix/i18n-hreflang`.
 - **Feature 3.4 — QR-фідбек з виробництва** (2026-07-17, ADR-032 §feedback, R-01 mitigation 4): замикає self-improvement loop — QR у PDF → мобільна форма `/f/{exportId}` → фідбек → digest бачить deviation-репорти → калібрування K-фактора. Два PR: **#69** (4a7d94d) — C4 UX-copy (Варіант 1 ★), таблиця `export_feedback` (FK на exports.id, drizzle-міграція за явною інструкцією), `POST /feedback/:exportId` (Zod, rate-limit 20/год/IP, 404 на невідомий export*id), подія `feedback_submitted` без PII (агрегати: outcome/has_deviation/has_comment/locale), digest-секція «Виробничий фідбек», UA+EN форма (мобільна-перша, 44px tap-target). **#75/issue #70** (34a2127) — QR раніше тримав непрацюючий fallback `flatcraft://<slug>/<article>`; тепер export_id (== job.id == exports.id) форвардиться api→cad-worker, `{BASE_URL}/f/{export_id}` підключено до всіх 6 `export*<tpl>\_pdf`. DXF без змін (ADR-024); PDF byte-снапшотів у репо нема — regen не знадобився. Тести: worker 339 pytest, api 67 unit, types 146, web 67 unit + 3 нові Playwright e2e. Гілки `feat/phase-3-4-qr-feedback`, `fix/issue-70`.
 - **Feature 3.3 — Observability foundation** (2026-07-06, ADR-032): 6 PR перед soft-launch. (1) docs-gate ADR-032 + docs/11; (2) Postgres `events` (Zod-payload'и) + persist `exports` (nullable user/draft, session\*hash з добовим salt); (3) Sentry ×3 web/api/worker з `beforeSend` PII; (4) pure `buildDigest` → Discord webhook (cron нд 18:00); (5) воронка **Umami self-hosted** (vendor-нейтральний `track`, GDPR fail-closed) + web-vitals; (6) цей progress-log. Стек мінімальний (без Prometheus/Grafana/OTel). Аналітика — Umami (окрема БД у наявному Postgres; Plausible відхилено — ClickHouse RAM). PR #54-#58. Міграцію events/exports генерує yurii вручну. Активацію виконано 2026-07-12 (Phase 3.3-B: PR #63/#65 + vault env; hotfix #71-#72).
-- **Feature 3.2 — Уніфікація перфо-панелі в один шаблон (hole_shape)** (2026-06-26, ADR-031): злито `perforated_panel` + `perforated_panel_square` у ОДИН ребристий монтажний лоток `perforated_panel`, де форма отвору — параметр `hole_shape` (circle|square); єдина гілка — рендер отвору. Розмір отвору — єдиний `hole_size_mm` (прибрано `hole_diameter_mm` + `syncHoleKeys`). Ребра рендеряться **вниз** (worker `-z`, 3D-сцена `-Y`; узгоджено з `direction='down'`). Видалено по всьому стеку: `perforated_panel_square.py`, `-square.ts`, square-сцену, viewport, shim `perforation-shape.ts`; slug прибирається з БД (`RETIRED_TEMPLATE_SLUGS`). Продукт «Декоративна перфо-панель» → base `perforated_panel` + `fixed hole_shape=square` + `userEditableFields += rib_height_mm`. Toggle круг/квадрат тепер редагує параметр (не свопає slug). DXF/PDF снапшоти перегенеровано; байт-детермінізм збережено. worker 332 pytest / types 134 / cad-engine 71 / ui 96 / web 54 / api 37 / db 51. Гілка `feat/perfo-unify-hole-shape`.
 
 **Інваріанти (must-not-break):**
 
@@ -248,4 +250,4 @@ flatcraft/
 
 ---
 
-_Останнє оновлення: 2026-07-17. Коли архітектура змінюється — оновлюйте CLAUDE.md (§1-12) першим. Завершення фази — у `docs/13_PROGRESS_LOG.md` + ротація §13._
+_Останнє оновлення: 2026-07-21. Коли архітектура змінюється — оновлюйте CLAUDE.md (§1-12) першим. Завершення фази — у `docs/13_PROGRESS_LOG.md` + ротація §13._
