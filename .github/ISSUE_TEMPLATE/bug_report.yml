@@ -1,0 +1,67 @@
+name: 🐛 Баг
+description: Щось не працює так, як мало б
+title: "[Bug]: "
+labels: []
+# ВАЖЛИВО (ADR-035 §5.1): жодних `labels: [ai-fix]` тут навмисно.
+# Лейбл ai-fix ставить ЛИШЕ yurii (write-access) — це головний захист
+# конвеєра AI bugfix flow від prompt-injection. Автолейбл на формі зробив
+# би цей гейт даремним (будь-хто в публічному репо міг би відкрити issue
+# і одразу отримати ai-fix). Ставте лейбл вручну ПІСЛЯ прочитання issue.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Дякуємо, що повідомляєте про проблему! Заповніть поля нижче — це
+        допомагає швидше знайти причину (в тому числі автоматизованому
+        тріажу, `docs/17_AI_BUGFIX_FLOW.md`).
+
+  - type: input
+    id: where
+    attributes:
+      label: Де
+      description: URL сторінки АБО назва шаблону/продукту
+      placeholder: "напр. https://hart.crimea.ua/templates/l_bracket, або «L-кронштейн»"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Кроки для відтворення
+      description: Що робили, крок за кроком
+      placeholder: |
+        1. Відкрив(-ла) сторінку …
+        2. Змінив(-ла) параметр … на …
+        3. Натиснув(-ла) «Експортувати»
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Що очікували побачити
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Що побачили насправді
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Скріншот (якщо є)
+      description: Можна перетягнути зображення прямо в це поле
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: Пристрій і браузер
+      placeholder: "напр. iPhone 13 / Safari; або Windows 11 / Chrome 120"
+    validations:
+      required: false

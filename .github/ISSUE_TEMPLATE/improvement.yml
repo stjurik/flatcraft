@@ -1,0 +1,52 @@
+name: ✨ Покращення
+description: Щось працює, але могло б бути кращим
+title: "[Improvement]: "
+labels: []
+# ADR-035 §5.1 — лейбл ai-fix НЕ автопризначається (див. bug_report.yml).
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Дякуємо за ідею! Заповніть поля нижче — конкретні приклади
+        допомагають швидше зрозуміти, що саме покращити.
+
+  - type: input
+    id: where
+    attributes:
+      label: Де
+      description: URL сторінки АБО назва шаблону/продукту, якого стосується ідея
+      placeholder: "напр. https://hart.crimea.ua/templates, або «форма параметрів»"
+    validations:
+      required: true
+
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Що хочеться покращити
+      description: Опишіть поточну поведінку і що саме незручно/неоптимально
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Чому це важливо
+      description: Який реальний сценарій використання це покращує
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Скріншот / мокап / приклад (якщо є)
+      description: Можна перетягнути зображення прямо в це поле, або дати посилання на схожу реалізацію деінде
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: Пристрій і браузер (якщо релевантно)
+      placeholder: "напр. iPhone 13 / Safari; або Windows 11 / Chrome 120"
+    validations:
+      required: false

@@ -1,0 +1,132 @@
+# AI bugfix flow v2 — Стадія 2/2: Фікс (ADR-035, docs/promts/master-ai-bugfix-flow.md).
+#
+# Тригер — ЛИШЕ лейбл `ai-approved`, який yurii ставить ПІСЛЯ читання
+# триаж-плану (ai-triage.yml). Двостадійність — свідома пауза для approve
+# (ADR-035 §2).
+#
+# Заборонені шляхи (ADR-035 §5.4) захищені ДВІЧІ:
+#   1. `settings` permissions.deny — механічно блокує Edit/Write tool-виклики
+#      Claude на цих шляхах ПІД ЧАС виконання.
+#   2. verification-step (tools/scripts/check-forbidden-paths.sh) — backstop
+#      ПІСЛЯ виконання, ловить обхід через Bash (напр. `echo x > infra/y`),
+#      валить job, якщо deny-rule не спрацювала.
+name: AI fix
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ai-fix-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    if: github.event.label.name == 'ai-approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # потрібна повна історія для git merge-base/diff нижче
+
+      - name: Create fix branch (merge-base guard, docs/16 §3 крок 0)
+        run: |
+          git fetch origin main
+          git checkout -b "fix/issue-${{ github.event.issue.number }}" origin/main
+
+      - name: Claude fix
+        # Pinned SHA — та сама причина, що в ai-triage.yml (ADR-035 §5.3).
+        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1 (v1.0.178, 2025-08-26)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --model sonnet
+            --max-turns 150
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(uv:*)"
+          # Механічна заборона (ADR-035 §5.4, лінія 1) — паритетна зі списком
+          # у промпті нижче. Синтаксис — той самий permissions.deny формат,
+          # що docs/16_AUTONOMOUS_RUNS.md §1 використовує для локальних
+          # автономних прогонів (deny має пріоритет над allow).
+          settings: |
+            {
+              "permissions": {
+                "deny": [
+                  "Edit(packages/db/src/migrations/**)",
+                  "Write(packages/db/src/migrations/**)",
+                  "Edit(infra/**)",
+                  "Write(infra/**)",
+                  "Edit(.github/**)",
+                  "Write(.github/**)",
+                  "Edit(CLAUDE.md)",
+                  "Write(CLAUDE.md)",
+                  "Edit(docs/03_DECISIONS.md)",
+                  "Write(docs/03_DECISIONS.md)",
+                  "Edit(docs/12_TEMPLATE_CONTRACT.md)",
+                  "Write(docs/12_TEMPLATE_CONTRACT.md)",
+                  "Edit(packages/db/src/schema.ts)",
+                  "Write(packages/db/src/schema.ts)",
+                  "Edit(workers/cad/tests/snapshots/**)",
+                  "Write(workers/cad/tests/snapshots/**)",
+                  "Bash(git push --force:*)",
+                  "Bash(docker:*)",
+                  "Bash(pnpm discord:apply:*)"
+                ]
+              }
+            }
+          # ЛИШЕ номер issue (безпечне ціле число) інтерполюється у workflow.
+          # Заборонені шляхи дослівно з ADR-035 §5.4/промпту — Claude має
+          # СПОЧАТКУ перевірити план проти цього списку, а не з'ясовувати
+          # постфактум через помилку deny-rule.
+          prompt: |
+            Ти — Будівельник (роль ADR-036 §3 / docs/15 §0), фіксиш issue
+            #${{ github.event.issue.number }} за планом, затвердженим yurii
+            (лейбл ai-approved поставлено ПІСЛЯ читання твого триаж-коментаря
+            з ai-triage.yml). Ти вже на гілці `fix/issue-${{ github.event.issue.number }}`
+            (створена зі свіжого origin/main, merge-base guard уже виконано).
+            Headless, без діалогу — увесь результат = PR + коментарі.
+
+            КРОК 1 — прочитай контекст:
+            - `gh issue view ${{ github.event.issue.number }} --json title,body,comments,url`
+              (в comments — твій же триаж-план з попередньої стадії, читай
+              його як затверджений ПЛАН, не вигадуй новий підхід без причини)
+            - CLAUDE.md §7, релевантні ADR (docs/03_DECISIONS.md)
+
+            ЗАБОРОНЕНІ ШЛЯХИ (НЕ торкайся; якщо план ЦЬОГО вимагає — СТОП,
+            дивись «Якщо заблокований» нижче, замість спроби обійти):
+              packages/db/src/migrations/**, infra/**, .github/**, CLAUDE.md,
+              docs/03_DECISIONS.md, docs/12_TEMPLATE_CONTRACT.md,
+              packages/db/src/schema.ts, workers/cad/tests/snapshots/**
+            (Ці шляхи ТАКОЖ заблоковано механічно через permissions.deny —
+            якщо Edit/Write на них впаде з permission-error, це очікувано,
+            не баг; переходь одразу до «Якщо заблокований».)
+
+            КРОК 2 — TDD за планом: тест (red) → код (green) → рефактор.
+            Регресійний тест — ОБОВ'ЯЗКОВИЙ (культура 2.10.e): він мусить
+            падати ДО фікса і проходити ПІСЛЯ. Прожени релевантні тести
+            (AGENTS.md — команди по workspace) ПЕРЕД комітом.
+
+            КРОК 3 — коміт (Conventional Commits) → push гілки →
+            `gh pr create --draft --base main --title "fix(issue-${{ github.event.issue.number }}): <короткий опис>" --body "<план з триажу, посилання Closes #${{ github.event.issue.number }}, розділ «Як перевірити очима», розділ «Опитування» якщо лишились варіанти>"`.
+
+            КРОК 4 — фінальний коментар у щойно створений PR:
+            `gh pr comment <PR-номер> --body "Готово до локального рев'ю: docs/promts/ai-review-local.md"`
+
+            Якщо заблокований (потрібен заборонений шлях АБО план виявився
+            хибним/архітектурним просто зараз):
+            1. `gh issue comment ${{ github.event.issue.number }} --body "<чому заблоковано, який шлях/причина>"`
+            2. `gh issue edit ${{ github.event.issue.number }} --add-label ai-architectural --remove-label ai-approved`
+            3. СТОП — НЕ створюй PR у цьому випадку.
+
+      - name: Verify forbidden paths untouched (ADR-035 §5.4, backstop)
+        if: always()
+        run: |
+          git fetch origin main
+          git diff --name-only origin/main...HEAD | tools/scripts/check-forbidden-paths.sh

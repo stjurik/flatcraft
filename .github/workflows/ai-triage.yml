@@ -1,0 +1,94 @@
+# AI bugfix flow v2 — Стадія 1/2: Тріаж (ADR-035, docs/promts/master-ai-bugfix-flow.md).
+#
+# Тригер — ЛИШЕ лейбл `ai-fix`. У GitHub лейбли може ставити тільки
+# користувач із write-доступом до репо — це основний захист від
+# prompt-injection (issue-текст = untrusted input, ADR-035 §5.1).
+#
+# Права запису: ЛИШЕ коментар + лейбл (issues: write). Жодного доступу до
+# коду (contents: read) — тріаж нічого не пише в репо.
+name: AI triage
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ai-triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    if: github.event.label.name == 'ai-fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Claude triage
+        # Pinned SHA (не version-тег @v1, як решта workflow у репо) — ADR-035
+        # §5.3: єдина дія, що пропускає untrusted issue-текст крізь агента,
+        # елевований supply-chain-поріг виправданий.
+        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1 (v1.0.178, 2025-08-26)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --model opus
+            --max-turns 40
+            --allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"
+          # ЛИШЕ номер issue (безпечне ціле число) інтерполюється у workflow —
+          # НІКОЛИ title/body (untrusted вільний текст). Claude сам витягує
+          # текст issue через `gh issue view` (дані, не код) — ADR-035 §5.
+          prompt: |
+            Ти — Тріаж (роль ADR-036 §3 / docs/15 §0) для issue
+            #${{ github.event.issue.number }} у репозиторії flatcraft
+            (hart.crimea.ua). Працюєш headless, без діалогу — жодних питань
+            у чат, увесь результат = коментар на issue + лейбл.
+
+            КРОК 1 — прочитай контекст (Read/Glob/Grep, репо вже checked out):
+            - `gh issue view ${{ github.event.issue.number }} --json title,body,labels,url`
+            - CLAUDE.md §7 (CAD-обмеження, інваріанти "must-not-break")
+            - docs/03_DECISIONS.md (релевантні ADR за темою issue)
+            - docs/promts/inputs/c1-template-inventory.md (відомі структурні
+              дрейфи 6 шаблонів — багато "дрібних багів" уже задокументовані
+              там як known drift, не нова знахідка)
+            - docs/02_ROADMAP.md (чи issue перетинається з активним треком,
+              особливо T2 Registry — Run 7 у процесі)
+
+            КРОК 2 — класифікуй ОДНЄЮ з трьох категорій:
+
+            **LOCAL-FIX** — дрібне, локалізоване виправлення (typo, off-by-one,
+            UX-текст, styling), НЕ зачіпає інваріанти CLAUDE.md §7/§13,
+            спільні шари (packages/cad-engine, packages/types), схему БД,
+            infra, або зону активної Registry-міграції (Run 7 — студії/
+            шаблони під час T2 = ARCHITECTURAL, див. нижче). Дій:
+            1. Сформулюй root-cause гіпотезу (file:line, якщо можеш знайти).
+            2. Напиши план: файли у скоупі, ЯКИЙ регресійний тест додати
+               (обов'язково — культура 2.10.e, "кожен фікс = тест, що ловить
+               регресію"), рекомендовану модель фікса (sonnet — дефолт;
+               haiku лише для тривіального typo-фікса без логіки).
+            3. Якщо ≥2 розумних підходи — розділ «Опитування» (варіанти,
+               ★ рекомендація).
+            4. `gh issue comment ${{ github.event.issue.number }} --body "<план>"`
+            5. `gh issue edit ${{ github.event.issue.number }} --add-label ai-plan-ready --remove-label ai-fix`
+
+            **ARCHITECTURAL** — зачіпає інваріанти §7/§13, спільні шари,
+            схему БД, infra/, АБО файл усередині активної Registry-зони
+            (студії/шаблони під час T2, docs/17 §«Конфлікт з Run 7»). Дій:
+            1. `gh issue comment ${{ github.event.issue.number }} --body "<пояснення + посилання на трек docs/02_ROADMAP.md>"`
+            2. `gh issue edit ${{ github.event.issue.number }} --add-label ai-architectural --remove-label ai-fix`
+            3. СТОП — не пропонуй план фікса. Це свідомий захист від костилів
+               (ADR-035 §2).
+
+            **NEED-INFO** — issue неповний (немає кроків відтворення, URL
+            шаблону, очікуваної поведінки). Дій:
+            1. `gh issue comment ${{ github.event.issue.number }} --body "<1-3 конкретні питання>"`
+            2. `gh issue edit ${{ github.event.issue.number }} --add-label ai-need-info --remove-label ai-fix`
+
+            Обери РІВНО одну категорію. Не вигадуй root-cause, якого не бачиш
+            у коді — якщо непевен, це NEED-INFO, не LOCAL-FIX.
