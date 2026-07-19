@@ -38,8 +38,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # ТИМЧАСОВО на час acceptance — вимкнути після: логи Actions
+          # публічного репо видимі всім, а show_full_output друкує ПОВНИЙ
+          # JSON-вивід Claude Code (може містити секрети/токени з tool-виводу).
+          show_full_output: true
           claude_args: |
-            --model opus
+            --model sonnet
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"
           # ЛИШЕ номер issue (безпечне ціле число) інтерполюється у workflow —
