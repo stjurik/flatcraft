@@ -8,6 +8,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./node": "./dist/spec-node.js",
+    "./geometry": "./dist/geometry/index.js",
     "./data/bend-machine-esi.yaml": "./data/bend-machine-esi.yaml"
   },
   "scripts": {

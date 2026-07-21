@@ -1,0 +1,30 @@
+{
+  "name": "@flatcraft/templates",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "export-registry": "tsx ../../tools/scripts/export-registry.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src test --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flatcraft/cad-engine": "workspace:*",
+    "@flatcraft/types": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "fast-check": "^4",
+    "react": "^19.0.0",
+    "tsx": "^4.19.1",
+    "vitest": "^2.1.2"
+  }
+}

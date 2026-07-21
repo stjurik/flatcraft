@@ -10,21 +10,13 @@
  * THREE.ExtrudeGeometry; будь-яка інша 3D-tooling може використати ту
  * саму послідовність команд.
  */
+import type { ShapeCommand } from "@flatcraft/cad-engine/geometry";
 import type { LBracketParameters, WallShelfParameters, ZBracketParameters } from "@flatcraft/types";
 
-export type ShapeCommand =
-  | { readonly kind: "moveTo"; readonly x: number; readonly y: number }
-  | { readonly kind: "lineTo"; readonly x: number; readonly y: number }
-  | {
-      readonly kind: "absarc";
-      readonly cx: number;
-      readonly cy: number;
-      readonly radius: number;
-      readonly startAngleRad: number;
-      readonly endAngleRad: number;
-      readonly clockwise: boolean;
-    }
-  | { readonly kind: "closePath" };
+// Реекспорт для наявних споживачів (`./geometry.js` → `3d-viewport/index.ts` →
+// `@flatcraft/ui`) — тип тепер живе у `@flatcraft/cad-engine` (ADR-033 §1,
+// PR 2): це data-контракт для sceneBuilder-ів, не UI-код.
+export type { ShapeCommand };
 
 export interface LBracketGeometryInputs {
   // Геометрія не залежить від bend_direction (рендериться лише на креслі) —

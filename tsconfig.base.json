@@ -28,6 +28,7 @@
       // tsx/tsc падають у node-resolution → dist/spec-node.js (несобраний у dev).
       // Явний мапінг тримає browser-unsafe fs-loader резолвним із source.
       "@flatcraft/cad-engine/node": ["packages/cad-engine/src/spec-node.ts"],
+      "@flatcraft/cad-engine/geometry": ["packages/cad-engine/src/geometry/index.ts"],
       "@flatcraft/*": ["packages/*/src", "apps/*/src"]
     }
   },

@@ -12,6 +12,8 @@ from typing import Literal
 import cadquery as cq
 from pydantic import BaseModel, ConfigDict, Field
 
+from flatcraft_cad.validate.profile import ProfileError
+
 BendDirection = Literal["up", "down"]
 
 
@@ -36,3 +38,12 @@ class Template[ParamsT: BaseModel](ABC):
     def build(self, params: ParamsT) -> cq.Workplane:
         """Збирає 3D-модель за параметрами. Pure-функція: однакові
         params → байт-у-байт однакова геометрія (CLAUDE.md §2.4)."""
+
+    def validate_params(self, params: ParamsT) -> list[ProfileError]:
+        """Server-side валідатор — паритет з TS `TemplateDefinition.validators`
+        (ADR-033 §2). Конкретний (не абстрактний) дефолт: порожній список.
+        Шаблон перевизначає під час міграції на реєстр (Run 7 Етап 2,
+        docs/12_TEMPLATE_CONTRACT.md §4) — до того лишається без змін
+        (наявна серверна валідація йде через окремі `validate/*.py` модулі,
+        не через цей метод)."""
+        return []

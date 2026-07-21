@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": "src",
+    "paths": {
+      "@flatcraft/*": ["packages/*/dist"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

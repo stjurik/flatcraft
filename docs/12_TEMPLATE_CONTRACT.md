@@ -6,30 +6,69 @@
 
 ## 1. `TemplateDefinition` (TypeScript-контракт)
 
+> **Реалізовано (Run 7 Master Registry Track, Етап 1, `feat/registry-core`):** блок нижче
+> оновлено з реального коду `packages/templates/src/definition.ts` (був аспіраційним
+> псевдокодом до цього PR). Два усвідомлені відхилення від початкового ескізу —
+> занесені в «Опитування» PR, не STOP-тригер (семантика контракту не змінилась):
+>
+> - `ProfileValidator<Params>` живе у `packages/templates` (не в `@flatcraft/cad-engine/validators`,
+>   як у первісному ескізі) — тип generic над `Params`, який `cad-engine` не знає;
+>   повертає вже наявний `ProblemError` з `@flatcraft/cad-engine` (той самий RFC 9457
+>   формат, що й `validateExportProfile`/`validateExportPerforation`/`validateExportBends`),
+>   замість введення нового issue-типу.
+> - `ProductDefinition.fixed` (не `fixedParameters`, як у `TemplateStudioProductMeta`
+>   в `apps/web`) — назва поля дослівно з ADR-033 §5 CONSEQUENCES («fixed,
+>   userEditableFields»).
+>
+> `labels: { uk, en }` — ADR-037 §5 Consequence (єдиний дозволений виняток зі
+> STOP-правила «не чіпати docs/12-контракт», `docs/promts/master-registry-track.md`):
+> Etap B (i18n студій) споживає це напряму; поле ОБОВ'ЯЗКОВЕ для кожного
+> шаблону, що мігрує на реєстр (Етап 2), щоб студії не лишились
+> частково-локалізованими після Registry.
+
 ```ts
 // packages/templates/src/definition.ts (новий пакет, ADR-033 §1)
-import { z } from "zod";
-import type { ShapeCommand } from "@flatcraft/cad-engine/geometry"; // ПЕРЕЇЖДЖАЄ з @flatcraft/ui у PR 2 (ADR-033 §1: react-free реєстр)
+import type { ProblemError } from "@flatcraft/cad-engine";
+import type { ShapeCommand } from "@flatcraft/cad-engine/geometry"; // ПЕРЕЇХАВ з @flatcraft/ui у PR 2 (ADR-033 §1: react-free реєстр)
 import type { ReactNode } from "react";
-import type { ProfileValidator } from "@flatcraft/cad-engine/validators";
+import type { z } from "zod";
 
-export type SceneBuilderKind =
-  | { kind: "extrude"; build: (params: unknown, thickness: number) => ShapeCommand[] }
-  | { kind: "composed"; render: (params: unknown, thickness: number) => ReactNode };
+export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_holes";
 
-export type ExtraControlSpec =
+export type SceneBuilderKind<Params> =
+  | { kind: "extrude"; build: (params: Params, thicknessMm: number) => ShapeCommand[] }
+  | { kind: "composed"; render: (params: Params, thicknessMm: number) => ReactNode };
+
+export type ExtraControlSpec<Params> =
   | { kind: "segmented"; field: string; options: { value: string; label: string }[]; label: string }
-  | { kind: "summary"; render: (params: unknown) => ReactNode }
+  | { kind: "summary"; render: (params: Params) => ReactNode }
   | { kind: "hint"; field: string; text: string };
 
+// ADR-019 + ADR-026 render-gate: RFC 9457 ProblemError[] — той самий формат,
+// що вже дає validateExportProfile/validateExportPerforation/validateExportBends.
+export type ProfileValidator<Params> = (
+  params: Params,
+  thicknessMm: number,
+) => readonly ProblemError[];
+
+export interface ProductDefinition<Params> {
+  // ADR-027: fixed + userEditableFields.
+  slug: string;
+  name: string;
+  description: string | null;
+  fixed: Partial<Params>;
+  userEditableFields: ReadonlyArray<keyof Params & string>;
+}
+
 export interface TemplateDefinition<Params> {
-  slug: string; // унікальний, kebab-case
+  slug: string; // унікальний, kebab-case (наявні шаблони — snake_case, напр. l_bracket)
   process: "sheet_metal"; // constant поки — ADR-034 зробить це union'ом
+  labels: { uk: string; en: string }; // ADR-037 §5 Consequence — обов'язково для кожного шаблону
   schema: z.ZodType<Params>; // повна refined-Zod (без Base-варіанту)
   defaults: Params;
   ui: {
-    scene: SceneBuilderKind;
-    extraControls?: ExtraControlSpec[]; // F8 SegmentedControl, wall-shelf summary
+    scene: SceneBuilderKind<Params>;
+    extraControls?: ExtraControlSpec<Params>[]; // F8 SegmentedControl, wall-shelf summary
     visibleFields?: string[]; // для product-mode (ADR-027)
     thumbSlug?: string; // /public/thumbs/{slug}.png (default = slug)
   };
@@ -37,8 +76,6 @@ export interface TemplateDefinition<Params> {
   products?: ProductDefinition<Params>[]; // ADR-027 (fixed + userEditableFields)
   capabilities: TemplateCapability[]; // 'bends' | 'profile' | 'perforation' | ...
 }
-
-export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_holes";
 ```
 
 ### Deps `packages/templates` (ADR-033 §1)
