@@ -31,6 +31,11 @@ describe.each(entries)("registry invariants — %s", (slug, def) => {
     expect(def.capabilities.length).toBeGreaterThan(0);
   });
 
+  test("labels.uk і labels.en непорожні (ADR-037 §5 Consequence)", () => {
+    expect(def.labels.uk.length).toBeGreaterThan(0);
+    expect(def.labels.en.length).toBeGreaterThan(0);
+  });
+
   test("render-gate: усі валідатори мовчать на дефолтних параметрах", () => {
     for (const validator of def.validators) {
       expect(validator(def.defaults, 2)).toHaveLength(0);

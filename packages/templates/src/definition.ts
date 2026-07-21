@@ -67,6 +67,13 @@ export interface TemplateDefinition<Params> {
   readonly slug: string;
   /** Константа поки — ADR-034 (Process layer) зробить це union'ом. */
   readonly process: "sheet_metal";
+  /**
+   * Локалізовані лейбли назви шаблону (ADR-037 §5 Consequence, Run 7 Етап 1):
+   * Etap B (i18n студій) споживає це напряму — заповнюється ОБОВ'ЯЗКОВО для
+   * кожного шаблону, що мігрує на реєстр (Etap 2), щоб студії не лишились
+   * частково-локалізованими після Registry.
+   */
+  readonly labels: { readonly uk: string; readonly en: string };
   /** Повна refined-Zod (без Base-варіанту, ADR-033 §2 ALT-C). */
   readonly schema: z.ZodType<Params>;
   readonly defaults: Params;

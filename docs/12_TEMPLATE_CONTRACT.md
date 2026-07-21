@@ -19,6 +19,12 @@
 > - `ProductDefinition.fixed` (не `fixedParameters`, як у `TemplateStudioProductMeta`
 >   в `apps/web`) — назва поля дослівно з ADR-033 §5 CONSEQUENCES («fixed,
 >   userEditableFields»).
+>
+> `labels: { uk, en }` — ADR-037 §5 Consequence (єдиний дозволений виняток зі
+> STOP-правила «не чіпати docs/12-контракт», `docs/promts/master-registry-track.md`):
+> Etap B (i18n студій) споживає це напряму; поле ОБОВ'ЯЗКОВЕ для кожного
+> шаблону, що мігрує на реєстр (Етап 2), щоб студії не лишились
+> частково-локалізованими після Registry.
 
 ```ts
 // packages/templates/src/definition.ts (новий пакет, ADR-033 §1)
@@ -57,6 +63,7 @@ export interface ProductDefinition<Params> {
 export interface TemplateDefinition<Params> {
   slug: string; // унікальний, kebab-case (наявні шаблони — snake_case, напр. l_bracket)
   process: "sheet_metal"; // constant поки — ADR-034 зробить це union'ом
+  labels: { uk: string; en: string }; // ADR-037 §5 Consequence — обов'язково для кожного шаблону
   schema: z.ZodType<Params>; // повна refined-Zod (без Base-варіанту)
   defaults: Params;
   ui: {
