@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@flatcraft/cad-engine": "workspace:*",
+    "@flatcraft/templates": "workspace:*",
     "@flatcraft/types": "workspace:*",
     "@flatcraft/ui": "workspace:*",
     "@react-three/drei": "^10.7.7",
