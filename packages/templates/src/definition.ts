@@ -2,14 +2,18 @@
  * `TemplateDefinition` — контракт одного зареєстрованого шаблону (ADR-033 §1).
  *
  * `packages/templates` — react-free data-пакет: deps лише `@flatcraft/types` +
- * `@flatcraft/cad-engine` (ADR-033 §1 Рішення 1). `react` — лише type-only
- * імпорт (`ReactNode`) для `kind: 'composed'`/`extraControls` — TS стирає це
- * при компіляції, у runtime-бандл `apps/api` не потрапляє (conformance §3.5
- * перевіряє інваріант автотестом на import-graph).
+ * `@flatcraft/cad-engine` (ADR-033 §1 Рішення 1). Жодних `react`-типів (навіть
+ * type-only) — виявлено на PR `perforated_panel` (Run 7 Етап 2, docs/12 §1
+ * STOP-знахідка 2026-07-21): `render: (...) => ReactNode` семантично повертає
+ * JSX, що вимагає `react` як RUNTIME-залежність, не type-only. Тому
+ * `SceneBuilderKind.composed` несе лише `{ kind: "composed" }` (реальний
+ * компонент — у `@flatcraft/ui/3d-viewport/composed-scenes`, slug-keyed
+ * lookup), а `ExtraControlSpec.summary.render` повертає `string`, не
+ * `ReactNode`. Conformance §3.5 (`apps/api/src/registry-bundle.test.ts`)
+ * перевіряє інваріант автотестом на import-graph.
  */
 import type { ProblemError } from "@flatcraft/cad-engine";
 import type { ShapeCommand } from "@flatcraft/cad-engine/geometry";
-import type { ReactNode } from "react";
 import type { z } from "zod";
 
 export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_holes";
@@ -18,17 +22,15 @@ export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_ho
  * Generic-viewport будує сцену одним з двох дозволених патернів (ADR-033 §1
  * Рішення 4): `extrude` — 2D `ShapeCommand[]` → `THREE.ExtrudeGeometry`
  * (l_bracket/z_bracket/corner_angle/wall_shelf), `composed` — довільна
- * BoxGeometry-композиція (enclosed_shelf/perforated_panel).
+ * BoxGeometry-композиція (enclosed_shelf/perforated_panel), рендерена через
+ * `@flatcraft/ui`-side lookup (не тут — react-free, докладніше вище).
  */
 export type SceneBuilderKind<Params> =
   | {
       readonly kind: "extrude";
       readonly build: (params: Params, thicknessMm: number) => ShapeCommand[];
     }
-  | {
-      readonly kind: "composed";
-      readonly render: (params: Params, thicknessMm: number) => ReactNode;
-    };
+  | { readonly kind: "composed" };
 
 /** Декларативні слоти для editor-UX, які generic AutoForm не покриває сам (ADR-033 §1 Рішення 3). */
 export type ExtraControlSpec<Params> =
@@ -38,7 +40,7 @@ export type ExtraControlSpec<Params> =
       readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
       readonly label: string;
     }
-  | { readonly kind: "summary"; readonly render: (params: Params) => ReactNode }
+  | { readonly kind: "summary"; readonly render: (params: Params) => string }
   | { readonly kind: "hint"; readonly field: string; readonly text: string };
 
 /**

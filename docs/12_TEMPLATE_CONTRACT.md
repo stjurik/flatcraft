@@ -26,22 +26,44 @@
 > шаблону, що мігрує на реєстр (Етап 2), щоб студії не лишились
 > частково-локалізованими після Registry.
 
+> **STOP-знахідка (Run 7 Етап 2, PR `perforated_panel`, рішення yurii
+> 2026-07-21):** `SceneBuilderKind.composed` у первісному ескізі ніс
+> `render: (params, thicknessMm) => ReactNode` **всередині** `packages/templates`.
+> Реальна реалізація виявила конфлікт: `render`, що повертає JSX, потребує
+> `react` як **runtime**-залежність (не type-only `ReactNode`), а
+> `packages/templates` — react-free за контрактом (§1, §3.5, автотест
+> `apps/api/tests/registry-bundle.test.ts`). `perforated_panel`/`enclosed_shelf`
+> — обидва `kind: 'composed'` — зробили б react-free-інваріант хибним негайно
+> після реєстрації. **Рішення:** `composed`-рендер живе у `packages/ui`
+> (`packages/ui/src/3d-viewport/composed-scenes.ts`, slug-keyed lookup,
+> populated поступово, по одному запису на PR), НЕ у `packages/templates`.
+> `TemplateDefinition.ui.scene` для `composed` несе лише `{ kind: "composed" }`
+> (без `render`) — generic-viewport (`apps/web`) дивиться `kind`, і для
+> `composed` шукає компонент у `COMPOSED_SCENES[slug]` окремо. Той самий
+> конфлікт стосувався б `ExtraControlSpec.summary.render: (params) => ReactNode`
+> (grid-summary текст перфо-панелі) — рішення тут простіше: `render` повертає
+> **`string`**, не `ReactNode` (це справді лише інтерпольований текст, без
+> розмітки); generic-editor обгортає результат у стандартний `<p>`. Код нижче
+> оновлено під обидва рішення.
+
 ```ts
 // packages/templates/src/definition.ts (новий пакет, ADR-033 §1)
 import type { ProblemError } from "@flatcraft/cad-engine";
 import type { ShapeCommand } from "@flatcraft/cad-engine/geometry"; // ПЕРЕЇХАВ з @flatcraft/ui у PR 2 (ADR-033 §1: react-free реєстр)
-import type { ReactNode } from "react";
 import type { z } from "zod";
 
 export type TemplateCapability = "bends" | "profile" | "perforation" | "mount_holes";
 
 export type SceneBuilderKind<Params> =
   | { kind: "extrude"; build: (params: Params, thicknessMm: number) => ShapeCommand[] }
-  | { kind: "composed"; render: (params: Params, thicknessMm: number) => ReactNode };
+  // "composed" — БЕЗ render: реальний React-компонент живе у
+  // packages/ui/src/3d-viewport/composed-scenes.ts (react-free packages/templates).
+  | { kind: "composed" };
 
 export type ExtraControlSpec<Params> =
   | { kind: "segmented"; field: string; options: { value: string; label: string }[]; label: string }
-  | { kind: "summary"; render: (params: Params) => ReactNode }
+  // render повертає string (не ReactNode) — react-free, generic-editor обгортає у <p>.
+  | { kind: "summary"; render: (params: Params) => string }
   | { kind: "hint"; field: string; text: string };
 
 // ADR-019 + ADR-026 render-gate: RFC 9457 ProblemError[] — той самий формат,
