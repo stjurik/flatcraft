@@ -1,12 +1,12 @@
 /**
- * SSR-тести PerforatedPanelEditor (ADR-031 — уніфікований шаблон, форма отвору
- * як параметр `hole_shape`).
+ * SSR-тести RegistryTemplateEditor (Run 7 Master Registry Track, Етап 2) —
+ * заміняє видалений `perforated-panel-editor.test.tsx`: та сама поведінка
+ * (SegmentedControl активна форма, гліф Ø/□ у grid-summary, банер
+ * HOLES_OVERLAP при pitch ≤ розмір отвору), тепер керована `TemplateDefinition`.
  *
  * @flatcraft/ui аліасовано на стаб (AutoForm→null, SegmentedControl→кнопки).
- * Перевіряємо ВЛАСНУ логіку редактора: SegmentedControl активна форма (за
- * value.hole_shape), гліф Ø/□ у grid-summary, банер HOLES_OVERLAP при
- * pitch ≤ розмір отвору.
  */
+import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   type PerforatedPanelParameters,
@@ -14,8 +14,9 @@ import {
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { PerforatedPanelEditor } from "./perforated-panel-editor";
+import { RegistryTemplateEditor } from "./registry-template-editor";
 
+const def = TEMPLATE_REGISTRY.perforated_panel;
 const noop = () => {};
 
 function params(overrides: Partial<PerforatedPanelParameters>): PerforatedPanelParameters {
@@ -23,12 +24,13 @@ function params(overrides: Partial<PerforatedPanelParameters>): PerforatedPanelP
 }
 
 function render(p: PerforatedPanelParameters): string {
-  const html = renderToString(<PerforatedPanelEditor value={p} onChange={noop} />);
-  // SSR вставляє маркери <!-- --> між сусідніми JSX-виразами — прибираємо.
+  const html = renderToString(
+    <RegistryTemplateEditor def={def} value={p} onChange={noop} thicknessMm={2} />,
+  );
   return html.replace(/<!-- -->/g, "");
 }
 
-describe("PerforatedPanelEditor — форма отвору", () => {
+describe("RegistryTemplateEditor — perforated_panel форма отвору", () => {
   it("circle: гліф Ø, активна опція 'circle'", () => {
     const html = render(params({ hole_shape: "circle" }));
     expect(html).toContain("Ø");
@@ -50,7 +52,6 @@ describe("PerforatedPanelEditor — форма отвору", () => {
   });
 
   it("pitch ≤ розмір отвору → банер HOLES_OVERLAP (перетин)", () => {
-    // □20 при pitch_y=10 — отвори зливаються по Y (як каталожний дефект).
     const html = render(
       params({
         hole_shape: "square",
@@ -68,7 +69,6 @@ describe("PerforatedPanelEditor — форма отвору", () => {
 
   it("grid-summary рахує отвори (pitch 20 → 9×7=63)", () => {
     const html = render(params({ hole_shape: "circle", pitch_x_mm: 20, pitch_y_mm: 20 }));
-    // 200−30=170 → 9 cols; 150−30=120 → 7 rows.
     expect(html).toMatch(/Grid:\s*9×7\s*=\s*63 отворів/);
   });
 });

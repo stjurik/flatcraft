@@ -207,8 +207,12 @@ export function validateExportBends(body: ExportRequest, spec: BendMachineSpec):
   return result.errors.map((e) => mapError(e, input, spec));
 }
 
-/** ProfileIssue → RFC 9457 ProblemError (Hotfix 2.9.f, ADR-026). */
-function profileIssueToProblem(issue: ProfileIssue): ProblemError {
+/**
+ * ProfileIssue → RFC 9457 ProblemError (Hotfix 2.9.f, ADR-026). Export —
+ * реєстрові `ProfileValidator<Params>` (ADR-033 §1, `packages/templates`)
+ * перевикористовують цю саму мапу, замість дублювання (Run 7 Етап 2).
+ */
+export function profileIssueToProblem(issue: ProfileIssue): ProblemError {
   return {
     field: issue.which,
     code: issue.code,
@@ -260,8 +264,8 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
   }
 }
 
-/** PerforationIssue → RFC 9457 ProblemError. */
-function perforationIssueToProblem(issue: PerforationIssue): ProblemError {
+/** PerforationIssue → RFC 9457 ProblemError. Export — див. `profileIssueToProblem`. */
+export function perforationIssueToProblem(issue: PerforationIssue): ProblemError {
   return {
     field: issue.which,
     code: issue.code,

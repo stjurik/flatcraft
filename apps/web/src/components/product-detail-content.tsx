@@ -1,14 +1,10 @@
+import { TEMPLATE_REGISTRY, type TemplateSlug } from "@flatcraft/templates";
 import type { MaterialChoice, ProductDetail } from "@flatcraft/types";
-import {
-  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
-  EnclosedShelfParametersSchema,
-  PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  PerforatedPanelParametersSchema,
-} from "@flatcraft/types";
+import { ENCLOSED_SHELF_DEFAULT_PARAMETERS, EnclosedShelfParametersSchema } from "@flatcraft/types";
 import Link from "next/link";
 
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
-import { PerforatedPanelStudio } from "./perforated-panel-studio";
+import { RegistryTemplateStudio } from "./registry-template-studio";
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
@@ -78,12 +74,20 @@ function ProductStudioSwitch({
   // від випадкового override). Тут — стартова форма для першого render'у.
   const baseDefaults = product.baseTemplate.defaultParameters;
 
-  if (product.baseTemplateSlug === "perforated_panel") {
+  // Registry-driven шлях (Run 7 Master Registry Track, Етап 2). Product-мета
+  // (name/description/fixedParameters/userEditableFields) — з ЖИВИХ даних БД
+  // (product), не зі статичного `def.products` (той — лише декларативне
+  // дзеркало parameter-shape для conformance/документації, docs/12 §1).
+  const registryDef = TEMPLATE_REGISTRY[product.baseTemplateSlug as TemplateSlug] as
+    | (typeof TEMPLATE_REGISTRY)[TemplateSlug]
+    | undefined;
+  if (registryDef) {
     const merged = { ...baseDefaults, ...product.fixedParameters };
-    const parsed = PerforatedPanelParametersSchema.safeParse(merged);
+    const parsed = registryDef.schema.safeParse(merged);
     return (
-      <PerforatedPanelStudio
-        initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
+      <RegistryTemplateStudio
+        slug={product.baseTemplateSlug as TemplateSlug}
+        initialParameters={parsed.success ? parsed.data : registryDef.defaults}
         materials={materials}
         product={{
           name: product.name,

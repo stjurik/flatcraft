@@ -5,13 +5,16 @@
 parity-тест (`tests/templates/test_registry.py`) негайно падає (F6-клас бага:
 `enclosed_shelf`, що колись випав з `templates/__init__.py.__all__`).
 
-ПОКИ ПОРОЖНІЙ (Run 7 Master Registry Track, Етап 1): `docs/12_TEMPLATE_CONTRACT.md`
-§6 фіксує це PR як registry-скафолдинг без міграції жодного шаблону. Кожен
-наступний PR Етапу 2 додає РІВНО один `"<slug>": <Slug>Template` запис.
+Run 7 Master Registry Track, Етап 2: кожен PR додає РІВНО один
+`"<slug>": <Slug>Template` запис (порядок — docs/12 §6: perforated_panel →
+corner_angle → l_bracket → z_bracket → wall_shelf → enclosed_shelf).
 """
 
 from typing import Any
 
 from flatcraft_cad.templates.base import Template
+from flatcraft_cad.templates.perforated_panel import PerforatedPanelTemplate
 
-TEMPLATES: dict[str, type[Template[Any]]] = {}
+TEMPLATES: dict[str, type[Template[Any]]] = {
+    "perforated_panel": PerforatedPanelTemplate,
+}

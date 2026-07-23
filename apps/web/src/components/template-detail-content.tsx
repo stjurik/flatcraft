@@ -1,3 +1,4 @@
+import { TEMPLATE_REGISTRY, type TemplateSlug } from "@flatcraft/templates";
 import type { MaterialChoice, TemplateDetail } from "@flatcraft/types";
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
@@ -6,8 +7,6 @@ import {
   EnclosedShelfParametersSchema,
   LBracketParametersSchema,
   L_BRACKET_DEFAULT_PARAMETERS,
-  PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  PerforatedPanelParametersSchema,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
   ZBracketParametersSchema,
@@ -18,7 +17,7 @@ import Link from "next/link";
 import { CornerAngleStudio } from "./corner-angle-studio";
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
 import { LBracketStudio } from "./l-bracket-studio";
-import { PerforatedPanelStudio } from "./perforated-panel-studio";
+import { RegistryTemplateStudio } from "./registry-template-studio";
 import { WallShelfStudio } from "./wall-shelf-studio";
 import { ZBracketStudio } from "./z-bracket-studio";
 import { dictionaries } from "../i18n/dictionaries";
@@ -88,6 +87,21 @@ function TemplateStudioSwitch({
   readonly materials: ReadonlyArray<MaterialChoice>;
   readonly unsupported: (slug: string) => string;
 }) {
+  // Registry-driven шлях (Run 7 Master Registry Track, Етап 2) — ПЕРШИЙ,
+  // перед хардкод-гілками, що по одній зникають з кожною наступною міграцією.
+  const registryDef = TEMPLATE_REGISTRY[slug as TemplateSlug] as
+    | (typeof TEMPLATE_REGISTRY)[TemplateSlug]
+    | undefined;
+  if (registryDef) {
+    const parsed = registryDef.schema.safeParse(defaults);
+    return (
+      <RegistryTemplateStudio
+        slug={slug as TemplateSlug}
+        initialParameters={parsed.success ? parsed.data : registryDef.defaults}
+        materials={materials}
+      />
+    );
+  }
   if (slug === "l_bracket") {
     const parsed = LBracketParametersSchema.safeParse(defaults);
     return (
@@ -120,15 +134,6 @@ function TemplateStudioSwitch({
     return (
       <WallShelfStudio
         initialParameters={parsed.success ? parsed.data : WALL_SHELF_DEFAULT_PARAMETERS}
-        materials={materials}
-      />
-    );
-  }
-  if (slug === "perforated_panel") {
-    const parsed = PerforatedPanelParametersSchema.safeParse(defaults);
-    return (
-      <PerforatedPanelStudio
-        initialParameters={parsed.success ? parsed.data : PERFORATED_PANEL_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );
