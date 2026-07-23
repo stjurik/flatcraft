@@ -16,6 +16,8 @@ COPY packages/types/package.json ./packages/types/
 COPY packages/db/package.json ./packages/db/
 # cad-engine — нова залежність api (Hotfix 2.10.e: серверний validateBend gate).
 COPY packages/cad-engine/package.json ./packages/cad-engine/
+# templates — нова залежність api (Run 7 Registry Track, ADR-033).
+COPY packages/templates/package.json ./packages/templates/
 # --ignore-scripts: пропускаємо root prepare-hook (lefthook install потребує git);
 # ssh2 необов'язковий native binding теж пропускається — fallback на pure-JS crypto.
 RUN pnpm install --frozen-lockfile --ignore-scripts --filter @flatcraft/api...
@@ -29,6 +31,7 @@ COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/cad-engine/node_modules ./packages/cad-engine/node_modules
+COPY --from=deps /app/packages/templates/node_modules ./packages/templates/node_modules
 COPY . .
 # Build з усіма workspace-deps (`...` суфікс): types → db → api у правильному порядку.
 RUN pnpm --filter @flatcraft/api... build && \
