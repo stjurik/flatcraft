@@ -1,7 +1,14 @@
-import type { ProfileIssue } from "@flatcraft/cad-engine";
+/**
+ * Мінімальна структурна форма — `ProfileIssue` (cad-engine) і `ProblemError`
+ * (реєстрові `def.validators`, ADR-033) обидва задовольняють її без мапінгу.
+ */
+interface FallbackIssue {
+  readonly which: string;
+  readonly message: string;
+}
 
 interface InvalidParametersFallbackProps {
-  readonly issues: readonly ProfileIssue[];
+  readonly issues: readonly FallbackIssue[];
 }
 
 /**

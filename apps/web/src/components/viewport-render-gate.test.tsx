@@ -10,9 +10,11 @@
  * passthrough, Scene — плейсхолдери. validateProfile береться з РЕАЛЬНОГО
  * @flatcraft/cad-engine.
  */
+import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
   CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
@@ -21,6 +23,7 @@ import { describe, expect, it } from "vitest";
 
 import { CornerAngleViewport } from "./corner-angle-viewport";
 import { LBracketViewport } from "./l-bracket-viewport";
+import { RegistryTemplateViewport } from "./registry-template-viewport";
 import { WallShelfViewport } from "./wall-shelf-viewport";
 import { ZBracketViewport } from "./z-bracket-viewport";
 
@@ -103,5 +106,34 @@ describe("render-gate: wall_shelf", () => {
       <WallShelfViewport parameters={WALL_SHELF_DEFAULT_PARAMETERS} thicknessMm={T} />,
     );
     expect(html).toContain(LOADING);
+  });
+});
+
+describe("render-gate: perforated_panel (RegistryTemplateViewport, Run 7 Етап 2)", () => {
+  const def = TEMPLATE_REGISTRY.perforated_panel;
+
+  it("замале ребро (rib_height ≤ t+r) → fallback — НОВИЙ render-gate (раніше не мав)", () => {
+    // default bend_radius_mm=2.5; t=10 → min=t+r=12.5; rib_height=10 <= 12.5 → invalid.
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{ ...PERFORATED_PANEL_DEFAULT_PARAMETERS, rib_height_mm: 10 }}
+        thicknessMm={10}
+      />,
+    );
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
+  });
+
+  it("валідні → сцена (composed, dynamic loading)", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={PERFORATED_PANEL_DEFAULT_PARAMETERS}
+        thicknessMm={T}
+      />,
+    );
+    expect(html).toContain(LOADING);
+    expect(html).not.toContain(FALLBACK);
   });
 });

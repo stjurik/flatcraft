@@ -32,15 +32,25 @@ export type SceneBuilderKind<Params> =
     }
   | { readonly kind: "composed" };
 
-/** Декларативні слоти для editor-UX, які generic AutoForm не покриває сам (ADR-033 §1 Рішення 3). */
+/**
+ * Декларативні слоти для editor-UX, які generic AutoForm не покриває сам
+ * (ADR-033 §1 Рішення 3). `testId` — обов'язковий (не вгадується з `field`/
+ * `slug`, щоб не ламати наявні e2e-testid при міграції — напр. перфо-панелі
+ * grid-summary testid `grid-summary`, не `perforated-panel-summary`).
+ */
 export type ExtraControlSpec<Params> =
   | {
       readonly kind: "segmented";
       readonly field: string;
       readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
       readonly label: string;
+      readonly testId: string;
     }
-  | { readonly kind: "summary"; readonly render: (params: Params) => string }
+  | {
+      readonly kind: "summary";
+      readonly render: (params: Params) => string;
+      readonly testId: string;
+    }
   | { readonly kind: "hint"; readonly field: string; readonly text: string };
 
 /**

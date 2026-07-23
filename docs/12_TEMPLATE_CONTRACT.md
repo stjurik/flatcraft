@@ -61,9 +61,17 @@ export type SceneBuilderKind<Params> =
   | { kind: "composed" };
 
 export type ExtraControlSpec<Params> =
-  | { kind: "segmented"; field: string; options: { value: string; label: string }[]; label: string }
+  // testId обов'язковий — не вгадується, щоб не ламати наявні e2e-testid
+  // (напр. grid-summary перфо-панелі, не perforated-panel-summary).
+  | {
+      kind: "segmented";
+      field: string;
+      options: { value: string; label: string }[];
+      label: string;
+      testId: string;
+    }
   // render повертає string (не ReactNode) — react-free, generic-editor обгортає у <p>.
-  | { kind: "summary"; render: (params: Params) => string }
+  | { kind: "summary"; render: (params: Params) => string; testId: string }
   | { kind: "hint"; field: string; text: string };
 
 // ADR-019 + ADR-026 render-gate: RFC 9457 ProblemError[] — той самий формат,

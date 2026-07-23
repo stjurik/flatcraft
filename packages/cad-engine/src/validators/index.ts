@@ -5,8 +5,10 @@ export { combine, fail, ok, type ValidationError, type ValidationResult } from "
 export {
   bendInputFor,
   buildProblem,
+  perforationIssueToProblem,
   ProblemDetailsSchema,
   ProblemErrorSchema,
+  profileIssueToProblem,
   validateExportBends,
   validateExportPerforation,
   validateExportProfile,
