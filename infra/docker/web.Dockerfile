@@ -14,6 +14,8 @@ COPY apps/web/package.json ./apps/web/
 COPY packages/types/package.json ./packages/types/
 COPY packages/ui/package.json ./packages/ui/
 COPY packages/cad-engine/package.json ./packages/cad-engine/
+# templates — нова залежність web (Run 7 Registry Track, ADR-033).
+COPY packages/templates/package.json ./packages/templates/
 # --ignore-scripts: пропускаємо root prepare-hook (lefthook install потребує git).
 RUN pnpm install --frozen-lockfile --ignore-scripts --filter @flatcraft/web...
 
@@ -26,6 +28,7 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY --from=deps /app/packages/cad-engine/node_modules ./packages/cad-engine/node_modules
+COPY --from=deps /app/packages/templates/node_modules ./packages/templates/node_modules
 COPY . .
 # NEXT_PUBLIC_* інлайняться у клієнтський bundle на build-time (не runtime).
 # Без цього браузер бере fallback localhost:4000 (apps/web/src/lib/api.ts).
