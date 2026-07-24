@@ -11,6 +11,7 @@
  */
 import type { ComponentType } from "react";
 
+import { CornerAngleScene } from "./corner-angle-scene.js";
 import { PerforatedPanelScene } from "./perforated-panel-scene.js";
 
 export interface ComposedSceneProps {
@@ -26,4 +27,8 @@ export const COMPOSED_SCENES: Partial<Record<string, ComposedSceneComponent>> = 
   // самий тип, під який `PerforatedPanelScene` уже написана; generic-viewport
   // передає параметри лише того slug'а, під який їх узяв з реєстру.
   perforated_panel: PerforatedPanelScene as ComposedSceneComponent,
+  // corner_angle — L-shape extrude + auto-grid hole cylinders overlay
+  // (наближене прев'ю); "composed", не "extrude" — docs/12 §1, коментар у
+  // `packages/templates/src/corner-angle/index.ts`.
+  corner_angle: CornerAngleScene as ComposedSceneComponent,
 };

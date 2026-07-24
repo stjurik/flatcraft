@@ -8,6 +8,7 @@
  * run export-registry` (регенерує `workers/cad/tests/fixtures/ts_registry_slugs.json`
  * для slug-паритету TS↔Python).
  */
+import { cornerAngleDefinition } from "./corner-angle/index.js";
 import { perforatedPanelDefinition } from "./perforated-panel/index.js";
 
 // Без `satisfies Record<string, TemplateDefinition<X>>` (Етап 1 мало це для
@@ -19,6 +20,7 @@ import { perforatedPanelDefinition } from "./perforated-panel/index.js";
 // TemplateDefinition<PerforatedPanelParameters>`, перевірено у своєму файлі).
 export const TEMPLATE_REGISTRY = {
   perforated_panel: perforatedPanelDefinition,
+  corner_angle: cornerAngleDefinition,
 } as const;
 
 export type TemplateSlug = keyof typeof TEMPLATE_REGISTRY;
