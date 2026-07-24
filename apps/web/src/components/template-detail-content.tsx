@@ -1,8 +1,6 @@
 import { TEMPLATE_REGISTRY, type TemplateSlug } from "@flatcraft/templates";
 import type { MaterialChoice, TemplateDetail } from "@flatcraft/types";
 import {
-  CORNER_ANGLE_DEFAULT_PARAMETERS,
-  CornerAngleParametersSchema,
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   EnclosedShelfParametersSchema,
   LBracketParametersSchema,
@@ -14,7 +12,6 @@ import {
 } from "@flatcraft/types";
 import Link from "next/link";
 
-import { CornerAngleStudio } from "./corner-angle-studio";
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
 import { LBracketStudio } from "./l-bracket-studio";
 import { RegistryTemplateStudio } from "./registry-template-studio";
@@ -116,15 +113,6 @@ function TemplateStudioSwitch({
     return (
       <ZBracketStudio
         initialParameters={parsed.success ? parsed.data : Z_BRACKET_DEFAULT_PARAMETERS}
-        materials={materials}
-      />
-    );
-  }
-  if (slug === "corner_angle") {
-    const parsed = CornerAngleParametersSchema.safeParse(defaults);
-    return (
-      <CornerAngleStudio
-        initialParameters={parsed.success ? parsed.data : CORNER_ANGLE_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );

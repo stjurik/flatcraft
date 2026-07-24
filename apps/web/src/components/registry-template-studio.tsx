@@ -60,6 +60,7 @@ export function RegistryTemplateStudio<Params extends Record<string, unknown>>({
           value={props.value}
           onChange={props.onChange}
           thicknessMm={props.thicknessMm}
+          materialCode={props.materialCode}
           {...(props.visibleFields ? { visibleFields: props.visibleFields } : {})}
         />
       )}

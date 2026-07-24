@@ -5,6 +5,8 @@ import { AutoForm, SegmentedControl, zodIssuesToFieldErrors } from "@flatcraft/u
 import { useMemo } from "react";
 import type { z } from "zod";
 
+import { bendMatrixIssues } from "../lib/bend-matrix";
+
 const IS_DEV = process.env.NEXT_PUBLIC_ENV === "dev";
 
 interface RegistryTemplateEditorProps<Params extends Record<string, unknown>> {
@@ -12,6 +14,15 @@ interface RegistryTemplateEditorProps<Params extends Record<string, unknown>> {
   readonly value: Params;
   readonly onChange: (next: Params) => void;
   readonly thicknessMm: number;
+  /**
+   * Потрібен лише для `def.capabilities.includes("bends")` (матричний банер,
+   * паритет з наявними `*-editor.tsx` типу `corner-angle-editor.tsx` —
+   * Hotfix 2.9.c). Undefined (прямі unit-тести без `TemplateStudio`) →
+   * матрична валідація тихо пропускається — той самий наслідок, що й раніше
+   * для perforated_panel (не входить у `bend-matrix-validation.spec.ts`
+   * `TEMPLATES_WITH_BENDS`, задокументовано незмінно).
+   */
+  readonly materialCode?: string;
   /** Product-mode allowlist (ADR-027 Рішення 4) — undefined у part-mode. */
   readonly visibleFields?: readonly string[];
 }
@@ -34,6 +45,7 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
   value,
   onChange,
   thicknessMm,
+  materialCode,
   visibleFields,
 }: RegistryTemplateEditorProps<Params>) {
   const testId = `${toKebab(def.slug)}-editor`;
@@ -56,9 +68,27 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
     () => def.validators.flatMap((validator) => validator(value, thicknessMm)),
     [def.validators, value, thicknessMm],
   );
+
+  const matrixIssues = useMemo(() => {
+    if (!materialCode || !def.capabilities.includes("bends")) return [];
+    return bendMatrixIssues({
+      template_slug: def.slug,
+      parameters: value,
+      material_code: materialCode,
+      thickness_mm: thicknessMm,
+      // Params — generic; ExportRequest очікує union конкретних per-slug
+      // типів. Каст безпечний — `def.slug` і `value` йдуть з одного
+      // TemplateDefinition-запису (той самий паттерн, що й TemplateStudio).
+    } as unknown as Parameters<typeof bendMatrixIssues>[0]);
+  }, [materialCode, def.capabilities, def.slug, value, thicknessMm]);
+
   const allErrors = useMemo(
-    () => [...defIssues.map((issue) => issue.message ?? issue.code), ...zodErrorStrings],
-    [defIssues, zodErrorStrings],
+    () => [
+      ...matrixIssues.map((issue) => issue.message ?? issue.code),
+      ...defIssues.map((issue) => issue.message ?? issue.code),
+      ...zodErrorStrings,
+    ],
+    [matrixIssues, defIssues, zodErrorStrings],
   );
 
   const extraControls = def.ui.extraControls ?? [];

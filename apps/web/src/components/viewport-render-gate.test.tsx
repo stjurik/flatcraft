@@ -12,7 +12,6 @@
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
-  CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
@@ -21,7 +20,6 @@ import {
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CornerAngleViewport } from "./corner-angle-viewport";
 import { LBracketViewport } from "./l-bracket-viewport";
 import { RegistryTemplateViewport } from "./registry-template-viewport";
 import { WallShelfViewport } from "./wall-shelf-viewport";
@@ -30,27 +28,6 @@ import { ZBracketViewport } from "./z-bracket-viewport";
 const T = 2; // t+r = 2 + 2.5 = 4.5 для default bend_radius_mm.
 const FALLBACK = "Виправте параметри у формі";
 const LOADING = "Завантаження 3D";
-
-describe("render-gate: corner_angle", () => {
-  it("невалідний legA → fallback, без сцени", () => {
-    const html = renderToString(
-      <CornerAngleViewport
-        parameters={{ ...CORNER_ANGLE_DEFAULT_PARAMETERS, legA_mm: 1 }}
-        thicknessMm={T}
-      />,
-    );
-    expect(html).toContain(FALLBACK);
-    expect(html).not.toContain(LOADING);
-  });
-
-  it("валідні параметри → сцена (loading), без fallback", () => {
-    const html = renderToString(
-      <CornerAngleViewport parameters={CORNER_ANGLE_DEFAULT_PARAMETERS} thicknessMm={T} />,
-    );
-    expect(html).toContain(LOADING);
-    expect(html).not.toContain(FALLBACK);
-  });
-});
 
 describe("render-gate: l_bracket", () => {
   it("невалідний legB → fallback", () => {
@@ -132,6 +109,30 @@ describe("render-gate: perforated_panel (RegistryTemplateViewport, Run 7 Ета�
         parameters={PERFORATED_PANEL_DEFAULT_PARAMETERS}
         thicknessMm={T}
       />,
+    );
+    expect(html).toContain(LOADING);
+    expect(html).not.toContain(FALLBACK);
+  });
+});
+
+describe("render-gate: corner_angle (RegistryTemplateViewport, Run 7 Етап 2)", () => {
+  const def = TEMPLATE_REGISTRY.corner_angle;
+
+  it("невалідний legA → fallback, без сцени", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{ ...def.defaults, legA_mm: 1 }}
+        thicknessMm={T}
+      />,
+    );
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
+  });
+
+  it("валідні параметри → сцена (composed, dynamic loading), без fallback", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport def={def} parameters={def.defaults} thicknessMm={T} />,
     );
     expect(html).toContain(LOADING);
     expect(html).not.toContain(FALLBACK);

@@ -6,8 +6,8 @@
  * комбінації: default-параметри мають bend_radius_mm=2.5, що недопустимо для
  * t=5 (дозволено [4, 5]) → червоний банер; t=2 → зелений.
  */
+import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
-  CORNER_ANGLE_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
@@ -18,8 +18,8 @@ import { describe, expect, it } from "vitest";
 // @flatcraft/ui аліасовано на стаб у vitest.config.ts (R3F 3d-viewport + dist —
 // нестабільно у node). Тестуємо ВЛАСНУ логіку редактора (матричний банер); форму
 // рендерить стаб-AutoForm (null).
-import { CornerAngleEditor } from "./corner-angle-editor";
 import { LBracketEditor } from "./l-bracket-editor";
+import { RegistryTemplateEditor } from "./registry-template-editor";
 import { WallShelfEditor } from "./wall-shelf-editor";
 import { ZBracketEditor } from "./z-bracket-editor";
 
@@ -53,11 +53,12 @@ const cases = [
       ),
   },
   {
-    name: "CornerAngleEditor",
+    name: "RegistryTemplateEditor (corner_angle)",
     render: (t: number) =>
       renderToString(
-        <CornerAngleEditor
-          value={CORNER_ANGLE_DEFAULT_PARAMETERS}
+        <RegistryTemplateEditor
+          def={TEMPLATE_REGISTRY.corner_angle}
+          value={TEMPLATE_REGISTRY.corner_angle.defaults}
           onChange={noop}
           materialCode="cold_rolled_steel"
           thicknessMm={t}
