@@ -14,9 +14,11 @@ from typing import Any
 
 from flatcraft_cad.templates.base import Template
 from flatcraft_cad.templates.corner_angle import CornerAngleTemplate
+from flatcraft_cad.templates.l_bracket import LBracketTemplate
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelTemplate
 
 TEMPLATES: dict[str, type[Template[Any]]] = {
     "perforated_panel": PerforatedPanelTemplate,
     "corner_angle": CornerAngleTemplate,
+    "l_bracket": LBracketTemplate,
 }
