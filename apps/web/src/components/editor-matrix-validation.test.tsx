@@ -7,18 +7,13 @@
  * t=5 (дозволено [4, 5]) → червоний банер; t=2 → зелений.
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
-import {
-  L_BRACKET_DEFAULT_PARAMETERS,
-  WALL_SHELF_DEFAULT_PARAMETERS,
-  Z_BRACKET_DEFAULT_PARAMETERS,
-} from "@flatcraft/types";
+import { WALL_SHELF_DEFAULT_PARAMETERS, Z_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 // @flatcraft/ui аліасовано на стаб у vitest.config.ts (R3F 3d-viewport + dist —
 // нестабільно у node). Тестуємо ВЛАСНУ логіку редактора (матричний банер); форму
 // рендерить стаб-AutoForm (null).
-import { LBracketEditor } from "./l-bracket-editor";
 import { RegistryTemplateEditor } from "./registry-template-editor";
 import { WallShelfEditor } from "./wall-shelf-editor";
 import { ZBracketEditor } from "./z-bracket-editor";
@@ -29,11 +24,12 @@ const INVALID_T = 5.0; // R=2.5 недопустимо (дозволено 4, 5)
 
 const cases = [
   {
-    name: "LBracketEditor",
+    name: "RegistryTemplateEditor (l_bracket)",
     render: (t: number) =>
       renderToString(
-        <LBracketEditor
-          value={L_BRACKET_DEFAULT_PARAMETERS}
+        <RegistryTemplateEditor
+          def={TEMPLATE_REGISTRY.l_bracket}
+          value={TEMPLATE_REGISTRY.l_bracket.defaults}
           onChange={noop}
           materialCode="cold_rolled_steel"
           thicknessMm={t}
