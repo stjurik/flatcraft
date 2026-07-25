@@ -9,6 +9,7 @@ export { CornerAngleScene } from "./corner-angle-scene.js";
 export { WallShelfScene } from "./wall-shelf-scene.js";
 export { PerforatedPanelScene } from "./perforated-panel-scene.js";
 export { EnclosedShelfScene } from "./enclosed-shelf-scene.js";
+export { ExtrudeScene, type ExtrudeSceneProps } from "./extrude-scene.js";
 export {
   buildLBracketShapeCommands,
   buildWallShelfShapeCommands,

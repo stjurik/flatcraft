@@ -12,7 +12,6 @@
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
-  L_BRACKET_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
@@ -20,7 +19,6 @@ import {
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { LBracketViewport } from "./l-bracket-viewport";
 import { RegistryTemplateViewport } from "./registry-template-viewport";
 import { WallShelfViewport } from "./wall-shelf-viewport";
 import { ZBracketViewport } from "./z-bracket-viewport";
@@ -29,22 +27,27 @@ const T = 2; // t+r = 2 + 2.5 = 4.5 для default bend_radius_mm.
 const FALLBACK = "Виправте параметри у формі";
 const LOADING = "Завантаження 3D";
 
-describe("render-gate: l_bracket", () => {
-  it("невалідний legB → fallback", () => {
+describe("render-gate: l_bracket (RegistryTemplateViewport, Run 7 Етап 2)", () => {
+  const def = TEMPLATE_REGISTRY.l_bracket;
+
+  it("невалідний legB → fallback, без сцени", () => {
     const html = renderToString(
-      <LBracketViewport
-        parameters={{ ...L_BRACKET_DEFAULT_PARAMETERS, legB_mm: 1 }}
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{ ...def.defaults, legB_mm: 1 }}
         thicknessMm={T}
       />,
     );
     expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
   });
 
-  it("валідні → сцена", () => {
+  it("валідні параметри → сцена (extrude, dynamic loading), без fallback", () => {
     const html = renderToString(
-      <LBracketViewport parameters={L_BRACKET_DEFAULT_PARAMETERS} thicknessMm={T} />,
+      <RegistryTemplateViewport def={def} parameters={def.defaults} thicknessMm={T} />,
     );
     expect(html).toContain(LOADING);
+    expect(html).not.toContain(FALLBACK);
   });
 });
 

@@ -9,6 +9,7 @@
  * для slug-паритету TS↔Python).
  */
 import { cornerAngleDefinition } from "./corner-angle/index.js";
+import { lBracketDefinition } from "./l-bracket/index.js";
 import { perforatedPanelDefinition } from "./perforated-panel/index.js";
 
 // Без `satisfies Record<string, TemplateDefinition<X>>` (Етап 1 мало це для
@@ -21,6 +22,7 @@ import { perforatedPanelDefinition } from "./perforated-panel/index.js";
 export const TEMPLATE_REGISTRY = {
   perforated_panel: perforatedPanelDefinition,
   corner_angle: cornerAngleDefinition,
+  l_bracket: lBracketDefinition,
 } as const;
 
 export type TemplateSlug = keyof typeof TEMPLATE_REGISTRY;

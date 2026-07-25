@@ -3,8 +3,6 @@ import type { MaterialChoice, TemplateDetail } from "@flatcraft/types";
 import {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   EnclosedShelfParametersSchema,
-  LBracketParametersSchema,
-  L_BRACKET_DEFAULT_PARAMETERS,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
   ZBracketParametersSchema,
@@ -13,7 +11,6 @@ import {
 import Link from "next/link";
 
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
-import { LBracketStudio } from "./l-bracket-studio";
 import { RegistryTemplateStudio } from "./registry-template-studio";
 import { WallShelfStudio } from "./wall-shelf-studio";
 import { ZBracketStudio } from "./z-bracket-studio";
@@ -95,15 +92,6 @@ function TemplateStudioSwitch({
       <RegistryTemplateStudio
         slug={slug as TemplateSlug}
         initialParameters={parsed.success ? parsed.data : registryDef.defaults}
-        materials={materials}
-      />
-    );
-  }
-  if (slug === "l_bracket") {
-    const parsed = LBracketParametersSchema.safeParse(defaults);
-    return (
-      <LBracketStudio
-        initialParameters={parsed.success ? parsed.data : L_BRACKET_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );
