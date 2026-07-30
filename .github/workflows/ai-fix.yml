@@ -48,6 +48,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # ТИМЧАСОВО на час acceptance — вимкнути після: логи Actions
+          # публічного репо видимі всім, а show_full_output друкує ПОВНИЙ
+          # JSON-вивід Claude Code (може містити секрети/токени з tool-виводу).
+          show_full_output: true
           claude_args: |
             --model sonnet
             --max-turns 150
