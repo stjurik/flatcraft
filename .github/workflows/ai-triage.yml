@@ -33,7 +33,7 @@ jobs:
         # Pinned SHA (не version-тег @v1, як решта workflow у репо) — ADR-035
         # §5.3: єдина дія, що пропускає untrusted issue-текст крізь агента,
         # елевований supply-chain-поріг виправданий.
-        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1 (v1.0.178, 2025-08-26)
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183 (2026-07-25)
         env:
           GH_TOKEN: ${{ github.token }}
         with:
