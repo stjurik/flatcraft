@@ -46,6 +46,18 @@ test.describe("/about (Phase X.1 D)", () => {
     await expect(discord).toHaveAttribute("target", "_blank");
   });
 
+  test("Footer SiteLinks — без пункту Telegram (uk та /en)", async ({ page }) => {
+    await page.goto("/");
+    await expect(
+      page.getByTestId("site-links").getByRole("link", { name: "Telegram" }),
+    ).toHaveCount(0);
+
+    await page.goto("/en");
+    await expect(
+      page.getByTestId("site-links").getByRole("link", { name: "Telegram" }),
+    ).toHaveCount(0);
+  });
+
   test("/about: Discord-спільнота — зовнішнє посилання", async ({ page }) => {
     await page.goto("/about");
     const discord = page.getByTestId("about-feedback-discord");

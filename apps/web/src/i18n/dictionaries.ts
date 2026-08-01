@@ -31,7 +31,6 @@ export interface Dictionary {
       readonly communityTitle: string;
       readonly github: string;
       readonly discord: string;
-      readonly telegram: string;
       readonly legalTitle: string;
       readonly privacy: string;
       readonly terms: string;
@@ -172,7 +171,6 @@ const uk: Dictionary = {
       communityTitle: "Спільнота",
       github: "GitHub ↗",
       discord: "Discord ↗",
-      telegram: "Telegram",
       legalTitle: "Юридичне",
       privacy: "Privacy",
       terms: "Terms",
@@ -349,7 +347,6 @@ const en: Dictionary = {
       communityTitle: "Community",
       github: "GitHub ↗",
       discord: "Discord ↗",
-      telegram: "Telegram",
       legalTitle: "Legal",
       privacy: "Privacy",
       terms: "Terms",
