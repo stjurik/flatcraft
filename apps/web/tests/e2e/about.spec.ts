@@ -58,6 +58,48 @@ test.describe("/about (Phase X.1 D)", () => {
     ).toHaveCount(0);
   });
 
+  // Кейси нижче запропонував agy/Gemini у ролі Тест-інженера під час рев'ю
+  // PR #97 (ADR-035 §4), верифіковані Claude проти реального коду. Мета —
+  // сусіди видаленого пункту: видалення елемента з масиву `columns` не мало
+  // зачепити ні решту колонки «Спільнота», ні інші колонки, ні маршрут /soon,
+  // який після видалення Telegram тримає лише пункт «Розблокувати».
+  test("Footer «Спільнота» — GitHub і Discord цілі після видалення Telegram", async ({ page }) => {
+    await page.goto("/");
+    const links = page.getByTestId("site-links");
+    const github = links.getByRole("link", { name: /GitHub/ });
+    await expect(github).toHaveAttribute("href", "https://github.com/stjurik/flatcraft");
+    await expect(github).toHaveAttribute("target", "_blank");
+
+    await page.goto("/en");
+    const discordEn = links.getByRole("link", { name: /Discord/ });
+    await expect(discordEn).toHaveAttribute("href", /^https:\/\/discord\.gg\//);
+    await expect(discordEn).toHaveAttribute("target", "_blank");
+  });
+
+  test("Footer — усі три колонки рендеряться в обох локалях", async ({ page }) => {
+    await page.goto("/");
+    const uk = page.getByTestId("site-links");
+    await expect(uk).toContainText("Продукт");
+    await expect(uk).toContainText("Спільнота");
+    await expect(uk).toContainText("Юридичне");
+
+    await page.goto("/en");
+    const en = page.getByTestId("site-links");
+    await expect(en).toContainText("Product");
+    await expect(en).toContainText("Community");
+    await expect(en).toContainText("Legal");
+  });
+
+  test("Footer — /soon лишається досяжним через «Розблокувати» (маршрут не осиротів)", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const unlock = page.getByTestId("site-links").getByRole("link", { name: "Розблокувати" });
+    await expect(unlock).toHaveAttribute("href", "/soon");
+    await unlock.click();
+    await expect(page).toHaveURL(/\/soon$/);
+  });
+
   test("/about: Discord-спільнота — зовнішнє посилання", async ({ page }) => {
     await page.goto("/about");
     const discord = page.getByTestId("about-feedback-discord");
