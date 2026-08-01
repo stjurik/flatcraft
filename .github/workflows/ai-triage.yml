@@ -38,10 +38,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # ТИМЧАСОВО на час acceptance — вимкнути після: логи Actions
-          # публічного репо видимі всім, а show_full_output друкує ПОВНИЙ
-          # JSON-вивід Claude Code (може містити секрети/токени з tool-виводу).
-          show_full_output: true
           claude_args: |
             --model sonnet
             --max-turns 40
@@ -97,3 +93,26 @@ jobs:
 
             Обери РІВНО одну категорію. Не вигадуй root-cause, якого не бачиш
             у коді — якщо непевен, це NEED-INFO, не LOCAL-FIX.
+
+      # Backstop до ADR-035 §2: прогін вважається успішним, ЛИШЕ якщо issue
+      # реально перейшов у термінальний стан. Кейс, що породив цей крок
+      # (issue #84, прогін 30616535686, 2026-07-31): агент відпрацював, зняв
+      # `ai-fix`, але `ai-plan-ready` поставити не зміг — лейбла не існувало
+      # в репо; job лишився зеленим, а issue завис без стану.
+      - name: Verify issue reached a terminal state (ADR-035 §2)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels=$(gh issue view ${{ github.event.issue.number }} \
+            --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]|join(",")')
+          echo "labels: $labels"
+          n=0
+          for l in ai-plan-ready ai-architectural ai-need-info; do
+            case ",$labels," in *",$l,"*) n=$((n+1));; esac
+          done
+          if [ "$n" -ne 1 ]; then
+            echo "::error::Тріаж завершився, але issue не має РІВНО одного" \
+                 "термінального лейбла (знайдено: $n). Стан: $labels"
+            exit 1
+          fi
