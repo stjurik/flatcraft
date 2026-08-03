@@ -28,8 +28,8 @@ interface SiteLinksProps {
  * футера. Tap-target ≥44px — через мінімальний padding по вертикалі.
  *
  * `locale` перемикає лейбли/маршрути на EN-дзеркала (ADR-037 §2); лінки на
- * "GitHub"/"Discord"/"Telegram"/"Privacy"/"Terms"/"Cookies" лишаються тими
- * самими англомовними словами в обох локалях (уже нейтральні на uk-сайті).
+ * "GitHub"/"Discord"/"Privacy"/"Terms"/"Cookies" лишаються тими самими
+ * англомовними словами в обох локалях (уже нейтральні на uk-сайті).
  */
 export function SiteLinks({ locale }: SiteLinksProps) {
   const dict = dictionaries[locale];
@@ -50,7 +50,6 @@ export function SiteLinks({ locale }: SiteLinksProps) {
       items: [
         { label: sl.github, href: GITHUB_URL, external: true },
         { label: sl.discord, href: DISCORD_URL, external: true },
-        { label: sl.telegram, href: `${prefix}/soon` },
       ],
     },
     {
