@@ -20,19 +20,44 @@ issue і виправлення без локальної сесії; дрібн
 
 **Черга:**
 
-1. **Запуск `docs/promts/master-ai-bugfix-flow.md`** (Архітектор; перший у черзі всього
-   Roadmap). Run створить: ADR-035, workflows `ai-triage`/`ai-fix`/`ai-review`,
-   issue-форми, docs/17 (інструкція флоу — файлу ще нема). Мануальні кроки
-   (OAuth-токен, лейбли) — у «Чергу yurii».
-2. **Активація потоку «digest/Sentry → issue → ai-fix»**: пункти недільного digest'а і
-   Sentry-issues заводяться через цей конвеєр (правило «issue або accepted noise», ADR-036 §2).
-   Acceptance — тестовий прогін повного циклу на реальному дрібному issue.
-3. **TD-01** (бампнути версії GitHub Actions — дедлайн-warning; див. §Tech-debt) —
-   кандидат на перший тестовий ai-fix issue.
-4. **TD-02** (guard проти stale `*.js` поряд з `.ts` у `packages/*/src/`; див. §Tech-debt).
+1. ✅ **Конвеєр побудовано і пройшов acceptance** (закрито 2026-08-03).
+   `docs/promts/master-ai-bugfix-flow.md` дав ADR-035, workflows
+   `ai-triage`/`ai-fix`, issue-форми, `docs/17`. Наскрізний прохід — issue #84
+   → тріаж у CI → `ai-approved` → Будівельник у CI → незалежне рев'ю `agy` →
+   merge PR **#97** (`d4c81be`) → staging. Ціна: **5 падінь тріажу і 4
+   спростовані гіпотези** (справжня причина — недійсне значення OAuth-секрету).
+   Деталі — `docs/13_PROGRESS_LOG.md` «Master Run 10+11», ADR-035 §Фактичний
+   результат. Супутні PR: #86, #94, #95 (terminal-state guard,
+   `show_full_output` прибрано).
+2. **Постачання сигналу «digest/Sentry → issue»** — лишається ручним ритуалом
+   (рішення 2026-08-03, Опитування Master Run 12): недільний digest ≤15 хв,
+   кожен пункт → issue АБО «accepted noise» у треді; Sentry — очима. Причина:
+   ~10 користувачів/день, обсяг сигналу малий, автоматика постачання коштує
+   більше, ніж економить, і додає клас шуму до того, як є що фільтрувати.
+   **Тригер перегляду:** digest стабільно дає >5 пунктів АБО аудиторія росте
+   кратно → повернутись до варіанта «Sentry webhook → issue-чернетка».
+3. ✅ **TD-01 — закрито** (перевірено 2026-08-03): усі дії вже на актуальних
+   мажорах — `actions/checkout@v5` ×15, `actions/setup-node@v5` ×7,
+   `pnpm/action-setup@v5` ×7, `actions/setup-python@v6` ×2,
+   `upload-artifact@v6`, `docker/*` v4-v7, `astral-sh/setup-uv@v7`. Жодної дії
+   на Node 20 не лишилось; дедлайни 16.06.2026 і 16.09.2026 не загрожують.
+   Бампи розійшлись по різних PR, пункт лишався невикресленим.
+4. **`NODE_VERSION` 20.11.0 → 22 або 24** (новий пункт, виділено з TD-01).
+   Це версія Node для **збірки проєкту** (`ci.yml`, `env.NODE_VERSION`), не для
+   runtime дій — TD-01 її не покривав. Node 20 досяг EOL **30.04.2026**, тобто
+   рантайм збірки лишився без security-патчів. Цілі: **22** (EOL 04.2027,
+   мінімальний ризик) або **24** (EOL 04.2028, довший горизонт). Робити разом
+   із наступним оновленням залежностей, не окремо.
+5. **TD-02** (guard проти stale `*.js` поряд з `.ts` у `packages/*/src/`;
+   див. §Tech-debt). Станом на 2026-08-03 `.js` у `src/` немає ні в git, ні
+   локально — але й guard'а немає, тобто пастка відтворювана.
+   **Примітка до майбутнього issue:** переважний scope — скрипт
+   `tools/scripts/*.sh` + тест рівня shell (за зразком
+   `check-forbidden-paths.sh` + `.test.sh`), а НЕ vitest: Будівельник у CI не
+   має `node_modules` і прогнати vitest не зможе (`docs/17` §9).
 
-**Гейт yurii:** merge run-PR + secret/лейбли (черга yurii); далі — merge кожного fix-PR
-після ai-review-вердикту.
+**Гейт yurii:** лейбл `ai-approved` на тріажені плани; merge кожного fix-PR після
+ai-review-вердикту (`docs/promts/ai-review-local.md`).
 
 ### T2. Registry — «специфікація → нова Деталь» (ADR-033)
 
@@ -143,7 +168,7 @@ _(Джерело обох пунктів — аналіз 2026-07-14, сесія
 
 > Не блокує роботу, закривається через T1-конвеєр (кандидати на перші ai-fix issues).
 
-- [ ] **TD-01.** Бампнути версії GitHub Actions (`actions/checkout@v4`, `docker/*`, `actions/setup-python@v5` тощо). **Чому:** CI кидає попередження — Node.js 20 actions deprecated, з 16 червня 2026 примусово Node.js 24, з 16 вересня 2026 Node.js 20 прибирають з runner'а. Поки лише warning, але дедлайн фіксований.
+- [x] **TD-01.** ~~Бампнути версії GitHub Actions (`actions/checkout@v4`, `docker/*`, `actions/setup-python@v5` тощо).~~ **Закрито 2026-08-03** (Master Run 12, звірка з `origin/main`): `checkout@v5`, `setup-node@v5`, `pnpm/action-setup@v5`, `setup-python@v6`, `upload-artifact@v6`, `docker/*` v4-v7, `setup-uv@v7`. Дій на Node.js 20 не лишилось — дедлайни 16.06.2026 / 16.09.2026 неактуальні. Бампи розійшлись по різних PR, пункт лишався невикресленим два місяці. **Не покрито цим пунктом:** `NODE_VERSION` (версія Node для збірки, не для дій) — винесено окремим пунктом черги T1.
 - [ ] **TD-02.** Унеможливити stale скомпільовані `*.js`/`*.js.map` поряд із `.ts` у `packages/*/src/`. **Чому:** vitest при `import "./foo.js"` резолвить буквальний `.js` і підхоплює stale-білд замість свіжого `.ts` — локальні прогони показують неправдиві результати (плутанина у Phase 2.16.b: тест «бачив» стару Zod-схему з `url()`, хоча `.ts` уже мав `min(1)`). Файли untracked (CI чистий), проблема лише локальна. Варіанти: lefthook/pre-commit guard, що падає на stray `src/**/*.js`; `clean`-крок у dev-командах; або гарантувати, що жоден `tsc` не запускається без `outDir: dist`.
 
 ---
