@@ -33,13 +33,13 @@ jobs:
         # Pinned SHA (не version-тег @v1, як решта workflow у репо) — ADR-035
         # §5.3: єдина дія, що пропускає untrusted issue-текст крізь агента,
         # елевований supply-chain-поріг виправданий.
-        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1 (v1.0.178, 2025-08-26)
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183 (2026-07-25)
         env:
           GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --model opus
+            --model sonnet
             --max-turns 40
             --allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*)"
           # ЛИШЕ номер issue (безпечне ціле число) інтерполюється у workflow —
@@ -93,3 +93,26 @@ jobs:
 
             Обери РІВНО одну категорію. Не вигадуй root-cause, якого не бачиш
             у коді — якщо непевен, це NEED-INFO, не LOCAL-FIX.
+
+      # Backstop до ADR-035 §2: прогін вважається успішним, ЛИШЕ якщо issue
+      # реально перейшов у термінальний стан. Кейс, що породив цей крок
+      # (issue #84, прогін 30616535686, 2026-07-31): агент відпрацював, зняв
+      # `ai-fix`, але `ai-plan-ready` поставити не зміг — лейбла не існувало
+      # в репо; job лишився зеленим, а issue завис без стану.
+      - name: Verify issue reached a terminal state (ADR-035 §2)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels=$(gh issue view ${{ github.event.issue.number }} \
+            --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]|join(",")')
+          echo "labels: $labels"
+          n=0
+          for l in ai-plan-ready ai-architectural ai-need-info; do
+            case ",$labels," in *",$l,"*) n=$((n+1));; esac
+          done
+          if [ "$n" -ne 1 ]; then
+            echo "::error::Тріаж завершився, але issue не має РІВНО одного" \
+                 "термінального лейбла (знайдено: $n). Стан: $labels"
+            exit 1
+          fi

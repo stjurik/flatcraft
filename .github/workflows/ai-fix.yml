@@ -43,7 +43,7 @@ jobs:
 
       - name: Claude fix
         # Pinned SHA — та сама причина, що в ai-triage.yml (ADR-035 §5.3).
-        uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1 (v1.0.178, 2025-08-26)
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183 (2026-07-25)
         env:
           GH_TOKEN: ${{ github.token }}
         with:
