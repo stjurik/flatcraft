@@ -71,9 +71,6 @@ export function CornerAngleScene(): null {
 export function LBracketScene(): null {
   return null;
 }
-export function ZBracketScene(): null {
-  return null;
-}
 export function WallShelfScene(): null {
   return null;
 }

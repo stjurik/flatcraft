@@ -11,6 +11,7 @@
 import { cornerAngleDefinition } from "./corner-angle/index.js";
 import { lBracketDefinition } from "./l-bracket/index.js";
 import { perforatedPanelDefinition } from "./perforated-panel/index.js";
+import { zBracketDefinition } from "./z-bracket/index.js";
 
 // Без `satisfies Record<string, TemplateDefinition<X>>` (Етап 1 мало це для
 // порожнього `{}`): `Params` у TemplateDefinition з'являється і коваріантно
@@ -23,6 +24,7 @@ export const TEMPLATE_REGISTRY = {
   perforated_panel: perforatedPanelDefinition,
   corner_angle: cornerAngleDefinition,
   l_bracket: lBracketDefinition,
+  z_bracket: zBracketDefinition,
 } as const;
 
 export type TemplateSlug = keyof typeof TEMPLATE_REGISTRY;

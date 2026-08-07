@@ -7,7 +7,7 @@
  * t=5 (дозволено [4, 5]) → червоний банер; t=2 → зелений.
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
-import { WALL_SHELF_DEFAULT_PARAMETERS, Z_BRACKET_DEFAULT_PARAMETERS } from "@flatcraft/types";
+import { WALL_SHELF_DEFAULT_PARAMETERS } from "@flatcraft/types";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +16,6 @@ import { describe, expect, it } from "vitest";
 // рендерить стаб-AutoForm (null).
 import { RegistryTemplateEditor } from "./registry-template-editor";
 import { WallShelfEditor } from "./wall-shelf-editor";
-import { ZBracketEditor } from "./z-bracket-editor";
 
 const noop = () => {};
 const VALID_T = 2.0; // R=2.5 дозволено
@@ -37,11 +36,12 @@ const cases = [
       ),
   },
   {
-    name: "ZBracketEditor",
+    name: "RegistryTemplateEditor (z_bracket)",
     render: (t: number) =>
       renderToString(
-        <ZBracketEditor
-          value={Z_BRACKET_DEFAULT_PARAMETERS}
+        <RegistryTemplateEditor
+          def={TEMPLATE_REGISTRY.z_bracket}
+          value={TEMPLATE_REGISTRY.z_bracket.defaults}
           onChange={noop}
           materialCode="cold_rolled_steel"
           thicknessMm={t}
