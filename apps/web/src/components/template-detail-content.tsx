@@ -5,15 +5,12 @@ import {
   EnclosedShelfParametersSchema,
   WALL_SHELF_DEFAULT_PARAMETERS,
   WallShelfParametersSchema,
-  ZBracketParametersSchema,
-  Z_BRACKET_DEFAULT_PARAMETERS,
 } from "@flatcraft/types";
 import Link from "next/link";
 
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
 import { RegistryTemplateStudio } from "./registry-template-studio";
 import { WallShelfStudio } from "./wall-shelf-studio";
-import { ZBracketStudio } from "./z-bracket-studio";
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
@@ -92,15 +89,6 @@ function TemplateStudioSwitch({
       <RegistryTemplateStudio
         slug={slug as TemplateSlug}
         initialParameters={parsed.success ? parsed.data : registryDef.defaults}
-        materials={materials}
-      />
-    );
-  }
-  if (slug === "z_bracket") {
-    const parsed = ZBracketParametersSchema.safeParse(defaults);
-    return (
-      <ZBracketStudio
-        initialParameters={parsed.success ? parsed.data : Z_BRACKET_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );
