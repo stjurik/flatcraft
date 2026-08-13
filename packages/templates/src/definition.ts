@@ -92,7 +92,13 @@ export interface TemplateDefinition<Params> {
   readonly ui: {
     readonly scene: SceneBuilderKind<Params>;
     readonly extraControls?: ReadonlyArray<ExtraControlSpec<Params>>;
-    /** Для product-mode (ADR-027 Рішення 4). */
+    /**
+     * Allowlist полів AutoForm для part/template-mode (issue #96 / T2).
+     * Product-mode має власний allowlist — `ProductDefinition.userEditableFields`
+     * (ADR-027 Рішення 4) — і бере пріоритет над цим полем, коли заданий
+     * (`registry-template-editor.tsx`). `undefined` тут → всі поля схеми
+     * видимі (зворотна сумісність для немігрованих на це поле шаблонів).
+     */
     readonly visibleFields?: readonly string[];
     /** `/public/thumbs/{thumbSlug ?? slug}.png`. */
     readonly thumbSlug?: string;
