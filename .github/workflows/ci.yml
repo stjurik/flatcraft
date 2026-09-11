@@ -26,6 +26,21 @@ jobs:
         with:
           args: -color
 
+  # Guard-скрипти захищають інваріанти (ADR-035 заборонені шляхи, deny-паритет,
+  # red-before-green). Їхні shell-тести лежали в репо, але CI їх не проганяв —
+  # тобто зламаний guard помітили б лише постфактум, на живому прогоні агента.
+  guards:
+    name: Guard-скрипти (shell-тести)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Прогін усіх tools/scripts/*.test.sh
+        run: |
+          for t in tools/scripts/*.test.sh; do
+            echo "── $t"
+            bash "$t"
+          done
+
   install:
     name: Install + lockfile check
     runs-on: ubuntu-latest

@@ -28,7 +28,11 @@ mkdir -p ~/hart/docs/promts/autorun ~/hart-wt ~/hart-logs
 2. **Створити хедер** `docs/promts/autorun/_autonomous-header.md` (текст у §3).
 3. **Обмеження прав — фактичний стан на 2026-08-11 (перевірено інспекцією, `docs/promts/inputs/inspection-2026-08.md` §C):**
 
-   ⚠️ **Локальний headless-прогін НЕ має жодного механічного обмеження.** Трекований `.claude/settings.json` містить **лише** `permissions.allow` (37 записів) — ключа `deny` в ньому **немає взагалі**. До 2026-08-11 цей розділ показував нижче наведений JSON як чинний механізм; він ним ніколи не був. Правило, якого немає у файлі, не захищає нічого.
+   ✅ **Виправлено 2026-09-11.** Механічні `deny`-правила для автономних прогонів живуть у трекованому `.claude/settings.autonomous.json`, який `tools/scripts/autorun.sh` підключає через `claude --settings`. Тобто headless-прогін на будь-якому клоні й на A8 обмежений тим самим списком, що й CI.
+
+   Окремий файл — свідомо, а не в `.claude/settings.json`: той читає **кожна** сесія в репо, включно з архітекторськими сесіями yurii, яким ADR, `CLAUDE.md` та `infra/` правити треба. `deny` там заблокував би легальну роботу, його довелося б обходити — і правило знову стало б декорацією. Тому `.claude/settings.json` лишається як був (лише `allow`), а заборони вмикає той, хто запускає агента автономно.
+
+   ⚠️ **Що було до 2026-09-11** (лишається як опис класу помилки): трекований `.claude/settings.json` містив **лише** `permissions.allow`, ключа `deny` в ньому не було взагалі, хоча цей розділ показував JSON нижче як чинний механізм. Правило, якого немає у файлі, не захищає нічого.
 
    **Де механічний захист РЕАЛЬНО існує** — тільки у GitHub Actions, для `ai-fix.yml`-прогонів (ADR-035), двома лініями:
 
@@ -37,7 +41,7 @@ mkdir -p ~/hart/docs/promts/autorun ~/hart-wt ~/hart-logs
    | `.github/workflows/ai-fix.yml:62-81` (`permissions.deny`) | **19 записів `deny`** (8 файлових цілей — кожна парою `Edit(...)`+`Write(...)` — і 3 Bash-патерни), блокують запис механічно: `packages/db/src/migrations/**`, `infra/**`, `.github/**`, `CLAUDE.md`, `docs/03_DECISIONS.md`, `docs/12_TEMPLATE_CONTRACT.md`, `packages/db/src/schema.ts`, `workers/cad/tests/snapshots/**`, плюс `Bash(git push --force:*)`, `Bash(docker:*)`, `Bash(pnpm discord:apply:*)` |
    | `tools/scripts/check-forbidden-paths.sh:19-26`            | backstop ПІСЛЯ прогону: 8 regex по `git diff --name-only origin/main...HEAD`, валить job. Ловить те, що обійшло deny (напр. запис іншим шляхом). Єдиний caller — `ai-fix.yml:133`                                                                                                                                                                                                                            |
 
-   Цей захист **не портативний на локальну машину і на A8**: він живе у workflow, а не в трекованому конфізі агента.
+   Списки у workflow і в трекованому файлі дублюються (дія споживає inline-JSON, CLI — файл), тому їх звіряє `tools/scripts/check-deny-parity.sh`: кожне правило з `ai-fix.yml` мусить бути у трекованому файлі, зворотне не вимагається (трекований може бути суворішим — він додає `packages/cad-engine/data/bend-machine-esi.yaml` за ADR-040 §1). Перевірка й тести guard-скриптів проганяються job'ом `guards` у `ci.yml`.
 
    **Що було не так у попередній редакції цього пункту** (лишається тут як приклад класу помилки — правило-декорація):
 

@@ -26,11 +26,35 @@ concurrency:
   group: ai-fix-${{ github.event.issue.number }}
   cancel-in-progress: true
 
+# Ті самі версії, що в ci.yml — щоб Будівельник збирав те саме, що потім перевіряє CI.
+# NODE_VERSION 20→22 свідомо НЕ чіпаємо тут: це окремий пункт черги T1, робиться
+# разом з оновленням залежностей (docs/02).
+env:
+  NODE_VERSION: "20.11.0"
+  PNPM_VERSION: "9.12.0"
+
 jobs:
   fix:
     if: github.event.label.name == 'ai-approved'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Дослівно з job `test` у ci.yml: без БД Будівельник не прожене *.int.test.ts.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flatcraft
+          POSTGRES_PASSWORD: flatcraft_ci_only
+          POSTGRES_DB: flatcraft
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flatcraft -d flatcraft"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://flatcraft:flatcraft_ci_only@localhost:5432/flatcraft
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,6 +64,30 @@ jobs:
         run: |
           git fetch origin main
           git checkout -b "fix/issue-${{ github.event.issue.number }}" origin/main
+
+      # Toolchain ДО Claude. Без node_modules Будівельник фізично не міг прогнати
+      # тести, які сам написав, — і доказ «червоний до фікса» відтворював РУКАМИ
+      # рев'юер (docs/17 §9, ai-review-local.md крок 2-bis). Патерн скопійовано
+      # дослівно з ci.yml (jobs `install` і `python`), щоб середовища не розходились.
+      - uses: pnpm/action-setup@v5
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.13"
+          enable-cache: true
+      - name: Setup Python + CAD worker deps
+        working-directory: workers/cad
+        run: |
+          uv python install 3.12
+          uv sync --extra dev
 
       - name: Claude fix
         # Pinned SHA — та сама причина, що в ai-triage.yml (ADR-035 §5.3).
@@ -111,8 +159,20 @@ jobs:
 
             КРОК 2 — TDD за планом: тест (red) → код (green) → рефактор.
             Регресійний тест — ОБОВ'ЯЗКОВИЙ (культура 2.10.e): він мусить
-            падати ДО фікса і проходити ПІСЛЯ. Прожени релевантні тести
-            (AGENTS.md — команди по workspace) ПЕРЕД комітом.
+            падати ДО фікса і проходити ПІСЛЯ.
+
+            Оточення вже готове ДО тебе: `node_modules` встановлено
+            (`pnpm install --frozen-lockfile`), `uv sync` у workers/cad зроблено,
+            Postgres піднято і `DATABASE_URL` заданий. Тобто тести МОЖНА і ТРЕБА
+            справді проганяти (AGENTS.md — команди по workspace), а не описувати
+            словами, що ти їх прогнав.
+
+            Порядок саме такий: СПОЧАТКУ напиши тест і переконайся, що він
+            ПАДАЄ на поточному коді, ПОТІМ фікси. Це перевіряється МАШИННО після
+            тебе (`tools/scripts/prove-red-before-green.sh`): твої нові тести
+            накладуть на origin/main і проженуть. Тест, який там ЗЕЛЕНИЙ, означає,
+            що він не ловить баг, заради якого написаний, — job впаде, і PR
+            доведеться переробляти. Тест, якого немає, — так само провал.
 
             КРОК 3 — коміт (Conventional Commits) → push гілки →
             `gh pr create --draft --base main --title "fix(issue-${{ github.event.issue.number }}): <короткий опис>" --body "<план з триажу, посилання Closes #${{ github.event.issue.number }}, розділ «Як перевірити очима», розділ «Опитування» якщо лишились варіанти>"`.
@@ -125,6 +185,14 @@ jobs:
             1. `gh issue comment ${{ github.event.issue.number }} --body "<чому заблоковано, який шлях/причина>"`
             2. `gh issue edit ${{ github.event.issue.number }} --add-label ai-architectural --remove-label ai-approved`
             3. СТОП — НЕ створюй PR у цьому випадку.
+
+      # Машинний доказ регресійного тесту. Замінює ручний крок рев'юера
+      # (ai-review-local.md крок 2-bis): тест, що не падає на origin/main, як
+      # регресійний нічого не вартий, і job це ловить сам.
+      - name: Prove red-before-green (регресійний тест справді ловить баг)
+        run: |
+          git fetch origin main
+          git diff --name-only origin/main...HEAD | tools/scripts/prove-red-before-green.sh
 
       - name: Verify forbidden paths untouched (ADR-035 §5.4, backstop)
         if: always()

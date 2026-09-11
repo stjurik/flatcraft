@@ -36,8 +36,12 @@ echo "── залежності (node_modules/venv не шаруться мі�
 
 echo "── headless-прогін: model=$MODEL, лог: $LOG_FILE"
 cd "$WT_DIR"
+# --settings: механічні deny-правила з трекованого файлу (docs/16 §1). Без нього
+# локальний headless-прогін не має ЖОДНОГО обмеження — правило, якого немає в git,
+# не захищає ні інший клон, ні прогін на A8 (docs/19 §7 п.4).
 cat "$HEADER_FILE" "$PROMPT_FILE" | claude -p \
   --model "$MODEL" \
+  --settings "$WT_DIR/.claude/settings.autonomous.json" \
   --permission-mode acceptEdits \
   --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(pnpm:*),Bash(uv:*)" \
   --max-turns 200 \
