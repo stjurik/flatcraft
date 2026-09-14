@@ -35,12 +35,22 @@ make_fixture() {
 # expect_msg — обов'язковий: інакше сценарій може «пройти» з правильним кодом виходу,
 # але з зовсім іншої причини (напр. жоден тест не запустився). Саме так тест 3
 # фолсово проходив, поки workspace_of не бачив кореневий package.json.
+# ЧОМУ ТУТ ЗАДАЄТЬСЯ GITHUB_STEP_SUMMARY. `summary()` у скрипті пише підсумок у
+# $GITHUB_STEP_SUMMARY, коли змінна є (CI), і в stdout, коли її немає (локально).
+# Поки набір її не задавав, він перевіряв ЛИШЕ локальний шлях: зеленів на машині
+# й червонів у CI, бо очікуваний рядок ішов у файл, а не в stdout (виявлено на
+# PR #108 — перший прогін ci.yml на цій гілці). Задаємо власний тимчасовий файл і
+# звіряємо stdout РАЗОМ із ним: один набір покриває обидві поведінки й не залежить
+# від того, де його запустили.
 run_case() {
   local name="$1" expected="$2" runner="$3" files="$4" dir="$5" expect_msg="$6"
-  local actual=0 out
+  local actual=0 out summary
+  summary="$(mktemp)"
   out="$(cd "$dir" && printf '%s\n' "$files" \
-    | PRVG_BASE_REF=main PRVG_TS_CMD="$runner" PRVG_PY_CMD="$runner" \
+    | GITHUB_STEP_SUMMARY="$summary" PRVG_BASE_REF=main PRVG_TS_CMD="$runner" PRVG_PY_CMD="$runner" \
       bash "$SCRIPT" 2>&1)" || actual=$?
+  out="$(printf '%s\n%s' "$out" "$(cat "$summary")")"
+  rm -f "$summary"
   if [[ "$actual" -eq "$expected" ]] && printf '%s' "$out" | grep -qF "$expect_msg"; then
     echo "✓ $name"
   else

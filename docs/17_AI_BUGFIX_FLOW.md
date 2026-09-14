@@ -114,7 +114,7 @@ draft PR → docs/promts/ai-review-local.md (одна команда, локал
 | `apps/web/src/components/template-studio.tsx`                                                | точка входу, що маршрутизує між per-template і registry-компонентами                                           |
 | `packages/templates/src/**`                                                                  | сам реєстр (`registry.ts`, `definition.ts`) і вже мігровані `perforated-panel/`, `corner-angle/`, `l-bracket/` |
 | `workers/cad/flatcraft_cad/templates/*.py`                                                   | Python-паритет шаблонів + `registry.py`                                                                        |
-| `workers/cad/tests/fixtures/ts_registry_slugs.json`                                          | згенерований фікстур slug-паритету TS↔Python — регенерується кожним міграційним PR                            |
+| `workers/cad/tests/fixtures/ts_registry_slugs.json`                                          | згенерований фікстур slug-паритету TS↔Python — регенерується кожним міграційним PR                             |
 
 **Тригер зняття (механічний, не «на око»):** завершення **Етапу 2** Run 7 —
 міграція всіх шести шаблонів (`docs/promts/master-registry-track.md`), тобто
