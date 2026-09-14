@@ -1,0 +1,28 @@
+{
+  "_comment": "Механічні deny-правила для АВТОНОМНИХ прогонів (tools/scripts/autorun.sh, headless claude -p). НЕ для інтерактивних сесій: у звичайному .claude/settings.json ці правила заблокували б легальну роботу yurii над ADR, CLAUDE.md та infra/. Паритет зі списком у .github/workflows/ai-fix.yml (ADR-035 §5.4) плюс bend-machine-esi.yaml (ADR-040 §1). Backstop після прогону — tools/scripts/check-forbidden-paths.sh. Інваріант docs/19 §7 п.4: правило, якого немає в git, не захищає ні CI, ні інший клон, ні прогін на A8.",
+  "permissions": {
+    "deny": [
+      "Edit(packages/db/src/migrations/**)",
+      "Write(packages/db/src/migrations/**)",
+      "Edit(infra/**)",
+      "Write(infra/**)",
+      "Edit(.github/**)",
+      "Write(.github/**)",
+      "Edit(CLAUDE.md)",
+      "Write(CLAUDE.md)",
+      "Edit(docs/03_DECISIONS.md)",
+      "Write(docs/03_DECISIONS.md)",
+      "Edit(docs/12_TEMPLATE_CONTRACT.md)",
+      "Write(docs/12_TEMPLATE_CONTRACT.md)",
+      "Edit(packages/db/src/schema.ts)",
+      "Write(packages/db/src/schema.ts)",
+      "Edit(workers/cad/tests/snapshots/**)",
+      "Write(workers/cad/tests/snapshots/**)",
+      "Edit(packages/cad-engine/data/bend-machine-esi.yaml)",
+      "Write(packages/cad-engine/data/bend-machine-esi.yaml)",
+      "Bash(git push --force:*)",
+      "Bash(docker:*)",
+      "Bash(pnpm discord:apply:*)"
+    ]
+  }
+}
