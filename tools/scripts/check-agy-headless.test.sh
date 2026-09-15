@@ -99,6 +99,14 @@ run_suite() {
       sed 's/^/      /' "$TMP/out.txt"
       fail=1
     fi
+    # EXPECT_RE — необов'язкова вимога до ВИВОДУ, не лише до коду. Потрібна там,
+    # де гілка більше не має власного exit-коду: інакше її не відрізнити від
+    # успішного прогону, і мутація класифікатора пройшла б незамічено.
+    if [[ -n "${EXPECT_RE:-}" ]] && ! grep -qE "$EXPECT_RE" "$TMP/out.txt"; then
+      echo "  ✗ $name — у виводі немає очікуваного «$EXPECT_RE»"
+      sed 's/^/      /' "$TMP/out.txt"
+      fail=1
+    fi
     # Транзитні файли зонда не мають лишатись у дереві.
     if [[ "$mode" != no_output ]] && compgen -G "$root/repo/docs/promts/inputs/_agy-probe-*" >/dev/null; then
       echo "  ✗ $name — транзитні файли зонда не прибрано"
@@ -122,8 +130,13 @@ run_suite() {
   check "вихідного файлу немає → 5" 5 no_output yes
   # Рядок 7: scope-creep — повторення інциденту Master Run 8.
   check "запис поза inputs/ → 6" 6 scope_creep yes
-  # Рядок 8: робоча тека поза trustedWorkspaces — відмова ДО витрати виклику.
-  check "недовірена тека → 7" 7 pass no
+  # Рядок 8 (вердикт 7) ЗНЯТО 2026-09-15: блокування спрацьовувало ДО виміру, а
+  # скрипт, який відмовляється міряти, нічого не доводить. Тепер недовірена тека
+  # проходить увесь ланцюг (0), а факт «поза списком» лишається у ВИВОДІ —
+  # assertion на текст тримає мутацію `WORKSPACE_TRUSTED=yes` впійманою.
+  EXPECT_RE='поза trustedWorkspaces'
+  check "недовірена тека → міряє далі (0) + примітка у виводі" 0 pass no
+  unset EXPECT_RE
 
   return "$fail"
 }
