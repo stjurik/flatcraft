@@ -30,6 +30,23 @@ if [[ ! -d "$WT_DIR" ]]; then
   git -C "$REPO_ROOT" worktree add "$WT_DIR" -b "$BRANCH" origin/main
 fi
 
+# `agy` довіряє теці за ТОЧНИМ збігом кореня git, без успадкування від батька
+# (вимір 2026-09-14, docs/19 §D.4). Тому кожен worktree треба реєструвати окремо,
+# інакше Gemini-пул (ADR-039 §5) недоступний саме з автономних прогонів — і то у
+# найгіршій формі: недовірена тека просить браузерний OAuth, тобто виглядає як
+# протермінований логін. Довіру НЕ знімаємо в кінці: worktree живе далі, і рев'ю
+# в ньому теж (`trust-worktree.sh remove` — для прибирання теки).
+echo "── довіра agy до worktree (docs/19 §D.4)"
+TRUST_CODE=0
+"$REPO_ROOT/tools/scripts/trust-worktree.sh" add "$WT_DIR" || TRUST_CODE=$?
+case "$TRUST_CODE" in
+  0) ;;
+  # Не фатально: задача прогону — Claude-run, `agy` тут другий пул для рев'ю.
+  # Зупиняти роботу через ненастроєний Gemini було б гірше, ніж прогін без нього.
+  2) echo "   ⚠ agy на цій машині не налаштований — прогін без Gemini-пулу (ADR-039 §5)" ;;
+  *) echo "   ⚠ реєстрація не вдалась (код $TRUST_CODE) — agy у цій теці впаде у браузерний OAuth" ;;
+esac
+
 echo "── залежності (node_modules/venv не шаруться між worktree)"
 (cd "$WT_DIR" && pnpm install --frozen-lockfile)
 (cd "$WT_DIR/workers/cad" && uv sync)
