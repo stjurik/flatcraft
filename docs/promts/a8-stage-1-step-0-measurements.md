@@ -72,7 +72,9 @@
 
 **Процедура.** Під `agent` на A8:
 
-1. Переконайся, що `/home/agent/hart` довірена (`hasTrustDialogAccepted: true`).
+1. Переконайся, що `/home/agent/hart` довірена (`hasTrustDialogAccepted: true`). **Якщо ні —
+   зупинись:** це крок yurii (OQ-22(а), разовий інтерактивний запуск). Без довіреної теки
+   контроль недійсний, і весь вимір М-1 перетворюється на здогад.
 2. Створи свіжий worktree: `/home/agent/hart-wt/probe-trust` від `origin/main`.
 3. Однаковий тривіальний виклик `claude -p` у **обох** теках. Шукай у stderr рядок
    `Ignoring N permissions.allow entries`.
