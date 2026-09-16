@@ -164,7 +164,54 @@ SETTINGS="$TMP_ROOT/s10.json"
 make_settings "$SETTINGS"
 expect_code 1 "неіснуюча тека → не довірена (без падіння)" check "$TMP_ROOT/ще-не-створено"
 
-# ── 11. autorun.sh СПРАВДІ кличе реєстрацію ────────────────────────────────
+# ── 11. У WORKTREE реєструються ОБИДВА кандидати ───────────────────────────
+# Головний кейс редакції 2026-09-16. У звичайному клоні `--show-toplevel` і
+# корінь `--git-common-dir` збігаються, тому кейси 1-10 цю гілку не зачіпають
+# узагалі — і саме тому баг прожив би непоміченим. Вимір М-1 (PR #110) показав,
+# що Claude Code ключиться на корінь клону; резолвінг `agy` не виміряний, тому
+# реєструємо обидва, і цей кейс стежить, щоб жоден не загубився.
+SETTINGS="$TMP_ROOT/s11.json"
+make_settings "$SETTINGS"
+MAIN="$(make_repo "$TMP_ROOT/main-clone")"
+git -C "$MAIN" commit -q --allow-empty -m "базовий коміт для worktree"
+WT="$TMP_ROOT/wt-linked"
+git -C "$MAIN" worktree add -q --detach "$WT" HEAD 2>/dev/null
+WT="$(realpath "$WT")"
+
+if [[ ! -d "$WT" ]]; then
+  fail "не вдалося створити worktree — кейс 11 не виконано"
+else
+  run add "$WT" >/dev/null 2>&1
+  HAS_WT=0; HAS_ROOT=0
+  entries | grep -qxF "$WT" && HAS_WT=1
+  entries | grep -qxF "$MAIN" && HAS_ROOT=1
+  if [[ "$HAS_WT" -eq 1 && "$HAS_ROOT" -eq 1 ]]; then
+    echo "✓ add із worktree реєструє ОБИДВА: worktree і корінь клону"
+  else
+    fail "add із worktree: worktree=$HAS_WT, корінь клону=$HAS_ROOT (треба 1/1)" \
+      "$(entries | tr '\n' ' ')"
+  fi
+
+  # `check` мусить вимагати ОБИДВА: часткова реєстрація — не «довірено».
+  python3 -c "
+import json,sys
+p='$SETTINGS'
+d=json.load(open(p))
+d['trustedWorkspaces']=[e for e in d['trustedWorkspaces'] if e!='$MAIN']
+json.dump(d,open(p,'w'),ensure_ascii=False,indent=2)
+"
+  expect_code 1 "check при частковій реєстрації → 1, а не 0" check "$WT"
+
+  run add "$WT" >/dev/null 2>&1
+  run remove "$WT" >/dev/null 2>&1
+  if ! entries | grep -qxF "$WT" && ! entries | grep -qxF "$MAIN"; then
+    echo "✓ remove із worktree знімає обидва записи"
+  else
+    fail "remove лишив запис" "$(entries | tr '\n' ' ')"
+  fi
+fi
+
+# ── 12. autorun.sh СПРАВДІ кличе реєстрацію ────────────────────────────────
 # Найдорожчий розрив цього проєкту — «код + тест, 0 викликів у пайплайні»
 # (інспекція §A: `validateSheet`, `validateHoles`). Зелені кейси 1-10 доводять,
 # що скрипт працює, і НЕ доводять, що ним хтось користується. Цей кейс і є

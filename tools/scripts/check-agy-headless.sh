@@ -76,14 +76,28 @@ command -v timeout >/dev/null 2>&1 || die_misuse "у PATH немає \`timeout\`
 WORKSPACE="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || die_misuse "поточна тека не є git-репозиторієм"
 
+# КОРІНЬ КЛОНУ — другий кандидат на ключ довіри, і всередині worktree він інший.
+# `--show-toplevel` у worktree повертає сам worktree; корінь головного клону
+# дістається лише через `--git-common-dir` (без `--path-format=absolute` git
+# віддає відносний шлях, тому прапорець обов'язковий).
+# Навіщо звіряти обидва: вимір М-1 (PR #110) показав, що Claude Code ключиться
+# саме на корінь клону. Чи так само поводиться `agy` — НЕ виміряно. Зонд, який
+# звіряв лише `--show-toplevel`, друкував «тека поза trustedWorkspaces» навіть
+# коли корінь клону зареєстровано правильно, тобто діагностика могла казати
+# неправду — той самий клас, що знятий вердикт 7.
+CLONE_ROOT="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
+[[ -n "$CLONE_ROOT" && "$CLONE_ROOT" != "." ]] || CLONE_ROOT="$WORKSPACE"
+
 SETTINGS="$HOME/.gemini/antigravity-cli/settings.json"
 SCOPE_GUARD="$(cd "$(dirname "$0")" && pwd)/check-agy-scope.sh"
 
 # ── Гілка 7: тека мусить бути довіреною ────────────────────────────────────
 # Перевіряємо ПЕРЕД викликом: недовірена тека дає відмову, яку легко прийняти
 # за збій логіна, а виклик при цьому вже витрачений.
+# Друкуємо, ЯКИЙ САМЕ шлях знайдено: «поза списком» без уточнення шляху — це
+# половина твердження, і саме вона вводила в оману у worktree.
 WORKSPACE_TRUSTED="$(
-  python3 - "$SETTINGS" "$WORKSPACE" <<'PY' 2>/dev/null || echo unknown
+  python3 - "$SETTINGS" "$WORKSPACE" "$CLONE_ROOT" <<'PY' 2>/dev/null || echo unknown
 import json, os, sys
 try:
     with open(sys.argv[1], encoding="utf-8") as fh:
@@ -91,18 +105,24 @@ try:
 except (OSError, ValueError):
     print("unknown")
     sys.exit(0)
-target = os.path.realpath(sys.argv[2])
-print("yes" if any(os.path.realpath(p) == target for p in trusted) else "no")
+real = {os.path.realpath(str(p)) for p in trusted}
+wt, root = os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[3])
+found = [name for name, path in (("worktree", wt), ("clone-root", root)) if path in real]
+# Той самий шлях у ролі обох (звичайний клон, не worktree) не має рахуватись двічі.
+if wt == root and found:
+    found = ["workspace"]
+print(",".join(found) if found else "no")
 PY
 )"
 
 # НЕ блокуємо: див. шапку, вердикт 7 знято 2026-09-15. Примітка лишається, бо
 # вона — половина діагнозу, якщо `agy` таки попросить браузер: тоді у виводі
 # видно і запит логіна, і те, що тека була поза списком.
-if [[ "$WORKSPACE_TRUSTED" != yes ]]; then
-  echo "── Примітка: тека поза trustedWorkspaces — зонд міряє далі"
-  echo "   тека:   $WORKSPACE"
-  echo "   список: $SETTINGS"
+if [[ "$WORKSPACE_TRUSTED" == unknown || "$WORKSPACE_TRUSTED" == no ]]; then
+  echo "── Примітка: жоден кандидат не знайдено у trustedWorkspaces — зонд міряє далі"
+  echo "   worktree:    $WORKSPACE"
+  echo "   корінь клону: $CLONE_ROOT"
+  echo "   список:      $SETTINGS"
   if [[ "$WORKSPACE_TRUSTED" == unknown ]]; then
     echo "   (файл налаштувань не прочитався — перевірте, чи \`agy\` тут налаштований)"
   fi
@@ -110,6 +130,16 @@ if [[ "$WORKSPACE_TRUSTED" != yes ]]; then
   echo "   ні read_file/write_file. Вимір 2026-09-14 давав браузерний OAuth."
   echo "   Суперечність відкрита (docs/19 §D.4). Якщо нижче буде запит логіна —"
   echo "   спробуйте: tools/scripts/trust-worktree.sh add $WORKSPACE"
+  echo
+else
+  # Позитивна гілка теж друкується: інакше з виводу не видно, ЯКИЙ кандидат
+  # знайдено, а це саме те, що відрізняє worktree від звичайного клону.
+  echo "── Примітка: у trustedWorkspaces знайдено: $WORKSPACE_TRUSTED"
+  [[ "$WORKSPACE_TRUSTED" == *worktree* ]] && echo "   worktree:     $WORKSPACE"
+  [[ "$WORKSPACE_TRUSTED" == *clone-root* ]] && echo "   корінь клону: $CLONE_ROOT"
+  [[ "$WORKSPACE_TRUSTED" == workspace ]] && echo "   тека:         $WORKSPACE (звичайний клон)"
+  echo "   ⚠ Це НАША звірка шляху, а не поведінка \`agy\`. Вердикт виміру —"
+  echo "   лише з поведінки \`agy\` нижче (exit-код, nonce, запит логіна)."
   echo
 fi
 

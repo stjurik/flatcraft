@@ -24,9 +24,15 @@
 # туди. `check` відповідає на це за 0 викликів Gemini і за мілісекунди.
 #
 # Використання:
-#   trust-worktree.sh check  <тека>   # 0 — довірена; 1 — ні; 2 — конфіг недоступний
-#   trust-worktree.sh add    <тека>   # ідемпотентно додає корінь git цієї теки
-#   trust-worktree.sh remove <тека>   # ідемпотентно прибирає (після прогону)
+#   trust-worktree.sh check  <тека>   # 0 — довірені ВСІ кандидати; 1 — ні; 2 — конфіг недоступний
+#   trust-worktree.sh add    <тека>   # ідемпотентно додає обидва кандидати (див. нижче)
+#   trust-worktree.sh remove <тека>   # ідемпотентно прибирає обидва (після прогону)
+#
+# СТАН ВИМІРУ (2026-09-16): `agy -p` працює і тоді, коли в `trustedWorkspaces`
+# немає жодного з двох кандидатів — контрольний прогін дав `PASS` без сигнатури
+# браузерного логіна. Тобто **на момент виміру цей скрипт не впливає ні на що**.
+# Лишений як страховка на випадок зміни поведінки CLI; резолвінг `agy` не
+# виміряний, тому реєструються обидва шляхи, а не обраний навмання один.
 #
 # Конфіг: $AGY_SETTINGS або ~/.gemini/antigravity-cli/settings.json.
 # Файл НЕ створюється, якщо його немає: відсутній конфіг означає, що `agy` на цій
@@ -46,14 +52,41 @@ usage() {
 [[ -n "$CMD" && -n "$TARGET" ]] || usage
 case "$CMD" in check | add | remove) ;; *) usage ;; esac
 
-# Ключ реєстрації — КОРІНЬ git, а не передана тека: `agy` звіряє саме корінь
-# (`git rev-parse --show-toplevel`), і запис підтеки лишив би теку недовіреною.
-# Для ще не створеної теки (autorun.sh кличе `check` до `worktree add`) корінь
-# невідомий — беремо шлях як є, відповідь «не довірена» тут правильна.
-ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null)" || ROOT=""
-if [[ -z "$ROOT" ]]; then
-  ROOT="$(realpath -m "$TARGET" 2>/dev/null || echo "$TARGET")"
-fi
+# ДВА КАНДИДАТИ НА КЛЮЧ, і це свідоме рішення, а не перестраховка.
+#
+#   worktree     = `git rev-parse --show-toplevel` — усередині worktree це сам
+#                  worktree;
+#   корінь клону = батьківська тека `--git-common-dir` — для worktree це
+#                  ГОЛОВНИЙ клон (без `--path-format=absolute` git віддає
+#                  відносний шлях, тому прапорець обов'язковий).
+#
+# Чому обидва. Вимір М-1 (PR #110) показав, що **Claude Code** ключиться на
+# корінь клону: запис для теки worktree не діє взагалі. Чи так само поводиться
+# `agy` — **не виміряно**: контрольний прогін 2026-09-16 (виклик у вікні OQ-35)
+# показав, що `agy -p` працює і тоді, коли в списку немає ЖОДНОГО з двох
+# шляхів. Тобто список нічого не гейтить, і за такої конструкції питання ключа
+# не має відповіді — не «відповідь негативна», а сам вимір неможливий.
+#
+# Тому ми не вибираємо між двома живими кандидатами і не переносимо поведінку
+# Claude Code на `agy` без виміру: реєструємо обидва. Це НЕ той випадок, що
+# інертні `Write(...)` у deny-списку — там половина була ВІДОМО мертвою і
+# вчила хибного патерну; тут обидва записи однаково правдоподібні.
+# **Коли резолвінг `agy` виміряють — лишити один.**
+resolve_candidates() {
+  local target="$1" wt="" root=""
+  wt="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || wt=""
+  root="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && root="$(dirname "$root")" || root=""
+  # Тека ще не створена (autorun.sh кличе `check` до `worktree add`) — беремо
+  # шлях як є; відповідь «не довірена» тут правильна.
+  [[ -n "$wt" ]] || wt="$(realpath -m "$target" 2>/dev/null || echo "$target")"
+  [[ -n "$root" ]] || root="$wt"
+  printf '%s\n' "$wt"
+  # У звичайному клоні обидва збігаються — другий запис не потрібен.
+  [[ "$root" == "$wt" ]] || printf '%s\n' "$root"
+}
+
+mapfile -t CANDIDATES < <(resolve_candidates "$TARGET")
 
 if [[ ! -f "$SETTINGS" ]]; then
   echo "✗ немає файлу налаштувань agy: $SETTINGS" >&2
@@ -61,10 +94,11 @@ if [[ ! -f "$SETTINGS" ]]; then
   exit 2
 fi
 
-python3 - "$SETTINGS" "$ROOT" "$CMD" <<'PY'
+python3 - "$SETTINGS" "$CMD" "${CANDIDATES[@]}" <<'PY'
 import json, os, sys, tempfile
 
-settings_path, root, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+settings_path, cmd = sys.argv[1], sys.argv[2]
+candidates = sys.argv[3:]
 
 try:
     with open(settings_path, encoding="utf-8") as fh:
@@ -84,24 +118,34 @@ elif not isinstance(entries, list):
     print(f"✗ {settings_path}: trustedWorkspaces не список", file=sys.stderr)
     sys.exit(2)
 
-target = os.path.realpath(root)
 # Порівняння через realpath з обох боків: у списку трапляються симлінки й
 # хвостові слеші, а рівність шляхів тут — єдине, що вирішує довіру.
-present = any(os.path.realpath(str(e)) == target for e in entries)
+targets = [os.path.realpath(c) for c in candidates]
+listed = {os.path.realpath(str(e)) for e in entries}
+missing = [t for t in targets if t not in listed]
 
 if cmd == "check":
-    sys.exit(0 if present else 1)
+    # 0 лише якщо присутні ВСІ кандидати: `add` реєструє обидва, тож часткова
+    # реєстрація — це не «довірено», а недороблена робота, і мовчати про неї
+    # означало б повторити клас «виглядає захистом, але не діє».
+    if missing:
+        for m in missing:
+            print(f"немає у списку: {m}")
+    sys.exit(1 if missing else 0)
 
 if cmd == "add":
-    if present:
-        print(f"= вже довірена: {target}")
+    if not missing:
+        print("= вже довірені: " + ", ".join(targets))
         sys.exit(0)
-    entries.append(target)
+    entries.extend(missing)
+    changed = missing
 else:  # remove
-    if not present:
-        print(f"= не було у списку: {target}")
+    removed = [t for t in targets if t in listed]
+    if not removed:
+        print("= не було у списку: " + ", ".join(targets))
         sys.exit(0)
-    entries = [e for e in entries if os.path.realpath(str(e)) != target]
+    entries = [e for e in entries if os.path.realpath(str(e)) not in set(targets)]
+    changed = removed
 
 data["trustedWorkspaces"] = entries
 
@@ -118,5 +162,7 @@ except BaseException:
     os.path.exists(tmp) and os.unlink(tmp)
     raise
 
-print(("+ довірена: " if cmd == "add" else "- знято довіру: ") + target)
+prefix = "+ довірена: " if cmd == "add" else "- знято довіру: "
+for path in changed:
+    print(prefix + path)
 PY
