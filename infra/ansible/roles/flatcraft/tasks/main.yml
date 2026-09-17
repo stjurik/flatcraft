@@ -57,6 +57,50 @@
     mode: "0600"
   notify: Restart flatcraft stack
 
+# ─── 3b. GHCR credential hygiene (перед pull, бо саме він від цього падав) ──
+# ІНЦИДЕНТ 2026-09-14…17: три deploy'ї підряд (#82, #83, #84) впали на кроці
+# `Pull latest images` з дослівним
+#     Error when processing image ghcr.io/stjurik/flatcraft-api:staging:
+#     Error response from daemon: error from registry: denied
+# при тому, що образ ПУБЛІЧНИЙ і тягнеться анонімно. Причина не в реєстрі:
+# у `~/.docker/config.json` лежав PAT, записаний `docker login` при
+# провізіонінгу 27.05; він протермінувався між 07.08 (останній зелений deploy)
+# і 14.09. Docker надсилає наявний креденшал і отримує відмову — замість того,
+# щоб піти анонімно. Доведено парою з контролем на самому сервері: той самий
+# pull з наявним конфігом → `denied`, з порожнім `DOCKER_CONFIG` → завантажився.
+#
+# Чому воно прожило непоміченим: логін живе в ролі `docker` з тегами
+# [provision, docker], а deploy ходить `--tags deploy` — тобто креденшал
+# записується один раз і далі лише псується з часом. Гейт нижче робить цей
+# клас самолікованим: перевіряє, чи креденшал взагалі працює, і прибирає його,
+# якщо ні.
+- name: Probe GHCR read access with whatever credentials are on the host
+  # `manifest inspect` не тягне шарів — це найдешевша перевірка саме того
+  # шляху, яким піде наступний pull, і під тим самим користувачем.
+  ansible.builtin.command:
+    cmd: "docker manifest inspect {{ image_prefix }}/flatcraft-api:{{ app_version }}"
+  register: flatcraft_ghcr_probe
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ app_user }}"
+
+- name: Drop unusable ghcr.io credential (образи публічні — анонімно працює)
+  # Умова звужена НАВМИСНО до сигнатур, реально бачених у логах (`denied`,
+  # `unauthorized`), а не до будь-якого ненульового коду: мережевий збій не
+  # має права зносити креденшал, який може бути справним. Якщо колись
+  # виконають D.1 (ADR-038) і образи стануть приватними — справний токен
+  # пройде перевірку і лишиться на місці, а непрацездатний однаково краще
+  # зняти, ніж тягти з ним `denied`.
+  community.docker.docker_login:
+    registry_url: ghcr.io
+    state: absent
+  when:
+    - flatcraft_ghcr_probe.rc != 0
+    - flatcraft_ghcr_probe.stderr | lower is search('denied|unauthorized')
+  become: true
+  become_user: "{{ app_user }}"
+
 # ─── 4. Docker compose pull + up -d ────────────────────────────────────────
 - name: Pull latest images
   # Чому окремо від `up -d`: щоб у разі failure (наприклад, ghcr rate-limit)
