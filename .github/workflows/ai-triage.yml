@@ -23,11 +23,32 @@ concurrency:
 
 jobs:
   triage:
-    if: github.event.label.name == 'ai-fix'
+    # Другий гейт до лейбла: лейбл мусить поставити ВЛАСНИК репозиторію.
+    # Сам лейбл уже вимагає write-доступу, але в репо з кількома колабораторами
+    # цього мало. Порівнюємо з `github.repository_owner`, а не з зашитим логіном:
+    # чернетка `ai-cloud-developer.yml` мала `== 'jstovbun'` (це адреса пошти, а не
+    # логін `stjurik`) — гейт не спрацював би ЖОДНОГО разу, і ніхто б не помітив,
+    # бо воркфлоу, який мовчить, виглядає як воркфлоу, до якого не дійшла черга.
+    if: >-
+      github.event.label.name == 'ai-fix' &&
+      github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+
+      # Третій гейт чернетки (`issue.author_association == 'OWNER'`) свідомо НЕ
+      # зроблено блокуючим: він зупинив би тріаж будь-якого issue, написаного не
+      # yurii, а це третє джерело завдань за CLAUDE.md §0 — зворотний зв'язок
+      # користувачів і виробництва. Замість блокування — гучна позначка в лозі:
+      # видно, що текст issue прийшов ззовні, і рішення лишається за людиною.
+      - name: Позначити зовнішнє походження issue
+        run: |
+          assoc="${{ github.event.issue.author_association }}"
+          echo "author_association: $assoc"
+          if [ "$assoc" != "OWNER" ]; then
+            echo "::warning::Issue написаний не власником ($assoc) — текст є недовіреним входом (ADR-035 §5.1)"
+          fi
 
       - name: Claude triage
         # Pinned SHA (не version-тег @v1, як решта workflow у репо) — ADR-035
@@ -116,3 +137,23 @@ jobs:
                  "термінального лейбла (знайдено: $n). Стан: $labels"
             exit 1
           fi
+
+      # Сигнал про падіння (OQ-«сліпа зона»). Три дні (14–17.09) деплой на
+      # staging падав, і дізнався про це yurii, глянувши в список Actions —
+      # жоден механізм не повідомив. Порожній секрет має бути ВИДИМИМ у лозі,
+      # а не тихою відсутністю сигналу: інакше відтворюємо ту саму сліпу зону.
+      - name: Сповістити про падіння
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_OPS_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_OPS_WEBHOOK не задано — сповіщення не надіслано"
+            exit 0
+          fi
+          curl -fsS -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"❌ **AI triage** впав — issue #%s\n%s"}' \
+                  "${{ github.event.issue.number }}" \
+                  "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")" \
+            > /dev/null
