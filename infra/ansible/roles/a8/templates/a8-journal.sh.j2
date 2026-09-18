@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-journal — один рядок JSON на прогін, поля з ADR-039 §8.
+#
+# ЧОМУ ПОЛЯ ЗАДАНІ ДО ПЕРШОГО ПРОГОНУ. Телеметрію заднім числом не збирають:
+# якщо перші прогони пишуться без поля, воно назавжди порожнє саме для тих
+# прогонів, які найцікавіші (OQ-35).
+#
+# Використання:
+#   a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка]
+#     source: human | external | derived   (OQ-34 — fail closed, див. нижче)
+#     result: ok | failed | stopped
+set -euo pipefail
+
+CONFIG="{{ a8_config_dir }}/a8.env"
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+[[ "${1:-}" == "append" ]] || { echo "використання: a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка]" >&2; exit 1; }
+shift
+
+task_id="${1:?task_id}"; source_field="${2:?source}"; result="${3:?result}"
+duration="${4:?duration_s}"; model="${5:?model}"; note="${6:-}"
+
+# OQ-34 fail closed: задача без валідного `source` не виконується і не
+# журналюється як звичайна. Відсутність поля має бути помилкою, а не мовчазним
+# дефолтом «можна все» — саме так контроль не зникає при рефакторі.
+case "$source_field" in
+  human|external|derived) ;;
+  *) echo "a8-journal: невідомий source '$source_field' — fail closed (OQ-34)" >&2; exit 2 ;;
+esac
+
+jq -nc \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg task "$task_id" --arg src "$source_field" --arg res "$result" \
+  --arg dur "$duration" --arg model "$model" --arg note "$note" \
+  '{ts:$ts, task:$task, source:$src, result:$res, duration_s:($dur|tonumber), model:$model, note:$note}' \
+  >> "${A8_LOGS_DIR}/runs.log"

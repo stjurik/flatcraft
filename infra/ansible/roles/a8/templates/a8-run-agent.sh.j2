@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-run-agent — єдине місце, де описано, ЯК запускається контейнер агента.
+# Кожен прапорець нижче має протокол виміру; README §4 зводить їх у таблицю.
+#
+# Використання: a8-run-agent <worktree> [команда...]
+set -euo pipefail
+
+WORKTREE="${1:?потрібен шлях до worktree}"
+shift || true
+
+CONFIG="{{ a8_config_dir }}/a8.env"
+# shellcheck disable=SC1090
+[[ -r "$CONFIG" ]] && source "$CONFIG"
+
+# Запобіжники перевіряються ТУТ, а не лише в демоні: обгортка — останнє місце,
+# яке точно виконається перед стартом контейнера.
+/usr/local/bin/a8-guard check >&2
+
+# ro-монтування заборонених шляхів — за СПИСКОМ, виміряним у М-3-fix (PR #110),
+# а не `infra/**` цілком: `infra/discord` — workspace-пакет, і pnpm мусить
+# створити там node_modules (інакше ENOENT на symlink). Для infra/discord
+# лишається лише deny-правило.
+#
+# Монтуємо лише шляхи, що існують: для відсутнього шляху docker сам створив би
+# теку на хості від root, тобто змінив би робоче дерево побічним ефектом.
+RO_ARGS=()
+for base in "{{ a8_repo_dir }}" "$WORKTREE"; do
+  for rel in {{ a8_ro_paths | join(' ') }}; do
+    [[ -e "$base/$rel" ]] && RO_ARGS+=(-v "$base/$rel:$base/$rel:ro")
+  done
+done
+
+exec docker run --rm \
+  --user {{ a8_container_uid }}:{{ a8_container_gid }} \
+  `# вимір №6 §4 п.1: UID контейнера = власник репо, інакше git 128 dubious ownership` \
+  -v "{{ a8_repo_dir }}:{{ a8_repo_dir }}" \
+  -v "$WORKTREE:$WORKTREE" \
+  -v "{{ a8_container_home }}:{{ a8_container_home }}" \
+  "${RO_ARGS[@]}" \
+  -e UV_PYTHON="{{ a8_python_version }}" \
+  `# М-3: node:22 несе CPython 3.14, а cadquery-ocp має wheels лише cp312/cp313 —` \
+  `# uv sync на дефолтному інтерпретаторі падає. UV_PYTHON пінить вибір uv.` \
+  -e HOME="{{ a8_container_home }}" \
+  `# вимір №6 §4 п.2: $HOME мусить бути записуваним, інакше pnpm падає на corepack` \
+  -e GIT_AUTHOR_NAME="{{ a8_git_author_name }}" \
+  -e GIT_AUTHOR_EMAIL="{{ a8_git_author_email }}" \
+  -e GIT_COMMITTER_NAME="{{ a8_git_author_name }}" \
+  -e GIT_COMMITTER_EMAIL="{{ a8_git_author_email }}" \
+  `# вимір №6 §4 п.3: без явної identity commit падає 128` \
+  -e GIT_TERMINAL_PROMPT=0 \
+  `# вимір №7: підстраховка. Несуча конструкція — ВІДСУТНІСТЬ -t нижче:` \
+  `# з псевдотерміналом push зависає (exit 124), без нього падає одразу (128).` \
+  `# Прапорця -t тут немає і не має з'явитися.` \
+  -e PATH="{{ a8_repo_dir }}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  `# вимір №7: без node_modules/.bin у PATH pre-commit — тихий no-op:` \
+  `# хук виконується, lefthook не знаходиться, коміт проходить із exit 0.` \
+  -w "$WORKTREE" \
+  "{{ a8_container_image }}" "$@"

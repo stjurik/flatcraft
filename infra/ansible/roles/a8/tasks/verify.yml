@@ -1,0 +1,415 @@
+---
+# Доказова частина ролі. Запускається окремо:
+#   ansible-playbook a8.yml -i inventory.a8.ini --tags verify
+#
+# ЩО ЦЕЙ ФАЙЛ ДОВОДИТЬ І ЧОГО НЕ ДОВОДИТЬ — див. README §5. Коротко: тут
+# переважно СТАН; ПОВЕДІНКУ міряють V5 (запобіжники справді відмовляють), V8c
+# (журнал) і V6, V7, V10, V12, V13, які запускають справжній контейнер. Зелений
+# verify не означає, що демон коректно бере задачу і віддає PR — такого демона
+# ще немає.
+
+# ─── V1. Користувач: без sudo, у групі docker ──────────────────────────────
+- name: V1a — collect agent user groups
+  ansible.builtin.command: "id -nG {{ a8_agent_user }}"
+  register: a8_v_groups
+  changed_when: false
+
+- name: V1c — ask sudo itself what agent may run
+  # Група — не єдиний шлях до sudo: правило в /etc/sudoers або sudoers.d дає
+  # права без членства в `sudo`. Питаємо сам sudo, а не список груп.
+  ansible.builtin.command: "sudo -n -l -U {{ a8_agent_user }}"
+  register: a8_v_sudo
+  changed_when: false
+  failed_when: false
+
+- name: V1b — agent is in docker group and NOT in sudo
+  ansible.builtin.assert:
+    that:
+      - "'docker' in a8_v_groups.stdout.split()"
+      - "'sudo' not in a8_v_groups.stdout.split()"
+      - "'is not allowed to run sudo' in a8_v_sudo.stdout"
+    fail_msg: >-
+      Групи {{ a8_agent_user }}: {{ a8_v_groups.stdout }}.
+      Очікується docker (docs/19 §B.1 — усвідомлений компроміс) і відсутність sudo.
+    success_msg: "Групи: {{ a8_v_groups.stdout }} — docker є, sudo немає"
+    quiet: true
+
+# ─── V2. Розкладка тек ─────────────────────────────────────────────────────
+- name: V2a — stat working directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: a8_v_dirs
+  loop:
+    - "{{ a8_repo_dir }}"
+    - "{{ a8_worktrees_dir }}"
+    - "{{ a8_logs_dir }}"
+    - "{{ a8_queue_dir }}"
+    - "{{ a8_container_home }}"
+
+- name: V2b — directories exist and belong to the agent
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - item.stat.pw_name == a8_agent_user
+    fail_msg: "{{ item.item }}: exists={{ item.stat.exists | default(false) }}, owner={{ item.stat.pw_name | default('?') }}"
+    quiet: true
+  loop: "{{ a8_v_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# ─── V3. Довіра Claude Code — саме на КОРІНЬ клону ─────────────────────────
+- name: V3a — read Claude Code config
+  ansible.builtin.slurp:
+    src: "{{ a8_agent_home }}/.claude.json"
+  register: a8_v_claude
+  failed_when: false
+
+- name: V3b — main clone is marked trusted
+  # Перевіряємо ключ саме кореня клону: виміряно (PR #110), що запис для теки
+  # worktree не діє взагалі, тож «є якийсь запис» — недостатнє твердження.
+  ansible.builtin.assert:
+    that:
+      - a8_v_claude.content is defined
+      - ((a8_v_claude.content | b64decode | from_json).projects | default({}))[a8_repo_dir] is defined
+      - ((a8_v_claude.content | b64decode | from_json).projects[a8_repo_dir].hasTrustDialogAccepted | default(false)) | bool
+    fail_msg: >-
+      У {{ a8_agent_home }}/.claude.json немає hasTrustDialogAccepted=true для {{ a8_repo_dir }}.
+      Наслідок: allow-список буде мовчки відкинуто рядком «this workspace has not been trusted».
+    quiet: true
+
+# ─── V4. Kill switch: механізм є, файла немає ──────────────────────────────
+- name: V4a — stat guard script and kill switch
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: a8_v_guard
+  loop:
+    - /usr/local/bin/a8-guard
+    - "{{ a8_config_dir }}/a8.env"
+    - "{{ a8_kill_switch_path }}"
+
+- name: V4b — guard exists, kill switch absent
+  ansible.builtin.assert:
+    that:
+      - a8_v_guard.results[0].stat.exists and a8_v_guard.results[0].stat.executable
+      - a8_v_guard.results[1].stat.exists
+      - not a8_v_guard.results[2].stat.exists
+    fail_msg: >-
+      guard={{ a8_v_guard.results[0].stat.exists }}, config={{ a8_v_guard.results[1].stat.exists }},
+      kill switch присутній={{ a8_v_guard.results[2].stat.exists }} (має бути false — інакше черга стоїть).
+    quiet: true
+
+# ─── V5. Guard справді відмовляє — поведінкова перевірка ───────────────────
+- name: V5a — run guard with a simulated kill switch
+  # Не просто «скрипт існує», а «скрипт РОБИТЬ те, заради чого існує»:
+  # підкладаємо kill switch у тимчасовий конфіг і чекаємо на код 10.
+  ansible.builtin.shell: |
+    set -o pipefail
+    tmp=$(mktemp -d)
+    touch "$tmp/STOP"
+    sed "s|^A8_KILL_SWITCH=.*|A8_KILL_SWITCH=$tmp/STOP|" {{ a8_config_dir }}/a8.env > "$tmp/a8.env"
+    sed "s|{{ a8_config_dir }}/a8.env|$tmp/a8.env|" /usr/local/bin/a8-guard > "$tmp/guard"
+    chmod +x "$tmp/guard"
+    "$tmp/guard" check >/dev/null 2>&1
+    echo "exit=$?"
+    rm -rf "$tmp"
+  register: a8_v_guard_behaviour
+  changed_when: false
+
+- name: V5b — guard returns 10 when the kill switch is present
+  ansible.builtin.assert:
+    that:
+      - "'exit=10' in a8_v_guard_behaviour.stdout"
+    fail_msg: "a8-guard при наявному kill switch повернув {{ a8_v_guard_behaviour.stdout }}, очікувалось exit=10"
+    success_msg: "a8-guard відмовляє при kill switch (exit=10)"
+    quiet: true
+
+# ─── V5c/V5d. Два інших запобіжники теж мусять СПРАЦЬОВУВАТИ ───────────────
+# Додано після рев'ю: V4 доводив лише наявність конфіга, тож денний ліміт і
+# пауза після трьох падінь могли бути зламані при зеленому verify. Запобіжник,
+# який ніхто не перевіряє на спрацювання, — це той самий клас «код + тест,
+# 0 викликів у пайплайні», проти якого написаний CLAUDE.md §0 п.6.
+- name: V5c — run guard against an exhausted daily limit
+  ansible.builtin.shell: |
+    set -o pipefail
+    tmp=$(mktemp -d); mkdir -p "$tmp/logs"
+    sed -e "s|^A8_KILL_SWITCH=.*|A8_KILL_SWITCH=$tmp/NOPE|" \
+        -e "s|^A8_LOGS_DIR=.*|A8_LOGS_DIR=$tmp/logs|" \
+        -e "s|^A8_DAILY_TASK_LIMIT=.*|A8_DAILY_TASK_LIMIT=2|" \
+        {{ a8_config_dir }}/a8.env > "$tmp/a8.env"
+    echo 2 > "$tmp/logs/counter-$(date -u +%Y-%m-%d)"
+    sed "s|{{ a8_config_dir }}/a8.env|$tmp/a8.env|" /usr/local/bin/a8-guard > "$tmp/guard"
+    chmod +x "$tmp/guard"; "$tmp/guard" check >/dev/null 2>&1; echo "limit_exit=$?"
+    printf 'failed\nfailed\nfailed\n' > "$tmp/logs/last-results"
+    echo 0 > "$tmp/logs/counter-$(date -u +%Y-%m-%d)"
+    "$tmp/guard" check >/dev/null 2>&1; echo "fail_exit=$?"
+    printf 'failed\nfailed\nok\n' > "$tmp/logs/last-results"
+    "$tmp/guard" check >/dev/null 2>&1; echo "recovered_exit=$?"
+    rm -rf "$tmp"
+  register: a8_v_guard_limits
+  changed_when: false
+
+- name: V5d — daily limit returns 11, three failures return 12, recovery returns 0
+  # Третій рядок — контроль: без нього перевірка не відрізняє «спрацював на
+  # трьох падіннях» від «завжди відмовляє».
+  ansible.builtin.assert:
+    that:
+      - "'limit_exit=11' in a8_v_guard_limits.stdout"
+      - "'fail_exit=12' in a8_v_guard_limits.stdout"
+      - "'recovered_exit=0' in a8_v_guard_limits.stdout"
+    fail_msg: "a8-guard: {{ a8_v_guard_limits.stdout | replace('\n', ' ') }}"
+    success_msg: "a8-guard: ліміт → 11, три падіння → 12, після успіху → 0"
+    quiet: true
+
+# ─── V6. Контейнер стартує під правильним UID і з записуваним $HOME ────────
+- name: V6a — run container through the wrapper
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    bash -c 'id -u; echo HOME=$HOME;
+    touch "$HOME/.a8probe" && echo HOME_WRITABLE && rm -f "$HOME/.a8probe";
+    test -t 0 && echo TTY || echo NO_TTY;
+    test -S /var/run/docker.sock && echo DOCKER_SOCK || echo NO_DOCKER_SOCK'
+  register: a8_v_container
+  changed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V6b — UID matches the repo owner, HOME writable, no TTY
+  # Три виміряні вимоги одним прогоном. NO_TTY — не косметика: саме
+  # псевдотермінал дає push зависнути замість впасти (вимір №7, B3 → exit 124).
+  ansible.builtin.assert:
+    that:
+      - a8_v_container.stdout_lines[0] | int == a8_container_uid
+      - "'HOME_WRITABLE' in a8_v_container.stdout"
+      - "'NO_TTY' in a8_v_container.stdout"
+      # Група docker на хості = root (docs/19 §B.1). Ця межа тримається, доки
+      # сокет docker НЕ змонтовано в контейнер: процес зі знятими підтвердженнями
+      # не повинен мати шляху до root на хості. README §4-bis.
+      - "'NO_DOCKER_SOCK' in a8_v_container.stdout"
+    fail_msg: "Вивід контейнера: {{ a8_v_container.stdout }}"
+    success_msg: "UID={{ a8_container_uid }}, HOME записуваний, термінала немає, docker-сокета немає"
+    quiet: true
+
+# ─── V7. git у контейнері працює на запис у worktree ───────────────────────
+- name: V7a — git status inside the container
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    git -C {{ a8_repo_dir }} status --porcelain
+  register: a8_v_git
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V7b — git does not fail with dubious ownership
+  # Саме ця сигнатура вбивала прогони М-3 (вимір №6 §3.3). Перевіряємо не
+  # «git є», а «git не відмовляє через невідповідність UID».
+  ansible.builtin.assert:
+    that:
+      - a8_v_git.rc == 0
+      - "'dubious ownership' not in (a8_v_git.stderr | default(''))"
+    fail_msg: "git у контейнері: rc={{ a8_v_git.rc }}, stderr={{ a8_v_git.stderr | default('') }}"
+    quiet: true
+
+- name: V7c — resolve git identity inside the container
+  # Додано після рев'ю: `git status` НЕ потребує identity, тож V7b залишався б
+  # зеленим і після того, як з обгортки прибрали GIT_AUTHOR_*. `git var
+  # GIT_AUTHOR_IDENT` натомість друкує саме той ident, з яким піде коміт.
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    git -C {{ a8_repo_dir }} var GIT_AUTHOR_IDENT
+  register: a8_v_ident
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V7d — identity is the one the wrapper passes, not an auto-detected guess
+  ansible.builtin.assert:
+    that:
+      - a8_v_ident.rc == 0
+      - a8_git_author_email in a8_v_ident.stdout
+    fail_msg: >-
+      git var GIT_AUTHOR_IDENT → rc={{ a8_v_ident.rc }}, '{{ a8_v_ident.stdout }}'.
+      Очікувався {{ a8_git_author_email }}. Без явної identity commit падає 128
+      'unable to auto-detect email address' (вимір №6 §3.1 крок 6).
+    quiet: true
+
+# ─── V8. Swap і ліміт логів docker ─────────────────────────────────────────
+- name: V8a — collect swap, swappiness and docker config
+  ansible.builtin.command: "{{ item }}"
+  register: a8_v_sys
+  changed_when: false
+  loop:
+    - swapon --show=NAME,SIZE --noheadings
+    - cat /etc/docker/daemon.json
+    - sysctl -n vm.swappiness
+
+- name: V8b — swap active, swappiness lowered, docker log rotation configured
+  # swappiness додано після рев'ю: без нього assertion зеленів на активному
+  # swap із дефолтними 60, тобто доводив половину вимоги.
+  ansible.builtin.assert:
+    that:
+      - a8_v_sys.results[0].stdout | length > 0
+      - "'max-size' in a8_v_sys.results[1].stdout"
+      - "'live-restore' in a8_v_sys.results[1].stdout"
+      - a8_v_sys.results[2].stdout | trim | int == 10
+    fail_msg: >-
+      swap='{{ a8_v_sys.results[0].stdout }}', swappiness={{ a8_v_sys.results[2].stdout | trim }};
+      daemon.json без max-size або без live-restore (останнє означало б, що шаблон зняв
+      наявну опцію — регресія).
+    quiet: true
+
+# ─── V8c/V8d. Журнал: поля і fail closed з OQ-34 ──────────────────────────
+- name: V8c — exercise the run journal
+  # Додано після рев'ю: V2 доводив лише наявність теки, тож формат журналу і
+  # fail-closed на полі `source` могли зламатись при зеленому verify. Пишемо в
+  # тимчасову теку, не в робочий журнал.
+  ansible.builtin.shell: |
+    set -o pipefail
+    tmp=$(mktemp -d); mkdir -p "$tmp/logs"
+    sed "s|^A8_LOGS_DIR=.*|A8_LOGS_DIR=$tmp/logs|" {{ a8_config_dir }}/a8.env > "$tmp/a8.env"
+    sed "s|{{ a8_config_dir }}/a8.env|$tmp/a8.env|" /usr/local/bin/a8-journal > "$tmp/journal"
+    chmod +x "$tmp/journal"
+    "$tmp/journal" append t1 human ok 42 opus "probe" >/dev/null 2>&1; echo "good_exit=$?"
+    "$tmp/journal" append t2 whatever ok 42 opus >/dev/null 2>&1; echo "bad_source_exit=$?"
+    echo "lines=$(wc -l < "$tmp/logs/runs.log")"
+    echo "fields=$(jq -r '[.ts,.task,.source,.result,.duration_s,.model] | length' "$tmp/logs/runs.log" | head -1)"
+    rm -rf "$tmp"
+  register: a8_v_journal
+  changed_when: false
+
+- name: V8d — journal writes six fields and fails closed on an unknown source
+  ansible.builtin.assert:
+    that:
+      - "'good_exit=0' in a8_v_journal.stdout"
+      - "'bad_source_exit=2' in a8_v_journal.stdout"
+      - "'lines=1' in a8_v_journal.stdout" # відхилений запис НЕ потрапив у журнал
+      - "'fields=6' in a8_v_journal.stdout"
+    fail_msg: "a8-journal: {{ a8_v_journal.stdout | replace('\n', ' ') }}"
+    success_msg: "a8-journal: валідний запис пройшов, source='whatever' відхилено (exit 2, OQ-34 fail closed)"
+    quiet: true
+
+# ─── V9. Egress-allowlist ──────────────────────────────────────────────────
+- name: V9a — inspect ipset and timer
+  # Третій блок — DNS-сервери, до яких реально ходить контейнер. Без них у наборі
+  # примус відрізав би резолв повністю (виміряно на A8: /etc/resolv.conf — лише
+  # стаб 127.0.0.53, контейнер отримує 192.168.1.1 з файлу systemd-resolved).
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipset list -n 2>/dev/null | grep -qx '{{ a8_egress_ipset }}' && echo SET_PRESENT || echo SET_MISSING
+    systemctl is-enabled a8-egress-refresh.timer 2>/dev/null || true
+    grep -E '^nameserver [0-9.]+$' /run/systemd/resolve/resolv.conf 2>/dev/null | awk '{print $2}' |
+      while read -r ip; do
+        ipset test '{{ a8_egress_ipset }}' "$ip" 2>/dev/null && echo "DNS_IN_SET $ip" || echo "DNS_MISSING $ip"
+      done
+  register: a8_v_egress
+  changed_when: false
+  when: a8_egress_enabled
+
+- name: V9b — allowlist set exists, refresh timer is enabled, container DNS is allowed
+  ansible.builtin.assert:
+    that:
+      - "'SET_PRESENT' in a8_v_egress.stdout"
+      - "'enabled' in a8_v_egress.stdout"
+      - "'DNS_IN_SET' in a8_v_egress.stdout"
+      - "'DNS_MISSING' not in a8_v_egress.stdout"
+    fail_msg: "ipset/таймер/DNS: {{ a8_v_egress.stdout | replace('\n', ' ') }}"
+    quiet: true
+  when: a8_egress_enabled
+
+- name: V9c — report that enforcement is off by default
+  ansible.builtin.debug:
+    msg: >-
+      ПРИМУС egress ВИМКНЕНО (a8_egress_enforce=false). Набір адрес наповнюється і його
+      видно, але DROP усього іншого не застосовано. Це не дефект verify — це дефолт
+      ролі: вмикати фільтр наосліп означає ризикнути тим, що демон тихо втратить
+      мережу. Порядок увімкнення — README §6.
+  when: a8_egress_enabled and not a8_egress_enforce
+
+# ─── V10. lefthook досяжний у PATH контейнера ──────────────────────────────
+- name: V10a — resolve lefthook inside the container
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    bash -lc 'command -v lefthook'
+  register: a8_v_lefthook
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V10b — lefthook is on PATH
+  # Вимір №7: без цього pre-commit — ТИХИЙ no-op (хук виконується, бінарника
+  # немає, коміт проходить з exit 0). МЕЖА: перевірка доводить досяжність
+  # бінарника, а НЕ те, що хук блокує поганий коміт — це потребує мутації репо
+  # і робиться на рівні демона, не тут (README §5).
+  ansible.builtin.assert:
+    that:
+      - a8_v_lefthook.rc == 0
+      - a8_v_lefthook.stdout | length > 0
+    fail_msg: >-
+      lefthook не знайдено в PATH контейнера (rc={{ a8_v_lefthook.rc }}).
+      Наслідок: pre-commit у контейнері не перевіряє ні ESLint, ні tsc, ні prettier, ні ruff,
+      і виглядає це як робочий захист. Чи виконано `pnpm install` у {{ a8_repo_dir }}?
+    quiet: true
+
+# ─── V12. Заборонені шляхи змонтовані read-only — і записуваний контроль ────
+- name: V12a — try to write into read-only and writable paths inside the container
+  # Поведінка, не наявність прапорця в скрипті: пробуємо писати. Контроль —
+  # запис у $HOME контейнера мусить пройти, інакше «EROFS скрізь» не
+  # відрізнялось би від «зламаного монтування взагалі».
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    bash -c 'for p in {{ a8_ro_paths | join(" ") }}; do
+    [ -e "{{ a8_repo_dir }}/$p" ] || { echo "ABSENT $p"; continue; };
+    if touch "{{ a8_repo_dir }}/$p/.a8probe" 2>/dev/null; then rm -f "{{ a8_repo_dir }}/$p/.a8probe"; echo "WRITABLE $p"; else echo "RO $p"; fi;
+    done;
+    touch "$HOME/.a8probe" && rm -f "$HOME/.a8probe" && echo CONTROL_WRITABLE'
+  register: a8_v_ro
+  changed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V12b — every forbidden path is read-only, control path is writable
+  ansible.builtin.assert:
+    that:
+      - "'WRITABLE ' not in a8_v_ro.stdout"
+      - "'RO ' in a8_v_ro.stdout"
+      - "'CONTROL_WRITABLE' in a8_v_ro.stdout"
+    fail_msg: "Монтування в контейнері: {{ a8_v_ro.stdout | replace('\n', ' ') }}"
+    success_msg: "{{ a8_v_ro.stdout | replace('\n', ' ') }}"
+    quiet: true
+
+# ─── V13. Python для uv запінено ───────────────────────────────────────────
+- name: V13a — read UV_PYTHON inside the container
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }} printenv UV_PYTHON
+  register: a8_v_uvpy
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V13b — uv will pick the pinned Python
+  # МЕЖА: доводить, що пін ДОХОДИТЬ до контейнера, а не що `uv sync` проходить —
+  # uv в образі node:22 не встановлений роллю, і повний sync — задача демона.
+  ansible.builtin.assert:
+    that:
+      - a8_v_uvpy.stdout | trim == a8_python_version
+    fail_msg: "UV_PYTHON у контейнері = '{{ a8_v_uvpy.stdout | trim }}', очікувалось {{ a8_python_version }} (М-3: на 3.14 uv sync падає)"
+    quiet: true
+
+# ─── V11. Креденшал на push — стан називається вголос ──────────────────────
+- name: V11 — report push credential state
+  ansible.builtin.debug:
+    msg: >-
+      {% if a8_push_credential_kind == 'none' %}
+      КРЕДЕНШАЛА НА PUSH НЕМАЄ (a8_push_credential_kind=none). Демон зможе робити
+      worktree, commit, fetch, rebase — і НЕ зможе віддати результат: push впаде 128
+      на автентифікації (вимір №7). Це не дефект ролі: створення креденшала —
+      незворотна дія в акаунті yurii, питання класу A, issue #78.
+      {% else %}
+      Креденшал типу {{ a8_push_credential_kind }} встановлено. Нагадування з виміру №7:
+      branch protection на main має enforce_admins=false, тож токен, що діє іменем
+      адміністратора, обходить PR, апрув і всі 10 required checks.
+      {% endif %}

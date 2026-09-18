@@ -1,0 +1,29 @@
+---
+# Playbook для A8 — машини автономної розробки (ADR-039, docs/19).
+#
+# ЧОМУ ОКРЕМИЙ PLAYBOOK, А НЕ РОЛЬ У site.yml. Три причини, кожна самостійна:
+#
+#   1. `site.yml` має `hosts: staging`. A8 у цю групу не входить і не має входити:
+#      це не сервер застосунку, а машина, що виконує агентів.
+#   2. `site.yml` тягне `vars_files: group_vars/all.vault.yml` — зашифрований файл
+#      з prod-секретами (R2-ключі, GHCR-токен, Postgres-пароль). Vault
+#      розшифровується НА ДЕПЛОЙ-СТАНЦІЇ, не на цілі, тож сама A8 пароля не
+#      потребує — але кожен прогін ролі A8 вимагав би його ВВЕДЕННЯ, і секрети
+#      потрапляли б у play, якому вони не потрібні. Найменші привілеї: A8-прогін
+#      не має бачити prod-креденшалів, бо інваріант docs/19 §7 п.1 саме про це.
+#   3. Ролі `site.yml` (`flatcraft`, `backups`, `monitoring`) на A8 не мають сенсу
+#      і частина з них зламала б машину.
+#
+# Застосування:
+#   ansible-playbook a8.yml -i inventory.a8.ini --check --diff   # сухий прогін
+#   ansible-playbook a8.yml -i inventory.a8.ini                  # застосувати
+#   ansible-playbook a8.yml -i inventory.a8.ini --tags verify    # довести результат
+#   ansible-playbook a8.yml --syntax-check                       # без інвентаря
+
+- name: Configure A8 autonomous development environment
+  hosts: a8
+  become: true
+
+  roles:
+    - role: a8
+      tags: [a8]
