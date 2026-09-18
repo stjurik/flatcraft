@@ -1,0 +1,73 @@
+---
+# Роль a8 — усі змінні тут, у defaults, а не в group_vars.
+# Причина: group_vars/all.yml належить play'ю staging і тягне за собою vault
+# (див. коментар у a8.yml). A8 має бути описана самодостатньо.
+
+# ─── Користувач і розкладка ────────────────────────────────────────────────
+a8_agent_user: agent
+a8_agent_home: /home/agent
+a8_repo_dir: /home/agent/hart # головний клон; ключ довіри Claude Code — саме він
+a8_worktrees_dir: /home/agent/hart-wt # worktree на задачу (ADR-039 §2)
+a8_logs_dir: /home/agent/agent-logs # журнал прогонів (ADR-039 §8)
+a8_queue_dir: /home/agent/agent-queue # черга задач на диску (ADR-039 §3)
+a8_container_home: /home/agent/container-home # записуваний $HOME для контейнера
+
+# ─── Запобіжники (docs/19 §7 п.5 — існують ДО першого прогону) ─────────────
+a8_kill_switch_path: /home/agent/STOP
+a8_daily_task_limit: 12
+a8_consecutive_failure_limit: 3
+a8_config_dir: /etc/a8
+
+# ─── Контейнер агента ──────────────────────────────────────────────────────
+a8_container_image: node:22
+a8_container_uid: 1002 # МУСИТЬ дорівнювати власнику a8_repo_dir (вимір №6)
+a8_container_gid: 1002
+a8_python_version: "3.12" # uv sync падає на 3.14 (М-3, PR #110)
+# Шляхи (відносно кореня клону і worktree), змонтовані в контейнер read-only.
+# Список виміряний у М-3-fix (PR #110): 5 шляхів → EROFS, pnpm/uv/vitest 0 помилок ФС.
+# infra/discord сюди НЕ входить навмисно — workspace-пакет, pnpm пише туди node_modules.
+a8_ro_paths:
+  - infra/ansible
+  - infra/compose
+  - infra/docker
+  - .github
+  - packages/db/src/migrations
+a8_git_author_name: "hart agent"
+a8_git_author_email: "agent@hart.local"
+
+# ─── Egress-allowlist ──────────────────────────────────────────────────────
+# Два прапорці, а не один — свідомо. Наповнення ipset безпечне саме по собі
+# (нічого не блокує), тому вмикається одразу; ПРИМУС (DROP усього іншого)
+# вимкнений, доки yurii не перевірить його на живому прогоні за README §6.
+# Увімкнути примус наосліп означало б ризикнути тим, що демон тихо втратить
+# мережу, а виглядатиме це як зависання задачі.
+a8_egress_enabled: true
+a8_egress_enforce: false
+a8_egress_bridge: docker0
+a8_egress_ipset: a8_egress
+a8_egress_refresh_minutes: 30
+
+# Мінімальний список. Кожен рядок має причину — без неї домен сюди не потрапляє.
+a8_egress_domains:
+  - api.anthropic.com # виклик моделі; без нього агента немає
+  - statsig.anthropic.com # телеметрія Claude Code; без неї CLI стартує, але шумить
+  - github.com # git fetch/push по HTTPS
+  - api.github.com # gh: створення draft PR, читання стану
+  - codeload.github.com # tarball-и, які тягне gh/npm
+  - objects.githubusercontent.com # LFS і release-артефакти
+  - registry.npmjs.org # pnpm
+  - pypi.org # uv
+  - files.pythonhosted.org # колеса пакетів для uv
+  - generativelanguage.googleapis.com # agy/Gemini у ролі рев'юера
+
+# CIDR'и, які додаються без DNS-резолву.
+a8_egress_extra_cidrs: []
+
+# ─── Креденшал на push (вимір №7) ──────────────────────────────────────────
+# ДЕФОЛТ — ПОРОЖНЬО, І ЦЕ НАВМИСНО. Роль креденшал НЕ створює: це незворотна
+# дія в акаунті yurii (питання класу A, issue #78). Доки значення порожнє,
+# роль застосовується повністю, але задачі креденшала пропускає і verify.yml
+# каже про це вголос — замість тихо створити дірку.
+a8_push_credential_kind: none # none | deploy_key | token_file
+a8_push_deploy_key_src: "" # локальний шлях до приватного ключа
+a8_push_token_file_src: "" # локальний шлях до файла з токеном

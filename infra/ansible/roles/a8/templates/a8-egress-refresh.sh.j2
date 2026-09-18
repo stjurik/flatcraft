@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-egress-refresh — наповнює ipset {{ a8_egress_ipset }} адресами дозволених
+# доменів.
+#
+# ЧОМУ ЦЕ НАБЛИЖЕННЯ, І ЦЕ ТРЕБА ЗНАТИ. Allowlist осмислений у ДОМЕНАХ, а
+# iptables оперує АДРЕСАМИ. Наслідки, які з цього випливають і яких не усуває
+# жодна частота оновлення:
+#   1. CDN-адреса, видана між оновленнями, ще не в наборі — запит обірветься;
+#   2. два домени на одному CDN-IP не розрізняються: дозволивши один, ви
+#      дозволили обидва;
+#   3. DNS-резолв робить ЦЕЙ скрипт, а не контейнер, тому вони можуть отримати
+#      різні адреси того самого імені.
+# Тобто це межа наслідку, а не доменний фільтр. Доменний фільтр потребує
+# HTTPS-проксі — інша конструкція контейнера (README §6, опитування).
+set -euo pipefail
+
+SET="{{ a8_egress_ipset }}"
+TMP="${SET}_tmp"
+
+ipset create "$SET" hash:net -exist
+ipset create "$TMP" hash:net -exist
+ipset flush "$TMP"
+
+add() { ipset add "$TMP" "$1" -exist 2>/dev/null || true; }
+
+# 1. DNS-сервери, до яких ходить КОНТЕЙНЕР. БЕЗ ЦЬОГО ПАДАЄ ВСЕ: контейнер
+# спершу резолвить ім'я, і якщо DNS не дозволений, жоден дозволений домен
+# недосяжний за визначенням.
+#
+# Читати лише /etc/resolv.conf НЕ МОЖНА — і це виміряно, а не припущено. На A8
+# (2026-09-18) там стоїть лише стаб systemd-resolved `127.0.0.53`. Docker знає,
+# що loopback хоста з контейнера недосяжний, і підставляє контейнеру upstream'и
+# з /run/systemd/resolve/resolv.conf — там `192.168.1.1`. Перша версія скрипта
+# брала лише перший файл, тож при увімкненому примусі DNS-запити контейнера
+# відкидалися б правилом DROP. Тому читаємо обидва; V9 у verify.yml перевіряє,
+# що кожен IPv4-upstream справді потрапив у набір.
+for conf in /etc/resolv.conf /run/systemd/resolve/resolv.conf; do
+  [[ -r "$conf" ]] || continue
+  while read -r _ ip _; do
+    [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$ip" != 127.* ]] && add "$ip/32"
+  done < <(grep -E '^nameserver' "$conf" || true)
+done
+
+# 2. Домени зі списку ролі.
+{% for domain in a8_egress_domains %}
+while read -r ip; do add "$ip/32"; done < <(getent ahostsv4 "{{ domain }}" 2>/dev/null | awk '{print $1}' | sort -u)
+{% endfor %}
+
+# 3. Явні CIDR'и.
+{% for cidr in a8_egress_extra_cidrs %}
+add "{{ cidr }}"
+{% endfor %}
+
+# 4. Діапазони GitHub з їхнього ж meta-API (адреси git/api ротуються частіше,
+#    ніж інтервал таймера).
+if meta="$(curl -fsS --max-time 20 https://api.github.com/meta 2>/dev/null)"; then
+  for key in git api web; do
+    while read -r cidr; do
+      [[ "$cidr" == *:* ]] && continue   # IPv6 пропускаємо: набір hash:net тут IPv4
+      add "$cidr"
+    done < <(printf '%s' "$meta" | jq -r ".${key}[]?" 2>/dev/null || true)
+  done
+else
+  echo "a8-egress-refresh: api.github.com недоступний — лишаю попередній набір" >&2
+fi
+
+ipset swap "$TMP" "$SET"
+ipset destroy "$TMP" 2>/dev/null || true
+echo "a8-egress-refresh: у наборі $(ipset list "$SET" | grep -c '^[0-9]') записів"
+
+# 5. Повторне застосування правил примусу — лише якщо примус увімкнено.
+#
+# ЧОМУ ЦЕ ТУТ, А НЕ ОДИН РАЗ У РОЛІ. Правила вставляються `iptables -I` і НЕ
+# переживають нічого: ребут; `ufw reload`, який перечитує DOCKER-USER з
+# /etc/ufw/after.rules; і рестарт docker — бо на A8 стоїть ручний drop-in
+# docker.service.d/ufw-reload.conf, що після КОЖНОГО старту docker робить
+# `ufw reload`. Сама роль рестартує docker через handler, тобто без цього кроку
+# власноруч знімала б власний примус. Таймер повертає правила не пізніше ніж
+# за {{ a8_egress_refresh_minutes }} хв (і за 2 хв після завантаження). Це ВІКНО,
+# у якому егрес не фільтрується, — README §6 називає його вголос.
+{% if a8_egress_enforce %}
+/usr/local/bin/a8-egress-rules apply
+{% else %}
+echo "a8-egress-refresh: примус вимкнено (a8_egress_enforce=false), правила не застосовую"
+{% endif %}

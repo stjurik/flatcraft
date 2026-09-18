@@ -1,0 +1,312 @@
+### uname
+Linux a8 6.8.0-139-generic #139-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 03:52:05 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+### id agent runner
+uid=1002(agent) gid=1002(agent) groups=1002(agent),100(users),988(docker)
+uid=1001(runner) gid=1001(runner) groups=1001(runner),100(users),988(docker)
+### getent group docker
+docker:x:988:runner,agent
+### dpkg -l | wc
+1059
+### dpkg selections hash
+6f5a76f0d80f787ecfaa415aff079867  -
+### systemctl list-units --type=service --state=running
+containerd.service
+cron.service
+dbus.service
+docker.service
+fwupd.service
+getty@tty1.service
+ModemManager.service
+multipathd.service
+polkit.service
+rsyslog.service
+smartmontools.service
+ssh.service
+systemd-journald.service
+systemd-logind.service
+systemd-networkd.service
+systemd-resolved.service
+systemd-timesyncd.service
+systemd-udevd.service
+tailscaled.service
+udisks2.service
+unattended-upgrades.service
+upower.service
+user@1000.service
+wpa_supplicant.service
+### systemctl list-timers
+apport-autoreport.service
+apt-daily.service
+apt-daily-upgrade.service
+docker-prune.service
+dpkg-db-backup.service
+e2scrub_all.service
+fstrim.service
+fwupd-refresh.service
+logrotate.service
+man-db.service
+motd-news.service
+snapd.snap-repair.service
+sysstat-collect.service
+sysstat-summary.service
+systemd-tmpfiles-clean.service
+ua-timer.service
+update-notifier-download.service
+update-notifier-motd.service
+### docker images
+alpine:latest
+hello-world:latest
+nginx:latest
+node:22
+### docker ps -a
+### ls -la /home/agent
+total 192
+drwxr-x--- 12 agent agent  4096 Sep 18 13:26 .
+drwxr-xr-x  5 root  root   4096 Sep  7 13:24 ..
+-rw-r--r--  1 agent agent   220 Sep  7 13:24 .bash_logout
+-rw-r--r--  1 agent agent  3797 Sep  7 15:51 .bashrc
+drwxrwxr-x  7 agent agent  4096 Sep 16 11:06 .cache
+drwxrwxr-x  7 agent agent  4096 Sep 16 11:17 .claude
+-rw-------  1 agent agent 38502 Sep 16 11:18 .claude.json
+-rw-rw-r--  1 agent agent 38407 Sep 16 00:28 .claude.json.measure-bak
+-rw-------  1 agent agent 38338 Sep 16 00:27 .claude.json.pre-m1
+-rw-------  1 agent agent   109 Sep 15 21:30 .claude-oauth-token
+drwxrwxr-x  4 agent agent  4096 Sep  7 15:51 .config
+drwx------  4 agent agent  4096 Sep 15 11:46 .gemini
+drwxrwxr-x 12 agent agent  4096 Sep 16 11:06 hart
+drwxrwxr-x  2 agent agent  4096 Sep 16 11:23 hart-wt
+drwxrwxr-x  6 agent agent  4096 Sep 16 11:06 .local
+drwxrwxr-x  2 agent agent  4096 Sep 18 14:38 m7
+drwxrwxr-x  2 agent agent  4096 Sep 18 14:13 m7-home
+drwxrwxr-x  5 agent agent  4096 Sep  7 15:55 .npm
+-rw-------  1 agent agent    26 Sep 15 11:47 .npmrc
+-rw-r--r--  1 agent agent   833 Sep  7 15:51 .profile
+-rw-rw-r--  1 agent agent    26 Sep  7 15:51 .zshrc
+### ls -la /home/agent/hart-wt
+total 8
+drwxrwxr-x  2 agent agent 4096 Sep 16 11:23 .
+drwxr-x--- 12 agent agent 4096 Sep 18 13:26 ..
+### iptables-save
+*mangle
+:PREROUTING ACCEPT 
+:INPUT ACCEPT 
+:FORWARD ACCEPT 
+:OUTPUT ACCEPT 
+:POSTROUTING ACCEPT 
+-A PREROUTING -m conntrack --ctstate RELATED,ESTABLISHED -m connmark ! --mark 0x0/0xff0000 -j CONNMARK --restore-mark --nfmask 0xff0000 --ctmask 0xff0000
+-A OUTPUT -m conntrack --ctstate NEW -m mark ! --mark 0x0/0xff0000 -j CONNMARK --save-mark --nfmask 0xff0000 --ctmask 0xff0000
+COMMIT
+*raw
+:PREROUTING ACCEPT 
+:OUTPUT ACCEPT 
+COMMIT
+*filter
+:INPUT DROP 
+:FORWARD DROP 
+:OUTPUT ACCEPT 
+:DOCKER - 
+:DOCKER-BRIDGE - 
+:DOCKER-CT - 
+:DOCKER-FORWARD - 
+:DOCKER-INTERNAL - 
+:DOCKER-USER - 
+:ts-forward - 
+:ts-input - 
+:ufw-after-forward - 
+:ufw-after-input - 
+:ufw-after-logging-forward - 
+:ufw-after-logging-input - 
+:ufw-after-logging-output - 
+:ufw-after-output - 
+:ufw-before-forward - 
+:ufw-before-input - 
+:ufw-before-logging-forward - 
+:ufw-before-logging-input - 
+:ufw-before-logging-output - 
+:ufw-before-output - 
+:ufw-logging-allow - 
+:ufw-logging-deny - 
+:ufw-not-local - 
+:ufw-reject-forward - 
+:ufw-reject-input - 
+:ufw-reject-output - 
+:ufw-skip-to-policy-forward - 
+:ufw-skip-to-policy-input - 
+:ufw-skip-to-policy-output - 
+:ufw-track-forward - 
+:ufw-track-input - 
+:ufw-track-output - 
+:ufw-user-forward - 
+:ufw-user-input - 
+:ufw-user-limit - 
+:ufw-user-limit-accept - 
+:ufw-user-logging-forward - 
+:ufw-user-logging-input - 
+:ufw-user-logging-output - 
+:ufw-user-output - 
+-A INPUT -j ts-input
+-A INPUT -j ufw-before-logging-input
+-A INPUT -j ufw-before-input
+-A INPUT -j ufw-after-input
+-A INPUT -j ufw-after-logging-input
+-A INPUT -j ufw-reject-input
+-A INPUT -j ufw-track-input
+-A FORWARD -j DOCKER-USER
+-A FORWARD -j DOCKER-FORWARD
+-A FORWARD -j ts-forward
+-A FORWARD -j ufw-before-logging-forward
+-A FORWARD -j ufw-before-forward
+-A FORWARD -j ufw-after-forward
+-A FORWARD -j ufw-after-logging-forward
+-A FORWARD -j ufw-reject-forward
+-A FORWARD -j ufw-track-forward
+-A OUTPUT -j ufw-before-logging-output
+-A OUTPUT -j ufw-before-output
+-A OUTPUT -j ufw-after-output
+-A OUTPUT -j ufw-after-logging-output
+-A OUTPUT -j ufw-reject-output
+-A OUTPUT -j ufw-track-output
+-A DOCKER ! -i docker0 -o docker0 -j DROP
+-A DOCKER-BRIDGE -o docker0 -j DOCKER
+-A DOCKER-CT -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A DOCKER-FORWARD -j DOCKER-CT
+-A DOCKER-FORWARD -j DOCKER-INTERNAL
+-A DOCKER-FORWARD -j DOCKER-BRIDGE
+-A DOCKER-FORWARD -i docker0 -j ACCEPT
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+-A DOCKER-USER -i enp1s0 -j DROP
+-A DOCKER-USER -j RETURN
+-A ts-forward -i tailscale0 -j MARK --set-xmark 0x40000/0xff0000
+-A ts-forward -m mark --mark 0x40000/0xff0000 -j ACCEPT
+-A ts-forward -s 100.64.0.0/10 -o tailscale0 -j DROP
+-A ts-forward -o tailscale0 -j ACCEPT
+-A ts-input -s <tailnet-ip-a8>/32 -i lo -j ACCEPT
+-A ts-input -i tailscale0 -j ACCEPT
+-A ts-input -p udp -m udp --dport 41641 -j ACCEPT
+-A ts-input -s 100.115.92.0/23 ! -i tailscale0 -j RETURN
+-A ts-input -s 100.64.0.0/10 ! -i tailscale0 -j DROP
+-A ufw-after-input -p udp -m udp --dport 137 -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp -m udp --dport 138 -j ufw-skip-to-policy-input
+-A ufw-after-input -p tcp -m tcp --dport 139 -j ufw-skip-to-policy-input
+-A ufw-after-input -p tcp -m tcp --dport 445 -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp -m udp --dport 67 -j ufw-skip-to-policy-input
+-A ufw-after-input -p udp -m udp --dport 68 -j ufw-skip-to-policy-input
+-A ufw-after-input -m addrtype --dst-type BROADCAST -j ufw-skip-to-policy-input
+-A ufw-after-logging-forward -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW BLOCK] "
+-A ufw-after-logging-input -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW BLOCK] "
+-A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A ufw-before-forward -p icmp -m icmp --icmp-type 3 -j ACCEPT
+-A ufw-before-forward -p icmp -m icmp --icmp-type 11 -j ACCEPT
+-A ufw-before-forward -p icmp -m icmp --icmp-type 12 -j ACCEPT
+-A ufw-before-forward -p icmp -m icmp --icmp-type 8 -j ACCEPT
+-A ufw-before-forward -j ufw-user-forward
+-A ufw-before-input -i lo -j ACCEPT
+-A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A ufw-before-input -m conntrack --ctstate INVALID -j ufw-logging-deny
+-A ufw-before-input -m conntrack --ctstate INVALID -j DROP
+-A ufw-before-input -p icmp -m icmp --icmp-type 3 -j ACCEPT
+-A ufw-before-input -p icmp -m icmp --icmp-type 11 -j ACCEPT
+-A ufw-before-input -p icmp -m icmp --icmp-type 12 -j ACCEPT
+-A ufw-before-input -p icmp -m icmp --icmp-type 8 -j ACCEPT
+-A ufw-before-input -p udp -m udp --sport 67 --dport 68 -j ACCEPT
+-A ufw-before-input -j ufw-not-local
+-A ufw-before-input -d 224.0.0.251/32 -p udp -m udp --dport 5353 -j ACCEPT
+-A ufw-before-input -d 239.255.255.250/32 -p udp -m udp --dport 1900 -j ACCEPT
+-A ufw-before-input -j ufw-user-input
+-A ufw-before-output -o lo -j ACCEPT
+-A ufw-before-output -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A ufw-before-output -j ufw-user-output
+-A ufw-logging-allow -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW ALLOW] "
+-A ufw-logging-deny -m conntrack --ctstate INVALID -m limit --limit 3/min --limit-burst 10 -j RETURN
+-A ufw-logging-deny -m limit --limit 3/min --limit-burst 10 -j LOG --log-prefix "[UFW BLOCK] "
+-A ufw-not-local -m addrtype --dst-type LOCAL -j RETURN
+-A ufw-not-local -m addrtype --dst-type MULTICAST -j RETURN
+-A ufw-not-local -m addrtype --dst-type BROADCAST -j RETURN
+-A ufw-not-local -m limit --limit 3/min --limit-burst 10 -j ufw-logging-deny
+-A ufw-not-local -j DROP
+-A ufw-skip-to-policy-forward -j DROP
+-A ufw-skip-to-policy-input -j DROP
+-A ufw-skip-to-policy-output -j ACCEPT
+-A ufw-track-output -p tcp -m conntrack --ctstate NEW -j ACCEPT
+-A ufw-track-output -p udp -m conntrack --ctstate NEW -j ACCEPT
+-A ufw-user-input -i tailscale0 -j ACCEPT
+-A ufw-user-input -s 192.168.1.0/24 -p tcp -m tcp --dport 22 -j ACCEPT
+-A ufw-user-limit -m limit --limit 3/min -j LOG --log-prefix "[UFW LIMIT BLOCK] "
+-A ufw-user-limit -j REJECT --reject-with icmp-port-unreachable
+-A ufw-user-limit-accept -j ACCEPT
+COMMIT
+*nat
+:PREROUTING ACCEPT 
+:INPUT ACCEPT 
+:OUTPUT ACCEPT 
+:POSTROUTING ACCEPT 
+:DOCKER - 
+:ts-postrouting - 
+-A PREROUTING -m addrtype --dst-type LOCAL -j DOCKER
+-A OUTPUT ! -d 127.0.0.0/8 -m addrtype --dst-type LOCAL -j DOCKER
+-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+-A POSTROUTING -j ts-postrouting
+-A ts-postrouting -m mark --mark 0x40000/0xff0000 -j MASQUERADE
+COMMIT
+### ufw status
+Status: active
+
+To                         Action      From
+--                         ------      ----
+Anywhere on tailscale0     ALLOW       Anywhere                   # tailnet
+22/tcp                     ALLOW       192.168.1.0/24             # SSH from LAN
+Anywhere (v6) on tailscale0 ALLOW       Anywhere (v6)              # tailnet
+
+### crontab agent
+no crontab for agent
+### crontab yurii
+no crontab for yurii
+### ls /etc/systemd/system
+cloud-config.target.wants
+cloud-final.service.wants
+cloud-init.target.wants
+dbus-fi.w1.wpa_supplicant1.service
+dbus-org.freedesktop.ModemManager1.service
+dbus-org.freedesktop.resolve1.service
+dbus-org.freedesktop.thermald.service
+dbus-org.freedesktop.timesync1.service
+default.target
+display-manager.service.wants
+docker-prune.service
+docker-prune.timer
+docker.service.d
+emergency.target.wants
+final.target.wants
+getty.target.wants
+graphical.target.wants
+hibernate.target
+hibernate.target.wants
+hybrid-sleep.target
+hybrid-sleep.target.wants
+iscsi.service
+mdmonitor.service.wants
+multi-user.target.wants
+network-online.target.wants
+oem-config.service.wants
+open-vm-tools.service.requires
+paths.target.wants
+rescue.target.wants
+sleep.target
+sleep.target.wants
+smartd.service
+sockets.target.wants
+ssh.service.requires
+suspend.target
+suspend.target.wants
+suspend-then-hibernate.target.wants
+sysinit.target.wants
+syslog.service
+sysstat.service.wants
+timers.target.wants
+vmtoolsd.service
+### ls /home/agent/m7
+total 20
+drwxrwxr-x  2 agent agent 4096 Sep 18 14:38 .
+drwxr-x--- 12 agent agent 4096 Sep 18 13:26 ..
+-rw-rw-r--  1 agent agent 3928 Sep 18 14:38 probe-cell2.sh
+-rw-rw-r--  1 agent agent 5665 Sep 18 13:26 probe.sh

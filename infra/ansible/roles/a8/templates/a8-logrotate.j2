@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+{{ a8_logs_dir }}/*.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+    su {{ a8_agent_user }} {{ a8_agent_user }}
+}

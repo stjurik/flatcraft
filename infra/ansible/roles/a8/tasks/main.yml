@@ -1,0 +1,345 @@
+---
+# Роль a8 — середовище автономної розробки на домашній машині A8.
+#
+# МЕЖА РОЛІ. Вона налаштовує СЕРЕДОВИЩЕ, у якому демон-оркестратор зможе
+# працювати, і не містить самого демона: systemd-юніт оркестратора, прев'ю на
+# тунелі, auto-merge і self-hosted runner — окремі кроки (docs/19 §6, ADR-040
+# «спроєктовано, НЕ побудовано»). Роль готує запобіжники ДО того, як з'явиться
+# те, що їх потребує — саме такий порядок вимагає docs/19 §7 п.5.
+#
+# ЧОГО РОЛЬ СВІДОМО НЕ ЧІПАЄ: sshd і ufw. Помилка в будь-якому з них на
+# headless-машині без консолі коштує втрати доступу, а виграш нульовий — обидва
+# вже налаштовані вручну з чекпоінтом (docs/19 §B.2, §B.3). Автоматизувати їх
+# варто окремим прогоном, у якому є фізичний доступ до машини.
+
+# ─── 0. Передумови: краще впасти зрозуміло, ніж налаштувати не ту машину ────
+- name: Assert target is Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+    fail_msg: >-
+      Роль a8 розрахована на Ubuntu (виміряно на 24.04, kernel 6.8).
+      Виявлено: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+    quiet: true
+
+- name: Assert push credential configuration is coherent
+  ansible.builtin.assert:
+    that:
+      - a8_push_credential_kind in ['none', 'deploy_key', 'token_file']
+      - a8_push_credential_kind != 'deploy_key' or a8_push_deploy_key_src | length > 0
+      - a8_push_credential_kind != 'token_file' or a8_push_token_file_src | length > 0
+    fail_msg: >-
+      a8_push_credential_kind={{ a8_push_credential_kind }}, але джерело не задане.
+      Роль креденшалів НЕ створює (питання класу A, issue #78) — вкажіть шлях до
+      вже створеного ключа/токена або лишіть kind=none.
+    quiet: true
+
+# ─── 1. Пакети, без яких решта ролі не працює ──────────────────────────────
+- name: Install packages required by the agent environment
+  ansible.builtin.apt:
+    name:
+      - ipset # egress-allowlist: набір адрес для iptables
+      - iptables
+      - jq # читання черги і журналу в скриптах
+      - git
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ─── 2. Користувач agent: без sudo, але в групі docker ─────────────────────
+# Це не недогляд, а зафіксоване рішення docs/19 §B.1: «Членство в групі docker
+# фактично дорівнює root на хості. Це усвідомлений компроміс: альтернатива
+# (rootless docker) додає клас проблем із мережею й монтуванням, який ви
+# діагностуватимете тижнями. Компенсація — жодних prod-креденшалів на машині».
+# Роль виконує це рішення і НЕ переглядає його: перехід на rootless docker або
+# вилучення agent із групи змінює контракт ADR-039 §2 і є питанням класу A.
+- name: Ensure agent user exists without sudo
+  ansible.builtin.user:
+    name: "{{ a8_agent_user }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Ensure agent user is in the docker group
+  ansible.builtin.user:
+    name: "{{ a8_agent_user }}"
+    groups: docker
+    append: true
+
+- name: Ensure agent user has no sudoers entry
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ a8_agent_user }}"
+    state: absent
+
+# ─── 3. Розкладка тек ──────────────────────────────────────────────────────
+- name: Create agent working directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0755"
+  loop:
+    - "{{ a8_worktrees_dir }}"
+    - "{{ a8_logs_dir }}"
+    - "{{ a8_queue_dir }}"
+    - "{{ a8_container_home }}" # вимір №6 §4 п.2: $HOME мусить бути записуваним
+
+- name: Create role config directory
+  ansible.builtin.file:
+    path: "{{ a8_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ─── 4. Swap і swappiness (docs/19 §B.5) ───────────────────────────────────
+- name: Check if swap file exists
+  ansible.builtin.stat:
+    path: /swapfile
+  register: a8_swap_stat
+
+- name: Create swap file
+  # Чому 8 GB: пік однієї сесії — 1748 МБ (М-4), плюс контейнери прев'ю і
+  # Playwright. 6876 МБ RAM на A8 без swap дає OOM під час паралельних задач.
+  ansible.builtin.command: "fallocate -l 8G /swapfile"
+  args:
+    creates: /swapfile
+  when: not a8_swap_stat.stat.exists
+
+- name: Set swap file permissions
+  ansible.builtin.file:
+    path: /swapfile
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Initialize swap area
+  ansible.builtin.command: mkswap /swapfile
+  when: not a8_swap_stat.stat.exists
+  changed_when: true
+
+- name: Enable swap
+  ansible.builtin.command: swapon /swapfile
+  when: not a8_swap_stat.stat.exists
+  changed_when: true
+
+- name: Persist swap in fstab
+  ansible.posix.mount:
+    name: none
+    src: /swapfile
+    fstype: swap
+    opts: sw
+    state: present
+
+- name: Lower swappiness
+  # sysctl_file — той самий, що в docs/19 §B.5 (`/etc/sysctl.d/99-swap.conf`).
+  # Дефолт модуля (`/etc/sysctl.conf`) створив би ДРУГЕ джерело істини для
+  # одного параметра, і наступний читач не знав би, яке з них діє.
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "10"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-swap.conf
+    sysctl_set: true
+    reload: true
+
+# ─── 5. Docker: ліміт логів (docs/19 §C.2) ─────────────────────────────────
+- name: Configure docker daemon options
+  # ⚠️ Шаблон містить ПОВНИЙ вміст daemon.json, включно з live-restore і
+  # builder.gc, які вже стоять на машині. Якби тут був лише log-opts, застосування
+  # ролі МОВЧКИ зняло б обидва — класична регресія «шаблон переписав чуже».
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+# ─── 6. Довіра Claude Code — один запис на КОРІНЬ КЛОНУ ────────────────────
+# Виміряно (PR #110, чотири прогони): Claude Code визначає проєкт за коренем
+# головного репозиторію, а не за cwd. Тому запис для теки worktree не діє
+# взагалі, а один запис для кореня покриває всі worktree, включно зі створеними
+# поза деревом клону.
+#
+# Чому не викликаємо tools/scripts/measure-trust.sh: його власний заголовок
+# каже «`set`/`unset` існують РІВНО для прогонів C і D виміру М-1 … Це НЕ
+# реалізація OQ-22(б) — там потрібен крок у демоні й роль Ansible». Ось цей крок.
+- name: Install trust helper
+  ansible.builtin.template:
+    src: a8-trust.py.j2
+    dest: /usr/local/bin/a8-trust
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mark the main clone as trusted
+  # changed_when за ВИВОДОМ, а не за кодом виходу: скрипт навмисно не пише
+  # нічого, коли прапорець уже стоїть, і мовчазне «changed» тут було б
+  # неправдою про стан машини.
+  # rc=3 (MISSING) не валить прогін: відсутність ~/.claude.json означає, що
+  # Claude Code на A8 ще не запускався. Це стан, який називає verify (V3), а не
+  # привід зупинити налаштування решти середовища.
+  ansible.builtin.command: "/usr/local/bin/a8-trust {{ a8_repo_dir }}"
+  register: a8_trust
+  changed_when: "'CHANGED' in a8_trust.stdout"
+  failed_when: a8_trust.rc not in [0, 3]
+  when: not ansible_check_mode
+
+# ─── 7. Запобіжники: kill switch, денний ліміт, пауза після падінь ─────────
+- name: Install guard configuration
+  ansible.builtin.template:
+    src: a8.env.j2
+    dest: "{{ a8_config_dir }}/a8.env"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install guard script
+  # Це той механізм, який демон зобов'язаний викликати ПЕРЕД кожною задачею.
+  # Він існує раніше за демона навмисно: запобіжник, доданий після першого
+  # прогону, не захищає перший прогін (docs/19 §7 п.5).
+  ansible.builtin.template:
+    src: a8-guard.sh.j2
+    dest: /usr/local/bin/a8-guard
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install run-journal helper
+  ansible.builtin.template:
+    src: a8-journal.sh.j2
+    dest: /usr/local/bin/a8-journal
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install logrotate policy for the run journal
+  ansible.builtin.template:
+    src: a8-logrotate.j2
+    dest: /etc/logrotate.d/a8
+    owner: root
+    group: root
+    mode: "0644"
+
+# ─── 8. Обгортка запуску контейнера — усі виміряні вимоги в одному місці ───
+- name: Install agent container runner
+  # Кожен прапорець усередині має протокол виміру; README §4 зводить їх у
+  # таблицю «вимога → рядок скрипта → вимір».
+  ansible.builtin.template:
+    src: a8-run-agent.sh.j2
+    dest: /usr/local/bin/a8-run-agent
+    owner: root
+    group: root
+    mode: "0755"
+
+# ─── 9. Egress-allowlist ───────────────────────────────────────────────────
+- name: Install egress refresh script
+  ansible.builtin.template:
+    src: a8-egress-refresh.sh.j2
+    dest: /usr/local/bin/a8-egress-refresh
+    owner: root
+    group: root
+    mode: "0755"
+  when: a8_egress_enabled
+
+- name: Install egress refresh service
+  ansible.builtin.template:
+    src: a8-egress-refresh.service.j2
+    dest: /etc/systemd/system/a8-egress-refresh.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: a8_egress_enabled
+  notify: Reload systemd
+
+- name: Install egress refresh timer
+  ansible.builtin.template:
+    src: a8-egress-refresh.timer.j2
+    dest: /etc/systemd/system/a8-egress-refresh.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: a8_egress_enabled
+  notify: Reload systemd
+
+- name: Enable egress refresh timer
+  # `not ansible_check_mode` — не косметика. У сухому прогоні юніт-файл фізично
+  # не пишеться, тож systemd його не бачить і задача падає:
+  # «Could not find the requested service a8-egress-refresh.timer». Знайдено
+  # оракулом §5 п.2 на першому ж прогоні. Альтернатива `check_mode: no`
+  # заборонена: вона вимикає сухий прогін, тобто РОБИТЬ запис там, де ми
+  # обіцяли лише подивитись.
+  # НАСЛІДОК, який треба знати: у --check стан таймера не перевіряється взагалі.
+  # Його доводить V9 у verify.yml, який ганяється після справжнього застосування.
+  ansible.builtin.systemd_service:
+    name: a8-egress-refresh.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - a8_egress_enabled
+    - not ansible_check_mode
+
+- name: Install egress enforcement script
+  # Правила лягають У ПОЗИЦІЮ, а не в кінець ланцюга: у DOCKER-USER першим стоїть
+  # stateful-RETURN (RELATED,ESTABLISHED), і вставка перед ним обрізала б
+  # зворотний трафік ВСІХ контейнерів. Виміряно 2026-09-18: rule 1 — RETURN
+  # ctstate, rule 2 — DROP -i enp1s0 з лічильником 0, rule 3 — RETURN.
+  ansible.builtin.template:
+    src: a8-egress-rules.sh.j2
+    dest: /usr/local/bin/a8-egress-rules
+    owner: root
+    group: root
+    mode: "0755"
+  when: a8_egress_enabled
+
+- name: Apply egress enforcement rules
+  ansible.builtin.command: /usr/local/bin/a8-egress-rules apply
+  register: a8_egress_apply
+  changed_when: "'CHANGED' in a8_egress_apply.stdout"
+  when:
+    - a8_egress_enabled
+    - a8_egress_enforce
+    - not ansible_check_mode
+
+- name: Remove egress enforcement rules when disabled
+  # Без цієї задачі прапорець a8_egress_enforce був би одностороннім: увімкнув,
+  # застосував, повернув на false — а правила DROP лишились би в ланцюзі назавжди,
+  # бо задача apply просто пропускається. Тобто роль перестала б описувати стан
+  # машини і почала описувати лише історію застосувань. Знайдено рев'юером
+  # (agy, виклик №2).
+  ansible.builtin.command: /usr/local/bin/a8-egress-rules remove
+  register: a8_egress_remove
+  changed_when: "'CHANGED' in a8_egress_remove.stdout"
+  when:
+    - a8_egress_enabled
+    - not a8_egress_enforce
+    - not ansible_check_mode
+
+# ─── 10. Креденшал на push — лише якщо його явно передали ──────────────────
+- name: Install push deploy key
+  ansible.builtin.copy:
+    src: "{{ a8_push_deploy_key_src }}"
+    dest: "{{ a8_agent_home }}/.ssh/id_push"
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0600"
+  when: a8_push_credential_kind == 'deploy_key'
+
+- name: Install push token file
+  ansible.builtin.copy:
+    src: "{{ a8_push_token_file_src }}"
+    dest: "{{ a8_config_dir }}/push-token"
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0600"
+  when: a8_push_credential_kind == 'token_file'
+
+# ─── 11. Доказова частина — окремим тегом, не при кожному застосуванні ─────
+- name: Run verification assertions
+  ansible.builtin.include_tasks: verify.yml
+  tags: [verify, never]

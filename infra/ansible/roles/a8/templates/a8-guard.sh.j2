@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-guard — запобіжники автономного прогону. Демон зобов'язаний викликати
+# `a8-guard check` ПЕРЕД тим, як узяти задачу з черги, і зупинитись при exit != 0.
+#
+# ЧОМУ ЦЕ ІСНУЄ ДО ДЕМОНА. docs/19 §7 п.5: «Kill switch і денний ліміт існують
+# ДО першого автономного прогону, а не після». Запобіжник, доданий після першої
+# ночі, першої ночі не захищає.
+#
+# ЧОГО ЦЕЙ СКРИПТ НЕ РОБИТЬ: він не зупиняє демона сам. Він дає код виходу і
+# рядок причини. Примус — за тим, хто його викликає; скрипт, який убиває чужі
+# процеси, страшніший за проблему, яку розв'язує.
+#
+# Коди виходу:
+#   0 — можна брати задачу
+#   10 — kill switch на місці
+#   11 — вичерпано денний ліміт задач
+#   12 — {{ a8_consecutive_failure_limit }} падінь поспіль, черга на паузі
+set -uo pipefail
+
+CONFIG="{{ a8_config_dir }}/a8.env"
+[[ -r "$CONFIG" ]] || {
+  echo "a8-guard: немає $CONFIG — відмовляю (fail closed)" >&2
+  exit 1
+}
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+TODAY="$(date -u +%Y-%m-%d)"
+COUNTER="${A8_LOGS_DIR}/counter-${TODAY}"
+STATE="${A8_LOGS_DIR}/last-results"
+
+case "${1:-check}" in
+check)
+  if [[ -e "$A8_KILL_SWITCH" ]]; then
+    echo "STOP: kill switch $A8_KILL_SWITCH на місці"
+    exit 10
+  fi
+
+  local_count=0
+  [[ -r "$COUNTER" ]] && local_count="$(cat "$COUNTER")"
+  if ((local_count >= A8_DAILY_TASK_LIMIT)); then
+    echo "STOP: денний ліміт вичерпано ($local_count/$A8_DAILY_TASK_LIMIT за $TODAY)"
+    exit 11
+  fi
+
+  # Три падіння поспіль читаються з хвоста журналу результатів, а не з
+  # лічильника: лічильник можна обнулити випадково, хвіст — ні.
+  #
+  # Нормалізація перед tail — не педантизм. Порожній рядок у кінці файлу,
+  # `\r` від DOS-переносу або пробіл після слова зробили б `grep '^failed$'`
+  # хибно-негативним, тобто черга продовжила б працювати після трьох падінь.
+  # Запобіжник, що мовчки не спрацьовує, гірший за відсутній. Знайдено
+  # рев'юером (agy, виклик №2).
+  if [[ -r "$STATE" ]]; then
+    tail_n="$(tr -d '\r' <"$STATE" | sed 's/[[:space:]]*$//' | grep -v '^$' |
+      tail -n "$A8_CONSECUTIVE_FAILURE_LIMIT" | grep -c '^failed$' || true)"
+    if ((tail_n >= A8_CONSECUTIVE_FAILURE_LIMIT)); then
+      echo "STOP: $tail_n падінь поспіль — черга на паузі, потрібне втручання"
+      exit 12
+    fi
+  fi
+
+  echo "OK: задач сьогодні $local_count/$A8_DAILY_TASK_LIMIT, падінь поспіль 0"
+  ;;
+
+count)
+  # Викликається демоном ПІСЛЯ того, як задачу взято.
+  local_count=0
+  [[ -r "$COUNTER" ]] && local_count="$(cat "$COUNTER")"
+  echo $((local_count + 1)) >"$COUNTER"
+  ;;
+
+record)
+  # a8-guard record <ok|failed>
+  result="${2:?потрібен результат: ok|failed}"
+  case "$result" in
+  ok | failed) echo "$result" >>"$STATE" ;;
+  *)
+    echo "a8-guard: невідомий результат '$result'" >&2
+    exit 1
+    ;;
+  esac
+  ;;
+
+*)
+  echo "використання: a8-guard {check|count|record <ok|failed>}" >&2
+  exit 1
+  ;;
+esac
