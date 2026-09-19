@@ -23,7 +23,10 @@ a8_config_dir: /etc/a8
 # Тег несе версії: зміна версії = новий тег = нова збірка, старий лишається.
 a8_claude_code_version: "2.1.272" # виміряна на A8 (PR #110); звірено 2026-09-19
 a8_uv_version: "0.12.17"
-a8_agent_image: "hart-agent:cc{{ a8_claude_code_version }}-uv{{ a8_uv_version }}"
+# Мусить збігатися з `packageManager` у package.json і PNPM_VERSION у ci.yml:
+# розбіжність означала б, що агент збирає не те, що потім перевіряє CI.
+a8_pnpm_version: "9.12.0"
+a8_agent_image: "hart-agent:cc{{ a8_claude_code_version }}-uv{{ a8_uv_version }}-pnpm{{ a8_pnpm_version }}"
 # Відкат на голий образ — один рядок: `a8_container_image: node:22`. Тоді демон
 # не зможе запустити агента (у node:22 немає claude), решта ролі працює.
 a8_container_image: "{{ a8_agent_image }}"

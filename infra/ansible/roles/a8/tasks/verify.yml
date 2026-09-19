@@ -489,21 +489,27 @@
     quiet: true
 
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
-- name: V15a — ask the container for claude and uv versions
+- name: V15a — ask the container for claude, uv and pnpm versions
+  # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
+  # тіку падає, і падає оманливо: entrypoint node:22 підставляє `node` перед
+  # невідомою командою, тож `pnpm install` стає `node pnpm install`, а node
+  # шукає файл `pnpm` у робочій теці. Перший тік на A8 (2026-09-19, задача
+  # log-pr116) дав саме це: Cannot find module '…/hart-wt/log-pr116/pnpm'.
+  # Тут воно ловиться до задачі, а не задачею.
   ansible.builtin.command:
     argv:
       - /usr/local/bin/a8-run-agent
       - "{{ a8_repo_dir }}"
       - bash
       - -c
-      - claude --version; uv --version
+      - claude --version; uv --version; pnpm --version
   register: a8_v_image
   changed_when: false
   failed_when: false
   become: true
   become_user: "{{ a8_agent_user }}"
 
-- name: V15b — container runs the pinned claude-code and uv
+- name: V15b — container runs the pinned claude-code, uv and pnpm
   # Доводить, що демону є ЧИМ запускати агента. Не доводить, що агент
   # автентифікується: токен і мережа — окрема перевірка першого ручного тіку.
   ansible.builtin.assert:
@@ -511,6 +517,7 @@
       - a8_v_image.rc == 0
       - a8_claude_code_version in a8_v_image.stdout
       - a8_uv_version in a8_v_image.stdout
+      - a8_pnpm_version in a8_v_image.stdout
     fail_msg: "Контейнер {{ a8_container_image }}: rc={{ a8_v_image.rc }}, '{{ a8_v_image.stdout }} {{ a8_v_image.stderr }}'"
     quiet: true
 

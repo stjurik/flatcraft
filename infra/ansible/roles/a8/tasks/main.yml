@@ -370,6 +370,7 @@
     docker build
     --build-arg CLAUDE_CODE_VERSION={{ a8_claude_code_version }}
     --build-arg UV_VERSION={{ a8_uv_version }}
+    --build-arg PNPM_VERSION={{ a8_pnpm_version }}
     -t {{ a8_agent_image }} {{ a8_config_dir }}/image
   when:
     - not ansible_check_mode
