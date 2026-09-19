@@ -107,6 +107,37 @@ if [[ -d "$TASKS" ]]; then
   done < <(grep -rn -E 'a8-run-agent' "$TASKS" || true)
 fi
 
+# Інваріант 4 — у зонді, що йде в контейнер, немає shell-змінних.
+#
+# ЧОМУ. `$HOME` у зонді V6a розкривався десь між Ansible і `docker run`: під
+# `agent` виходило `/home/agent` замість `/home/agent/container-home`, і зонд
+# падав, хоча середовище було справне. Перехід на `argv:` цього НЕ виправив
+# (2026-09-19, PR #120) — три незалежні виміри показали, що контейнер, bash і
+# тека в порядку, ламався лише текст зонда. Висновок: не з'ясовувати, який шар
+# винен, а не пускати змінну в текст узагалі. Потрібне значення вже знає
+# Ansible — підставляй його Jinja-літералом; потрібне значення знає лише
+# контейнер — читай його `printenv`, без `$`.
+#
+# Інваріант 3 цього не ловив: він перевіряє ФОРМУ виклику, а не вміст зонда.
+# Вікно — від рядка з `a8-run-agent` до `register:`, яким тут закінчується
+# кожна така задача.
+if [[ -d "$TASKS" ]]; then
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("shell-змінна в зонді до контейнера (значення може не доїхати): $hit")
+  done < <(
+    {
+      find "$TASKS" -name '*.yml' -print0 2>/dev/null |
+        xargs -0 awk '
+          /^- name:/                        { inprobe = 0 }
+          /a8-run-agent/ && $0 !~ /^[[:space:]]*#/ { inprobe = 1; next }
+          inprobe && /^[[:space:]]*register:/ { inprobe = 0 }
+          inprobe && /\$/ && $0 !~ /^[[:space:]]*#/ { print FILENAME ":" FNR ":" $0 }
+        ' 2>/dev/null || true
+    }
+  )
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -117,4 +148,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних"

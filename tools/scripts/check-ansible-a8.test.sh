@@ -71,7 +71,7 @@ TASKS_OK='---
       - /home/agent/hart
       - bash
       - -c
-      - echo "$HOME"'
+      - printenv HOME'
 
 # Тест 1 — здорове дерево → 0.
 make_tree "$tmproot/ok" "$PLAY_OK" "$TASKS_OK"
@@ -110,6 +110,53 @@ make_tree "$tmproot/argv" "$PLAY_OK" '---
     /usr/local/bin/a8-run-agent /home/agent/hart
     bash -c "echo $HOME"'
 assert_exit "a8-run-agent без argv → 1" 1 "$tmproot/argv"
+
+# Тест 6-bis — shell-змінна в зонді до контейнера (вада 4, реальна: $HOME
+# у V6a давав /home/agent замість /home/agent/container-home).
+make_tree "$tmproot/dollar" "$PLAY_OK" '---
+- name: probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - bash
+      - -c
+      - echo "HOME=$HOME"
+  register: probe_out'
+assert_exit "shell-змінна в зонді → 1" 1 "$tmproot/dollar"
+
+# Тест 6-ter — той самий зонд без змінної: значення читається printenv,
+# шлях підставляє Jinja. Має проходити.
+make_tree "$tmproot/nodollar" "$PLAY_OK" '---
+- name: probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - bash
+      - -c
+      - |
+        printenv HOME
+        touch "/home/agent/container-home/.a8probe"
+  register: probe_out'
+assert_exit "зонд без змінних → 0" 0 "$tmproot/nodollar"
+
+# Тест 6-quater — `$` ПІСЛЯ register: належить іншій задачі, не зонду.
+make_tree "$tmproot/after" "$PLAY_OK" '---
+- name: probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - printenv
+      - HOME
+  register: probe_out
+
+- name: host-side shell, змінні тут доречні
+  ansible.builtin.shell: |
+    tmp=$(mktemp -d)
+    rm -rf "$tmp"'
+assert_exit "змінна поза зондом → 0" 0 "$tmproot/after"
 
 # Тест 6 — згадка a8-run-agent у коментарі не є викликом.
 make_tree "$tmproot/cmt" "$PLAY_OK" '---
@@ -160,6 +207,25 @@ s = s.replace(
 open(p, 'w').write(s)
 PY
 assert_exit "мутація 3: зонд назад у рядкову форму → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
+
+# Мутація 4 — повертаємо в зонд shell-змінну, тобто рівно ту ваду, через яку
+# V6b падала 2026-09-19 при справному середовищі.
+python3 - "$mut/infra/ansible/roles/a8/tasks/verify.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+# Прив'язка саме до РЯДКА КОДУ, а не до першого входження підрядка:
+# `printenv HOME` згадується ще й у коментарі над зондом, і мутація без
+# відступу правила б коментар, лишаючи код цілим. Guard тоді законно мовчить,
+# а тест «проходить», доводячи лише власну присутність (docs/16 §8.1).
+anchor = "\n        printenv HOME\n"
+assert anchor in s, "фікстура застаріла: у зонді немає рядка `printenv HOME`"
+s = s.replace(anchor, '\n        echo "HOME=$HOME"\n', 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 4: shell-змінна назад у зонд → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
