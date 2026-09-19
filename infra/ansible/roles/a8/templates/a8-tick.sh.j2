@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-tick — ОДИН тік демона черги: узяти щонайбільше одну задачу, виконати,
+# записати, померти. Запускається таймером a8-tick.timer (вимкненим за
+# дефолтом) або руками: `sudo -u agent a8-tick`.
+#
+# ЧОМУ РАЗОВИЙ СКРИПТ, А НЕ ДОВГОЖИВУЧИЙ ПРОЦЕС. ADR-039 §3: стан живе в git і
+# черзі на диску, ніколи в пам'яті. Процес, що робить одну задачу і помирає,
+# порушити це не може за побудовою: усе, що він знає, він щоразу читає з диска,
+# а все, що вирішив, — пише туди ж ДО наступного кроку.
+#
+# ЛОГІКА РІШЕНЬ — у /usr/local/lib/a8/a8-tick-logic.sh (копія
+# tools/scripts/a8-tick-logic.sh, доведена в CI). Тут лише послідовність дій.
+# Запуск контейнера — лише через a8-run-agent, запобіжники — лише через
+# a8-guard: їхню логіку тут НЕ дублюємо.
+#
+# СТАН ЗАДАЧІ = ТЕКА, у якій лежить її файл:
+#   <queue>/*.json      — чекає (береться найстаріша за іменем)
+#   <queue>/running/    — узята; якщо тік помер, наступний тік знайде її тут
+#   <queue>/done/       — агент завершився ok (з push або no-credential)
+#   <queue>/failed/     — failed; причина — у журналі
+#   <queue>/rejected/   — запис невалідний; які саме поля — у журналі
+# Задача, зупинена запобіжником або 401, повертається в чергу: її не виконали.
+set -uo pipefail
+
+CONFIG="${A8_CONFIG:-{{ a8_config_dir }}/a8.env}"
+# shellcheck disable=SC1090
+source "$CONFIG" || { echo "a8-tick: немає $CONFIG — відмовляю" >&2; exit 1; }
+# Логіка запускається ОКРЕМИМ процесом: без export режим OQ-34 із конфігу до неї
+# не доходить, і налаштування ролі було б мертвим (a8-tick.test.sh, сценарій 3b).
+export A8_SOURCES_ALLOWED
+
+# Точки підміни — ЛИШЕ для тесту (tools/scripts/a8-tick.test.sh). systemd-юніт
+# їх не задає, тож на A8 завжди діють шляхи за замовчуванням.
+LOGIC="${A8_TICK_LOGIC:-/usr/local/lib/a8/a8-tick-logic.sh}"
+GUARD="${A8_GUARD:-/usr/local/bin/a8-guard}"
+RUNNER="${A8_RUNNER:-/usr/local/bin/a8-run-agent}"
+JOURNAL="${A8_JOURNAL:-/usr/local/bin/a8-journal}"
+DOCKER="${A8_DOCKER:-docker}"
+
+Q="$A8_QUEUE_DIR"
+mkdir -p "$Q/running" "$Q/done" "$Q/failed" "$Q/rejected" "$A8_LOGS_DIR/tasks"
+
+# Два тіки одночасно (таймер + ручний запуск) узяли б одну задачу двічі.
+exec 9>"$A8_LOGS_DIR/tick.lock"
+flock -n 9 || {
+  "$JOURNAL" event busy "інший тік ще працює"
+  exit 0
+}
+
+logic() { bash "$LOGIC" "$@"; }
+field() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$2"; }
+now() { date +%s; }
+
+# ─── 0. Сирота з попереднього тіку ─────────────────────────────────────────
+# Файл у running/ при вільному lock означає: попередній тік помер посеред
+# задачі (OOM, ребут, kill). Що встиг зробити агент — невідомо, тому це failed,
+# а не «повторити»: повтор міг би вдруге виконати вже зроблений побічний ефект.
+# Worktree і гілку НЕ видаляємо — вони доказ для людини.
+for orphan in "$Q"/running/*.json; do
+  [[ -e "$orphan" ]] || continue
+  oid="$(field id "$orphan")"
+  # Тік міг померти, поки агент працював: контейнер живе без нагляду. Ім'я
+  # детерміноване (a8-<id>), тож убити його можна й без пам'яті про запуск.
+  # Знайдено рев'юером (agy, рев'ю №1 демона).
+  [[ -n "$oid" ]] && "$DOCKER" kill "a8-$oid" >/dev/null 2>&1
+  "$GUARD" count >/dev/null
+  "$GUARD" record failed
+  "$JOURNAL" append "${oid:-unknown}" "$(field source "$orphan")" failed 0 "-" \
+    "попередній тік обірвався посеред задачі" \
+    exit_class=failed detail=orphan origin="$(field origin "$orphan")" \
+    oracle="$(field oracle "$orphan")" branch="ai/${oid}"
+  mv "$orphan" "$Q/failed/"
+done
+
+# ─── 1. Запобіжники ────────────────────────────────────────────────────────
+grc=0
+"$GUARD" check >/dev/null 2>&1 || grc=$?
+gstate="$(logic guard-state "$grc")"
+if [[ "$gstate" != ok ]]; then
+  # Стани не зливаємо: «пауза» і «ліміт» — різні причини, різні ліки.
+  "$JOURNAL" event "$gstate" "a8-guard check → $grc"
+  [[ "$gstate" == guard_error ]] && exit 1
+  exit 0
+fi
+
+# ─── 2. Найстаріша ВАЛІДНА задача ──────────────────────────────────────────
+task=""
+while IFS= read -r f; do
+  verdict="$(logic validate "$f")" && {
+    task="$f"
+    break
+  }
+  # Fail closed: невалідний запис не виконується і не лишається в черзі, щоб
+  # не відхилятись щотіку. Журнал називає САМЕ ТІ поля, що відхилили задачу.
+  "$JOURNAL" reject "$(basename "$f" .json)" "${verdict#reject }"
+  mv "$f" "$Q/rejected/"
+done < <(find "$Q" -maxdepth 1 -type f -name '*.json' | sort)
+
+[[ -n "$task" ]] || exit 0
+
+id="$(field id "$task")"
+src="$(field source "$task")"
+origin="$(field origin "$task")"
+oracle="$(field oracle "$task")"
+model="$(field model "$task")"
+model="${model:-$A8_DEFAULT_MODEL}"
+branch="ai/$id"
+wt="$A8_WORKTREES_DIR/$id"
+log="$A8_LOGS_DIR/tasks/$id.log"
+# Вивід САМОГО claude — окремо від логу тіку: класифікатор не має бачити
+# вивід git/pnpm/check-hook-loud (знайдено незалежним рев'ю №2 демона).
+out="$A8_LOGS_DIR/tasks/$id.claude.json"
+
+# Узяти = перенести. Від цієї миті задача існує лише в running/ — жоден інший
+# тік її вже не побачить у черзі.
+claimed="$Q/running/$(basename "$task")"
+mv "$task" "$claimed"
+started="$(now)"
+
+finish() { # finish <результат> <клас> <деталь> <куди>
+  "$JOURNAL" append "$id" "$src" "$1" "$(($(now) - started))" "$model" "" \
+    exit_class="$2" detail="$3" origin="$origin" oracle="$oracle" \
+    branch="$branch" worktree="$wt"
+  if [[ "$4" == queue ]]; then
+    mv "$claimed" "$Q/"
+  else
+    mv "$claimed" "$Q/$4/"
+  fi
+}
+
+# Повернути задачу в чергу можна, лише прибравши її порожню гілку і worktree:
+# інакше наступний тік побачить «гілка вже існує» і завалить задачу, яку ніхто
+# не виконував (знайдено незалежним рев'ю №2 демона). Гілку з комітами НЕ
+# чіпаємо — це чиясь робота; тоді задача йде у failed з поясненням.
+release_or_keep() {
+  if [[ "$(git -C "$A8_REPO_DIR" rev-list --count "origin/main..$branch" 2>/dev/null || echo 0)" == 0 ]]; then
+    git -C "$A8_REPO_DIR" worktree remove --force "$wt" >>"$log" 2>&1
+    git -C "$A8_REPO_DIR" branch -D "$branch" >>"$log" 2>&1
+    return 0
+  fi
+  return 1
+}
+
+fail_task() { # fail_task <деталь>
+  "$GUARD" record failed
+  finish failed failed "$1" failed
+  # Паузу ВИСТАВЛЯЄ сам запис `failed` у last-results: a8-guard читає той самий
+  # файл і на наступному тіку поверне 12. Тут лише фіксуємо в журналі, на
+  # якому саме падінні це сталося.
+  if logic should-pause "$A8_CONSECUTIVE_FAILURE_LIMIT" "$A8_LOGS_DIR/last-results" >/dev/null; then
+    "$JOURNAL" event paused "$A8_CONSECUTIVE_FAILURE_LIMIT failed поспіль — a8-guard далі повертатиме 12"
+  fi
+}
+
+# ─── 3. Свіжий worktree від origin/main ────────────────────────────────────
+if ! git -C "$A8_REPO_DIR" fetch --quiet origin main >>"$log" 2>&1; then
+  "$GUARD" count >/dev/null
+  fail_task "git fetch"
+  exit 0
+fi
+if git -C "$A8_REPO_DIR" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null || [[ -e "$wt" ]]; then
+  # Не перезаписуємо: наявна гілка з тим самим id — чиясь робота.
+  "$GUARD" count >/dev/null
+  fail_task "гілка $branch або $wt уже існує"
+  exit 0
+fi
+git -C "$A8_REPO_DIR" worktree add --quiet -b "$branch" "$wt" origin/main >>"$log" 2>&1
+# Merge-base guard: worktree мусить стояти рівно на origin/main.
+if [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git -C "$A8_REPO_DIR" rev-parse origin/main)" ]]; then
+  "$GUARD" count >/dev/null
+  fail_task "worktree не на origin/main"
+  exit 0
+fi
+
+# ─── 4. Залежності і гучний pre-commit ─────────────────────────────────────
+# Залежності — у worktree, бо node_modules і venv між worktree не шаруються
+# (той самий крок, що в tools/scripts/autorun.sh). Без них хук, навіть знайшовши
+# lefthook, запускав би ESLint/tsc/ruff, яких у worktree немає.
+if ! "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 ||
+  ! "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync' >>"$log" 2>&1; then
+  "$GUARD" count >/dev/null
+  fail_task "deps"
+  exit 0
+fi
+# Інакше лінт і типи в контейнері декоративні: хук друкує попередження і
+# пропускає коміт з кодом 0 (вимір №7; повторено на T470 у PR #116).
+if ! "$RUNNER" "$wt" bash tools/scripts/check-hook-loud.sh >>"$log" 2>&1; then
+  "$GUARD" count >/dev/null
+  fail_task "hooks-decorative"
+  exit 0
+fi
+
+# ─── 5. Агент — лише через a8-run-agent ────────────────────────────────────
+# Формулювання пише СУПЕРВІЗОР; текст задачі — дані в ньому (OQ-34 п.3).
+prompt="Працюй за CLAUDE.md §0.
+
+Оракул приймання цієї задачі: ${oracle}
+Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
+
+ЗАДАЧА:
+$(field prompt "$claimed")"
+
+export A8_CONTAINER_NAME="a8-$id"
+# Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
+CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
+export CLAUDE_CODE_OAUTH_TOKEN
+
+rc=0
+timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
+  --model "$model" \
+  --settings "$wt/.claude/settings.autonomous.json" \
+  --dangerously-skip-permissions \
+  --max-turns "$A8_MAX_TURNS" \
+  --output-format json >"$out" 2>&1 || rc=$?
+unset CLAUDE_CODE_OAUTH_TOKEN
+
+# `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент
+# працював би далі без нагляду, поки демон уже записав «failed timeout».
+[[ "$rc" == 124 ]] && "$DOCKER" kill "$A8_CONTAINER_NAME" >/dev/null 2>&1
+
+# Лічимо ПІСЛЯ запуску: a8-run-agent сам викликає `a8-guard check`, і лічильник,
+# збільшений до запуску, зупинив би останню дозволену задачу дня кодом 11.
+"$GUARD" count >/dev/null
+
+# ─── 6. Класифікація ───────────────────────────────────────────────────────
+read -r cls detail < <(logic classify "$rc" "$out")
+case "$cls" in
+  auth_stop)
+    # STOP усієї черги (ADR-039 §4): потрібен інтерактивний логін. Kill switch —
+    # той самий механізм, що в людини; зняти його — рішення людини.
+    printf '401 Invalid bearer token у задачі %s, %s. Потрібен claude setup-token.\n' \
+      "$id" "$(date -u +%FT%TZ)" >"$A8_KILL_SWITCH"
+    if release_or_keep; then
+      finish auth_stop auth_stop "$detail" queue
+    else
+      finish auth_stop auth_stop "$detail; гілка має коміти — не повертаю в чергу" failed
+    fi
+    exit 0
+    ;;
+  stopped)
+    if release_or_keep; then
+      finish stopped stopped "$detail" queue
+    else
+      finish stopped stopped "$detail; гілка має коміти — не повертаю в чергу" failed
+    fi
+    exit 0
+    ;;
+  failed)
+    fail_task "$detail"
+    exit 0
+    ;;
+  ok) ;;
+  *)
+    # FAIL CLOSED. Порожній або невідомий клас (класифікатор упав, файл логіки
+    # відсутній) — це падіння, а не «мабуть, успіх». Без цієї гілки порожній
+    # $cls проходив повз case і задача йшла на push і в done/. Знайдено
+    # рев'юером (agy, рев'ю №1 демона).
+    fail_task "classifier: '${cls:-}'"
+    exit 0
+    ;;
+esac
+
+# ok від моделі ще не означає, що є результат.
+if [[ "$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)" == 0 ]]; then
+  fail_task "no-commits"
+  exit 0
+fi
+
+# ─── 7. Push — лише якщо креденшал заданий ─────────────────────────────────
+case "$A8_PUSH_CREDENTIAL_KIND" in
+  none)
+    # Не «успіх»: результат є, але він нікуди не віддався (вимір №7).
+    "$GUARD" record ok
+    finish no-credential ok "push пропущено: креденшала немає" done
+    ;;
+  deploy_key)
+    if GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_push -o IdentitiesOnly=yes -o BatchMode=yes" \
+      git -C "$wt" push "$A8_PUSH_SSH_URL" "$branch:$branch" >>"$log" 2>&1; then
+      "$GUARD" record ok
+      finish ok ok pushed done
+    else
+      fail_task push
+    fi
+    ;;
+  token_file)
+    if GIT_ASKPASS=/usr/local/bin/a8-git-askpass GIT_TERMINAL_PROMPT=0 \
+      git -C "$wt" -c credential.helper= push origin "$branch:$branch" >>"$log" 2>&1; then
+      "$GUARD" record ok
+      finish ok ok pushed done
+    else
+      fail_task push
+    fi
+    ;;
+  *)
+    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"
+    ;;
+esac
+exit 0

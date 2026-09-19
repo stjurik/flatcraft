@@ -1,39 +1,85 @@
 #!/usr/bin/env bash
 # {{ ansible_managed }}
 #
-# a8-journal — один рядок JSON на прогін, поля з ADR-039 §8.
+# a8-journal — структурований журнал СУПЕРВІЗОРА, один JSON на рядок у
+# {{ a8_logs_dir }}/runs.log. Агент сам про себе сюди не пише.
 #
 # ЧОМУ ПОЛЯ ЗАДАНІ ДО ПЕРШОГО ПРОГОНУ. Телеметрію заднім числом не збирають:
 # якщо перші прогони пишуться без поля, воно назавжди порожнє саме для тих
 # прогонів, які найцікавіші (OQ-35).
 #
+# Звідки поля (цитуємо зміст, не номер):
+#   ADR-039, пункт 7 «Запобіжники»: «Журнал кожного прогону на диску: задача,
+#     гілка, worktree, модель, час, клас виходу, посилання на PR» → task,
+#     branch, worktree, model, ts/duration_s, exit_class, pr;
+#   ADR-039 §4 (класифікатор виходу) → exit_class і detail;
+#   ADR-039 §8, метрика «покриття оракулами» → oracle;
+#   OQ-34 → source (довіра); CLAUDE.md §0 «три джерела» → origin;
+#   інженерне рішення прогону → result (що сталося із задачею: ok, failed,
+#     no-credential, auth_stop, stopped) і note.
+# `pr` зарезервоване: PR створює воркфлоу, якого ще немає; демон пише гілку.
+#
 # Використання:
-#   a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка]
-#     source: human | external | derived   (OQ-34 — fail closed, див. нижче)
-#     result: ok | failed | stopped
+#   a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка] [ключ=значення ...]
+#     ключі: origin oracle branch worktree exit_class detail pr
+#   a8-journal reject <task_id> <причини через кому>   — ЯКІ поля відхилили задачу
+#   a8-journal event <стан> <пояснення>                — запобіжники, пауза, busy
 set -euo pipefail
 
-CONFIG="{{ a8_config_dir }}/a8.env"
+CONFIG="${A8_CONFIG:-{{ a8_config_dir }}/a8.env}"
 # shellcheck disable=SC1090
 source "$CONFIG"
+LOG="${A8_LOGS_DIR}/runs.log"
+ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-[[ "${1:-}" == "append" ]] || { echo "використання: a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка]" >&2; exit 1; }
-shift
+usage() {
+  echo "використання: a8-journal {append|reject|event} ..." >&2
+  exit 1
+}
 
-task_id="${1:?task_id}"; source_field="${2:?source}"; result="${3:?result}"
-duration="${4:?duration_s}"; model="${5:?model}"; note="${6:-}"
+case "${1:-}" in
+  append)
+    shift
+    task_id="${1:?task_id}"; source_field="${2:?source}"; result="${3:?result}"
+    duration="${4:?duration_s}"; model="${5:?model}"; note="${6:-}"
+    shift 5; (($# > 0)) && shift
 
-# OQ-34 fail closed: задача без валідного `source` не виконується і не
-# журналюється як звичайна. Відсутність поля має бути помилкою, а не мовчазним
-# дефолтом «можна все» — саме так контроль не зникає при рефакторі.
-case "$source_field" in
-  human|external|derived) ;;
-  *) echo "a8-journal: невідомий source '$source_field' — fail closed (OQ-34)" >&2; exit 2 ;;
+    # OQ-34 fail closed: запис без валідного `source` не журналюється як
+    # звичайний. Відсутність поля має бути помилкою, а не мовчазним дефолтом.
+    case "$source_field" in
+      human|external|derived) ;;
+      *) echo "a8-journal: невідомий source '$source_field' — fail closed (OQ-34)" >&2; exit 2 ;;
+    esac
+
+    extra='{}'
+    for kv in "$@"; do
+      key="${kv%%=*}"; val="${kv#*=}"
+      case "$key" in
+        origin|oracle|branch|worktree|exit_class|detail|pr) ;;
+        *) echo "a8-journal: невідоме поле '$key'" >&2; exit 2 ;;
+      esac
+      extra="$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$extra")"
+    done
+
+    jq -nc \
+      --arg ts "$(ts)" \
+      --arg task "$task_id" --arg src "$source_field" --arg res "$result" \
+      --arg dur "$duration" --arg model "$model" --arg note "$note" \
+      --argjson extra "$extra" \
+      '{ts:$ts, event:"run", task:$task, source:$src, result:$res,
+        duration_s:($dur|tonumber), model:$model, note:$note} + $extra' >>"$LOG"
+    ;;
+  reject)
+    # Два fail closed — два різні «ні»: поле `fields` перелічує КОЖНЕ поле,
+    # що не пройшло, у вигляді <поле>:<причина> (source:not-allowed, oracle:missing…).
+    task_id="${2:?task_id}"; reasons="${3:?причини}"
+    jq -nc --arg ts "$(ts)" --arg task "$task_id" --arg r "$reasons" \
+      '{ts:$ts, event:"reject", task:$task, result:"rejected", fields:($r|split(","))}' >>"$LOG"
+    ;;
+  event)
+    state="${2:?стан}"; detail="${3:-}"
+    jq -nc --arg ts "$(ts)" --arg s "$state" --arg d "$detail" \
+      '{ts:$ts, event:$s, detail:$d}' >>"$LOG"
+    ;;
+  *) usage ;;
 esac
-
-jq -nc \
-  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg task "$task_id" --arg src "$source_field" --arg res "$result" \
-  --arg dur "$duration" --arg model "$model" --arg note "$note" \
-  '{ts:$ts, task:$task, source:$src, result:$res, duration_s:($dur|tonumber), model:$model, note:$note}' \
-  >> "${A8_LOGS_DIR}/runs.log"

@@ -273,7 +273,9 @@
     chmod +x "$tmp/journal"
     "$tmp/journal" append t1 human ok 42 opus "probe" >/dev/null 2>&1; echo "good_exit=$?"
     "$tmp/journal" append t2 whatever ok 42 opus >/dev/null 2>&1; echo "bad_source_exit=$?"
-    echo "lines=$(wc -l < "$tmp/logs/runs.log")"
+    "$tmp/journal" reject t3 "source:missing,oracle:missing" >/dev/null 2>&1
+    echo "reject_fields=$(jq -c 'select(.event=="reject") | .fields' "$tmp/logs/runs.log")"
+    echo "lines=$(grep -c '"event":"run"' "$tmp/logs/runs.log")"
     echo "fields=$(jq -r '[.ts,.task,.source,.result,.duration_s,.model] | length' "$tmp/logs/runs.log" | head -1)"
     rm -rf "$tmp"
   register: a8_v_journal
@@ -286,6 +288,8 @@
       - "'bad_source_exit=2' in a8_v_journal.stdout"
       - "'lines=1' in a8_v_journal.stdout" # відхилений запис НЕ потрапив у журнал
       - "'fields=6' in a8_v_journal.stdout"
+      # Два fail closed — два різні «ні»: запис відмови називає КОЖНЕ поле.
+      - '''reject_fields=["source:missing","oracle:missing"]'' in a8_v_journal.stdout'
     fail_msg: "a8-journal: {{ a8_v_journal.stdout | replace('\n', ' ') }}"
     success_msg: "a8-journal: валідний запис пройшов, source='whatever' відхилено (exit 2, OQ-34 fail closed)"
     quiet: true
@@ -397,6 +401,103 @@
     that:
       - a8_v_uvpy.stdout | trim == a8_python_version
     fail_msg: "UV_PYTHON у контейнері = '{{ a8_v_uvpy.stdout | trim }}', очікувалось {{ a8_python_version }} (М-3: на 3.14 uv sync падає)"
+    quiet: true
+
+# ─── V14. Демон черги: встановлено те, що доведено в CI, таймер як у змінній ─
+- name: V14a — checksum of the installed decision logic
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/a8-tick-logic.sh
+    checksum_algorithm: sha256
+  register: a8_v_logic
+
+- name: V14b — checksum of the decision logic in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/a8-tick-logic.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_logic_repo
+
+- name: V14c — tick installed, timer state matches a8_tick_timer_enabled
+  ansible.builtin.shell: |
+    set -o pipefail
+    test -x /usr/local/bin/a8-tick && echo TICK_PRESENT || echo TICK_MISSING
+    systemctl is-enabled a8-tick.timer 2>/dev/null || true
+  register: a8_v_tick
+  changed_when: false
+
+- name: V14d — logic on A8 is byte-identical to the tested copy; timer as configured
+  # Контрольна сума — не формальність: тест у CI доводить файл із репозиторію.
+  # Якщо на A8 лежить інша копія, зелений CI нічого не каже про те, що працює.
+  ansible.builtin.assert:
+    that:
+      - a8_v_logic.stat.exists
+      - a8_v_logic.stat.checksum == a8_v_logic_repo.stat.checksum
+      - "'TICK_PRESENT' in a8_v_tick.stdout"
+      - "('enabled' in a8_v_tick.stdout_lines) == (a8_tick_timer_enabled | bool)"
+    fail_msg: >-
+      logic sha256 A8={{ a8_v_logic.stat.checksum | default('—') }} repo={{ a8_v_logic_repo.stat.checksum }};
+      tick/timer: {{ a8_v_tick.stdout | replace('\n', ' ') }}; очікувано enabled={{ a8_tick_timer_enabled }}
+    quiet: true
+
+# ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
+- name: V15a — ask the container for claude and uv versions
+  ansible.builtin.command: >-
+    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
+    bash -c 'claude --version; uv --version'
+  register: a8_v_image
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V15b — container runs the pinned claude-code and uv
+  # Доводить, що демону є ЧИМ запускати агента. Не доводить, що агент
+  # автентифікується: токен і мережа — окрема перевірка першого ручного тіку.
+  ansible.builtin.assert:
+    that:
+      - a8_v_image.rc == 0
+      - a8_claude_code_version in a8_v_image.stdout
+      - a8_uv_version in a8_v_image.stdout
+    fail_msg: "Контейнер {{ a8_container_image }}: rc={{ a8_v_image.rc }}, '{{ a8_v_image.stdout }} {{ a8_v_image.stderr }}'"
+    quiet: true
+
+# ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────
+- name: V16a — feed a write command to a8-ro-shell
+  ansible.builtin.command: /usr/local/bin/a8-ro-shell
+  environment:
+    SSH_ORIGINAL_COMMAND: "touch /tmp/a8-ro-shell-probe"
+  register: a8_v_roshell
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V16b — write refused with code 126 and nothing created
+  ansible.builtin.stat:
+    path: /tmp/a8-ro-shell-probe
+  register: a8_v_roshell_probe
+
+- name: V16c — a8-ro-shell refuses writes
+  ansible.builtin.assert:
+    that:
+      - a8_v_roshell.rc == 126
+      - "'ВІДХИЛЕНО' in a8_v_roshell.stderr"
+      - not a8_v_roshell_probe.stat.exists
+    fail_msg: "a8-ro-shell: rc={{ a8_v_roshell.rc }}, stderr={{ a8_v_roshell.stderr }}"
+    quiet: true
+
+# ─── V17. Drop-in egress — рівно тоді, коли увімкнено примус ───────────────
+- name: V17a — stat the egress drop-in
+  ansible.builtin.stat:
+    path: /etc/systemd/system/docker.service.d/zz-a8-egress.conf
+  register: a8_v_dropin
+
+- name: V17b — drop-in present if and only if enforcement is on
+  ansible.builtin.assert:
+    that:
+      - a8_v_dropin.stat.exists == (a8_egress_enabled and a8_egress_enforce)
+    fail_msg: "drop-in exists={{ a8_v_dropin.stat.exists }}, enforce={{ a8_egress_enforce }}"
     quiet: true
 
 # ─── V11. Креденшал на push — стан називається вголос ──────────────────────

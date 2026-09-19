@@ -339,7 +339,139 @@
     mode: "0600"
   when: a8_push_credential_kind == 'token_file'
 
-# ─── 11. Доказова частина — окремим тегом, не при кожному застосуванні ─────
+# ─── 11. Образ агента (files/agent.Dockerfile) ─────────────────────────────
+- name: Create agent image build directory
+  ansible.builtin.file:
+    path: "{{ a8_config_dir }}/image"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install agent Dockerfile
+  ansible.builtin.copy:
+    src: agent.Dockerfile
+    dest: "{{ a8_config_dir }}/image/Dockerfile"
+    owner: root
+    group: root
+    mode: "0644"
+  register: a8_dockerfile
+
+- name: Check whether the agent image exists
+  ansible.builtin.command: "docker image inspect --format '{{ '{{' }}.Id{{ '}}' }}' {{ a8_agent_image }}"
+  register: a8_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Build the agent image
+  # Будує лише коли образу з цим тегом немає або Dockerfile змінився. Тег несе
+  # версії, тож зміна версії завжди дає нову збірку; старий образ лишається.
+  ansible.builtin.command: >-
+    docker build
+    --build-arg CLAUDE_CODE_VERSION={{ a8_claude_code_version }}
+    --build-arg UV_VERSION={{ a8_uv_version }}
+    -t {{ a8_agent_image }} {{ a8_config_dir }}/image
+  when:
+    - not ansible_check_mode
+    - (a8_image_inspect.rc | default(1)) != 0 or a8_dockerfile.changed
+  changed_when: true
+
+# ─── 12. Демон черги ───────────────────────────────────────────────────────
+- name: Create a8 library directory
+  ansible.builtin.file:
+    path: /usr/local/lib/a8
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install queue decision logic
+  # Та сама копія, що доведена в CI (tools/scripts/a8-tick-logic.test.sh).
+  # V14 у verify звіряє контрольну суму встановленого файла з репозиторієм.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-tick-logic.sh"
+    dest: /usr/local/lib/a8/a8-tick-logic.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install queue tick
+  ansible.builtin.template:
+    src: a8-tick.sh.j2
+    dest: /usr/local/bin/a8-tick
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install git askpass for token push
+  ansible.builtin.template:
+    src: a8-git-askpass.sh.j2
+    dest: /usr/local/bin/a8-git-askpass
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install queue tick service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - a8-tick.service
+    - a8-tick.timer
+  notify: Reload systemd
+
+- name: Set queue tick timer state from a8_tick_timer_enabled
+  # Стан таймера описаний ЗМІННОЮ, а не рукою: `systemctl enable` на машині
+  # наступне застосування ролі поверне назад, і це правильно.
+  ansible.builtin.systemd_service:
+    name: a8-tick.timer
+    enabled: "{{ a8_tick_timer_enabled }}"
+    state: "{{ 'started' if a8_tick_timer_enabled else 'stopped' }}"
+    daemon_reload: true
+  when: not ansible_check_mode
+
+# ─── 13. Вікно без egress-фільтра ──────────────────────────────────────────
+- name: Create docker drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: a8_egress_enabled and a8_egress_enforce
+
+- name: Install egress drop-in for docker
+  ansible.builtin.template:
+    src: a8-egress-dropin.conf.j2
+    dest: /etc/systemd/system/docker.service.d/zz-a8-egress.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: a8_egress_enabled and a8_egress_enforce
+  notify: Reload systemd
+
+- name: Remove egress drop-in when enforcement is off
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d/zz-a8-egress.conf
+    state: absent
+  when: not (a8_egress_enabled and a8_egress_enforce)
+  notify: Reload systemd
+
+# ─── 14. ssh лише на читання ───────────────────────────────────────────────
+- name: Install read-only ssh shell
+  # Сам по собі нічого не відкриває: працює лише для ключа, прописаного в
+  # authorized_keys з command="/usr/local/bin/a8-ro-shell" (крок yurii, #78).
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-ro-shell.sh"
+    dest: /usr/local/bin/a8-ro-shell
+    owner: root
+    group: root
+    mode: "0755"
+
+# ─── 15. Доказова частина — окремим тегом, не при кожному застосуванні ─────
 - name: Run verification assertions
   ansible.builtin.include_tasks: verify.yml
   tags: [verify, never]

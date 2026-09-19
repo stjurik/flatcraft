@@ -32,7 +32,17 @@ for base in "{{ a8_repo_dir }}" "$WORKTREE"; do
   done
 done
 
+# Необов'язкові прапорці від демона (a8-tick):
+#   A8_CONTAINER_NAME — ім'я контейнера, щоб при таймауті вбити САМЕ його
+#     (timeout убиває клієнт docker run, а не контейнер);
+#   CLAUDE_CODE_OAUTH_TOKEN — передається ІМЕНЕМ (`-e VAR`), значення docker
+#     бере з середовища: у аргументах процесу, видимих у `ps`, його немає.
+OPT_ARGS=()
+[[ -n "${A8_CONTAINER_NAME:-}" ]] && OPT_ARGS+=(--name "$A8_CONTAINER_NAME")
+[[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+
 exec docker run --rm \
+  "${OPT_ARGS[@]}" \
   --user {{ a8_container_uid }}:{{ a8_container_gid }} \
   `# вимір №6 §4 п.1: UID контейнера = власник репо, інакше git 128 dubious ownership` \
   -v "{{ a8_repo_dir }}:{{ a8_repo_dir }}" \
