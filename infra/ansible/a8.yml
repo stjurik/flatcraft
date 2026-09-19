@@ -24,6 +24,14 @@
   hosts: a8
   become: true
 
+  vars:
+    # Модуль `shell` за замовчуванням виконує через /bin/sh, а в Ubuntu це dash,
+    # який не знає `set -o pipefail` (виміряно на A8 2026-09-19: V5a впала з
+    # `/bin/sh: 1: set: Illegal option -o pipefail`). П'ять задач verify.yml
+    # покладаються на pipefail, тож задаємо bash один раз на play, а не п'ятьма
+    # окремими `args: executable:`.
+    ansible_shell_executable: /bin/bash
+
   roles:
     - role: a8
       tags: [a8]
