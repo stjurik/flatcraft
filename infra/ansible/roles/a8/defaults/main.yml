@@ -19,7 +19,14 @@ a8_consecutive_failure_limit: 3
 a8_config_dir: /etc/a8
 
 # ─── Контейнер агента ──────────────────────────────────────────────────────
-a8_container_image: node:22
+# Образ агента збирає роль із files/agent.Dockerfile (рішення yurii Q2-г).
+# Тег несе версії: зміна версії = новий тег = нова збірка, старий лишається.
+a8_claude_code_version: "2.1.272" # виміряна на A8 (PR #110); звірено 2026-09-19
+a8_uv_version: "0.12.17"
+a8_agent_image: "hart-agent:cc{{ a8_claude_code_version }}-uv{{ a8_uv_version }}"
+# Відкат на голий образ — один рядок: `a8_container_image: node:22`. Тоді демон
+# не зможе запустити агента (у node:22 немає claude), решта ролі працює.
+a8_container_image: "{{ a8_agent_image }}"
 a8_container_uid: 1002 # МУСИТЬ дорівнювати власнику a8_repo_dir (вимір №6)
 a8_container_gid: 1002
 a8_python_version: "3.12" # uv sync падає на 3.14 (М-3, PR #110)
@@ -71,3 +78,17 @@ a8_egress_extra_cidrs: []
 a8_push_credential_kind: none # none | deploy_key | token_file
 a8_push_deploy_key_src: "" # локальний шлях до приватного ключа
 a8_push_token_file_src: "" # локальний шлях до файла з токеном
+
+# ─── Демон черги (a8-tick) ─────────────────────────────────────────────────
+# ТАЙМЕР ВИМКНЕНИЙ. Вмикає yurii після першого ручного тіку під наглядом —
+# зміною цього рядка, не `systemctl enable` руками.
+a8_tick_timer_enabled: false
+a8_tick_interval_minutes: 10
+a8_task_timeout_s: 5400 # 90 хв на задачу; далі контейнер убивається
+a8_max_turns: 200 # як у tools/scripts/autorun.sh
+a8_default_model: sonnet # docs/15 §0: Opus — для проєктування, не для кожної задачі
+a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only: 600 agent
+# Режим (а) OQ-34: доки звужені набори дозволів для external/derived не
+# реалізовані й не покриті тестом, демон приймає лише human.
+a8_sources_allowed: human
+a8_push_ssh_url: "git@github.com:stjurik/flatcraft.git"

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# GIT_ASKPASS для a8-tick при a8_push_credential_kind=token_file. Токен
+# читається з файла в момент запиту і не потрапляє ні в аргументи процесу
+# (видно в `ps`), ні в конфіг git.
+case "${1:-}" in
+  Username*) echo x-access-token ;;
+  Password*) cat "{{ a8_config_dir }}/push-token" ;;
+esac
