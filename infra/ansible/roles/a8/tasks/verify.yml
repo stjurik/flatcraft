@@ -163,12 +163,26 @@
 
 # ─── V6. Контейнер стартує під правильним UID і з записуваним $HOME ────────
 - name: V6a — run container through the wrapper
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    bash -c 'id -u; echo HOME=$HOME;
-    touch "$HOME/.a8probe" && echo HOME_WRITABLE && rm -f "$HOME/.a8probe";
-    test -t 0 && echo TTY || echo NO_TTY;
-    test -S /var/run/docker.sock && echo DOCKER_SOCK || echo NO_DOCKER_SOCK'
+  # `argv:` обов'язковий, а не стилістика. З рядковою формою `$HOME` розкривався
+  # НА ХОСТІ: Ansible для become загортає команду в `sh -c`, і той шар з'їдав
+  # змінну ще до `docker run`. Під `agent` виходило HOME=/home/agent, а це тека,
+  # яку docker створює в контейнері сам від root (монтуються лише її підтеки) —
+  # звідси хибний провал HOME_WRITABLE 2026-09-19. Контрольний `docker run` з
+  # тими ж прапорцями дав HOME=/home/agent/container-home і WRITABLE, тобто
+  # ламався зонд, а не середовище. В argv Ansible цитує кожен елемент окремо,
+  # тож `$HOME` доходить до bash усередині контейнера.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - |
+        id -u
+        echo "HOME=$HOME"
+        touch "$HOME/.a8probe" && echo HOME_WRITABLE && rm -f "$HOME/.a8probe"
+        test -t 0 && echo TTY || echo NO_TTY
+        test -S /var/run/docker.sock && echo DOCKER_SOCK || echo NO_DOCKER_SOCK
   register: a8_v_container
   changed_when: false
   become: true
@@ -192,9 +206,15 @@
 
 # ─── V7. git у контейнері працює на запис у worktree ───────────────────────
 - name: V7a — git status inside the container
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    git -C {{ a8_repo_dir }} status --porcelain
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - git
+      - -C
+      - "{{ a8_repo_dir }}"
+      - status
+      - --porcelain
   register: a8_v_git
   changed_when: false
   failed_when: false
@@ -215,9 +235,15 @@
   # Додано після рев'ю: `git status` НЕ потребує identity, тож V7b залишався б
   # зеленим і після того, як з обгортки прибрали GIT_AUTHOR_*. `git var
   # GIT_AUTHOR_IDENT` натомість друкує саме той ident, з яким піде коміт.
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    git -C {{ a8_repo_dir }} var GIT_AUTHOR_IDENT
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - git
+      - -C
+      - "{{ a8_repo_dir }}"
+      - var
+      - GIT_AUTHOR_IDENT
   register: a8_v_ident
   changed_when: false
   failed_when: false
@@ -333,9 +359,13 @@
 
 # ─── V10. lefthook досяжний у PATH контейнера ──────────────────────────────
 - name: V10a — resolve lefthook inside the container
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    bash -lc 'command -v lefthook'
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -lc
+      - command -v lefthook
   register: a8_v_lefthook
   changed_when: false
   failed_when: false
@@ -362,13 +392,27 @@
   # Поведінка, не наявність прапорця в скрипті: пробуємо писати. Контроль —
   # запис у $HOME контейнера мусить пройти, інакше «EROFS скрізь» не
   # відрізнялось би від «зламаного монтування взагалі».
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    bash -c 'for p in {{ a8_ro_paths | join(" ") }}; do
-    [ -e "{{ a8_repo_dir }}/$p" ] || { echo "ABSENT $p"; continue; };
-    if touch "{{ a8_repo_dir }}/$p/.a8probe" 2>/dev/null; then rm -f "{{ a8_repo_dir }}/$p/.a8probe"; echo "WRITABLE $p"; else echo "RO $p"; fi;
-    done;
-    touch "$HOME/.a8probe" && rm -f "$HOME/.a8probe" && echo CONTROL_WRITABLE'
+  # `argv:` з тієї ж причини, що у V6a, і тут ціна помилки вища: `$p` — змінна
+  # циклу, і в рядковій формі хостовий `sh -c` підставляв би ПОРОЖНЄ значення.
+  # Зонд перевіряв би `{{ a8_repo_dir }}/` замість заборонених шляхів і бадьоро
+  # звітував результат, який ні про що не говорить. Тихий хибний «успіх» гірший
+  # за падіння: саме так інваріант перетворюється на декорацію.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - |
+        for p in {{ a8_ro_paths | join(" ") }}; do
+          [ -e "{{ a8_repo_dir }}/$p" ] || { echo "ABSENT $p"; continue; }
+          if touch "{{ a8_repo_dir }}/$p/.a8probe" 2>/dev/null; then
+            rm -f "{{ a8_repo_dir }}/$p/.a8probe"; echo "WRITABLE $p"
+          else
+            echo "RO $p"
+          fi
+        done
+        touch "$HOME/.a8probe" && rm -f "$HOME/.a8probe" && echo CONTROL_WRITABLE
   register: a8_v_ro
   changed_when: false
   become: true
@@ -386,8 +430,12 @@
 
 # ─── V13. Python для uv запінено ───────────────────────────────────────────
 - name: V13a — read UV_PYTHON inside the container
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }} printenv UV_PYTHON
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - printenv
+      - UV_PYTHON
   register: a8_v_uvpy
   changed_when: false
   failed_when: false
@@ -441,17 +489,27 @@
     quiet: true
 
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
-- name: V15a — ask the container for claude and uv versions
-  ansible.builtin.command: >-
-    /usr/local/bin/a8-run-agent {{ a8_repo_dir }}
-    bash -c 'claude --version; uv --version'
+- name: V15a — ask the container for claude, uv and pnpm versions
+  # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
+  # тіку падає, і падає оманливо: entrypoint node:22 підставляє `node` перед
+  # невідомою командою, тож `pnpm install` стає `node pnpm install`, а node
+  # шукає файл `pnpm` у робочій теці. Перший тік на A8 (2026-09-19, задача
+  # log-pr116) дав саме це: Cannot find module '…/hart-wt/log-pr116/pnpm'.
+  # Тут воно ловиться до задачі, а не задачею.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - claude --version; uv --version; pnpm --version
   register: a8_v_image
   changed_when: false
   failed_when: false
   become: true
   become_user: "{{ a8_agent_user }}"
 
-- name: V15b — container runs the pinned claude-code and uv
+- name: V15b — container runs the pinned claude-code, uv and pnpm
   # Доводить, що демону є ЧИМ запускати агента. Не доводить, що агент
   # автентифікується: токен і мережа — окрема перевірка першого ручного тіку.
   ansible.builtin.assert:
@@ -459,6 +517,7 @@
       - a8_v_image.rc == 0
       - a8_claude_code_version in a8_v_image.stdout
       - a8_uv_version in a8_v_image.stdout
+      - a8_pnpm_version in a8_v_image.stdout
     fail_msg: "Контейнер {{ a8_container_image }}: rc={{ a8_v_image.rc }}, '{{ a8_v_image.stdout }} {{ a8_v_image.stderr }}'"
     quiet: true
 

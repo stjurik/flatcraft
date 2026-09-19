@@ -370,6 +370,7 @@
     docker build
     --build-arg CLAUDE_CODE_VERSION={{ a8_claude_code_version }}
     --build-arg UV_VERSION={{ a8_uv_version }}
+    --build-arg PNPM_VERSION={{ a8_pnpm_version }}
     -t {{ a8_agent_image }} {{ a8_config_dir }}/image
   when:
     - not ansible_check_mode
@@ -473,5 +474,13 @@
 
 # ─── 15. Доказова частина — окремим тегом, не при кожному застосуванні ─────
 - name: Run verification assertions
-  ansible.builtin.include_tasks: verify.yml
+  # `apply:` обов'язковий. include_tasks — динамічний: теги на самому рядку
+  # include діють ЛИШЕ на нього, а не на задачі всередині. Без `apply` прогін
+  # `--tags verify` включав файл і тут же відфільтровував кожну його задачу:
+  # у PLAY RECAP виходило `ok=2` (Gathering Facts + include), і жодна з перевірок
+  # не виконувалась. Виявлено 2026-09-19 при першому справжньому застосуванні.
+  ansible.builtin.include_tasks:
+    file: verify.yml
+    apply:
+      tags: [verify]
   tags: [verify, never]

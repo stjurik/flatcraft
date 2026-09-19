@@ -20,8 +20,24 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
 FROM node:22
 ARG CLAUDE_CODE_VERSION=2.1.272
+ARG PNPM_VERSION=9.12.0
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force
+# pnpm — інакше перший же крок тіку падає. У node:22 є corepack, але шимів він
+# не створює: їх робить `corepack enable`. Без них `pnpm` немає в PATH, і
+# entrypoint образу (`node:22` docker-entrypoint.sh) підставляє `node` перед
+# невідомою командою — `pnpm install` стає `node pnpm install`, а node шукає
+# файл `pnpm` у робочій теці:
+#   Error: Cannot find module '/home/agent/hart-wt/<id>/pnpm'
+# Саме це впіймав перший тік на A8 2026-09-19 (задача log-pr116, detail=deps).
+#
+# `prepare … --activate` завантажує pnpm НА ЕТАПІ ЗБІРКИ, а не при першому
+# запуску: інакше кожен холодний контейнер ходив би в мережу по менеджер
+# пакетів, і це ламалось би рівно тоді, коли ввімкнуть egress-фільтр.
+# Версія збігається з `packageManager` у package.json і PNPM_VERSION у ci.yml —
+# розбіжність означала б, що агент збирає не те, що потім перевіряє CI.
+RUN corepack enable \
+ && corepack prepare "pnpm@${PNPM_VERSION}" --activate
 COPY --from=uv /uv /uvx /usr/local/bin/
 # Користувача НЕ задаємо: UID визначає a8-run-agent (`--user 1002:1002`),
 # бо він мусить збігатися з власником репо на хості (вимір №6).
