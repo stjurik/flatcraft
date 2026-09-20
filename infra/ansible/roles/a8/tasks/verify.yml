@@ -145,6 +145,13 @@
     "$tmp/guard" check >/dev/null 2>&1; echo "fail_exit=$?"
     printf 'failed\nfailed\nok\n' > "$tmp/logs/last-results"
     "$tmp/guard" check >/dev/null 2>&1; echo "recovered_exit=$?"
+    # Звіт guard'а про себе мусить збігатися з тим, що він порахував. Раніше в
+    # повідомленні стояв вписаний «0»: при `failed ok failed failed` guard
+    # правильно НЕ ставив паузу, але друкував «падінь поспіль 0», і живий
+    # розбір 2026-09-20 зробив із цього хибний висновок. Тут стан свідомо
+    # такий, де відповідь не 0 і не дорівнює ліміту: 2 з 3.
+    printf 'ok\nfailed\nfailed\n' > "$tmp/logs/last-results"
+    echo "report=$("$tmp/guard" check 2>&1 | sed -n 's/.*падінь поспіль //p')"
     rm -rf "$tmp"
   register: a8_v_guard_limits
   changed_when: false
@@ -157,8 +164,12 @@
       - "'limit_exit=11' in a8_v_guard_limits.stdout"
       - "'fail_exit=12' in a8_v_guard_limits.stdout"
       - "'recovered_exit=0' in a8_v_guard_limits.stdout"
+      # Guard мусить звітувати ПОРАХОВАНЕ число, а не літерал. Стан `ok failed
+      # failed` при ліміті 3 → паузи немає, але падінь у вікні рівно два.
+      # Вписаний «0» цю перевірку не пройде.
+      - "'report=2 з 3' in a8_v_guard_limits.stdout"
     fail_msg: "a8-guard: {{ a8_v_guard_limits.stdout | replace('\n', ' ') }}"
-    success_msg: "a8-guard: ліміт → 11, три падіння → 12, після успіху → 0"
+    success_msg: "a8-guard: ліміт → 11, три падіння → 12, після успіху → 0, звіт збігається з підрахунком"
     quiet: true
 
 # ─── V6. Контейнер стартує під правильним UID і з записуваним $HOME ────────
