@@ -372,12 +372,20 @@
 
 # ─── V10. lefthook досяжний у PATH контейнера ──────────────────────────────
 - name: V10a — resolve lefthook inside the container
+  # `-c`, НЕ `-lc`. Login-shell читає /etc/profile, а той перезадає PATH —
+  # наш `-e PATH=…` з `node_modules/.bin` при цьому зникає. Виміряно парою
+  # з контролем 2026-09-19, та сама обгортка, різниця в одному символі:
+  #   bash -lc printenv → PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:…
+  #   bash -c  printenv → PATH=/home/agent/hart/node_modules/.bin:/usr/local/sbin:…
+  # Через це V10 падала при цілком справному середовищі: lefthook лежав на
+  # місці, але зонд дивився в інший PATH. Демон цим не зачеплений — він кличе
+  # `bash tools/scripts/check-hook-loud.sh`, без `-l`.
   ansible.builtin.command:
     argv:
       - /usr/local/bin/a8-run-agent
       - "{{ a8_repo_dir }}"
       - bash
-      - -lc
+      - -c
       - command -v lefthook
   register: a8_v_lefthook
   changed_when: false
@@ -397,7 +405,11 @@
     fail_msg: >-
       lefthook не знайдено в PATH контейнера (rc={{ a8_v_lefthook.rc }}).
       Наслідок: pre-commit у контейнері не перевіряє ні ESLint, ні tsc, ні prettier, ні ruff,
-      і виглядає це як робочий захист. Чи виконано `pnpm install` у {{ a8_repo_dir }}?
+      і виглядає це як робочий захист. Перевір у такому порядку:
+      (1) чи справді бракує бінарника — `ls {{ a8_repo_dir }}/node_modules/.bin/lefthook`;
+      (2) якщо він там є, дивись на PATH самого контейнера —
+      `a8-run-agent {{ a8_repo_dir }} bash -c printenv | grep ^PATH=`.
+      Другий випадок уже траплявся: login-shell перезадавав PATH і зонд шукав не там.
     quiet: true
 
 # ─── V12. Заборонені шляхи змонтовані read-only — і записуваний контроль ────

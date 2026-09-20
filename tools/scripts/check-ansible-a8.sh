@@ -103,6 +103,14 @@ if [[ -d "$TASKS" ]]; then
     if [[ "$line" =~ ^[[:space:]]*(src|dest|path|creates|removes):[[:space:]] ]]; then
       continue
     fi
+    # Проза, що ЦИТУЄ команду (напр. підказка в `fail_msg`), — не виклик.
+    # Конвенція репозиторію: команда в тексті береться у зворотні лапки, а
+    # справжній рядок argv або `command:` їх не містить ніколи. Спіймано на
+    # власному хибному спрацюванні 2026-09-19, коли підказка V10b цитувала
+    # `a8-run-agent … bash -c printenv`.
+    if [[ "$line" == *'`'* ]]; then
+      continue
+    fi
     violations+=("виклик a8-run-agent НЕ через argv (хостовий sh -c розкриє \$-змінні до docker run): $hit")
   done < <(grep -rn -E 'a8-run-agent' "$TASKS" || true)
 fi
@@ -138,6 +146,33 @@ if [[ -d "$TASKS" ]]; then
   )
 fi
 
+# Інваріант 5 — зонд у контейнер не викликає login-shell.
+#
+# ЧОМУ. `bash -lc` читає /etc/profile, а той ПЕРЕЗАДАЄ PATH: `-e PATH=…`, який
+# передає a8-run-agent разом із `node_modules/.bin`, зникає цілком. Виміряно
+# парою з контролем 2026-09-19, різниця в одному символі:
+#   bash -lc printenv → PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:…
+#   bash -c  printenv → PATH=/home/agent/hart/node_modules/.bin:/usr/local/sbin:…
+# Через це V10 падала при справному середовищі: lefthook лежав на місці, а
+# зонд дивився в інший PATH. Клас той самий, що й з `$` у зонді: текст зонда
+# ламає вимір, а виглядає це як поломка середовища.
+if [[ -d "$TASKS" ]]; then
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("login-shell у зонді до контейнера (перезадасть PATH із /etc/profile): $hit")
+  done < <(
+    {
+      find "$TASKS" -name '*.yml' -print0 2>/dev/null |
+        xargs -0 awk '
+          /^- name:/                        { inprobe = 0 }
+          /a8-run-agent/ && $0 !~ /^[[:space:]]*#/ { inprobe = 1; next }
+          inprobe && /^[[:space:]]*register:/ { inprobe = 0 }
+          inprobe && /^[[:space:]]*-[[:space:]]*-[a-z]*l[a-z]*c?[[:space:]]*$/ && $0 !~ /^[[:space:]]*#/ { print FILENAME ":" FNR ":" $0 }
+        ' 2>/dev/null || true
+    }
+  )
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -148,4 +183,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell"

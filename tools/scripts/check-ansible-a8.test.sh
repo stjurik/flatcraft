@@ -158,6 +158,44 @@ make_tree "$tmproot/after" "$PLAY_OK" '---
     rm -rf "$tmp"'
 assert_exit "змінна поза зондом → 0" 0 "$tmproot/after"
 
+# Тест 6-quinquies — login-shell у зонді (вада 5, реальна: V10 падала, бо
+# `bash -lc` перезадав PATH із /etc/profile і викинув node_modules/.bin).
+make_tree "$tmproot/login" "$PLAY_OK" '---
+- name: probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - bash
+      - -lc
+      - command -v lefthook
+  register: probe_out'
+assert_exit "login-shell у зонді → 1" 1 "$tmproot/login"
+
+# Той самий зонд без -l має проходити: перевіряємо саме прапорець, не bash.
+make_tree "$tmproot/nologin" "$PLAY_OK" '---
+- name: probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - bash
+      - -c
+      - command -v lefthook
+  register: probe_out'
+assert_exit "той самий зонд без -l → 0" 0 "$tmproot/nologin"
+
+# Тест 6-sexies — цитата команди в тексті помилки не є викликом.
+make_tree "$tmproot/prose" "$PLAY_OK" '---
+- name: assert something
+  ansible.builtin.assert:
+    that:
+      - true
+    fail_msg: >-
+      Не знайдено. Перевір PATH самого контейнера:
+      `a8-run-agent /home/agent/hart bash -c printenv | grep ^PATH=`.'
+assert_exit "цитата команди в fail_msg → 0" 0 "$tmproot/prose"
+
 # Тест 6 — згадка a8-run-agent у коментарі не є викликом.
 make_tree "$tmproot/cmt" "$PLAY_OK" '---
 - name: container
@@ -225,6 +263,20 @@ s = s.replace(anchor, '\n        echo "HOME=$HOME"\n', 1)
 open(p, 'w').write(s)
 PY
 assert_exit "мутація 4: shell-змінна назад у зонд → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
+
+# Мутація 5 — повертаємо login-shell у зонд V10a. Прив'язка за відступом до
+# рядка коду, а не до підрядка: `-c` трапляється в тексті часто.
+python3 - "$mut/infra/ansible/roles/a8/tasks/verify.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "      - -c\n      - command -v lefthook\n"
+assert anchor in s, "фікстура застаріла: V10a більше не виглядає так"
+s = s.replace(anchor, "      - -lc\n      - command -v lefthook\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 5: login-shell назад у зонд → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
 
 if [[ "$fail" -eq 0 ]]; then
