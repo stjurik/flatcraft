@@ -590,17 +590,60 @@
     fail_msg: "drop-in exists={{ a8_v_dropin.stat.exists }}, enforce={{ a8_egress_enforce }}"
     quiet: true
 
-# ─── V11. Креденшал на push — стан називається вголос ──────────────────────
-- name: V11 — report push credential state
+# ─── V11. Креденшал на push — перевіряється НА ДИСКУ ───────────────────────
+#
+# Раніше це був `debug`, що читав ЗМІННУ. 2026-09-20 перше застосування з
+# deploy_key впало («Destination directory /home/agent/.ssh does not exist»),
+# ключ не встановився — а V11 одразу після цього бадьоро повідомив «Креденшал
+# типу deploy_key встановлено», бо змінну йому передали. Звіт про НАМІР,
+# поданий як факт про стан: той самий клас, що ця роль ловить у себе весь час.
+- name: V11a — stat the push credential on disk
+  ansible.builtin.stat:
+    path: >-
+      {{ a8_agent_home ~ '/.ssh/id_push' if a8_push_credential_kind == 'deploy_key'
+         else a8_config_dir ~ '/push-token' }}
+  register: a8_v_cred
+  when: a8_push_credential_kind != 'none'
+
+- name: V11b — credential file exists with 0600 and belongs to the agent
+  ansible.builtin.assert:
+    that:
+      - a8_v_cred.stat.exists
+      - a8_v_cred.stat.mode == "0600"
+      - a8_v_cred.stat.pw_name == a8_agent_user
+    fail_msg: >-
+      a8_push_credential_kind={{ a8_push_credential_kind }}, але файла креденшала
+      на диску немає або права не ті (exists={{ a8_v_cred.stat.exists | default(false) }},
+      mode={{ a8_v_cred.stat.mode | default('—') }}).
+      Найчастіша причина: застосування впало на задачі встановлення ключа, і play
+      обірвався ПОСЕРЕДИНІ — `a8.env` уже містить kind={{ a8_push_credential_kind }},
+      а ключа немає. Демон у такому стані піде в гілку deploy_key і впаде на push.
+      Лікування: повторити apply і переконатись, що PLAY RECAP дає failed=0.
+    success_msg: "Креденшал {{ a8_push_credential_kind }} на диску, 0600, власник {{ a8_agent_user }}"
+    quiet: true
+  when: a8_push_credential_kind != 'none'
+
+- name: V11c — say out loud when there is no credential at all
   ansible.builtin.debug:
     msg: >-
-      {% if a8_push_credential_kind == 'none' %}
       КРЕДЕНШАЛА НА PUSH НЕМАЄ (a8_push_credential_kind=none). Демон зможе робити
       worktree, commit, fetch, rebase — і НЕ зможе віддати результат: push впаде 128
       на автентифікації (вимір №7). Це не дефект ролі: створення креденшала —
       незворотна дія в акаунті yurii, питання класу A, issue #78.
-      {% else %}
-      Креденшал типу {{ a8_push_credential_kind }} встановлено. Нагадування з виміру №7:
-      branch protection на main має enforce_admins=false, тож токен, що діє іменем
-      адміністратора, обходить PR, апрув і всі 10 required checks.
-      {% endif %}
+  when: a8_push_credential_kind == 'none'
+
+- name: V11d — remind what the credential can reach
+  # Стан branch protection роль перевірити НЕ може: це GitHub, не машина. Тому
+  # тут не стверджуємо значення `enforce_admins`, а даємо команду, якою його
+  # видно. Попередня редакція писала «enforce_admins=false» як факт — і застаріла
+  # того ж дня, коли yurii увімкнув його (2026-09-20).
+  ansible.builtin.debug:
+    msg: >-
+      Креденшал типу {{ a8_push_credential_kind }} активний. Що він може на боці
+      GitHub — роль не знає і не перевіряє. Подивитись:
+      `gh api repos/stjurik/flatcraft/branches/main/protection --jq
+      '{approvals: .required_pull_request_reviews.required_approving_review_count,
+      admins: .enforce_admins.enabled}'`.
+      Ключ розгортання адміністратором НЕ є, тож захист main на нього діє;
+      токен, що працює іменем адміністратора, — інша річ (вимір №7).
+  when: a8_push_credential_kind != 'none'
