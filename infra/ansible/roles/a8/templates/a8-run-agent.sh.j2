@@ -63,8 +63,15 @@ exec docker run --rm \
   `# вимір №7: підстраховка. Несуча конструкція — ВІДСУТНІСТЬ -t нижче:` \
   `# з псевдотерміналом push зависає (exit 124), без нього падає одразу (128).` \
   `# Прапорця -t тут немає і не має з'явитися.` \
-  -e PATH="{{ a8_repo_dir }}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  -e PATH="$WORKTREE/node_modules/.bin:{{ a8_repo_dir }}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   `# вимір №7: без node_modules/.bin у PATH pre-commit — тихий no-op:` \
   `# хук виконується, lefthook не знаходиться, коміт проходить із exit 0.` \
+  `# ПОРЯДОК важить: worktree ПЕРШИЙ. Тік ставить залежності саме туди` \
+  `# (pnpm install у $wt), а worktree стоїть на своєму коміті зі своїм` \
+  `# lockfile. Брати інструменти з іншого дерева — помилка, яка чекає` \
+  `# першого розходження версій. Головний клон лишається запасним: ним` \
+  `# користуються виклики, де worktree ще порожній (напр. verify).` \
+  `# ⚠ Усе це діє лише для bash БЕЗ -l: login-shell перезадає PATH із` \
+  `# /etc/profile і викидає цей рядок цілком (виміряно 2026-09-19).` \
   -w "$WORKTREE" \
   "{{ a8_container_image }}" "$@"
