@@ -151,7 +151,12 @@
     # розбір 2026-09-20 зробив із цього хибний висновок. Тут стан свідомо
     # такий, де відповідь не 0 і не дорівнює ліміту: 2 з 3.
     printf 'ok\nfailed\nfailed\n' > "$tmp/logs/last-results"
-    echo "report=$("$tmp/guard" check 2>&1 | sed -n 's/.*падінь поспіль //p')"
+    # Без підстановки команди: рядок виду `echo "x=$("$q" … | sed …)"` валить
+    # ansible-lint (`parser-error: failed at splitting arguments`) — bash його
+    # розуміє, парсер лінта ні. Пишемо у файл і дістаємо sed'ом окремою
+    # командою; результат той самий, а розбір однозначний.
+    "$tmp/guard" check > "$tmp/report" 2>&1
+    sed -n 's/.*падінь поспіль /report=/p' "$tmp/report"
     rm -rf "$tmp"
   register: a8_v_guard_limits
   changed_when: false
