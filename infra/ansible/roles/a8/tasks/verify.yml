@@ -632,6 +632,53 @@
       незворотна дія в акаунті yurii, питання класу A, issue #78.
   when: a8_push_credential_kind == 'none'
 
+- name: V11c-bis — authenticate to GitHub with the deploy key, exactly as the tick does
+  # ПОВЕДІНКА, не наявність файлів. V11b доводить, що ключ лежить на місці;
+  # це не означає, що ним можна користуватись. 2026-09-20 саме так і вийшло:
+  # ключ стояв, права правильні, а push падав на `Host key verification failed`,
+  # бо в щойно створеній .ssh не було known_hosts.
+  #
+  # Прапорці — ДОСЛІВНО ті, що в a8-tick (гілка deploy_key). Інакше перевірка
+  # доводила б щось інше, ніж робить демон. BatchMode=yes тут несучий: саме він
+  # забороняє інтерактивний запит і перетворює відсутній known_hosts на відмову.
+  #
+  # `ssh -T git@github.com` віддає rc=1 НАВІТЬ при успіху («does not provide
+  # shell access»), тому вердикт читається з тексту, а не з коду виходу.
+  ansible.builtin.command:
+    argv:
+      - sudo
+      - -n
+      - -u
+      - "{{ a8_agent_user }}"
+      - ssh
+      - -i
+      - "{{ a8_agent_home }}/.ssh/id_push"
+      - -o
+      - IdentitiesOnly=yes
+      - -o
+      - BatchMode=yes
+      - -T
+      - git@github.com
+  register: a8_v_ssh
+  changed_when: false
+  failed_when: false
+  when: a8_push_credential_kind == 'deploy_key'
+
+- name: V11c-ter — GitHub recognises the key and the host is trusted
+  ansible.builtin.assert:
+    that:
+      - "'successfully authenticated' in (a8_v_ssh.stderr | default('')) ~ (a8_v_ssh.stdout | default(''))"
+    fail_msg: >-
+      Ключем {{ a8_agent_home }}/.ssh/id_push автентифікуватись у GitHub НЕ вдалось.
+      Дослівно: {{ (a8_v_ssh.stderr | default('')) ~ ' ' ~ (a8_v_ssh.stdout | default('')) }}
+      Читати так: «Host key verification failed» — немає або зіпсований
+      {{ a8_agent_home }}/.ssh/known_hosts; «Permission denied (publickey)» — ключ не той,
+      що зареєстрований у Deploy keys, або права не 0600.
+      Доки ця перевірка червона, демон доходитиме до push і падатиме з detail=push.
+    success_msg: "GitHub упізнав ключ, хост довірений — push демона має пройти"
+    quiet: true
+  when: a8_push_credential_kind == 'deploy_key'
+
 - name: V11d — remind what the credential can reach
   # Стан branch protection роль перевірити НЕ може: це GitHub, не машина. Тому
   # тут не стверджуємо значення `enforce_admins`, а даємо команду, якою його
