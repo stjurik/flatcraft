@@ -195,6 +195,32 @@ if [[ -f "$RUNNER_TPL" ]]; then
   done < <(grep -nE '^[^#]*a8-guard[[:space:]]+check([[:space:]]|$)' "$RUNNER_TPL" || true)
 fi
 
+# Інваріант 7 — verify.yml не судить про машину за змінною play'ю.
+#
+# ЧОМУ. Це третя редакція однієї й тієї самої вади за добу 2026-09-20:
+#   1. V11 був `debug`, що друкував «креденшал встановлено», прочитавши змінну,
+#      яку йому передали — одразу після червоного застосування, де ключ НЕ
+#      встановився;
+#   2. V11 навчили читати файл, але ГІЛКУВАВСЯ він і далі по
+#      `a8_push_credential_kind`. `--tags verify` без `-e` брав дефолт і
+#      повідомляв «КРЕДЕНШАЛА НА PUSH НЕМАЄ», тоді як у `a8.env` на машині
+#      стояло `deploy_key` і ключ лежав на місці.
+# Спільне в обох: перевірка описувала намір оператора, а видавала за стан
+# машини. Найдорожчий клас у цьому проєкті — не «не працює», а «звітує, що
+# працює».
+#
+# Правило: у verify.yml імені `a8_push_credential_kind` немає взагалі — ані в
+# умовах, ані в текстах повідомлень. Вид креденшала здобувається читанням
+# `a8.env` з машини (факт `a8_v_push_kind`). Заборона на згадку в тексті теж
+# навмисна: повідомлення, що цитує змінну play'ю, читається як факт про машину.
+VERIFY_TASKS="$TASKS/verify.yml"
+if [[ -f "$VERIFY_TASKS" ]]; then
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("verify.yml згадує a8_push_credential_kind — перевірка мусить читати стан З МАШИНИ (a8_v_push_kind): $hit")
+  done < <(grep -n 'a8_push_credential_kind' "$VERIFY_TASKS" || true)
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -205,4 +231,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю"

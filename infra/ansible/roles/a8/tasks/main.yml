@@ -22,16 +22,56 @@
       Виявлено: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
     quiet: true
 
+# ─── 0b. Чинний креденшал береться З МАШИНИ ────────────────────────────────
+# Дефолт `keep` (defaults/main.yml) означає «лишити те, що вже налаштовано».
+# Щоб це виконати, треба спершу дізнатись, що там налаштовано, — не з пам'яті
+# оператора, а з файла.
+- name: Read the credential kind currently written on the machine
+  ansible.builtin.slurp:
+    src: "{{ a8_config_dir }}/a8.env"
+  register: a8_env_slurp
+  failed_when: false
+  changed_when: false
+
+- name: Remember the credential kind found on the machine
+  # Список + ['none'] і `first` замість `default`: на чистій машині файла немає
+  # взагалі, і вираз мусить давати відповідь, а не падати на порожньому списку.
+  ansible.builtin.set_fact:
+    a8_push_kind_on_host: >-
+      {{ ((a8_env_slurp.content | default('') | b64decode)
+          | regex_findall('(?m)^A8_PUSH_CREDENTIAL_KIND=(\S+)') + ['none']) | first }}
+
+- name: Resolve the effective push credential kind
+  # Далі роль користується ЛИШЕ a8_push_kind. a8_push_credential_kind — це
+  # намір оператора, a8_push_kind — те, що справді буде на машині.
+  ansible.builtin.set_fact:
+    a8_push_kind: >-
+      {{ a8_push_kind_on_host if a8_push_credential_kind == 'keep'
+         else a8_push_credential_kind }}
+
+- name: Report which push credential the run will configure
+  ansible.builtin.debug:
+    msg: >-
+      Креденшал на push: {{ a8_push_kind }}
+      {{ '(узято з машини — kind не передано явно)' if a8_push_credential_kind == 'keep'
+         else '(задано явно прапорцем -e)' }}.
+      На машині зараз: {{ a8_push_kind_on_host }}.
+
 - name: Assert push credential configuration is coherent
   ansible.builtin.assert:
     that:
-      - a8_push_credential_kind in ['none', 'deploy_key', 'token_file']
+      - a8_push_credential_kind in ['keep', 'none', 'deploy_key', 'token_file']
+      - a8_push_kind in ['none', 'deploy_key', 'token_file']
+      # Джерело потрібне лише коли kind ЗАДАНО явно. При `keep` креденшал уже
+      # лежить на машині, і перезаписувати його нічим — саме в цьому сенс
+      # дефолту: повторне застосування не вимагає ключа під рукою.
       - a8_push_credential_kind != 'deploy_key' or a8_push_deploy_key_src | length > 0
       - a8_push_credential_kind != 'token_file' or a8_push_token_file_src | length > 0
     fail_msg: >-
       a8_push_credential_kind={{ a8_push_credential_kind }}, але джерело не задане.
       Роль креденшалів НЕ створює (питання класу A, issue #78) — вкажіть шлях до
-      вже створеного ключа/токена або лишіть kind=none.
+      вже створеного ключа/токена, або не передавайте kind узагалі: дефолт `keep`
+      лишить чинний креденшал машини ({{ a8_push_kind_on_host }}) недоторканим.
     quiet: true
 
 # ─── 1. Пакети, без яких решта ролі не працює ──────────────────────────────
@@ -338,7 +378,7 @@
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0700"
-  when: a8_push_credential_kind == 'deploy_key'
+  when: a8_push_kind == 'deploy_key'
 
 - name: Fetch GitHub SSH host keys over HTTPS
   # ЧОМУ НЕ `ssh-keyscan`. Keyscan бере той ключ, який йому віддасть той, хто
@@ -350,7 +390,7 @@
     url: https://api.github.com/meta
     return_content: true
   register: a8_gh_meta
-  when: a8_push_credential_kind == 'deploy_key'
+  when: a8_push_kind == 'deploy_key'
   check_mode: false
 
 - name: Install known_hosts for github.com
@@ -368,16 +408,21 @@
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0644"
-  when: a8_push_credential_kind == 'deploy_key'
+  when: a8_push_kind == 'deploy_key'
 
 - name: Install push deploy key
+  # Копіюємо, ЛИШЕ коли джерело задане. При `keep` ключ уже на машині, і файла
+  # на керуючій станції може не бути взагалі — саме заради цього випадку й
+  # заводився дефолт `keep`.
   ansible.builtin.copy:
     src: "{{ a8_push_deploy_key_src }}"
     dest: "{{ a8_agent_home }}/.ssh/id_push"
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0600"
-  when: a8_push_credential_kind == 'deploy_key'
+  when:
+    - a8_push_kind == 'deploy_key'
+    - a8_push_deploy_key_src | length > 0
 
 - name: Install push token file
   ansible.builtin.copy:
@@ -386,7 +431,40 @@
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0600"
-  when: a8_push_credential_kind == 'token_file'
+  when:
+    - a8_push_kind == 'token_file'
+    - a8_push_token_file_src | length > 0
+
+# Роль не має права лишити машину в стані «a8.env обіцяє креденшал, якого
+# немає». Саме цей стан виник 2026-09-20, коли play обірвався на встановленні
+# ключа: конфіг уже казав deploy_key, ключа не було, і демон пішов би в гілку
+# deploy_key і впав на push. Тепер apply на цьому падає САМ — до того, як
+# хтось повірить зеленому PLAY RECAP.
+#
+# Перевірка потрібна і при `keep`: тоді роль нічого не копіює, і без неї
+# зламаний стан просто відтворювався б з кожним застосуванням.
+- name: Stat the credential the configuration promises
+  ansible.builtin.stat:
+    path: >-
+      {{ a8_agent_home ~ '/.ssh/id_push' if a8_push_kind == 'deploy_key'
+         else a8_config_dir ~ '/push-token' }}
+  register: a8_cred_promised
+  when: a8_push_kind != 'none'
+
+- name: Assert the promised credential exists on disk
+  ansible.builtin.assert:
+    that:
+      - a8_cred_promised.stat.exists
+    fail_msg: >-
+      a8.env обіцяє kind={{ a8_push_kind }}, але файла креденшала на машині
+      немає. Демон у такому стані дійде до push і впаде 128.
+      Лікування — одне з двох: передати джерело
+      (-e a8_push_credential_kind={{ a8_push_kind }}
+      -e a8_push_{{ 'deploy_key' if a8_push_kind == 'deploy_key' else 'token_file' }}_src=ШЛЯХ),
+      або свідомо зняти креденшал (-e a8_push_credential_kind=none).
+    success_msg: "Креденшал {{ a8_push_kind }} на місці"
+    quiet: true
+  when: a8_push_kind != 'none'
 
 # ─── 11. Образ агента (files/agent.Dockerfile) ─────────────────────────────
 - name: Create agent image build directory

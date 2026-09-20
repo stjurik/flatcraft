@@ -637,13 +637,35 @@
 # ключ не встановився — а V11 одразу після цього бадьоро повідомив «Креденшал
 # типу deploy_key встановлено», бо змінну йому передали. Звіт про НАМІР,
 # поданий як факт про стан: той самий клас, що ця роль ловить у себе весь час.
+#
+# ДРУГА РЕДАКЦІЯ ТІЄЇ САМОЇ ВАДИ, 2026-09-20 увечері. Перевірка почала читати
+# файл, але ГІЛКУВАЛАСЬ і далі по змінній play'ю. `--tags verify` без `-e`
+# брав дефолт і повідомляв «КРЕДЕНШАЛА НА PUSH НЕМАЄ», тоді як у a8.env на
+# машині стояло deploy_key і ключ лежав на місці. Перевірка збрехала про стан
+# машини, дивлячись на аргумент командного рядка.
+#
+# Тому нижче вся гілка бере вид креденшала З МАШИНИ. `--tags verify` не
+# виконує main.yml, тож факт треба здобути тут, своїм читанням.
+- name: V11-pre — read the credential kind the machine is configured with
+  ansible.builtin.slurp:
+    src: "{{ a8_config_dir }}/a8.env"
+  register: a8_v_env
+  failed_when: false
+  changed_when: false
+
+- name: V11-pre — resolve it
+  ansible.builtin.set_fact:
+    a8_v_push_kind: >-
+      {{ ((a8_v_env.content | default('') | b64decode)
+          | regex_findall('(?m)^A8_PUSH_CREDENTIAL_KIND=(\S+)') + ['none']) | first }}
+
 - name: V11a — stat the push credential on disk
   ansible.builtin.stat:
     path: >-
-      {{ a8_agent_home ~ '/.ssh/id_push' if a8_push_credential_kind == 'deploy_key'
+      {{ a8_agent_home ~ '/.ssh/id_push' if a8_v_push_kind == 'deploy_key'
          else a8_config_dir ~ '/push-token' }}
   register: a8_v_cred
-  when: a8_push_credential_kind != 'none'
+  when: a8_v_push_kind != 'none'
 
 - name: V11b — credential file exists with 0600 and belongs to the agent
   ansible.builtin.assert:
@@ -652,25 +674,25 @@
       - a8_v_cred.stat.mode == "0600"
       - a8_v_cred.stat.pw_name == a8_agent_user
     fail_msg: >-
-      a8_push_credential_kind={{ a8_push_credential_kind }}, але файла креденшала
+      a8_v_push_kind={{ a8_v_push_kind }}, але файла креденшала
       на диску немає або права не ті (exists={{ a8_v_cred.stat.exists | default(false) }},
       mode={{ a8_v_cred.stat.mode | default('—') }}).
       Найчастіша причина: застосування впало на задачі встановлення ключа, і play
-      обірвався ПОСЕРЕДИНІ — `a8.env` уже містить kind={{ a8_push_credential_kind }},
+      обірвався ПОСЕРЕДИНІ — `a8.env` уже містить kind={{ a8_v_push_kind }},
       а ключа немає. Демон у такому стані піде в гілку deploy_key і впаде на push.
       Лікування: повторити apply і переконатись, що PLAY RECAP дає failed=0.
-    success_msg: "Креденшал {{ a8_push_credential_kind }} на диску, 0600, власник {{ a8_agent_user }}"
+    success_msg: "Креденшал {{ a8_v_push_kind }} на диску, 0600, власник {{ a8_agent_user }}"
     quiet: true
-  when: a8_push_credential_kind != 'none'
+  when: a8_v_push_kind != 'none'
 
 - name: V11c — say out loud when there is no credential at all
   ansible.builtin.debug:
     msg: >-
-      КРЕДЕНШАЛА НА PUSH НЕМАЄ (a8_push_credential_kind=none). Демон зможе робити
+      КРЕДЕНШАЛА НА PUSH НЕМАЄ (a8_v_push_kind=none). Демон зможе робити
       worktree, commit, fetch, rebase — і НЕ зможе віддати результат: push впаде 128
       на автентифікації (вимір №7). Це не дефект ролі: створення креденшала —
       незворотна дія в акаунті yurii, питання класу A, issue #78.
-  when: a8_push_credential_kind == 'none'
+  when: a8_v_push_kind == 'none'
 
 - name: V11c-bis — authenticate to GitHub with the deploy key, exactly as the tick does
   # ПОВЕДІНКА, не наявність файлів. V11b доводить, що ключ лежить на місці;
@@ -702,7 +724,7 @@
   register: a8_v_ssh
   changed_when: false
   failed_when: false
-  when: a8_push_credential_kind == 'deploy_key'
+  when: a8_v_push_kind == 'deploy_key'
 
 - name: V11c-ter — GitHub recognises the key and the host is trusted
   ansible.builtin.assert:
@@ -717,7 +739,7 @@
       Доки ця перевірка червона, демон доходитиме до push і падатиме з detail=push.
     success_msg: "GitHub упізнав ключ, хост довірений — push демона має пройти"
     quiet: true
-  when: a8_push_credential_kind == 'deploy_key'
+  when: a8_v_push_kind == 'deploy_key'
 
 - name: V11d — remind what the credential can reach
   # Стан branch protection роль перевірити НЕ може: це GitHub, не машина. Тому
@@ -726,11 +748,11 @@
   # того ж дня, коли yurii увімкнув його (2026-09-20).
   ansible.builtin.debug:
     msg: >-
-      Креденшал типу {{ a8_push_credential_kind }} активний. Що він може на боці
+      Креденшал типу {{ a8_v_push_kind }} активний. Що він може на боці
       GitHub — роль не знає і не перевіряє. Подивитись:
       `gh api repos/stjurik/flatcraft/branches/main/protection --jq
       '{approvals: .required_pull_request_reviews.required_approving_review_count,
       admins: .enforce_admins.enabled}'`.
       Ключ розгортання адміністратором НЕ є, тож захист main на нього діє;
       токен, що працює іменем адміністратора, — інша річ (вимір №7).
-  when: a8_push_credential_kind != 'none'
+  when: a8_v_push_kind != 'none'
