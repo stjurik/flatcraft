@@ -46,6 +46,7 @@ A8_QUEUE_DIR=$QD
 A8_REPO_DIR=$ROOT/repo
 A8_WORKTREES_DIR=$ROOT/wt
 A8_TASK_TIMEOUT=${TASK_TIMEOUT:-20}
+A8_ORACLE_TIMEOUT=${ORACLE_TIMEOUT:-20}
 A8_MAX_TURNS=10
 A8_DEFAULT_MODEL=sonnet
 A8_CLAUDE_TOKEN_FILE=$ROOT/token
@@ -72,16 +73,37 @@ ENV
   cat >"$BIN/a8-run-agent" <<STUB
 #!/usr/bin/env bash
 CALLS="$LOGS/runner-calls"
+STOPFILE="$ROOT/STOP"
 STUB
   cat >>"$BIN/a8-run-agent" <<'STUB'
 wt="$1"; shift
-"$A8_GUARD" check >/dev/null 2>&1 || exit $?
+# `check-run`, як і справжня обгортка. Якби тут лишився `check`, тест зеленів
+# би на демоні, який на останній задачі дня валить власний оракул кодом 11.
+"$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
 if [[ "$*" == *check-hook-loud* ]]; then exit "${HOOK_RC:-0}"; fi
 if [[ "$1" == pnpm || "$*" == *"uv sync"* ]]; then exit "${DEPS_RC:-0}"; fi
+# Оракул приходить як `bash -c <текст>` і ВИКОНУЄТЬСЯ по-справжньому, у
+# worktree. Заглушка, що відповідала б за нього кодом зі змінної, доводила б
+# лише «рядок викликано»; нам потрібне «оракул червоніє на неправильній
+# роботі», а це видно тільки на справжньому виконанні проти справжнього дерева.
+if [[ "$1" == bash && "$2" == -c ]]; then
+  (cd "$wt" && bash -c "$3")
+  exit $?
+fi
 case "${AGENT_MODE:-commit}" in
   commit)
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  work)
+    # Робота, яку оракул може ПЕРЕВІРИТИ: без файла той самий оракул червоніє.
+    echo MARKER >"$wt/result.txt"
+    git -C "$wt" add result.txt
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  stopafter)
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
+    touch "$STOPFILE"
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
@@ -103,7 +125,13 @@ teardown() { rm -rf "$ROOT"; }
 enqueue() { # enqueue <файл> <json>
   printf '%s\n' "$2" >"$QD/$1.json"
 }
-valid() { echo "{\"id\":\"$1\",\"source\":\"human\",\"origin\":\"direction\",\"oracle\":\"pnpm test\",\"prompt\":\"do $1\"}"; }
+# Оракул за замовчуванням тривіально зелений: сценарії, що перевіряють ІНШЕ,
+# не мають падати на ньому. Хто перевіряє сам оракул — задає його явно.
+valid() { with_oracle "$1" true; }
+with_oracle() { # with_oracle <id> <текст оракула>
+  jq -nc --arg id "$1" --arg o "$2" \
+    '{id:$id, source:"human", origin:"direction", oracle:$o, prompt:("do "+$id)}'
+}
 tick() { bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1; }
 tick_rc() {
   local rc=0
@@ -215,6 +243,43 @@ run_scenarios() {
   [[ "$(jl .event)" == paused ]] && ok "третє падіння → event paused" || bad "третє: $(last)"
   AGENT_MODE=fail tick
   [[ "$(jl .event)" == paused && -e "$QD/004.json" ]] && ok "четвертий тік: guard → paused, задача не взята" || bad "четвертий: $(last)"
+  teardown
+
+  # 7b. Guard звітує падіння ПОСПІЛЬ, а не «скільки failed у вікні».
+  # Рішення в обох редакціях однакове; різниться ЧИСЛО, яке читає людина.
+  # `failed failed ok` — стан, на якому стара редакція друкувала 2 при нулі
+  # падінь поспіль; саме його yurii побачив 2026-09-20 після успішного прогону.
+  setup
+  printf 'failed\nfailed\nok\n' >"$LOGS/last-results"
+  [[ "$("$BIN/a8-guard" check)" == *"падінь поспіль 0 з 3"* ]] &&
+    ok "після успіху guard звітує 0 падінь поспіль (вікно давало б 2)" ||
+    bad "звіт guard після успіху: $("$BIN/a8-guard" check)"
+  # Контроль: без нього перевірка не відрізняє «рахує» від «завжди друкує 0».
+  printf 'ok\nfailed\nfailed\n' >"$LOGS/last-results"
+  [[ "$("$BIN/a8-guard" check)" == *"падінь поспіль 2 з 3"* ]] &&
+    ok "два падіння в хвості → guard звітує 2" || bad "звіт guard: $("$BIN/a8-guard" check)"
+  teardown
+
+  # 7c. Контракт двох дієслів: check гейтить НАБІР задачі, check-run — лише
+  # виконання. Без цього поділу оракул останньої задачі дня падав би кодом 11.
+  setup 1
+  echo 1 >"$LOGS/counter-$(date -u +%Y-%m-%d)"
+  "$BIN/a8-guard" check >/dev/null 2>&1
+  c_limit=$?
+  "$BIN/a8-guard" check-run >/dev/null 2>&1
+  r_limit=$?
+  printf 'failed\nfailed\nfailed\n' >"$LOGS/last-results"
+  "$BIN/a8-guard" check-run >/dev/null 2>&1
+  r_paused=$?
+  touch "$ROOT/STOP"
+  "$BIN/a8-guard" check-run >/dev/null 2>&1
+  r_stop=$?
+  [[ "$c_limit" == 11 && "$r_limit" == 0 && "$r_paused" == 0 ]] &&
+    ok "вичерпаний ліміт і пауза зупиняють check (11), але не check-run (0)" ||
+    bad "дієслова guard: check=$c_limit check-run=$r_limit paused=$r_paused"
+  [[ "$r_stop" == 10 ]] &&
+    ok "kill switch зупиняє і check-run (10) — єдиний запобіжник на межі контейнера" ||
+    bad "check-run при kill switch: $r_stop"
   teardown
 
   # 8. Агент «ok», але комітів немає → failed no-commits.
@@ -349,6 +414,63 @@ EOF
   tick
   [[ "$(jl .result)" == failed ]] && ok "невідомий A8_PUSH_CREDENTIAL_KIND → failed" || bad "unknown kind: $(last)"
   teardown
+
+  # ─── 18. Оракул приймання ────────────────────────────────────────────────
+  # Головна пара сценаріїв: ОДИН І ТОЙ САМИЙ оракул на двох різних результатах
+  # агента. Якщо вердикт не розходиться — оракул нічого не доводить (docs/02
+  # п.4: він мусить червоніти на НЕПРАВИЛЬНОМУ результаті, а не лише на
+  # відсутньому). Перевіряти «оракул викликано» замість цього означало б
+  # повторити помилку 2026-09-20.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == ok && "$(jl .oracle_rc)" == 0 ]] &&
+    git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    ok "агент зробив роботу → оракул зелений (oracle_rc 0), гілка на origin" || bad "оракул на правильній роботі: $(last)"
+  teardown
+
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=commit tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == oracle* && "$(jl .oracle_rc)" != 0 ]] &&
+    ok "той самий оракул на порожньому коміті → failed oracle" || bad "оракул на неправильній роботі: $(last)"
+  git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    bad "червоний оракул: гілку все одно запушено на origin" ||
+    ok "червоний оракул → на origin не запушено нічого"
+  git -C "$ROOT/repo" rev-parse --verify -q refs/heads/ai/a >/dev/null && [[ -d "$ROOT/wt/a" ]] &&
+    ok "червоний оракул: гілка і worktree збережені як доказ для людини" || bad "доказ прибрано"
+  teardown
+
+  # 18b. Задача, що впала ДО оракула, мусить відрізнятись у журналі від
+  # прийнятої машиною: oracle_rc = «-», а не 0.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=nocommit tick
+  [[ "$(jl .oracle_rc)" == "-" ]] &&
+    ok "падіння до оракула → oracle_rc «-» (не плутається із зеленим 0)" || bad "oracle_rc: $(last)"
+  teardown
+
+  # 18c. МЕЖА, заради якої розділялись дієслова guard'а: остання дозволена
+  # задача дня. Лічильник уже інкрементовано, і зі старим `check` в обгортці
+  # оракул отримував би 11 — тобто демон валив би задачу, яку агент виконав.
+  PUSH_KIND=token_file setup 1
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == ok && "$(jl .oracle_rc)" == 0 ]] &&
+    ok "ліміт 1: оракул останньої задачі дня проганяється і зеленіє" || bad "оракул на межі ліміту: $(last)"
+  teardown
+
+  # 18d. Kill switch посеред задачі теж дає ненульовий код — але через
+  # обгортку. Записати це як «червоний оракул» означало б звинуватити агента
+  # в рішенні людини.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=stopafter tick
+  [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"kill switch"* ]] &&
+    ok "kill switch під час оракула → stopped, а не failed oracle" || bad "kill switch під час оракула: $(last)"
+  grep -q failed "$LOGS/last-results" 2>/dev/null &&
+    bad "зупинка людиною зарахована в падіння поспіль" || ok "зупинка людиною не зарахована в падіння"
+  teardown
 }
 
 run_scenarios
@@ -402,6 +524,11 @@ if [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "невідомий kind → ok" 's/    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"/    finish ok ok unknown done/'
   mutate "push не перевіряється" 's/git -C "\$wt" -c credential.helper= push origin/true || git -C "\$wt" -c credential.helper= push origin/'
   mutate "класифікатор на спільному лозі" 's/logic classify "\$rc" "\$out"/logic classify "\$rc" "\$log"/'
+  mutate "оракул не проганяється" 's/timeout "\$A8_ORACLE_TIMEOUT" "\$RUNNER" "\$wt" bash -c "\$oracle" >>"\$log" 2>&1 \|\| orc=\$\?/orc=0/'
+  mutate "червоний оракул ігнорується" 's/if \(\(orc != 0\)\); then/if false; then/'
+  mutate "оракул після push" 's/(# ─── 6b\. Оракул(?:.*?\n)*?^fi\n\n)(# ─── 7\.)/$2/m'
+  mutate "oracle_rc завжди зелений" 's/oracle_rc="\$orc"/oracle_rc=0/'
+  mutate "kill switch під час оракула як червоний оракул" 's/  if \[\[ -e "\$A8_KILL_SWITCH" \]\]; then\n    finish stopped[^\n]*\n    exit 0\n  fi\n//'
   mutate "стани guard злиті в один" 's/"\$JOURNAL" event "\$gstate"/"\$JOURNAL" event stopped/'
   wait
   for i in $(seq 1 "$n"); do

@@ -88,6 +88,10 @@ a8_push_token_file_src: "" # локальний шлях до файла з то
 a8_tick_timer_enabled: false
 a8_tick_interval_minutes: 10
 a8_task_timeout_s: 5400 # 90 хв на задачу; далі контейнер убивається
+# Оракул приймання — окремий, набагато коротший бюджет: це перевірка вже
+# зробленого (тест, grep, prettier), а не робота. Спільний таймаут із задачею
+# означав би, що зациклений оракул тримає flock черги півтори години.
+a8_oracle_timeout_s: 900 # 15 хв на прогін оракула
 a8_max_turns: 200 # як у tools/scripts/autorun.sh
 a8_default_model: sonnet # docs/15 §0: Opus — для проєктування, не для кожної задачі
 a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only: 600 agent
