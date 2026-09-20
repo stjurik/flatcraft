@@ -279,6 +279,21 @@ PY
 assert_exit "мутація 5: login-shell назад у зонд → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
 
+# Мутація 6 — повертаємо обгортці дієслово `check`. Це і є та вада, через яку
+# оракул останньої дозволеної задачі дня падав би кодом 11. Тестом її не
+# дістати: a8-tick.test.sh підміняє обгортку заглушкою.
+python3 - "$mut/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "\n/usr/local/bin/a8-guard check-run >&2\n"
+assert anchor in s, "фікстура застаріла: обгортка більше не кличе guard так"
+s = s.replace(anchor, "\n/usr/local/bin/a8-guard check >&2\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 6: обгортка назад на 'a8-guard check' → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2" "$mut/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else

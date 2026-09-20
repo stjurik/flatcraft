@@ -157,6 +157,23 @@
     # командою; результат той самий, а розбір однозначний.
     "$tmp/guard" check > "$tmp/report" 2>&1
     sed -n 's/.*падінь поспіль /report=/p' "$tmp/report"
+    # ПОСПІЛЬ = з кінця до першого не-`failed`. На `failed failed ok` вікно
+    # давало 2, тоді як падінь поспіль нуль: успіх скинув лічильник. Саме це
+    # число guard надрукував 2026-09-20 одразу після успішного прогону, і воно
+    # прочиталось як «лишилось одне падіння до паузи».
+    printf 'failed\nfailed\nok\n' > "$tmp/logs/last-results"
+    "$tmp/guard" check > "$tmp/after-ok" 2>&1
+    sed -n 's/.*падінь поспіль /after_ok=/p' "$tmp/after-ok"
+    # Дієслово check-run гейтить лише ВИКОНАННЯ. Ані вичерпаний ліміт, ані
+    # пауза його не стосуються: обгортка стартує контейнер, а не бере задачу,
+    # і лічильник на цей момент уже інкрементовано демоном. Інакше оракул
+    # приймання останньої дозволеної задачі дня падав би кодом 11.
+    echo 2 > "$tmp/logs/counter-$(date -u +%Y-%m-%d)"
+    printf 'failed\nfailed\nfailed\n' > "$tmp/logs/last-results"
+    "$tmp/guard" check-run >/dev/null 2>&1; echo "run_exit=$?"
+    # Kill switch — єдиний запобіжник, що зупиняє і виконання теж.
+    touch "$tmp/NOPE"
+    "$tmp/guard" check-run >/dev/null 2>&1; echo "run_stop_exit=$?"
     rm -rf "$tmp"
   register: a8_v_guard_limits
   changed_when: false
@@ -170,11 +187,18 @@
       - "'fail_exit=12' in a8_v_guard_limits.stdout"
       - "'recovered_exit=0' in a8_v_guard_limits.stdout"
       # Guard мусить звітувати ПОРАХОВАНЕ число, а не літерал. Стан `ok failed
-      # failed` при ліміті 3 → паузи немає, але падінь у вікні рівно два.
+      # failed` при ліміті 3 → паузи немає, але падінь поспіль рівно два.
       # Вписаний «0» цю перевірку не пройде.
       - "'report=2 з 3' in a8_v_guard_limits.stdout"
+      # Пара до попереднього рядка: ті самі три результати в іншому порядку.
+      # Вікно дало б 2, підрахунок поспіль дає 0. Без ЦІЄЇ пари перевірка не
+      # відрізняє «рахує поспіль» від «рахує у вікні».
+      - "'after_ok=0 з 3' in a8_v_guard_limits.stdout"
+      # Два дієслова: check гейтить набір задачі, check-run — лише виконання.
+      - "'run_exit=0' in a8_v_guard_limits.stdout"
+      - "'run_stop_exit=10' in a8_v_guard_limits.stdout"
     fail_msg: "a8-guard: {{ a8_v_guard_limits.stdout | replace('\n', ' ') }}"
-    success_msg: "a8-guard: ліміт → 11, три падіння → 12, після успіху → 0, звіт збігається з підрахунком"
+    success_msg: "a8-guard: ліміт → 11, три падіння → 12, після успіху → 0, падіння рахуються поспіль, check-run гейтить лише kill switch"
     quiet: true
 
 # ─── V6. Контейнер стартує під правильним UID і з записуваним $HOME ────────

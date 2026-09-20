@@ -13,7 +13,12 @@
 #     гілка, worktree, модель, час, клас виходу, посилання на PR» → task,
 #     branch, worktree, model, ts/duration_s, exit_class, pr;
 #   ADR-039 §4 (класифікатор виходу) → exit_class і detail;
-#   ADR-039 §8, метрика «покриття оракулами» → oracle;
+#   ADR-039 §8, метрика «покриття оракулами» → oracle і oracle_rc.
+#     `oracle` — ТЕКСТ оракула (що мало бути доведено), `oracle_rc` — його код
+#     виходу (чи це справді доведено МАШИНОЮ). Без другого поля перший лише
+#     цитує намір: запис із зеленим `result` не відрізнити від запису, де
+#     оракул не проганявся взагалі. Значення `-` означає «до оракула не
+#     дійшло» (задача впала раніше) — це не те саме, що 0;
 #   OQ-34 → source (довіра); CLAUDE.md §0 «три джерела» → origin;
 #   інженерне рішення прогону → result (що сталося із задачею: ok, failed,
 #     no-credential, auth_stop, stopped) і note.
@@ -21,7 +26,7 @@
 #
 # Використання:
 #   a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка] [ключ=значення ...]
-#     ключі: origin oracle branch worktree exit_class detail pr
+#     ключі: origin oracle oracle_rc branch worktree exit_class detail pr
 #   a8-journal reject <task_id> <причини через кому>   — ЯКІ поля відхилили задачу
 #   a8-journal event <стан> <пояснення>                — запобіжники, пауза, busy
 set -euo pipefail
@@ -55,7 +60,7 @@ case "${1:-}" in
     for kv in "$@"; do
       key="${kv%%=*}"; val="${kv#*=}"
       case "$key" in
-        origin|oracle|branch|worktree|exit_class|detail|pr) ;;
+        origin|oracle|oracle_rc|branch|worktree|exit_class|detail|pr) ;;
         *) echo "a8-journal: невідоме поле '$key'" >&2; exit 2 ;;
       esac
       extra="$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$extra")"
