@@ -294,6 +294,21 @@ PY
 assert_exit "мутація 6: обгортка назад на 'a8-guard check' → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2" "$mut/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
 
+# Мутація 7 — повертаємо verify.yml до судження про машину за змінною play'ю.
+# Саме так `--tags verify` без `-e` повідомляв «КРЕДЕНШАЛА НА PUSH НЕМАЄ» при
+# налаштованому deploy_key на машині (2026-09-20).
+python3 - "$mut/infra/ansible/roles/a8/tasks/verify.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "  when: a8_v_push_kind != 'none'\n"
+assert anchor in s, "фікстура застаріла: V11 більше не гілкується так"
+s = s.replace(anchor, "  when: a8_push_credential_kind != 'none'\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 7: verify.yml назад на змінну play'ю → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else
