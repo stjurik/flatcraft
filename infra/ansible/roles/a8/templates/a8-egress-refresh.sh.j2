@@ -80,7 +80,7 @@ echo "a8-egress-refresh: у наборі $(ipset list "$SET" | grep -c '^[0-9]')
 # власноруч знімала б власний примус. Таймер повертає правила не пізніше ніж
 # за {{ a8_egress_refresh_minutes }} хв (і за 2 хв після завантаження). Це ВІКНО,
 # у якому егрес не фільтрується, — README §6 називає його вголос.
-{% if a8_egress_enforce %}
+{% if a8_egress_enforce | bool %}
 /usr/local/bin/a8-egress-rules apply
 {% else %}
 echo "a8-egress-refresh: примус вимкнено (a8_egress_enforce=false), правила не застосовую"
