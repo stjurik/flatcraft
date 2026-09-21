@@ -288,6 +288,7 @@ test("registry import у apps/api НЕ тягне react/react-dom", async () => 
 - [ ] **8. Conformance suite:** усі 4 перевірки з §3 зелені **автоматично** (нічого не писати вручну — реєстр + фікстури).
 - [ ] **9. Thumb:** `apps/web/public/thumbs/<slug>.png` (опційно; default — placeholder).
 - [ ] **10. Docs:** нема окремого docs-файлу — definition містить `.describe()` як єдине джерело.
+- [ ] **11. e2e складу форми:** якщо `def.ui.visibleFields` задано — окремий Playwright-тест підтверджує, що поля НЕ у списку відсутні у формі (`getByTestId("field-<name>")`/`getByTestId("auto-form-unsupported-<name>")` → `toHaveCount(0)`), а поля зі списку видимі. Байт-снапшоти DXF/PDF доводять детермінізм геометрії, НЕ склад форми — регресія `l_bracket` (issue #96, PR #92) пройшла повз усі снапшоти й повз усі 24 наявні spec-файли саме тому, що жоден не перевіряв, які поля рендерить AutoForm.
 
 **НЕ треба:**
 
