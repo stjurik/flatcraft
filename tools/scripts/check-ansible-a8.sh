@@ -260,6 +260,11 @@ if [[ -f "$BOOL_DEFAULTS" && -d "$TASKS" ]]; then
         grep -rnE "when:.*\\b$var\\b" "$TASKS" || true
         grep -rnE "^[[:space:]]*-[[:space:]]+(not[[:space:]]+)?\\(?$var\\)?[[:space:]]*$" "$TASKS" || true
         grep -rnE "if[[:space:]]+$var\\b" "$TASKS" || true
+        # ШАБЛОНИ теж. `{% if a8_egress_enforce %}` у .j2 має ту саму ваду:
+        # рядок "false" у Jinja істинний, тож при `-e …=false` відрендерився б
+        # код, що ПОВЕРТАЄ правила примусу кожні 30 хв. Перша редакція
+        # інваріанта дивилась лише в tasks/ і цю міну не бачила.
+        grep -rnE "\\{%-? *if +$var\\b" "$ROLE/templates" 2>/dev/null || true
       }
     )
     # `grep -oE … -P` — два матчери одночасно, і grep на це відповідає

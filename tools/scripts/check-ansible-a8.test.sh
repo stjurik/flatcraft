@@ -338,6 +338,22 @@ PY
 assert_exit "мутація 9: тернарник таймера без '| bool' → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/tasks/main.yml" "$mut/infra/ansible/roles/a8/tasks/main.yml"
 
+# Мутація 10 — той самий клас у ШАБЛОНІ. Перша редакція інваріанта 8 дивилась
+# лише в tasks/ і цю міну не бачила: при `-e a8_egress_enforce=false` рядок
+# "false" у Jinja істинний, тож відрендерився б код, який ПОВЕРТАЄ правила
+# примусу кожні 30 хв, поки роль їх одноразово знімає.
+python3 - "$mut/infra/ansible/roles/a8/templates/a8-egress-refresh.sh.j2" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "{% if a8_egress_enforce | bool %}"
+assert anchor in s, "фікстура застаріла: умова примусу в шаблоні виглядає інакше"
+s = s.replace(anchor, "{% if a8_egress_enforce %}", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 10: Jinja-умова в шаблоні без '| bool' → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/templates/a8-egress-refresh.sh.j2" "$mut/infra/ansible/roles/a8/templates/a8-egress-refresh.sh.j2"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else
