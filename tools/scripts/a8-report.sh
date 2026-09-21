@@ -75,6 +75,15 @@ emit "# джерело: tools/scripts/a8-report.sh"
 section "Час на самій машині"
 emit "$(remote 'date -u +%Y-%m-%dT%H:%M:%SZ; uptime')"
 
+section "Залізо і памʼять"
+# Доданий після 2026-09-21: yurii встановив планку памʼяті, а звіт не мав
+# жодного рядка, яким це можна підтвердити. Звіт, що не бачить зміни заліза,
+# не годиться для машини, яку обслуговують руками.
+emit "$(remote 'free -h; echo; nproc --all | sed "s/^/ядер: /"')"
+emit ""
+emit "помилки памʼяті в dmesg (порожньо = добре):"
+emit "$(remote 'sudo dmesg -T 2>/dev/null | grep -iE "edac|machine check|memory error|Corrected error" | tail -5 || true')"
+
 section "Таймери"
 emit "$(remote 'systemctl list-timers a8-tick.timer a8-egress-refresh.timer --all --no-pager')"
 
