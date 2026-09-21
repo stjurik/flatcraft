@@ -309,6 +309,35 @@ PY
 assert_exit "мутація 7: verify.yml назад на змінну play'ю → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/tasks/verify.yml" "$mut/infra/ansible/roles/a8/tasks/verify.yml"
 
+# Мутація 8 — знімаємо `| bool` з умови примусу egress. Саме на цьому впало
+# застосування на A8 2026-09-21, а на старішому ansible-core та сама вада
+# мовчки інвертує прапорець замість падіння.
+python3 - "$mut/infra/ansible/roles/a8/tasks/main.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "  when:\n    - a8_egress_enabled | bool\n    - a8_egress_enforce | bool\n"
+assert anchor in s, "фікстура застаріла: умова примусу egress виглядає інакше"
+s = s.replace(anchor, "  when:\n    - a8_egress_enabled\n    - a8_egress_enforce\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 8: умова egress без '| bool' → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/main.yml" "$mut/infra/ansible/roles/a8/tasks/main.yml"
+
+# Мутація 9 — той самий клас у тернарнику стану таймера. Це найнебезпечніший
+# випадок: `-e a8_tick_timer_enabled=false` на ansible-core 2.16 дає "started".
+python3 - "$mut/infra/ansible/roles/a8/tasks/main.yml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "'started' if a8_tick_timer_enabled | bool else 'stopped'"
+assert anchor in s, "фікстура застаріла: тернарник стану таймера виглядає інакше"
+s = s.replace(anchor, "'started' if a8_tick_timer_enabled else 'stopped'", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 9: тернарник таймера без '| bool' → 1" 1 "$mut"
+cp "$REPO/infra/ansible/roles/a8/tasks/main.yml" "$mut/infra/ansible/roles/a8/tasks/main.yml"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else

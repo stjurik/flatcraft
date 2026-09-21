@@ -388,7 +388,7 @@
       done
   register: a8_v_egress
   changed_when: false
-  when: a8_egress_enabled
+  when: a8_egress_enabled | bool
 
 - name: V9b — allowlist set exists, refresh timer is enabled, container DNS is allowed
   ansible.builtin.assert:
@@ -399,7 +399,7 @@
       - "'DNS_MISSING' not in a8_v_egress.stdout"
     fail_msg: "ipset/таймер/DNS: {{ a8_v_egress.stdout | replace('\n', ' ') }}"
     quiet: true
-  when: a8_egress_enabled
+  when: a8_egress_enabled | bool
 
 - name: V9c — report that enforcement is off by default
   ansible.builtin.debug:
@@ -408,7 +408,7 @@
       видно, але DROP усього іншого не застосовано. Це не дефект verify — це дефолт
       ролі: вмикати фільтр наосліп означає ризикнути тим, що демон тихо втратить
       мережу. Порядок увімкнення — README §6.
-  when: a8_egress_enabled and not a8_egress_enforce
+  when: (a8_egress_enabled | bool) and not (a8_egress_enforce | bool)
 
 # ─── V10. lefthook досяжний у PATH контейнера ──────────────────────────────
 - name: V10a — resolve lefthook inside the container
@@ -626,7 +626,7 @@
 - name: V17b — drop-in present if and only if enforcement is on
   ansible.builtin.assert:
     that:
-      - a8_v_dropin.stat.exists == (a8_egress_enabled and a8_egress_enforce)
+      - a8_v_dropin.stat.exists == ((a8_egress_enabled | bool) and (a8_egress_enforce | bool))
     fail_msg: "drop-in exists={{ a8_v_dropin.stat.exists }}, enforce={{ a8_egress_enforce }}"
     quiet: true
 
