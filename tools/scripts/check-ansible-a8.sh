@@ -221,6 +221,54 @@ if [[ -f "$VERIFY_TASKS" ]]; then
   done < <(grep -n 'a8_push_credential_kind' "$VERIFY_TASKS" || true)
 fi
 
+# Інваріант 8 — булеву змінну ролі не можна вживати в умові без `| bool`.
+#
+# ЧОМУ. `-e a8_egress_enforce=true` з командного рядка передає РЯДОК, а не
+# булеан. Далі поведінка залежить від версії ansible-core, і обидві погані:
+#
+#   ansible-core 2.19+ : `when: a8_egress_enforce` → помилка
+#       «Conditional result (True) was derived from value of type 'str'»
+#       (спостережено на A8 2026-09-21, застосування впало посередині);
+#   ansible-core 2.16  : помилки НЕМАЄ, рядок "false" істинний, і задача
+#       виконується. Виміряно локально тим самим днем:
+#           -e flag=false →  OLD_FIRED, OLD_STATE=started
+#                            NEW_STATE=stopped   (з `| bool`)
+#
+# Друга гілка страшніша: `-e a8_tick_timer_enabled=false` не вимкнув би
+# таймер, а ЗАПУСТИВ його, мовчки. Прапорець, що робить протилежне до
+# написаного, — найдорожчий клас у цьому проєкті.
+#
+# Правило: ім'я булевої змінної (тієї, що в defaults оголошена як true/false)
+# в умові мусить мати `| bool`. У текстах повідомлень — можна й навіть краще
+# без нього: там показують те, що передали.
+BOOL_DEFAULTS="$ROLE/defaults/main.yml"
+if [[ -f "$BOOL_DEFAULTS" && -d "$TASKS" ]]; then
+  while IFS= read -r var; do
+    [[ -z "$var" ]] && continue
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      line="${hit#*:}"
+      line="${line#*:}"
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      # `| bool` одразу після імені — інваріант виконано.
+      if [[ "$line" =~ $var[[:space:]]*\|[[:space:]]*bool ]]; then
+        continue
+      fi
+      violations+=("булева змінна '$var' в умові без '| bool' (рядок із -e зламає або інвертує): $hit")
+    done < <(
+      {
+        grep -rnE "when:.*\\b$var\\b" "$TASKS" || true
+        grep -rnE "^[[:space:]]*-[[:space:]]+(not[[:space:]]+)?\\(?$var\\)?[[:space:]]*$" "$TASKS" || true
+        grep -rnE "if[[:space:]]+$var\\b" "$TASKS" || true
+      }
+    )
+    # `grep -oE … -P` — два матчери одночасно, і grep на це відповідає
+    # «conflicting matchers specified». Список змінних виходив порожній, тобто
+    # інваріант «проходив», не виконавшись жодного разу. Спіймано власним
+    # прогоном 2026-09-21 — і це рівно той клас, який цей файл ловить у ролі.
+  done < <(sed -nE 's/^(a8_[a-z_]+): *(true|false) *(#.*)?$/\1/p' "$BOOL_DEFAULTS")
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -231,4 +279,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool"
