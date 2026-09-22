@@ -11,15 +11,11 @@
  * @flatcraft/cad-engine.
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
-import {
-  PERFORATED_PANEL_DEFAULT_PARAMETERS,
-  WALL_SHELF_DEFAULT_PARAMETERS,
-} from "@flatcraft/types";
+import { PERFORATED_PANEL_DEFAULT_PARAMETERS } from "@flatcraft/types";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { RegistryTemplateViewport } from "./registry-template-viewport";
-import { WallShelfViewport } from "./wall-shelf-viewport";
 
 const T = 2; // t+r = 2 + 2.5 = 4.5 для default bend_radius_mm.
 const FALLBACK = "Виправте параметри у формі";
@@ -73,22 +69,27 @@ describe("render-gate: z_bracket (RegistryTemplateViewport, Run 7 Етап 2)", 
   });
 });
 
-describe("render-gate: wall_shelf", () => {
-  it("замала back_height → fallback", () => {
+describe("render-gate: wall_shelf (RegistryTemplateViewport, Run 7 Етап 2)", () => {
+  const def = TEMPLATE_REGISTRY.wall_shelf;
+
+  it("замала back_height → fallback, без сцени", () => {
     const html = renderToString(
-      <WallShelfViewport
-        parameters={{ ...WALL_SHELF_DEFAULT_PARAMETERS, back_height_mm: 3 }}
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{ ...def.defaults, back_height_mm: 3 }}
         thicknessMm={T}
       />,
     );
     expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
   });
 
-  it("валідні → сцена", () => {
+  it("валідні параметри → сцена (composed, dynamic loading), без fallback", () => {
     const html = renderToString(
-      <WallShelfViewport parameters={WALL_SHELF_DEFAULT_PARAMETERS} thicknessMm={T} />,
+      <RegistryTemplateViewport def={def} parameters={def.defaults} thicknessMm={T} />,
     );
     expect(html).toContain(LOADING);
+    expect(html).not.toContain(FALLBACK);
   });
 });
 

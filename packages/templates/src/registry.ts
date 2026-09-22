@@ -11,6 +11,7 @@
 import { cornerAngleDefinition } from "./corner-angle/index.js";
 import { lBracketDefinition } from "./l-bracket/index.js";
 import { perforatedPanelDefinition } from "./perforated-panel/index.js";
+import { wallShelfDefinition } from "./wall-shelf/index.js";
 import { zBracketDefinition } from "./z-bracket/index.js";
 
 // Без `satisfies Record<string, TemplateDefinition<X>>` (Етап 1 мало це для
@@ -25,6 +26,7 @@ export const TEMPLATE_REGISTRY = {
   corner_angle: cornerAngleDefinition,
   l_bracket: lBracketDefinition,
   z_bracket: zBracketDefinition,
+  wall_shelf: wallShelfDefinition,
 } as const;
 
 export type TemplateSlug = keyof typeof TEMPLATE_REGISTRY;
