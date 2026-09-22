@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `ai/**` — гілки, які пушить демон A8. PR на них створює `a8-pr.yml` під
+    # `GITHUB_TOKEN`, а такий PR НЕ запускає `pull_request`-воркфлоу. Без цього
+    # рядка PR приходив би без жодного чека — виглядав би як готова робота.
+    branches: [main, "ai/**"]
   pull_request:
     branches: [main]
 
