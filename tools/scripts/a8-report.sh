@@ -26,6 +26,15 @@ SINCE="${A8_REPORT_SINCE:--12h}"
 KILLSWITCH=0
 OUT=""
 
+# Сигнатури СПРАВЖНІХ помилок памʼяті. Попередній шаблон містив голе `edac`, і
+# звіт 2026-09-22 надрукував під заголовком «помилки памʼяті» рядок
+# `EDAC MC: Ver: 3.0.0` — це банер версії підсистеми при завантаженні, а не
+# помилка. Розділ, підписаний «порожньо = добре», не має права показувати
+# норму як відхилення: інакше справжню помилку не відрізнити від звичного шуму.
+# Контроль — сценарій 9 у a8-report.test.sh: шаблон мусить ВІДКИНУТИ банер і
+# ЗЛОВИТИ рядки CE/UE та mce. Одна половина без іншої нічого не доводить.
+MEM_ERROR_RE='mce:|hardware error|machine check|memory error|EDAC MC[0-9]+: [0-9]+ (CE|UE)'
+
 while (($# > 0)); do
   case "$1" in
     -o | --out)
@@ -82,7 +91,7 @@ section "Залізо і памʼять"
 emit "$(remote 'free -h; echo; nproc --all | sed "s/^/ядер: /"')"
 emit ""
 emit "помилки памʼяті в dmesg (порожньо = добре):"
-emit "$(remote 'sudo dmesg -T 2>/dev/null | grep -iE "edac|machine check|memory error|Corrected error" | tail -5 || true')"
+emit "$(remote "sudo dmesg -T 2>/dev/null | grep -iE '$MEM_ERROR_RE' | tail -5 || true")"
 
 section "Таймери"
 emit "$(remote 'systemctl list-timers a8-tick.timer a8-egress-refresh.timer --all --no-pager')"
@@ -95,10 +104,19 @@ emit ""
 emit "стартів a8-tick.service за період:"
 emit "$(remote "sudo journalctl -u a8-tick.service --since '$SINCE' --no-pager | grep -c 'Starting\\|Started' || true")"
 
-section "Журнал прогонів (runs.log, весь)"
-emit "$(remote 'sudo -u agent cat /home/agent/agent-logs/runs.log 2>/dev/null || echo "(порожній або відсутній)"')"
+section "Журнал прогонів (runs.log, включно з ротованими)"
+# logrotate ріже runs.log щодня опівночі. Звіт, що читає лише живий файл,
+# показав 2026-09-22 порожній журнал за ніч, у якій ротація сталася о 00:00 —
+# і це ВЖЕ ВДРУГЕ в цьому проєкті прочиталось як «записи зникли» (перший раз —
+# 2026-09-21, запис про oracle-red лежав у runs.log.1.gz).
+# Порядок вивода — найстаріше згори: runs.log.2.gz → runs.log.1.gz → runs.log.
+JOURNAL_CAT='ls -1v /home/agent/agent-logs/runs.log.*.gz 2>/dev/null | tac | xargs -r zcat --; cat /home/agent/agent-logs/runs.log 2>/dev/null'
+emit "$(remote "sudo -u agent bash -c \"$JOURNAL_CAT\"")"
 emit ""
-emit "ротовані файли:"
+emit "записів усього (включно з ротованими):"
+emit "$(remote "sudo -u agent bash -c \"$JOURNAL_CAT\" | grep -c . || true")"
+emit ""
+emit "файли журналу:"
 emit "$(remote 'sudo -u agent ls -la /home/agent/agent-logs/ | grep runs.log || true')"
 
 section "Запобіжники"
@@ -123,6 +141,16 @@ emit "$(remote 'df -h /home | tail -1')"
 emit ""
 emit "гілки ai/*:"
 emit "$(remote "sudo -u agent git -C /home/agent/hart branch --list 'ai/*'" )"
+emit ""
+emit "зареєстровані worktree у git:"
+emit "$(remote 'sudo -u agent git -C /home/agent/hart worktree list')"
+emit ""
+# Тека, вилучена `rm -rf` замість `git worktree remove`, лишає реєстрацію в
+# git: гілка стає `+` у `branch --list`, її не видалити, а `du` по теках чесно
+# каже «жодного worktree». Саме так виглядав звіт 2026-09-22 — розбіжність
+# між двома рядками того самого розділу. Тут вона стає окремим фактом.
+emit "осиротілі реєстрації (порожньо = добре):"
+emit "$(remote 'sudo -u agent git -C /home/agent/hart worktree prune --dry-run -v')"
 
 section "Egress"
 emit "$(remote 'sudo a8-egress-rules status')"
