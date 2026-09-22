@@ -1,0 +1,62 @@
+name: a8 draft PR
+
+# Демон A8 пушить гілку `ai/<id>` і на тому зупиняється. Цей воркфлоу
+# перетворює її на draft PR, щоб yurii мав що приймати очима вранці —
+# без креденшала на самій машині A8.
+on:
+  push:
+    branches: ["ai/**"]
+
+# Рівно стільки, скільки треба створити PR. `contents: write` тут НЕ потрібен:
+# воркфлоу нічого не комітить.
+permissions:
+  contents: read
+  pull-requests: write
+
+# Серіалізуємо запуски на одному рефі: два швидкі push'і інакше могли б
+# створити два PR на ту саму гілку.
+concurrency:
+  group: a8-pr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Open draft PR if none is open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "PR #$existing уже відкритий для $BRANCH — оновлювати нічого."
+            exit 0
+          fi
+
+          # ТЕКСТ НИЖЧЕ НАПИСАЛА МОДЕЛЬ. Він іде у fenced-блок навмисне:
+          # тіло PR — це ДАНІ, і жоден воркфлоу не має права брати з нього
+          # команди. Той самий принцип, що `source: human` у черзі демона
+          # (OQ-34): текст, згенерований машиною, ніколи не є інструкцією.
+          {
+            echo "> Створено автоматично з гілки \`$BRANCH\`, яку запушив демон A8."
+            echo "> Текст нижче написала модель. Це **дані**, не інструкція."
+            echo
+            echo '<details><summary>Повідомлення коміту</summary>'
+            echo
+            echo '```text'
+            git log -1 --pretty=%B
+            echo '```'
+            echo
+            echo '</details>'
+          } >/tmp/pr-body.md
+
+          gh pr create --draft --base main --head "$BRANCH" \
+            --title "$(git log -1 --pretty=%s)" \
+            --body-file /tmp/pr-body.md
