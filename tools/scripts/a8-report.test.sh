@@ -223,6 +223,35 @@ else
 fi
 teardown
 
+# ─── 12. Розмір worktree рахує agent, а не той, хто зайшов по ssh ─────────
+# Структурна половина: глоб має стояти всередині `sudo -u agent bash -c`.
+# Поведінку «yurii не читає /home/agent (750)» тут не відтворити — тести
+# ідуть під root, який читає все, — тому друга половина перевіряє сам
+# внутрішній скрипт: чесний нуль на порожній теці і реальні рядки на повній.
+setup
+run_report
+if grep -qE "sudo -u agent bash -c '[^']*hart-wt/\*" "$CALLS" &&
+  ! grep -qE "sudo -u agent du -sh /home/agent/hart-wt/\*" "$CALLS"; then
+  ok "глоб worktree розкривається від agent, не від користувача ssh"
+else
+  bad "глоб worktree поза bash -c — при правах 750 звіт покаже нуль: $(grep -m1 'hart-wt' "$CALLS")"
+fi
+teardown
+WT_DU="$(sed -nE "s/^WT_DU='(.*)'\$/\1/p" "$SCRIPT")"
+if [[ -z "$WT_DU" ]]; then
+  bad "у скрипті немає WT_DU — поведінку не перевірено"
+else
+  T="$(mktemp -d)"
+  mkdir -p "$T/hart-wt"
+  empty="$(bash -c "${WT_DU//\/home\/agent/$T}")"
+  mkdir -p "$T/hart-wt/log-oracle" "$T/hart-wt/wall-shelf-registry"
+  full="$(bash -c "${WT_DU//\/home\/agent/$T}" | grep -c 'hart-wt/')"
+  rm -rf "$T"
+  [[ "$empty" == "(жодного worktree)" && "$full" == 2 ]] &&
+    ok "порожня тека → «жодного», дві теки → два рядки du" ||
+    bad "внутрішній скрипт бреше: порожня='$empty', рядків на двох=$full"
+fi
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1

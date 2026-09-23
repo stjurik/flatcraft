@@ -135,7 +135,13 @@ emit "$(remote 'sudo -u agent ls -la /home/agent/agent-queue/ /home/agent/agent-
 section "Worktree і диск"
 # Worktree після успішної задачі НЕ прибираються — кожен несе node_modules і
 # .venv. Цей розділ існує, щоб витік було видно числом, а не здогадом.
-emit "$(remote 'sudo -u agent du -sh /home/agent/hart-wt/* 2>/dev/null || echo "(жодного worktree)"')"
+# Глоб МУСИТЬ розкриватися всередині `bash -c` від agent. Поза ним його
+# розкривала оболонка yurii, а `/home/agent` має права 750: `*` ішов у du
+# дослівно, du падав, і `||` друкував «(жодного worktree)», поки їх було два
+# (знайдено оркестратором на T470 2026-09-23; попередній діагноз «осиротіла
+# реєстрація» був хибним). nullglob + лічильник: нуль — це справді нуль.
+WT_DU='shopt -s nullglob; set -- /home/agent/hart-wt/*; if (($#)); then du -sh "$@"; else echo "(жодного worktree)"; fi'
+emit "$(remote "sudo -u agent bash -c '$WT_DU'")"
 emit ""
 emit "$(remote 'df -h /home | tail -1')"
 emit ""
