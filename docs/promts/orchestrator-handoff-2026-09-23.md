@@ -95,6 +95,7 @@ create and approve pull requests» **увімкнена** і безпечна **
    - заразом у скрипті 8 шаблонів, а в §6.1 заборонено 9 місць: бракує
      `^packages/cad-engine/data/bend-machine-esi\.yaml$`.
 3. **Довезти нічну роботу `wall_shelf`.** Механіку перевірено на тестовому репозиторії:
+
    ```bash
    ssh a8-ts 'cd /tmp && sudo -u agent git -C /home/agent/hart-wt/wall-shelf-registry bundle create /tmp/wall-shelf.bundle ai/wall-shelf-registry ^origin/main && sudo -u agent chmod a+r /tmp/wall-shelf.bundle'
    scp a8-ts:/tmp/wall-shelf.bundle /tmp/ && cd ~/hart && git fetch origin main
@@ -103,6 +104,7 @@ create and approve pull requests» **увімкнена** і безпечна **
    git log --oneline origin/main..ai/wall-shelf-registry        # рівно 783ce65
    git diff --name-only origin/main...ai/wall-shelf-registry | tools/scripts/check-forbidden-paths.sh
    ```
+
    Далі push і PR. Це **свідоме перекриття** вердикту машини: червоне дало середовище, а
    Python-частину доведе CI. У лічильник «3 чисті прогони поспіль» (T5 крок 5) не йде. PR
    має містити розділ «Як перевірити очима»: студія настінної полиці поруч зі staging.
@@ -111,6 +113,7 @@ create and approve pull requests» **увімкнена** і безпечна **
    перепрогнати той самий оракул у тому самому worktree. Тоді зелений вердикт дає машина,
    а не рішення її обійти, і заразом нитка 1 перевіряється на реальній задачі. Bundle
    лишається запасним шляхом, якщо оракул і після бібліотек червоний. Вибір — за yurii.
+
 4. **Гілки демона.** `ai/log-pr116` не мерджити: там вигадане число (18 пар замість 24), саме
    цей випадок і породив правило «сильний оракул». Видалити можна лише зі згоди yurii (клас A).
    Для `ai/log-oracle` PR відкрити руками. Порожній коміт тут **не** допоможе: воркфлоу на
