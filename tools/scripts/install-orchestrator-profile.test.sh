@@ -26,6 +26,13 @@ setup() { # setup [файл-профілю]
   cp "${1:-$REAL_PROFILE}" "$T/.claude/settings.orchestrator.json"
   LOCAL="$T/.claude/settings.local.json"
   HOOK_COPY="$T/hooks/log-permission-request.sh"
+  # Справжній «origin»: інсталятор бере хук із main на origin за SHA від
+  # ls-remote, а не з робочого дерева.
+  GIT=(git -C "$T" -c user.name=t -c user.email=t@t)
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm init
+  git init -q --bare "$T/origin.git"
+  "${GIT[@]}" remote add origin "$T/origin.git"
+  "${GIT[@]}" push -q origin HEAD:refs/heads/main
 }
 run() { (cd "$T" && FLATCRAFT_BACKUP_DIR="$T/backups" FLATCRAFT_HOOKS_DIR="$T/hooks" bash tools/scripts/install-orchestrator-profile.sh "$@" 2>&1); }
 teardown() { rm -rf "$T"; }
@@ -212,6 +219,58 @@ for foreign in \
   teardown
   rm -f "$p"
 done
+
+# ─── 16. Хук береться з main на origin, а не з робочого дерева ─────────────
+# Знайдено рецензією Claude Opus 4.6 (через agy) 2026-09-23: перша редакція
+# копіювала файл робочого дерева, тож невинний запуск інсталятора з гілки
+# розгорнув би нерецензований код, який потім виконується без кліку.
+setup
+echo 'echo змінено-в-дереві' >>"$T/tools/scripts/log-permission-request.sh"
+run >/dev/null
+cmp -s "$HERE/log-permission-request.sh" "$HOOK_COPY" &&
+  ok "змінений у робочому дереві хук не встановлюється — ставиться версія з origin/main" ||
+  bad "встановлено хук із робочого дерева, а не з origin/main"
+teardown
+
+# ─── 17. Підроблене локальне origin/main не допомагає ───────────────────────
+# `git fetch . HEAD:refs/remotes/origin/main` дозволений профілем без кліку й
+# пересуває локальний ref. SHA беремо з ls-remote — у самого origin.
+setup
+echo 'echo закомічено-локально' >>"$T/tools/scripts/log-permission-request.sh"
+"${GIT[@]}" commit -qam evil
+"${GIT[@]}" fetch -q . HEAD:refs/remotes/origin/main
+run >/dev/null
+cmp -s "$HERE/log-permission-request.sh" "$HOOK_COPY" &&
+  ok "підроблене локальне origin/main ігнорується — SHA з ls-remote" ||
+  bad "встановлено хук із підробленого локального origin/main"
+teardown
+
+# ─── 18. Немає зв'язку з origin — нічого не змінено ────────────────────────
+setup
+"${GIT[@]}" remote set-url origin "$T/немає.git"
+out="$(run)"
+rc=$?
+if [[ $rc == 2 && ! -f "$LOCAL" && ! -e "$HOOK_COPY" ]]; then
+  ok "origin недоступний → відмова з кодом 2, ні налаштувань, ні копії хука"
+else
+  bad "без origin інсталятор щось змінив або не відмовив (rc=$rc): $out"
+fi
+out="$(run --check)"
+[[ $? == 1 && "$out" == *"НЕ ПЕРЕВІРЕНО"* ]] && ok "--check без origin → «НЕ ПЕРЕВІРЕНО», а не OK" ||
+  bad "--check без origin сказав щось інше: $out"
+teardown
+
+# ─── 19. Усе встановлено, а origin зник — --check не каже OK ───────────────
+# Без origin копію нема з чим звірити. «OK» тут означав би, що перевірки не
+# було, а звіт каже, що була (мутація «noorigin = OK» виживала без цього).
+setup
+run >/dev/null
+"${GIT[@]}" remote set-url origin "$T/немає.git"
+out="$(run --check)"
+[[ $? == 1 && "$out" == *"НЕ ПЕРЕВІРЕНО"* && "$out" != *"OK:"* ]] &&
+  ok "усе встановлено, origin недоступний → --check «НЕ ПЕРЕВІРЕНО», не OK" ||
+  bad "--check сказав OK без звірки з origin: $out"
+teardown
 
 # ─── 15. Без заборони правити копію хука — відмова ─────────────────────────
 p="$(mktemp)"

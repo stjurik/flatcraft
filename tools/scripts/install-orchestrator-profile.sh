@@ -39,10 +39,24 @@ BACKUP_DIR="${FLATCRAFT_BACKUP_DIR:-$HOME/.flatcraft-backups}"
 # виконання будь-чого в обхід заборон. Тому:
 #   - запускається копія поза репо, у HOOKS_DIR, з правами 555;
 #   - профіль забороняє її правити (REQUIRED_DENY нижче);
-#   - --check звіряє копію з git побайтово;
+#   - джерело копії — НЕ робоче дерево, а файл у коміті, на який ЗАРАЗ указує
+#     main на origin (SHA з `git ls-remote`, тобто від самого GitHub). Робоче
+#     дерево й локальний `origin/main` оркестратор змінює без кліку (Edit,
+#     `git fetch .`); main на GitHub — лише через merge yurii. Знайдено
+#     рецензією Claude Opus 4.6 через agy 2026-09-23;
+#   - --check звіряє копію з тим самим файлом побайтово;
 #   - єдина дозволена в профілі команда хука — HOOK_CMD, дослівно.
+#
+# ЧОГО ЦЕ НЕ ТРИМАЄ — чесно. Профіль дозволяє запускати тести й `pnpm install`,
+# а це виконання коду, який оркестратор сам пише. Такий код може переписати
+# копію хука (заборона Edit/Write, за документацією, не діє на довільні
+# програми; 555 не захищає від того самого користувача). Отже, копія захищена
+# від випадкового дрейфу і від розгортання нерецензованого коду, але не від
+# рішучого агента. Механічна межа для цього — пісочниця Claude Code
+# (sandboxing), рішення yurii.
+#
 # FLATCRAFT_HOOKS_DIR — лише для тестів; команда хука завжди вказує на $HOME.
-HOOK_SRC="$ROOT/tools/scripts/log-permission-request.sh"
+HOOK_PATH="tools/scripts/log-permission-request.sh"
 HOOKS_DIR="${FLATCRAFT_HOOKS_DIR:-$HOME/.flatcraft/hooks}"
 HOOK_DST="$HOOKS_DIR/log-permission-request.sh"
 # shellcheck disable=SC2016 # $HOME має розгорнути shell хука, а не цей скрипт
@@ -104,10 +118,19 @@ if [[ -n "$foreign" ]]; then
   printf '  ✗ %s\n' "$foreign" >&2
   exit 1
 fi
-if jq -e '(.hooks // {}) != {}' "$PROFILE" >/dev/null && [[ ! -f "$HOOK_SRC" ]]; then
-  echo "відмова: профіль має хук, а в репо немає $HOOK_SRC" >&2
-  exit 2
-fi
+# Файл хука з коміту, на який зараз указує main на origin. SHA — з ls-remote
+# (відповідь самого origin); об'єкти git адресуються вмістом, тож підмінити
+# файл за справжнім SHA локально не можна.
+HOOK_WANT="$(mktemp)"
+trap 'rm -f "$HOOK_WANT"' EXIT
+authentic_hook() { # пише хук з origin/main у HOOK_WANT; код 1 — не вдалося
+  local sha
+  sha="$(git -C "$ROOT" ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git -C "$ROOT" cat-file -e "$sha^{commit}" 2>/dev/null ||
+    git -C "$ROOT" fetch -q origin main 2>/dev/null || return 1
+  git -C "$ROOT" show "$sha:$HOOK_PATH" >"$HOOK_WANT" 2>/dev/null
+}
 
 current='{}'
 [[ -f "$LOCAL" ]] && current="$(cat "$LOCAL")"
@@ -131,37 +154,46 @@ same_as_sets() { # same_as_sets <json1> <json2>
     | (if .hooks then .hooks |= map_values(unique) else . end); n'
   [[ "$(jq -S "$norm" <<<"$1")" == "$(jq -S "$norm" <<<"$2")" ]]
 }
-hook_state() { # друкує: none | ok | missing | drift
+hook_state() { # друкує: none | noorigin | missing | ok | drift
   if jq -e '(.hooks // {}) == {}' "$PROFILE" >/dev/null; then
     echo none
+  elif ! authentic_hook; then
+    echo noorigin
   elif [[ ! -f "$HOOK_DST" ]]; then
     echo missing
-  elif cmp -s "$HOOK_SRC" "$HOOK_DST"; then
+  elif cmp -s "$HOOK_WANT" "$HOOK_DST"; then
     echo ok
   else
     echo drift
   fi
 }
 
+# Стан хука рахується ОДИН раз і до будь-якого запису: без origin нема з чим
+# звірити копію, і тоді не змінюємо нічого — ні налаштувань, ні копії.
+hs="$(hook_state)"
+
 if [[ "${1:-}" == --check ]]; then
-  hs="$(hook_state)"
   if same_as_sets "$merged" "$current" && [[ "$hs" == ok || "$hs" == none ]]; then
     echo "OK: профіль оркестратора вже в $LOCAL"
     exit 0
   fi
   same_as_sets "$merged" "$current" ||
     echo "НЕ ВСТАНОВЛЕНО: у $LOCAL бракує частини профілю — запустіть без --check" >&2
+  [[ "$hs" == noorigin ]] && echo "НЕ ПЕРЕВІРЕНО: немає зв'язку з origin — копію хука нема з чим звірити" >&2
   [[ "$hs" == missing ]] && echo "НЕ ВСТАНОВЛЕНО: немає копії хука $HOOK_DST" >&2
-  [[ "$hs" == drift ]] && echo "НЕ ВСТАНОВЛЕНО: копія хука $HOOK_DST розійшлась із git — запустіть без --check" >&2
+  [[ "$hs" == drift ]] && echo "НЕ ВСТАНОВЛЕНО: копія хука $HOOK_DST розійшлась із main на origin — запустіть без --check" >&2
   exit 1
 fi
 
-hs="$(hook_state)"
+if [[ "$hs" == noorigin ]]; then
+  echo "відмова: не вдалося взяти $HOOK_PATH з main на origin — нічого не змінено" >&2
+  exit 2
+fi
 if [[ "$hs" == missing || "$hs" == drift ]]; then
   mkdir -p "$HOOKS_DIR"
   chmod 700 "$HOOKS_DIR"
   [[ -f "$HOOK_DST" ]] && chmod u+w "$HOOK_DST"
-  cp "$HOOK_SRC" "$HOOK_DST"
+  cp "$HOOK_WANT" "$HOOK_DST"
   chmod 555 "$HOOK_DST"
   [[ "$hs" == drift ]] && echo "Хук-лічильник відновлено з git (копія розійшлась): $HOOK_DST" ||
     echo "Хук-лічильник встановлено: $HOOK_DST"
