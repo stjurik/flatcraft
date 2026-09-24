@@ -41,10 +41,12 @@ jq -e '.deny | index("write_file(/tmp)") != null' <<<"$want" >/dev/null || {
   exit 1
 }
 
-# Охорона шаблону: жодної команди; читання — будь-що; запис — рівно inputs/.
-bad="$(jq -r --arg w "$INPUTS_RULE" '.allow[]
-  | select(startswith("command(") or (startswith("write_file(") and . != $w)
-           or (startswith("read_file(") | not) and (startswith("write_file(") | not))' <<<"$want")"
+# Охорона шаблону: жодної команди; читання — рівно головний клон і тека
+# worktree-ів; запис — рівно inputs/. Читання обмежене, бо read_file(*)
+# відкривав agy домашню теку з ключами й паролем vault (рецензія Claude Opus
+# 4.6, 2026-09-24), а для рецензії йому потрібні лише репо і worktree-и.
+bad="$(jq -r --arg w "$INPUTS_RULE" --arg r1 "read_file($MAIN)" --arg r2 "read_file($MAIN-wt)" '.allow[]
+  | select(. != $w and . != $r1 and . != $r2)' <<<"$want")"
 if [[ -n "$bad" ]]; then
   echo "відмова: у шаблоні дозвіл ширший за «читання + запис у inputs/» — налаштування не змінено:" >&2
   sed 's/^/  ✗ /' <<<"$bad" >&2

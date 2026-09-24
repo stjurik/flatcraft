@@ -43,9 +43,9 @@ fresh
 out="$(run)"
 rc=$?
 allow="$(jq -c '.permissions.allow' "$S")"
-want="[\"read_file(*)\",\"write_file($MAIN/docs/promts/inputs)\"]"
+want="[\"read_file($MAIN)\",\"read_file($MAIN-wt)\",\"write_file($MAIN/docs/promts/inputs)\"]"
 if [[ $rc == 0 && "$allow" == "$want" ]]; then
-  ok "дозволи agy: лише read_file(*) і write_file(<головний клон>/docs/promts/inputs)"
+  ok "дозволи agy: читання лише клону й worktree-ів, запис лише в <клон>/docs/promts/inputs"
 else
   bad "дозволи після встановлення неправильні (rc=$rc): $allow — $out"
 fi
@@ -77,7 +77,7 @@ run --check >/dev/null
 [[ $? == 1 ]] && ok "--check на широких дозволах → 1" || bad "--check не помітив широких дозволів"
 
 # ─── 5. Шаблон із небезпечним дозволом — відмова, файл не змінено ──────────
-for danger in 'command(ls)' 'write_file(*)' 'write_file(/tmp/**)' 'write_file(@REPO@/**)'; do
+for danger in 'command(ls)' 'read_file(*)' 'read_file(/home)' 'write_file(*)' 'write_file(/tmp/**)' 'write_file(@REPO@/**)'; do
   fresh
   before="$(sha256sum "$S")"
   tpl="$T/tpl.json"

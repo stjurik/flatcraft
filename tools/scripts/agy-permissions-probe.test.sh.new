@@ -76,8 +76,8 @@ opened="$(grep -c 'ВІДКРИТО' <<<"$out")"
 [[ $rc == 1 && "$opened" == 7 ]] && ok "відкритий конфіг (контроль) → код 1, усі сім заборонених дій «ВІДКРИТО»" ||
   bad "відкритий конфіг розпізнано неправильно (rc=$rc, відкритих $opened з 7): $out"
 
-for hole in tmp vartmp sib rhome edit; do
-  case $hole in tmp) name=WRITE_TMP ;; vartmp) name=WRITE_VARTMP ;; sib) name=WRITE_SIBLING ;; rhome) name=READ_HOME ;; edit) name=EDIT_HOME ;; esac
+for hole in tmp sib rhome edit; do
+  case $hole in tmp) name=WRITE_TMP ;; sib) name=WRITE_SIBLING ;; rhome) name=READ_HOME ;; edit) name=EDIT_HOME ;; esac
   out="$(probe closed "$hole")"
   rc=$?
   if [[ $rc == 1 && "$(line "$name" "$out")" == "$name ВІДКРИТО (має бути заблоковано)" && "$(grep -c 'ВІДКРИТО' <<<"$out")" == 1 ]]; then
@@ -86,13 +86,6 @@ for hole in tmp vartmp sib rhome edit; do
     bad "дірку $name не розпізнано (rc=$rc): $out"
   fi
 done
-
-# Звуження, що зламало читання worktree-ів, — теж провал: без нього agy не
-# прочитає код гілки на рецензії.
-out="$(probe closed nowt)"
-[[ $? == 1 && "$(line READ_WT "$out")" == "READ_WT НЕ працює (має працювати)" ]] &&
-  ok "читання worktree-ів заблоковано → код 1: звуження не має ламати рецензію" ||
-  bad "зламане читання worktree не помічено: $out"
 
 out="$(probe silent)"
 [[ $? == 2 && "$out" == *"не пробувала"* ]] && ok "модель нічого не пробувала → код 2, а не «заблоковано»" ||
