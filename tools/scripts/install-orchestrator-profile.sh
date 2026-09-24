@@ -33,6 +33,35 @@ PROFILE="$ROOT/.claude/settings.orchestrator.json"
 LOCAL="$ROOT/.claude/settings.local.json"
 BACKUP_DIR="${FLATCRAFT_BACKUP_DIR:-$HOME/.flatcraft-backups}"
 
+# Хук-лічильник натискань (log-permission-request.sh). Хук виконується БЕЗ
+# жодного кліку, тож він сильніший за будь-який дозвіл: якби він запускав файл
+# із репозиторію, оркестратор, відредагувавши той файл, отримав би автоматичне
+# виконання будь-чого в обхід заборон. Тому:
+#   - запускається копія поза репо, у HOOKS_DIR, з правами 555;
+#   - профіль забороняє її правити (REQUIRED_DENY нижче);
+#   - джерело копії — НЕ робоче дерево, а файл у коміті, на який ЗАРАЗ указує
+#     main на origin (SHA з `git ls-remote`, тобто від самого GitHub). Робоче
+#     дерево й локальний `origin/main` оркестратор змінює без кліку (Edit,
+#     `git fetch .`); main на GitHub — лише через merge yurii. Знайдено
+#     рецензією Claude Opus 4.6 через agy 2026-09-23;
+#   - --check звіряє копію з тим самим файлом побайтово;
+#   - єдина дозволена в профілі команда хука — HOOK_CMD, дослівно.
+#
+# ЧОГО ЦЕ НЕ ТРИМАЄ — чесно. Профіль дозволяє запускати тести й `pnpm install`,
+# а це виконання коду, який оркестратор сам пише. Такий код може переписати
+# копію хука (заборона Edit/Write, за документацією, не діє на довільні
+# програми; 555 не захищає від того самого користувача). Отже, копія захищена
+# від випадкового дрейфу і від розгортання нерецензованого коду, але не від
+# рішучого агента. Механічна межа для цього — пісочниця Claude Code
+# (sandboxing), рішення yurii.
+#
+# FLATCRAFT_HOOKS_DIR — лише для тестів; команда хука завжди вказує на $HOME.
+HOOK_PATH="tools/scripts/log-permission-request.sh"
+HOOKS_DIR="${FLATCRAFT_HOOKS_DIR:-$HOME/.flatcraft/hooks}"
+HOOK_DST="$HOOKS_DIR/log-permission-request.sh"
+# shellcheck disable=SC2016 # $HOME має розгорнути shell хука, а не цей скрипт
+HOOK_CMD='bash "$HOME/.flatcraft/hooks/log-permission-request.sh"'
+
 # Дозвіл, що пропускає ДОВІЛЬНУ дію: будь-яку команду, будь-яку віддалену
 # команду на A8 (префікс ssh обмежує те, що ДО команди, а не ПІСЛЯ — див.
 # a8-ro-shell.sh), запис через gh api, merge, креденшали, root, живий Discord.
@@ -50,6 +79,9 @@ REQUIRED_DENY=(
   'Edit(packages/db/src/migrations/**)'
   'Edit(workers/cad/tests/snapshots/**)'
   'Edit(packages/cad-engine/data/bend-machine-esi.yaml)'
+  'Edit(~/.flatcraft/**)'
+  'Write(~/.flatcraft/**)'
+  'Bash(agy *--dangerously-skip-permissions*)'
 )
 
 danger_in() { # danger_in <файл> — друкує небезпечні дозволи (порожньо = чисто)
@@ -75,6 +107,32 @@ if ((${#missing[@]})); then
   exit 1
 fi
 
+# Будь-який обробник хука, крім HOOK_CMD дослівно, — відмова: інший тип (http,
+# prompt, agent), інша команда чи HOOK_CMD із дописаним «; щось» однаково
+# виконуються без кліку.
+foreign="$(jq -r --arg c "$HOOK_CMD" '
+  [(.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
+   | select(.type != "command" or .command != $c or has("args"))
+   | (.command // .url // .prompt // (.type + "?"))] | .[]' "$PROFILE")"
+if [[ -n "$foreign" ]]; then
+  echo "відмова: у профілі чужий хук — локальний файл не змінено:" >&2
+  printf '  ✗ %s\n' "$foreign" >&2
+  exit 1
+fi
+# Файл хука з коміту, на який зараз указує main на origin. SHA — з ls-remote
+# (відповідь самого origin); об'єкти git адресуються вмістом, тож підмінити
+# файл за справжнім SHA локально не можна.
+HOOK_WANT="$(mktemp)"
+trap 'rm -f "$HOOK_WANT"' EXIT
+authentic_hook() { # пише хук з origin/main у HOOK_WANT; код 1 — не вдалося
+  local sha
+  sha="$(git -C "$ROOT" ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git -C "$ROOT" cat-file -e "$sha^{commit}" 2>/dev/null ||
+    git -C "$ROOT" fetch -q origin main 2>/dev/null || return 1
+  git -C "$ROOT" show "$sha:$HOOK_PATH" >"$HOOK_WANT" 2>/dev/null
+}
+
 current='{}'
 [[ -f "$LOCAL" ]] && current="$(cat "$LOCAL")"
 merged="$(jq -s '
@@ -82,18 +140,67 @@ merged="$(jq -s '
   | $l | .permissions = (($l.permissions // {})
       + { allow: ((($l.permissions.allow // []) + ($p.permissions.allow // [])) | unique),
           deny:  ((($l.permissions.deny  // []) + ($p.permissions.deny  // [])) | unique) })
+  | if ($p.hooks // {}) == {} then .
+    else .hooks = reduce ($p.hooks | keys[]) as $e (($l.hooks // {});
+      .[$e] = (((.[$e] // []) + $p.hooks[$e]) | unique))
+    end
 ' <(printf '%s' "$current") "$PROFILE")"
 
+# Порівняння як МНОЖИН. Claude Code дописує новий дозвіл у кінець списку, коли
+# yurii тисне «більше не питати», тож порядок у локальному файлі не наш. Перша
+# редакція порівнювала з порядком і 2026-09-23 казала «НЕ ВСТАНОВЛЕНО» при
+# повністю встановленому профілі.
+same_as_sets() { # same_as_sets <json1> <json2>
+  local norm='def n: (if .permissions then .permissions |= with_entries(.value |= (if type == "array" then unique else . end)) else . end)
+    | (if .hooks then .hooks |= map_values(unique) else . end); n'
+  [[ "$(jq -S "$norm" <<<"$1")" == "$(jq -S "$norm" <<<"$2")" ]]
+}
+hook_state() { # друкує: none | noorigin | missing | ok | drift
+  if jq -e '(.hooks // {}) == {}' "$PROFILE" >/dev/null; then
+    echo none
+  elif ! authentic_hook; then
+    echo noorigin
+  elif [[ ! -f "$HOOK_DST" ]]; then
+    echo missing
+  elif cmp -s "$HOOK_WANT" "$HOOK_DST"; then
+    echo ok
+  else
+    echo drift
+  fi
+}
+
+# Стан хука рахується ОДИН раз і до будь-якого запису: без origin нема з чим
+# звірити копію, і тоді не змінюємо нічого — ні налаштувань, ні копії.
+hs="$(hook_state)"
+
 if [[ "${1:-}" == --check ]]; then
-  if [[ "$(jq -S . <<<"$merged")" == "$(jq -S . <<<"$current")" ]]; then
+  if same_as_sets "$merged" "$current" && [[ "$hs" == ok || "$hs" == none ]]; then
     echo "OK: профіль оркестратора вже в $LOCAL"
     exit 0
   fi
-  echo "НЕ ВСТАНОВЛЕНО: у $LOCAL бракує частини профілю — запустіть без --check" >&2
+  same_as_sets "$merged" "$current" ||
+    echo "НЕ ВСТАНОВЛЕНО: у $LOCAL бракує частини профілю — запустіть без --check" >&2
+  [[ "$hs" == noorigin ]] && echo "НЕ ПЕРЕВІРЕНО: немає зв'язку з origin — копію хука нема з чим звірити" >&2
+  [[ "$hs" == missing ]] && echo "НЕ ВСТАНОВЛЕНО: немає копії хука $HOOK_DST" >&2
+  [[ "$hs" == drift ]] && echo "НЕ ВСТАНОВЛЕНО: копія хука $HOOK_DST розійшлась із main на origin — запустіть без --check" >&2
   exit 1
 fi
 
-if [[ "$(jq -S . <<<"$merged")" == "$(jq -S . <<<"$current")" ]]; then
+if [[ "$hs" == noorigin ]]; then
+  echo "відмова: не вдалося взяти $HOOK_PATH з main на origin — нічого не змінено" >&2
+  exit 2
+fi
+if [[ "$hs" == missing || "$hs" == drift ]]; then
+  mkdir -p "$HOOKS_DIR"
+  chmod 700 "$HOOKS_DIR"
+  [[ -f "$HOOK_DST" ]] && chmod u+w "$HOOK_DST"
+  cp "$HOOK_WANT" "$HOOK_DST"
+  chmod 555 "$HOOK_DST"
+  [[ "$hs" == drift ]] && echo "Хук-лічильник відновлено з git (копія розійшлась): $HOOK_DST" ||
+    echo "Хук-лічильник встановлено: $HOOK_DST"
+fi
+
+if same_as_sets "$merged" "$current"; then
   echo "Змін немає: профіль уже в $LOCAL"
 else
   if [[ -f "$LOCAL" ]]; then
@@ -114,5 +221,7 @@ if [[ -n "$old" ]]; then
   echo
   echo "⚠ У локальному файлі вже є дозволи, що пропускають довільні дії (CLAUDE.md §6.2)."
   echo "  Заборони профілю мають пріоритет над ними лише там, де збігаються. Варто переглянути:"
-  printf '  • %s\n' "$old"
+  # По рядку на запис: printf з одним багаторядковим аргументом ставив маркер
+  # лише перед першим рядком (помічено 2026-09-23).
+  sed 's/^/  • /' <<<"$old"
 fi

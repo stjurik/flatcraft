@@ -40,7 +40,8 @@
       "Bash(ansible-playbook a8.yml -i inventory.a8.ini --tags verify)",
       "Bash(agy -p *)",
       "Bash(bash tools/scripts/check-agy-scope.sh *)",
-      "Bash(tools/scripts/check-agy-scope.sh *)"
+      "Bash(tools/scripts/check-agy-scope.sh *)",
+      "Bash(bash ~/.flatcraft/hooks/log-permission-request.sh --count *)"
     ],
     "deny": [
       "Bash(git push --force:*)",
@@ -69,7 +70,24 @@
       "Edit(workers/cad/tests/snapshots/**)",
       "Write(workers/cad/tests/snapshots/**)",
       "Edit(packages/cad-engine/data/bend-machine-esi.yaml)",
-      "Write(packages/cad-engine/data/bend-machine-esi.yaml)"
+      "Write(packages/cad-engine/data/bend-machine-esi.yaml)",
+      "Edit(~/.flatcraft/**)",
+      "Write(~/.flatcraft/**)",
+      "Bash(agy *--dangerously-skip-permissions*)"
+    ]
+  },
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.flatcraft/hooks/log-permission-request.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
