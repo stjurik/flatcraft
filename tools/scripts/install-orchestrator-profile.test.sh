@@ -272,6 +272,20 @@ out="$(run --check)"
   bad "--check сказав OK без звірки з origin: $out"
 teardown
 
+# ─── 20. Без заборони agy --dangerously-skip-permissions — відмова ─────────
+# Дозвіл `agy -p *` пропускає й `agy -p "…" --dangerously-skip-permissions`, а
+# з цим прапорцем agy ігнорує власні звужені дозволи (tools/agy/). Заборона з
+# `*` посередині працює: «A `*` can go anywhere in the rule» (документація
+# Claude Code, permissions, звірено 2026-09-24).
+p="$(mktemp)"
+jq '.permissions.deny -= ["Bash(agy *--dangerously-skip-permissions*)"]' "$REAL_PROFILE" >"$p"
+setup "$p"
+out="$(run)"
+[[ $? == 1 && "$out" == *"dangerously-skip-permissions"* && ! -f "$LOCAL" ]] &&
+  ok "без заборони agy --dangerously-skip-permissions — відмова" || bad "профіль без цієї заборони пройшов: $out"
+teardown
+rm -f "$p"
+
 # ─── 15. Без заборони правити копію хука — відмова ─────────────────────────
 p="$(mktemp)"
 jq '.permissions.deny -= ["Edit(~/.flatcraft/**)"]' "$REAL_PROFILE" >"$p"

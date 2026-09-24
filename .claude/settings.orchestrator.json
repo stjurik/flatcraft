@@ -72,7 +72,8 @@
       "Edit(packages/cad-engine/data/bend-machine-esi.yaml)",
       "Write(packages/cad-engine/data/bend-machine-esi.yaml)",
       "Edit(~/.flatcraft/**)",
-      "Write(~/.flatcraft/**)"
+      "Write(~/.flatcraft/**)",
+      "Bash(agy *--dangerously-skip-permissions*)"
     ]
   },
   "hooks": {

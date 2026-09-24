@@ -81,6 +81,7 @@ REQUIRED_DENY=(
   'Edit(packages/cad-engine/data/bend-machine-esi.yaml)'
   'Edit(~/.flatcraft/**)'
   'Write(~/.flatcraft/**)'
+  'Bash(agy *--dangerously-skip-permissions*)'
 )
 
 danger_in() { # danger_in <файл> — друкує небезпечні дозволи (порожньо = чисто)
