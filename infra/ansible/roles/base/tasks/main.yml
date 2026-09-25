@@ -169,6 +169,7 @@
     content: |
       [sshd]
       enabled = true
+      backend = systemd
       port = ssh
       maxretry = 3
       bantime = 3600
