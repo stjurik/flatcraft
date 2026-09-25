@@ -11,7 +11,8 @@
 set -euo pipefail
 
 WEBHOOK_URL="{{ discord_webhook }}"
-STATE_FILE="/tmp/flatcraft-monitor.state"
+# MONITOR_STATE_FILE — лише для тесту (tools/scripts/check-monitor-script.test.sh).
+STATE_FILE="${MONITOR_STATE_FILE:-/tmp/flatcraft-monitor.state}"
 DISK_THRESHOLD={{ monitor_disk_threshold_pct }}
 
 # ─── Notification helper ───────────────────────────────────────────────────
@@ -45,16 +46,19 @@ if [ "$disk_pct" -ge "$DISK_THRESHOLD" ]; then
 fi
 
 # ─── 2. Container health ───────────────────────────────────────────────────
-# docker ps повертає унікальний name'ом у форматі `flatcraft-<service>-1` (Compose Spec).
-while IFS= read -r line; do
-    name=$(echo "$line" | jq -r '.Names')
-    health=$(echo "$line" | jq -r '.Health // "none"')
-    status=$(echo "$line" | jq -r '.State')
+# Контейнери мають імена `flatcraft-<service>-1` (Compose Spec).
+# Стан здоров'я — з `docker inspect` (.State.Health.Status: healthy | unhealthy | starting).
+# Не з поля `.Status` у `docker ps`: там рядок «Up 5 hours (healthy)», який
+# ніколи не дорівнює `healthy`. Так 2026-09-25 монітор застряг у PROBLEM на здорових контейнерах
+# і перестав би сповіщати про справжню аварію.
+while read -r name health status; do
+    name=${name#/}
     # Container з healthcheck повинен бути healthy. Без healthcheck — пропускаємо.
     if [[ "$health" != "none" && "$health" != "healthy" && "$health" != "starting" ]]; then
         CURRENT_PROBLEMS+=("Container $name health=$health (state=$status)")
     fi
-done < <(docker ps --filter "name=flatcraft-" --format '{"Names":"{{ "{{" }}.Names{{ "}}" }}","State":"{{ "{{" }}.State{{ "}}" }}","Health":"{{ "{{" }}.Status{{ "}}" }}"}' | jq -c '.')
+done < <(docker ps -q --filter "name=flatcraft-" \
+    | xargs -r docker inspect --format '{% raw %}{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.State.Status}}{% endraw %}')
 
 # ─── 3. Compose stack: чи є взагалі сервіси? ───────────────────────────────
 running_count=$(docker ps --filter "name=flatcraft-" --format '{{ "{{" }}.Names{{ "}}" }}' | wc -l)
