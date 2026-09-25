@@ -25,10 +25,12 @@ notify() {
         OK)    color=3066993  ;;   # green
         *)     color=15844367 ;;   # yellow
     esac
+    # Текст — у description (ліміт Discord 4096), а не в title (ліміт 256): 2026-09-25
+    # алерт про сім контейнерів мав title на 560 символів, і Discord відповів 400.
     curl -fsS -X POST "$WEBHOOK_URL" \
         -H 'Content-Type: application/json' \
-        -d "$(jq -n --arg t "[$severity] $msg" --argjson c "$color" \
-              '{embeds:[{title:$t, color:$c, timestamp:(now|todateiso8601)}]}')" \
+        -d "$(jq -n --arg t "[$severity] flatcraft staging" --arg d "$msg" --argjson c "$color" \
+              '{embeds:[{title:$t, description:$d[0:4000], color:$c, timestamp:(now|todateiso8601)}]}')" \
         > /dev/null || echo "WARNING: Discord notify failed" >&2
 }
 
@@ -70,7 +72,7 @@ fi
 if [ ${{ "{#" }}CURRENT_PROBLEMS[@]} -gt 0 ]; then
     if [ "$PREV_STATE" = "OK" ]; then
         # New incident
-        msg="🚨 flatcraft staging issue(s):\n$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
+        msg="🚨 flatcraft staging issue(s):"$'\n'"$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
         notify ERROR "$msg"
     fi
     write_state "PROBLEM"

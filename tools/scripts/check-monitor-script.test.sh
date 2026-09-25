@@ -95,8 +95,10 @@ done <"$FAKE_DOCKER_FIXTURE"
 SH
 cat >"$tmp/bin/curl" <<'SH'
 #!/usr/bin/env bash
-# Один виклик — один рядок: тіло сповіщення (JSON від jq) багаторядкове.
-printf 'CALL %s\n' "$(printf '%s' "$*" | tr '\n' ' ')" >>"$FAKE_CURL_LOG"
+# Один виклик — один рядок «CALL <тіло -d одним рядком JSON>».
+body=""
+while [ $# -gt 0 ]; do case $1 in -d) body=$2; shift 2 ;; *) shift ;; esac; done
+printf 'CALL %s\n' "$(printf '%s' "$body" | jq -c .)" >>"$FAKE_CURL_LOG"
 SH
 chmod +x "$tmp/bin/docker" "$tmp/bin/curl"
 
@@ -148,6 +150,21 @@ if [[ $STATE == OK && $CALLS == 0 ]]; then
   ok "starting і контейнер без healthcheck — не проблема"
 else
   bad "starting / без healthcheck → очікувано OK; стан=$STATE, вивід: $OUT"
+fi
+
+# Ліміти Discord для embed: title ≤ 256, description ≤ 4096. Інакше webhook відповідає 400 і
+# сповіщення не доходить (2026-09-25: title на 560 символів).
+discord_limits_ok() {
+  sed -n 's/^CALL //p' "$tmp/curl.log" |
+    jq -e -s 'length > 0 and all(.[].embeds[]; (.title | length) <= 256 and ((.description // "") | length) <= 4096)' >/dev/null
+}
+
+run "$(healthy_stack | sed 's/|healthy|Up 5 hours (healthy)$/|unhealthy|Up 5 hours (unhealthy)/')" ""
+if [[ $STATE == PROBLEM && $CALLS == 1 ]] && discord_limits_ok &&
+  sed -n 's/^CALL //p' "$tmp/curl.log" | jq -e '.embeds[0].description | contains("flatcraft-redis-1")' >/dev/null; then
+  ok "сім unhealthy → одне сповіщення в межах лімітів Discord, усі сім у тексті"
+else
+  bad "сім unhealthy → сповіщення поза лімітами Discord або без усіх контейнерів; сповіщень=$CALLS, тіло: $(cat "$tmp/curl.log")"
 fi
 
 run "" ""
