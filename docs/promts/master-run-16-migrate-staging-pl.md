@@ -90,6 +90,7 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
 | `ssh flatcraft-pl 'runuser -u deploy -- ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com'`                                             | «successfully authenticated» (код 1 для `-T` — норма). Інакше STOP: без цього ключа роль `flatcraft` впаде на `git clone` (`docs/08` §1.5) |
 | `git check-ignore -v infra/ansible/inventory.ini`; `grep -c flatcraft-pl infra/ansible/inventory.ini`                                                            | ігнорується; `1`                                                                                                                           |
 | `grep -rn "infra/inventory.ini" --exclude-dir=node_modules --exclude-dir=.git .`                                                                                 | лише два deny-рядки в `.claude/settings.a8.json` — це заборони, а не споживачі. Будь-що інше — STOP                                        |
+| `echo ok \| tee ~/hart-logs/migrate-pl-probe.log`; `git log -p origin/main..HEAD \| grep -cFf ~/.flatcraft/leak/origin-host`                                     | `ok`; `0` — доводить на старті, що `--add-dir` діє: інакше оракул витоку відмовить лише перед першим push, під ранок                       |
 
 Зафіксуй `RUN_START` з оточення — він потрібен у КРОЦІ 2.
 
