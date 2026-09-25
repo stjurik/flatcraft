@@ -301,7 +301,8 @@ ssh flatcraft-pl 'runuser -u deploy -- ssh -o BatchMode=yes -o StrictHostKeyChec
 **3. Два секретні файли і шляхи до них.** Значення — з менеджера паролів (`docs/08` §0.10):
 `flatcraft-staging.vault-password` (64 hex-символи; той самий, що GitHub-секрет
 `ANSIBLE_VAULT_PASSWORD`) і `flatcraft-staging.age-private-key` (потрібен лише рядок
-`AGE-SECRET-KEY-1…`). Введення приховане, на екран нічого не друкується.
+`AGE-SECRET-KEY-1…`). У менеджері паролів yurii вони звуться `staging-ansible-vault-password` і
+`staging-age-private`. Введення приховане, на екран нічого не друкується.
 
 Vault-пароль — файл `~/.flatcraft-vault-pass` (`docs/08` §1.3); якщо його немає, команда
 попросить вставити пароль:
@@ -315,7 +316,7 @@ age-ключ — файл `~/.flatcraft/age.key` (після ночі — `shred
 ключем, яким шифруються бекапи:
 
 ```bash
-test -r ~/.flatcraft/age.key || { read -r -s -p "Рядок AGE-SECRET-KEY-1… (не видно): " K && echo && ( umask 077; printf '%s\n' "$K" > ~/.flatcraft/age.key ) && unset K; }
+age-keygen -y ~/.flatcraft/age.key >/dev/null 2>&1 || { rm -f ~/.flatcraft/age.key; read -r -s -p "Рядок AGE-SECRET-KEY-1… (не видно): " K && echo && ( umask 077; printf '%s\n' "$K" > ~/.flatcraft/age.key ) && unset K; }
 cd ~/hart/infra/ansible && [[ "$(age-keygen -y ~/.flatcraft/age.key)" == "$(ansible-vault view group_vars/all.vault.yml --vault-password-file ~/.flatcraft-vault-pass | sed -n "s/^vault_age_public_key: *[\"']\{0,1\}\([^\"' ]*\)[\"']\{0,1\} *$/\1/p")" ]] && echo "age-ключ відповідає бекапам" || echo "age-ключ НЕ відповідає бекапам — не запускати"
 ```
 
