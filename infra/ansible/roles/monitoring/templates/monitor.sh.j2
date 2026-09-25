@@ -3,7 +3,8 @@
 # flatcraft health monitor. Cron'иться кожні {{ monitor_interval_minutes }} хв.
 # Алертить у Discord webhook коли:
 #   1. disk usage / > {{ monitor_disk_threshold_pct }}%
-#   2. будь-який container зі стека не healthy (status != "healthy" і != "starting")
+#   2. будь-який container зі стека не працює (exited, restarting…) або не healthy
+#      (health != "healthy" і != "starting")
 #
 # State-tracking у /tmp/flatcraft-monitor.state — щоб не спамити webhook кожні 5 хв,
 # поки інцидент триває. Шлемо повторно лише після recovery → знову бида.
@@ -31,7 +32,7 @@ notify() {
         -H 'Content-Type: application/json' \
         -d "$(jq -n --arg t "[$severity] flatcraft staging" --arg d "$msg" --argjson c "$color" \
               '{embeds:[{title:$t, description:$d[0:4000], color:$c, timestamp:(now|todateiso8601)}]}')" \
-        > /dev/null || echo "WARNING: Discord notify failed" >&2
+        > /dev/null || { echo "WARNING: Discord notify failed" >&2; return 1; }
 }
 
 # State tracking — щоб не спамити поки інцидент триває.
@@ -53,13 +54,16 @@ fi
 # Не з поля `.Status` у `docker ps`: там рядок «Up 5 hours (healthy)», який
 # ніколи не дорівнює `healthy`. Так 2026-09-25 монітор застряг у PROBLEM на здорових контейнерах
 # і перестав би сповіщати про справжню аварію.
+# `docker ps -a`: контейнер, що впав (exited після `on-failure:5` у compose), без `-a` просто
+# зникає зі списку, і монітор писав би OK.
 while read -r name health status; do
     name=${name#/}
-    # Container з healthcheck повинен бути healthy. Без healthcheck — пропускаємо.
-    if [[ "$health" != "none" && "$health" != "healthy" && "$health" != "starting" ]]; then
+    # Контейнер мусить працювати; з healthcheck — ще й бути healthy (або starting).
+    if [[ "$status" != "running" ]] ||
+        [[ "$health" != "none" && "$health" != "healthy" && "$health" != "starting" ]]; then
         CURRENT_PROBLEMS+=("Container $name health=$health (state=$status)")
     fi
-done < <(docker ps -q --filter "name=flatcraft-" \
+done < <(docker ps -a -q --filter "name=flatcraft-" \
     | xargs -r docker inspect --format '{% raw %}{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.State.Status}}{% endraw %}')
 
 # ─── 3. Compose stack: чи є взагалі сервіси? ───────────────────────────────
@@ -70,19 +74,23 @@ fi
 
 # ─── 4. Dispatch ───────────────────────────────────────────────────────────
 if [ ${{ "{#" }}CURRENT_PROBLEMS[@]} -gt 0 ]; then
+    # Стан міняємо лише тоді, коли сповіщення доставлено: інакше наступний запуск спробує
+    # знову. 2026-09-25 перший алерт не дійшов, а стан PROBLEM записався — повтору не було б.
     if [ "$PREV_STATE" = "OK" ]; then
         # New incident
         msg="🚨 flatcraft staging issue(s):"$'\n'"$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
-        notify ERROR "$msg"
+        if notify ERROR "$msg"; then write_state "PROBLEM"; fi
     fi
-    write_state "PROBLEM"
     echo "[$(date -u +%FT%TZ)] PROBLEMS: ${CURRENT_PROBLEMS[*]}"
     exit 0
 fi
 
 # Все ОК
 if [ "$PREV_STATE" = "PROBLEM" ]; then
-    notify OK "✅ flatcraft staging recovered — all containers healthy, disk ${disk_pct}%."
+    if ! notify OK "✅ flatcraft staging recovered — all containers healthy, disk ${disk_pct}%."; then
+        echo "[$(date -u +%FT%TZ)] OK, але сповіщення про відновлення не доставлено — повтор на наступному запуску"
+        exit 0
+    fi
 fi
 write_state "OK"
 echo "[$(date -u +%FT%TZ)] OK (disk ${disk_pct}%, ${running_count} containers)"

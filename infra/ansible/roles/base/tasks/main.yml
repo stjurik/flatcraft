@@ -19,6 +19,7 @@
       - htop
       - rsync
       - fail2ban
+      - python3-systemd # для backend = systemd у jail sshd; у fail2ban він лише Recommends
       - unattended-upgrades
       - apt-listchanges
       - logrotate
