@@ -298,14 +298,31 @@ ssh flatcraft-pl 'runuser -u deploy -- ssh -o BatchMode=yes -o StrictHostKeyChec
 
 Очікування: `Hi stjurik/flatcraft! You've successfully authenticated…`
 
-**3. Шляхи до секретів** (лише шляхи; сам age-ключ — з менеджера паролів у файл із правами
-600, після ночі видалити):
+**3. Два секретні файли і шляхи до них.** Значення — з менеджера паролів (`docs/08` §0.10):
+`flatcraft-staging.vault-password` (64 hex-символи; той самий, що GitHub-секрет
+`ANSIBLE_VAULT_PASSWORD`) і `flatcraft-staging.age-private-key` (потрібен лише рядок
+`AGE-SECRET-KEY-1…`). Введення приховане, на екран нічого не друкується.
+
+Vault-пароль — файл `~/.flatcraft-vault-pass` (`docs/08` §1.3); якщо його немає, команда
+попросить вставити пароль:
 
 ```bash
-read -r -e -p "Файл з vault-паролем: " VP && test -r "$VP" &&
-read -r -e -p "Файл з age private key: " AK && test -r "$AK" &&
-read -r -p "Назва тарифу (можна порожньо): " PLAN &&
-printf 'VAULT_PASS_FILE=%q\nAGE_KEY_FILE=%q\nSERVER_PLAN=%q\n' "$VP" "$AK" "$PLAN" > ~/.flatcraft/migrate-pl.env && chmod 600 ~/.flatcraft/migrate-pl.env && echo "env OK"
+test -r ~/.flatcraft-vault-pass || { read -r -s -p "Vault-пароль (не видно): " V && echo && ( umask 077; printf '%s\n' "$V" > ~/.flatcraft-vault-pass ) && unset V; }
+cd ~/hart/infra/ansible && ansible-vault view group_vars/all.vault.yml --vault-password-file ~/.flatcraft-vault-pass >/dev/null && echo "vault-пароль підходить"
+```
+
+age-ключ — файл `~/.flatcraft/age.key` (після ночі — `shred -u`), одразу звірений із публічним
+ключем, яким шифруються бекапи:
+
+```bash
+test -r ~/.flatcraft/age.key || { read -r -s -p "Рядок AGE-SECRET-KEY-1… (не видно): " K && echo && ( umask 077; printf '%s\n' "$K" > ~/.flatcraft/age.key ) && unset K; }
+cd ~/hart/infra/ansible && [[ "$(age-keygen -y ~/.flatcraft/age.key)" == "$(ansible-vault view group_vars/all.vault.yml --vault-password-file ~/.flatcraft-vault-pass | sed -n "s/^vault_age_public_key: *[\"']\{0,1\}\([^\"' ]*\)[\"']\{0,1\} *$/\1/p")" ]] && echo "age-ключ відповідає бекапам" || echo "age-ключ НЕ відповідає бекапам — не запускати"
+```
+
+Файл зі шляхами (третє значення — назва тарифу Mirohost, можна лишити порожнім):
+
+```bash
+printf 'VAULT_PASS_FILE=%q\nAGE_KEY_FILE=%q\nSERVER_PLAN=%q\n' "$HOME/.flatcraft-vault-pass" "$HOME/.flatcraft/age.key" "" > ~/.flatcraft/migrate-pl.env && chmod 600 ~/.flatcraft/migrate-pl.env && echo "env OK"
 ```
 
 **4. Робоча тека, промпт, inventory з псевдонімом:**
