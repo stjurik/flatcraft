@@ -93,10 +93,9 @@ fi
 
 # Все ОК
 if [ "$PREV_STATE" = "PROBLEM" ]; then
-    if ! notify OK "✅ flatcraft staging recovered — all containers healthy, disk ${disk_pct}%."; then
-        echo "[$(date -u +%FT%TZ)] OK, але сповіщення про відновлення не доставлено — повтор на наступному запуску"
-        exit 0
-    fi
+    # Недоставлене «recovered» не повторюємо: стан OK важливіший. Інакше завислий PROBLEM
+    # глушив би алерт про наступну аварію (контрприклад Opus 4.6, 2026-09-25).
+    notify OK "✅ flatcraft staging recovered — усі перевірки OK (disk ${disk_pct}%, ${running_count} containers)." || true
 fi
 write_state "OK"
 echo "[$(date -u +%FT%TZ)] OK (disk ${disk_pct}%, ${running_count} containers)"

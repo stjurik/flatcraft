@@ -224,13 +224,27 @@ if [[ $OUT == *"WARNING: Discord notify failed"* && $STATE != PROBLEM && $CALLS 
 else
   bad "недоставлений алерт → очікувано без стану PROBLEM; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
 fi
+# А недоставлене «recovered» не тримає стан PROBLEM: інакше наступна аварія мовчала б.
 run "$(healthy_stack)" "PROBLEM"
-if [[ $OUT == *"не доставлено"* && $STATE == PROBLEM && $CALLS == 1 ]]; then
-  ok "«recovered» не доставлено → стан лишається PROBLEM, буде повтор"
+if [[ $OUT == *"WARNING: Discord notify failed"* && $STATE == OK && $CALLS == 1 ]]; then
+  ok "«recovered» не доставлено → стан OK, наступна аварія алертитиме"
 else
-  bad "недоставлене відновлення → очікувано стан PROBLEM; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
+  bad "недоставлене відновлення → очікувано стан OK; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
 fi
 CURL_FAIL=0
+run "$(with web 'running|unhealthy|Up 5 hours (unhealthy)')" "$STATE" # стан — з попереднього запуску
+if [[ $STATE == PROBLEM && $CALLS == 1 ]]; then
+  ok "після недоставленого «recovered» нова аварія → алерт"
+else
+  bad "нова аварія після недоставленого «recovered» → очікувано алерт; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
+fi
+
+run "$(healthy_stack)" "PROBLEM"
+if sed -n 's/^CALL //p' "$tmp/curl.log" | jq -e '.embeds[0].description | test("усі перевірки OK") and (test("all containers healthy") | not)' >/dev/null; then
+  ok "«recovered» не стверджує, що проблема була в контейнерах"
+else
+  bad "текст «recovered» → очікувано «усі перевірки OK»; тіло: $(cat "$tmp/curl.log")"
+fi
 
 # Порожній файл стану (обрізаний `>` при збої запису) не має глушити алерти.
 run "$(with api 'running|unhealthy|Up 5 hours (unhealthy)')" "EMPTY"
