@@ -63,7 +63,7 @@ if [ "$running_count" -eq 0 ]; then
 fi
 
 # ─── 4. Dispatch ───────────────────────────────────────────────────────────
-if [ ${#CURRENT_PROBLEMS[@]} -gt 0 ]; then
+if [ ${{ "{#" }}CURRENT_PROBLEMS[@]} -gt 0 ]; then
     if [ "$PREV_STATE" = "OK" ]; then
         # New incident
         msg="🚨 flatcraft staging issue(s):\n$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
