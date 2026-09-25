@@ -67,8 +67,12 @@ done < <(docker ps -a -q --filter "name=flatcraft-" \
     | xargs -r docker inspect --format '{% raw %}{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.State.Status}}{% endraw %}')
 
 # ─── 3. Compose stack: чи є взагалі сервіси? ───────────────────────────────
-running_count=$(docker ps --filter "name=flatcraft-" --format '{{ "{{" }}.Names{{ "}}" }}' | wc -l)
-if [ "$running_count" -eq 0 ]; then
+# Docker, що не відповідає, — теж аварія. Без `if !` помилка тут під `set -e` і `pipefail`
+# вбивала б скрипт до алерту (контрприклад рецензента Opus 4.6, 2026-09-25).
+if ! running_count=$(docker ps --filter "name=flatcraft-" --format '{{ "{{" }}.Names{{ "}}" }}' | wc -l); then
+    CURRENT_PROBLEMS+=("Docker не відповідає: docker ps завершився з помилкою.")
+    running_count=0
+elif [ "$running_count" -eq 0 ]; then
     CURRENT_PROBLEMS+=("Stack down: 0 containers running.")
 fi
 
@@ -76,7 +80,9 @@ fi
 if [ ${{ "{#" }}CURRENT_PROBLEMS[@]} -gt 0 ]; then
     # Стан міняємо лише тоді, коли сповіщення доставлено: інакше наступний запуск спробує
     # знову. 2026-09-25 перший алерт не дійшов, а стан PROBLEM записався — повтору не було б.
-    if [ "$PREV_STATE" = "OK" ]; then
+    # Усе, крім PROBLEM (зокрема порожній файл стану), — новий інцидент: інакше порожній
+    # файл глушив би алерти назавжди (контрприклад Opus 4.6).
+    if [ "$PREV_STATE" != "PROBLEM" ]; then
         # New incident
         msg="🚨 flatcraft staging issue(s):"$'\n'"$(printf '• %s\n' "${CURRENT_PROBLEMS[@]}")"
         if notify ERROR "$msg"; then write_state "PROBLEM"; fi

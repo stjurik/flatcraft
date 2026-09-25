@@ -64,6 +64,10 @@ render_tpl 0 "$tmp/monitor-disk.sh" || exit 1 # диск завжди «вище
 cat >"$tmp/bin/docker" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${FAKE_DOCKER_FAIL:-0}" = 1 ]; then
+  echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+  exit 1
+fi
 sub=$1
 shift
 fmt="" quiet=0 all=0 ids=()
@@ -116,15 +120,21 @@ fi
 SH
 chmod +x "$tmp/bin/docker" "$tmp/bin/curl"
 
-# run <фікстура> <попередній стан або ""> [скрипт] → OUT, STATE, CALLS. CURL_FAIL=1 — webhook падає.
-CURL_FAIL=0
+# run <фікстура> <попередній стан: "" — файла немає, EMPTY — порожній файл> [скрипт]
+#   → OUT, STATE, CALLS. CURL_FAIL=1 — webhook падає; DOCKER_FAIL=1 — docker не відповідає.
+CURL_FAIL=0 DOCKER_FAIL=0
 run() {
   printf '%s\n' "$1" >"$tmp/fixture"
   rm -f "$tmp/state" "$tmp/curl.log"
   : >"$tmp/curl.log"
-  [ -n "$2" ] && echo "$2" >"$tmp/state"
+  case $2 in
+    "") ;;
+    EMPTY) : >"$tmp/state" ;;
+    *) echo "$2" >"$tmp/state" ;;
+  esac
   OUT=$(PATH="$tmp/bin:$PATH" MONITOR_STATE_FILE="$tmp/state" FAKE_DOCKER_FIXTURE="$tmp/fixture" \
-    FAKE_CURL_LOG="$tmp/curl.log" FAKE_CURL_FAIL="$CURL_FAIL" bash "${3:-$tmp/monitor.sh}" 2>&1)
+    FAKE_CURL_LOG="$tmp/curl.log" FAKE_CURL_FAIL="$CURL_FAIL" FAKE_DOCKER_FAIL="$DOCKER_FAIL" \
+    bash "${3:-$tmp/monitor.sh}" 2>&1)
   STATE=$(cat "$tmp/state" 2>/dev/null)
   CALLS=$(grep -c '^CALL' "$tmp/curl.log")
 }
@@ -221,6 +231,23 @@ else
   bad "недоставлене відновлення → очікувано стан PROBLEM; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
 fi
 CURL_FAIL=0
+
+# Порожній файл стану (обрізаний `>` при збої запису) не має глушити алерти.
+run "$(with api 'running|unhealthy|Up 5 hours (unhealthy)')" "EMPTY"
+if [[ $STATE == PROBLEM && $CALLS == 1 ]]; then
+  ok "порожній файл стану + проблема → алерт і стан PROBLEM"
+else
+  bad "порожній файл стану → очікувано алерт; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
+fi
+
+DOCKER_FAIL=1
+run "$(healthy_stack)" ""
+if [[ $OUT == *"PROBLEMS:"*"Docker не відповідає"* && $STATE == PROBLEM && $CALLS == 1 ]]; then
+  ok "docker не відповідає → PROBLEM і алерт, а не тихе падіння скрипта"
+else
+  bad "docker не відповідає → очікувано алерт; стан=$STATE, сповіщень=$CALLS, вивід: $OUT"
+fi
+DOCKER_FAIL=0
 
 run "" ""
 if [[ $OUT == *"Stack down: 0 containers running."* && $STATE == PROBLEM ]]; then
