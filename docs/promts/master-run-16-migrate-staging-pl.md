@@ -33,10 +33,10 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
 
 1. **IP сервера тобі не потрібен і ніде не пишеться.** Сервер — лише `flatcraft-pl`. Репо
    публічне, а Cloudflare-проксі й UFW (80/443 лише від CF) мають сенс, доки origin IP
-   невідомий. IP живе тільки в `~/.ssh/config`, `~/.flatcraft/origin-host`, у секреті
+   невідомий. IP живе тільки в `~/.ssh/config`, `~/.flatcraft/leak/origin-host`, у секреті
    `STAGING_HOST` і в Cloudflare. **Оракул витоку** — перед кожним `git push`, перед
    `gh pr create` і перед коментарем в issue:
-   `git log -p origin/main..HEAD | grep -cFf ~/.flatcraft/origin-host` → `0`; для тексту PR і
+   `git log -p origin/main..HEAD | grep -cFf ~/.flatcraft/leak/origin-host` → `0`; для тексту PR і
    коментаря — те саме через `gh pr view <N> --json body --jq .body | grep -cFf …` і файл
    чернетки. Не `0` → прибери, а не пуш. Сам файл `origin-host` не читай і не друкуй — лише
    `grep -f`.
@@ -68,9 +68,11 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
 7. **Довгі команди.** Ліміт однієї команди — 60 хв (`BASH_MAX_TIMEOUT_MS`), став `timeout`
    явно. Великий вивід веди в `~/hart-logs/` через `tee ~/hart-logs/<ім'я>.log` і показуй
    лише хвіст (`tail -n 60`). Шлях пиши саме як `~/hart-logs/…`: так його пропускає дозвіл.
+   **Кожна** команда `ansible-playbook` і `ansible-galaxy` — з `2>&1`: без нього в headless
+   ansible падає з «Ansible requires blocking IO … <stderr>» (виміряно на T470 2026-09-24).
 8. **Тексти для GitHub — файлами в `~/hart-logs/`:** тіло PR — `~/hart-logs/migrate-pl-pr-body.md`,
    коментар — `~/hart-logs/migrate-pl-78.md`. Оракул витоку на файл
-   (`grep -cFf ~/.flatcraft/origin-host <файл>` → `0`), потім
+   (`grep -cFf ~/.flatcraft/leak/origin-host <файл>` → `0`), потім
    `gh pr create --draft --base main --title "…" --body-file …` і
    `gh issue comment 78 -R stjurik/flatcraft --body-file …`. Порядок аргументів саме такий:
    так команди пропускає дозвіл.
@@ -79,21 +81,21 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
 
 Звіт — таблицею «перевірка / очікування / факт». Будь-яке «не так» — STOP.
 
-| Перевірка                                                                                                                                              | Очікування                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `git status --porcelain`; `git merge-base HEAD origin/main` = `git rev-parse origin/main`                                                              | чисто; гілка від свіжого `origin/main`                                                                                                     |
-| `test -r "$VAULT_PASS_FILE" && test -r "$AGE_KEY_FILE" && test -r ~/.flatcraft/origin-host && echo ok`                                                 | `ok` (лише наявність, не вміст)                                                                                                            |
-| `ansible-playbook --version`; `ansible-galaxy collection list` (community.general, community.docker, ansible.posix); `age --version`; `gh auth status` | ansible-core 2.16.x; три колекції є                                                                                                        |
-| `ssh flatcraft-pl 'hostname; cat /etc/debian_version; nproc; free -h; df -h /'`                                                                        | `flatcraft-staging-pl`, `12.x`. **Цифри CPU / RAM / диск — у звіт і в ADR-042**                                                            |
-| `ssh flatcraft-pl 'runuser -u deploy -- ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com'`                                   | «successfully authenticated» (код 1 для `-T` — норма). Інакше STOP: без цього ключа роль `flatcraft` впаде на `git clone` (`docs/08` §1.5) |
-| `git check-ignore -v infra/ansible/inventory.ini`; `grep -c flatcraft-pl infra/ansible/inventory.ini`                                                  | ігнорується; `1`                                                                                                                           |
-| `grep -rn "infra/inventory.ini" --exclude-dir=node_modules --exclude-dir=.git .`                                                                       | лише два deny-рядки в `.claude/settings.a8.json` — це заборони, а не споживачі. Будь-що інше — STOP                                        |
+| Перевірка                                                                                                                                                        | Очікування                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `git status --porcelain`; `git merge-base HEAD origin/main` = `git rev-parse origin/main`                                                                        | чисто; гілка від свіжого `origin/main`                                                                                                     |
+| `test -r "$VAULT_PASS_FILE" && test -r "$AGE_KEY_FILE" && test -r ~/.flatcraft/leak/origin-host && echo ok`                                                      | `ok` (лише наявність, не вміст)                                                                                                            |
+| `ansible-playbook --version 2>&1`; `ansible-galaxy collection list 2>&1` (community.general, community.docker, ansible.posix); `age --version`; `gh auth status` | ansible-core 2.16.x; три колекції є                                                                                                        |
+| `ssh flatcraft-pl 'hostname; cat /etc/debian_version; nproc; free -h; df -h /'`                                                                                  | `flatcraft-staging-pl`, `12.x`. **Цифри CPU / RAM / диск — у звіт і в ADR-042**                                                            |
+| `ssh flatcraft-pl 'runuser -u deploy -- ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com'`                                             | «successfully authenticated» (код 1 для `-T` — норма). Інакше STOP: без цього ключа роль `flatcraft` впаде на `git clone` (`docs/08` §1.5) |
+| `git check-ignore -v infra/ansible/inventory.ini`; `grep -c flatcraft-pl infra/ansible/inventory.ini`                                                            | ігнорується; `1`                                                                                                                           |
+| `grep -rn "infra/inventory.ini" --exclude-dir=node_modules --exclude-dir=.git .`                                                                                 | лише два deny-рядки в `.claude/settings.a8.json` — це заборони, а не споживачі. Будь-що інше — STOP                                        |
 
 Зафіксуй `RUN_START` з оточення — він потрібен у КРОЦІ 2.
 
 ## 3. КРОК 1 — налаштування сервера
 
-1. `cd infra/ansible && ansible-playbook site.yml --syntax-check`.
+1. `cd infra/ansible && ansible-playbook site.yml --syntax-check 2>&1`.
 2. Повний прогін, `timeout` 3600000 мс:
    `cd infra/ansible && ansible-playbook -i inventory.ini site.yml --vault-password-file "$VAULT_PASS_FILE" 2>&1 | tee ~/hart-logs/migrate-pl-ansible-1.log | tail -n 60`.
    Оракул — `PLAY RECAP`: `failed=0 unreachable=0`.
@@ -103,8 +105,8 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
    `content` таски `Configure fail2ban for sshd`, додай один рядок `backend = systemd` під
    `[sshd]` → окремий коміт `fix(ansible): fail2ban читає journald на Debian 12` → повтори
    пункт 2. Будь-яка інша причина або `F2B_FIX` ≠ `yes` — STOP.
-4. Ідемпотентність і шлях GitHub-деплою: повтори з `--tags deploy` (саме так деплоїть
-   `deploy-staging.yml`) → `failed=0`.
+4. Ідемпотентність і шлях GitHub-деплою: та сама команда, що в п.2, з `--tags deploy` (саме так
+   деплоїть `deploy-staging.yml`), `2>&1` і логом `~/hart-logs/migrate-pl-ansible-2.log` → `failed=0`.
 5. Стан: `ssh flatcraft-pl 'docker ps --format "{{.Names}} {{.Status}}"'` → усі `Up`, де є
    healthcheck — `healthy`. Ключ CI на сервері:
    `ssh flatcraft-pl 'grep -c flatcraft-ci /home/deploy/.ssh/authorized_keys'` → `1`.
@@ -256,11 +258,23 @@ gitignored `infra/ansible/inventory.ini` із псевдонімом, файл �
 
 Робить yurii, не агент. Кожен блок — з очікуваним виводом; якщо вивід інший — не запускати.
 
+**0. ansible-core 2.16, як у CI** (`deploy-staging.yml`: `ansible-core>=2.16,<2.17`; `docs/08`
+§1.1 — через pipx). На інших версіях ролі не проганялись, і КРОК 0 зупиниться:
+
+```bash
+ansible-playbook --version 2>&1 | head -1 && ansible-galaxy collection list 2>&1 | grep -E '^(community\.general|community\.docker|ansible\.posix) '
+```
+
+Очікування: `ansible-playbook [core 2.16.x]` і три рядки колекцій. Інша версія →
+`python3 -m pip uninstall -y --break-system-packages ansible-core && pipx install --force "ansible-core==2.16.*"`
+і повторити перевірку. Колекцій немає (після зміни версії їх може не бути видно) →
+`ansible-galaxy collection install community.general community.docker ansible.posix`.
+
 **1. Псевдонім сервера й файл для оракула витоку.** IP вводиться лише тут, у терміналі:
 
 ```bash
-read -r -p "IP нового сервера: " NEWIP && mkdir -p ~/.flatcraft/backups ~/.flatcraft/tmp ~/hart-logs && chmod 700 ~/.flatcraft ~/.flatcraft/tmp &&
-printf '%s\n' "$NEWIP" > ~/.flatcraft/origin-host && chmod 600 ~/.flatcraft/origin-host &&
+read -r -p "IP нового сервера: " NEWIP && mkdir -p ~/.flatcraft/backups ~/.flatcraft/tmp ~/.flatcraft/leak ~/hart-logs && chmod 700 ~/.flatcraft ~/.flatcraft/tmp ~/.flatcraft/leak &&
+printf '%s\n' "$NEWIP" > ~/.flatcraft/leak/origin-host && chmod 600 ~/.flatcraft/leak/origin-host &&
 { grep -q '^Host flatcraft-pl$' ~/.ssh/config 2>/dev/null || printf '\nHost flatcraft-pl\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n' "$NEWIP" >> ~/.ssh/config; } &&
 chmod 600 ~/.ssh/config && ssh flatcraft-pl 'hostname; cat /etc/debian_version'
 ```
@@ -318,7 +332,7 @@ cd ~/hart-wt/migrate-pl && set -a && . ~/.flatcraft/migrate-pl.env && set +a &&
 export RUN_START="$(date -u +%Y%m%dT%H%M%SZ)" F2B_FIX=yes BASH_DEFAULT_TIMEOUT_MS=1800000 BASH_MAX_TIMEOUT_MS=3600000 &&
 ALLOW=(Read Glob Grep Edit Write "Write(~/hart-logs/**)" "Edit(~/hart-logs/**)"
   "Bash(git:*)" "Bash(cd:*)" "Bash(ls:*)" "Bash(test:*)" "Bash(grep:*)" "Bash(tail:*)" "Bash(wc:*)"
-  "Bash(date:*)" "Bash(echo:*)" "Bash(ssh flatcraft-pl *)" "Bash(scp flatcraft-pl:*)" "Bash(scp * flatcraft-pl:*)"
+  "Bash(date:*)" "Bash(echo:*)" "Bash(ssh flatcraft-pl *)" "Bash(scp flatcraft-pl:/root/*)" "Bash(scp ~/.flatcraft/tmp/* flatcraft-pl:/root/*)"
   "Bash(ansible-playbook:*)" "Bash(ansible-galaxy collection list*)" "Bash(age -d *)" "Bash(age --version)"
   "Bash(shred -u *)" "Bash(tee ~/hart-logs/*)" "Bash(mkdir -p ~/.flatcraft/*)" "Bash(pnpm:*)"
   "Bash(gh auth status*)" "Bash(gh pr create --draft *)" "Bash(gh pr view *)" "Bash(gh pr list *)"
@@ -327,7 +341,7 @@ DENY=("Bash(git push --force*)" "Bash(git push -f*)" "Bash(git push * --force*)"
   "Bash(git push * HEAD:main*)" "Bash(gh pr merge*)" "Bash(gh pr ready*)" "Bash(gh secret*)" "Bash(gh api*)"
   "Bash(gh workflow*)" "Bash(gh repo*)" "Bash(gh auth login*)" "Bash(gh auth refresh*)" "Bash(docker*)"
   "Bash(sudo*)" "Bash(ansible-vault*)" "Bash(ansible-playbook *a8*)" "Bash(agy*)" "Bash(pnpm discord:apply*)"
-  "Read(~/.ssh/**)" "Read(~/.flatcraft/origin-host)" "Edit(~/.ssh/**)" "Write(~/.ssh/**)"
+  "Read(~/.ssh/**)" "Edit(~/.ssh/**)" "Write(~/.ssh/**)"
   "Edit(~/.flatcraft/**)" "Write(~/.flatcraft/**)" "Edit(~/.claude/**)" "Write(~/.claude/**)"
   "Edit(~/.gemini/**)" "Write(~/.gemini/**)" "Edit(~/.config/**)" "Write(~/.config/**)"
   "Edit(~/.bashrc)" "Write(~/.bashrc)" "Edit(~/hart/**)" "Write(~/hart/**)"
@@ -342,6 +356,7 @@ DENY=("Bash(git push --force*)" "Bash(git push -f*)" "Bash(git push * --force*)"
   "Edit(infra/ansible/roles/flatcraft/**)" "Edit(infra/ansible/roles/monitoring/**)") &&
 echo "налаштування OK, RUN_START=$RUN_START"
 [[ -n "${RUN_START:-}" ]] && nohup setsid claude -p --model opus --permission-mode acceptEdits --max-turns 300 \
+  --add-dir ~/hart-logs ~/.flatcraft/leak \
   --output-format stream-json --verbose --allowedTools "${ALLOW[@]}" --disallowedTools "${DENY[@]}" \
   < ~/.flatcraft/migrate-pl.prompt.md > ~/hart-logs/migrate-pl-$RUN_START.jsonl 2>&1 &
 echo "запущено: ~/hart-logs/migrate-pl-$RUN_START.jsonl"
@@ -349,6 +364,17 @@ echo "запущено: ~/hart-logs/migrate-pl-$RUN_START.jsonl"
 
 Очікування: `налаштування OK, RUN_START=…` і `запущено: …`. Якщо першого рядка немає —
 не запустилось нічого, пришліть вивід.
+
+Чому саме так (виміряно оркестратором на T470 2026-09-24 короткими headless-прогонами):
+
+- `--add-dir`: `grep`, `tee` і подібні команди Claude Code пускає лише до файлів у робочих
+  теках сесії. `~/hart-logs` — для логів і текстів PR, `~/.flatcraft/leak` — лише для файла з
+  IP (оракул витоку). Увесь `~/.flatcraft` не додається: там розшифрований дамп.
+- `scp`: правило, що закінчується на `:*`, — це префікс, після якого йде пробіл. Тому
+  `scp flatcraft-pl:*` не пропускає `scp flatcraft-pl:/root/…`, а `*` посередині такого правила —
+  просто символ. Правила з `*` у кінці без двокрапки працюють як шаблон.
+- Заборони `Read` для файла з IP немає: вона блокує і `grep -f`. Не читати IP — правило
+  промпту; якщо IP потрапить у git чи PR, його зловить оракул.
 
 Без `--dangerously-skip-permissions` (CLAUDE.md §6.2): чого немає в `ALLOW`, те агентові
 відмовлено, і він зупиняється зі звітом. **Чесно про межі:** це запобіжник від помилок, а не
