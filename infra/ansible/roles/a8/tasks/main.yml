@@ -527,6 +527,17 @@
     group: root
     mode: "0755"
 
+- name: Install forbidden-paths backstop
+  # Крок 6a тіку: diff задачі проти заборонених шляхів CLAUDE.md §6.1, до
+  # оракула і push. Копія під root — агент не може її змінити; V19 у verify
+  # звіряє контрольну суму з репозиторієм, як V14 для логіки.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/check-forbidden-paths.sh"
+    dest: /usr/local/lib/a8/check-forbidden-paths.sh
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install queue tick
   ansible.builtin.template:
     src: a8-tick.sh.j2
