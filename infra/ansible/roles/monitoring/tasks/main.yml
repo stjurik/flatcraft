@@ -13,9 +13,11 @@
   ansible.builtin.template:
     src: monitor.sh.j2
     dest: /usr/local/bin/flatcraft-monitor.sh
+    # У скрипті — URL вебхука Discord (секрет): читати й запускати лише root і app_user,
+    # від якого йде cron нижче.
     owner: root
-    group: root
-    mode: "0755"
+    group: "{{ app_user }}"
+    mode: "0750"
   vars:
     discord_webhook: "{{ vault_discord_webhook_url }}"
 
