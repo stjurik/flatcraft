@@ -296,6 +296,67 @@ out="$(run)"
 teardown
 rm -f "$p"
 
+# ─── 21. Злиття переносить ask і additionalDirectories ─────────────────────
+# Без них профіль мовчки втрачав би «питати перед інсталятором» і теку worktree-ів,
+# а кожне читання у ~/hart-wt знову питало б yurii.
+setup
+echo '{"permissions":{"ask":["Bash(make deploy)"],"additionalDirectories":["/srv/x"]}}' >"$LOCAL"
+run >/dev/null
+if jq -e --slurpfile p "$REAL_PROFILE" '
+    (.permissions.ask | index("Bash(make deploy)") != null)
+    and ((.permissions.ask - $p[0].permissions.ask) == ["Bash(make deploy)"])
+    and (.permissions.additionalDirectories | sort == (["/srv/x"] + $p[0].permissions.additionalDirectories | sort))' "$LOCAL" >/dev/null; then
+  ok "злиття: ask і additionalDirectories профілю додано, чужі записи лишились"
+else
+  bad "ask/additionalDirectories злито неправильно: $(jq -c .permissions "$LOCAL")"
+fi
+teardown
+
+# ─── 22. --replace: дозволи рівно профіль, решта ключів — як була ───────────
+setup
+echo '{"model":"opus","permissions":{"allow":["Bash(git -C /home/yurii/hart add a.ts)","Bash(node -e \"x\")"],"deny":["Bash(rm -rf /x)"],"defaultMode":"acceptEdits"}}' >"$LOCAL"
+out="$(run --replace)"
+rc=$?
+if [[ $rc == 0 ]] && jq -e --slurpfile p "$REAL_PROFILE" '
+    (.permissions.allow | sort) == ($p[0].permissions.allow | unique | sort)
+    and (.permissions.deny | sort) == ($p[0].permissions.deny | unique | sort)
+    and (.permissions.ask | sort) == ($p[0].permissions.ask | unique | sort)
+    and (.permissions.additionalDirectories | sort) == ($p[0].permissions.additionalDirectories | unique | sort)
+    and .model == "opus" and .permissions.defaultMode == "acceptEdits"' "$LOCAL" >/dev/null; then
+  ok "--replace: allow/ask/deny/additionalDirectories — рівно профіль; model і defaultMode не зачеплено"
+else
+  bad "--replace зробив не те (rc=$rc): $(jq -c . "$LOCAL") — $out"
+fi
+b="$(find "$T/backups" -name 'settings.local.*.json' | head -1)"
+[[ -n "$b" ]] && jq -e '.permissions.allow | index("Bash(node -e \"x\")") != null' "$b" >/dev/null &&
+  ok "--replace: резервна копія зі старими одноразовими дозволами" || bad "--replace без резервної копії: $b"
+cmp -s "$HERE/log-permission-request.sh" "$HOOK_COPY" && ok "--replace ставить і хук-лічильник" ||
+  bad "--replace не встановив хук"
+out="$(run --check)"
+[[ $? == 0 && "$out" != *"понад профіль"* ]] && ok "після --replace --check каже OK без «понад профіль»" ||
+  bad "--check після --replace: $out"
+teardown
+
+# ─── 23. --check рахує накопичене понад профіль, але лишається OK ───────────
+setup
+run >/dev/null
+jq '.permissions.allow += ["Bash(echo раз)", "Bash(echo два)"]' "$LOCAL" >"$LOCAL.x" && mv "$LOCAL.x" "$LOCAL"
+out="$(run --check)"
+[[ $? == 0 && "$out" == *"понад профіль у локальному файлі дозволів: 2"* ]] &&
+  ok "--check: OK і число одноразових дозволів понад профіль (2)" || bad "--check не показав накопичене: $out"
+teardown
+
+# ─── 24. --replace з небезпечним профілем — відмова, файл не змінено ────────
+p="$(with_allow 'Bash(ssh a8-ts *)')"
+setup "$p"
+echo '{"permissions":{"allow":["Bash(echo x)"]}}' >"$LOCAL"
+before="$(sha256sum "$LOCAL")"
+out="$(run --replace)"
+[[ $? == 1 && "$(sha256sum "$LOCAL")" == "$before" ]] && ok "--replace з небезпечним дозволом у профілі — відмова, файл той самий" ||
+  bad "--replace пропустив небезпечний профіль: $out"
+teardown
+rm -f "$p"
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1
