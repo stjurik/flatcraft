@@ -15,17 +15,19 @@
 #   git diff --name-only origin/main...HEAD | tools/scripts/check-forbidden-paths.sh
 set -euo pipefail
 
+# Каталоги — з `(/|$)`: git показує субмодуль (gitlink) на місці каталогу
+# рядком БЕЗ кінцевого «/», і шаблон `^infra/` його б не впізнав.
 FORBIDDEN_PATTERNS=(
-  '^packages/db/src/migrations/'
-  '^infra/'
-  '^\.github/'
+  '^packages/db/src/migrations(/|$)'
+  '^infra(/|$)'
+  '^\.github(/|$)'
   '^CLAUDE\.md$'
   '^docs/03_DECISIONS\.md$'
   '^docs/12_TEMPLATE_CONTRACT\.md$'
   '^packages/db/src/schema\.ts$'
   # Bend-матриця — єдине джерело істини для гибки (CLAUDE.md §6.1, §13).
   '^packages/cad-engine/data/bend-machine-esi\.yaml$'
-  '^workers/cad/tests/snapshots/'
+  '^workers/cad/tests/snapshots(/|$)'
 )
 
 violations=()

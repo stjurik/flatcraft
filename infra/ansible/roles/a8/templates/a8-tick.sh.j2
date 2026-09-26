@@ -293,8 +293,12 @@ case "$cls" in
     ;;
 esac
 
-# ok від моделі ще не означає, що є результат.
-if [[ "$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)" == 0 ]]; then
+# ok від моделі ще не означає, що є результат. Рахуємо від бази до ГІЛКИ, що
+# пушиться: `origin/main..HEAD` зарахував би коміт на відокремленому HEAD, і
+# гілку без змін запушило б як «ok» (знайшов рецензент agy, Gemini 3.8 Flash).
+# SHA вершини закріплюється тут; його ж перевіряє backstop і пушить крок 7.
+tip="$(git --no-replace-objects -C "$wt" rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+if [[ -z "$tip" || "$(git --no-replace-objects -C "$wt" rev-list --count "$base..$tip" 2>/dev/null || echo 0)" == 0 ]]; then
   fail_task "no-commits"
   exit 0
 fi
@@ -314,14 +318,19 @@ fi
 #     зсунути гілку вже після перевірки;
 #   - `--no-renames`: інакше перенесення CLAUDE.md показало б лише нову назву;
 #   - `--no-replace-objects`: `git replace` підміняє вміст для diff, але push
-#     віддає справжні об'єкти.
-tip="$(git --no-replace-objects -C "$wt" rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+#     віддає справжні об'єкти;
+#   - `-z`: без нього git бере в лапки шлях із кирилицею чи лапками
+#     ("infra/\321\202…"), і шаблон ^infra/ його не бачить (знайшов рецензент
+#     agy, Gemini 3.8 Flash). NUL → перевод рядка: ім'я з переводом рядка дасть
+#     зайвий рядок, але перший шматок забороненого шляху зберігає префікс.
 bout=""
-if [[ -z "$tip" ]] ||
-  ! changed="$(git --no-replace-objects -C "$wt" diff --name-only --no-renames "$base" "$tip" 2>>"$log")" ||
+if ! changed="$(git --no-replace-objects -C "$wt" diff -z --name-only --no-renames "$base" "$tip" 2>>"$log" | tr '\0' '\n')" ||
   ! bout="$(printf '%s\n' "$changed" | bash "$FORBIDDEN" 2>&1)"; then
   printf '%s\n' "$bout" >>"$log"
-  fail_task "forbidden-paths: $(sed -n 's/^  ✗ //p' <<<"$bout" | tr '\n' ' ')"
+  viol="$(sed -n 's/^  ✗ //p' <<<"$bout" | tr '\n' ' ')"
+  # Порожній перелік — це не «заборонене не знайдено», а «перевірку не
+  # виконано»: git diff упав або скрипта немає. Fail closed, але з поясненням.
+  fail_task "forbidden-paths: ${viol:-перевірку не виконано — git diff або скрипт упали, див. лог задачі}"
   exit 0
 fi
 

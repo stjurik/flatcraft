@@ -130,6 +130,19 @@ case "${AGENT_MODE:-commit}" in
         git -C "$wt" replace "$f" "$c" ;;
     esac
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  cyrillic | quote)
+    # Не-ASCII або лапки в імені: `git diff --name-only` бере такий шлях у лапки
+    # з вісімковими кодами ("infra/\321\202…"), і шаблон ^infra/ його не бачить.
+    mkdir -p "$wt/infra"
+    if [[ "$AGENT_MODE" == cyrillic ]]; then echo x >"$wt/infra/тест.sh"; else echo x >"$wt/infra/a\"b"; fi
+    git -C "$wt" add -A infra
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m odd-name
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  detachonly)
+    # Коміт на відокремленому HEAD, гілка лишилась на базі: пушити нічого.
+    git -C "$wt" checkout -q --detach
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m detached
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
   rename)
     git -C "$wt" mv CLAUDE.md notes.md
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m rename
@@ -555,6 +568,32 @@ EOF
   forbidden_case detach "гілка на забороненому, HEAD — на чистому"
   # 19f. `git replace` підміняє вміст для diff, але не для push.
   forbidden_case replace "заборонений коміт підмінено через git replace"
+  # 19h. Кирилиця й лапки в імені — `git diff` без -z бере шлях у лапки.
+  forbidden_case cyrillic "infra/тест.sh (кирилиця в імені)"
+  forbidden_case quote "infra/a\"b (лапки в імені)"
+  # 19i. «Є коміти» рахується від бази до гілки, а не від origin/main до HEAD:
+  # коміт на відокремленому HEAD інакше дав би push гілки без змін як «ok».
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=detachonly tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == no-commits ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "коміт лише на відокремленому HEAD → failed no-commits, нічого не запушено"
+  else
+    bad "коміт на відокремленому HEAD: $(last)"
+  fi
+  teardown
+  # 19j. Скрипта backstop немає (роль не доставила) → fail closed, з поясненням.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  A8_FORBIDDEN_CHECK="$ROOT/немає.sh" AGENT_MODE=work tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == "forbidden-paths: перевірку не виконано"* ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "скрипта backstop немає → failed «перевірку не виконано», нічого не запушено"
+  else
+    bad "backstop без скрипта: $(last)"
+  fi
+  teardown
   # 19g. Оракул виконує код агента й може зсунути гілку ПІСЛЯ перевірки.
   # Пушиться рівно той SHA, що пройшов backstop.
   PUSH_KIND=token_file setup
@@ -649,10 +688,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # мутація, бо кожне закриває окремий обхід.
   mutate "backstop не викликає скрипт" 's/\| bash "\$FORBIDDEN" 2>&1\)/| true 2>\&1)/'
   mutate "backstop від origin/main, а не від бази" 's/--no-renames "\$base" "\$tip"/--no-renames origin\/main "\$tip"/'
-  mutate "backstop без --no-renames" 's/diff --name-only --no-renames /diff --name-only /'
+  mutate "backstop без --no-renames" 's/--name-only --no-renames "/--name-only "/'
   mutate "backstop перевіряє HEAD, а не гілку" 's/rev-parse --verify --quiet "refs\/heads\/\$branch\^\{commit\}"/rev-parse --verify --quiet HEAD/'
   mutate "backstop бачить підміну git replace" 's/git --no-replace-objects -C "\$wt" diff/git -C "\$wt" diff/'
   mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
+  mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
+  mutate "no-commits від origin/main до HEAD" 's/rev-list --count "\$base\.\.\$tip"/rev-list --count origin\/main..HEAD/'
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"

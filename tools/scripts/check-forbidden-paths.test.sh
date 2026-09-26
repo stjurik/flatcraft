@@ -47,13 +47,31 @@ assert_exit "empty diff → 0" 0 ""
 # До 2026-09-26 скрипт мав 8 шаблонів проти 9 місць у §6.1, і саме цього бракувало.
 assert_exit "bend-machine-esi.yaml → 1" 1 "$(printf 'packages/cad-engine/data/bend-machine-esi.yaml\n')"
 
+# Тест 8b: каталог без кінцевого «/» — так git показує субмодуль (gitlink) на
+# місці каталогу. І навпаки: схожа назва не має спрацьовувати.
+assert_exit "infra (gitlink без /) → 1" 1 "infra"
+assert_exit ".github (gitlink без /) → 1" 1 ".github"
+assert_exit "workers/cad/tests/snapshots (без /) → 1" 1 "workers/cad/tests/snapshots"
+assert_exit "packages/db/src/migrations (без /) → 1" 1 "packages/db/src/migrations"
+assert_exit "infrastructure/x → 0 (схожа назва — не заборонена)" 0 "infrastructure/x"
+assert_exit ".githubx/y → 0" 0 ".githubx/y"
+
 # Тест 9: паритет із контрактом. Кожне місце з CLAUDE.md §6.1 «Не робить НІКОЛИ»
 # мусить блокуватись. Перелік береться з самого CLAUDE.md, а не переписується
 # сюди: інакше нове місце в контракті знову лишилось би без шаблону.
 CLAUDE_MD="$(dirname "$0")/../../CLAUDE.md"
+# Шляхом вважається лише те, що існує в репозиторії (файл або каталог): так
+# `drizzle-kit` з того самого абзацу відпадає, а кореневий файл без «/» і без
+# .md (скажімо, `package.json`) — ні. Перша редакція фільтрувала за «/ або .md»
+# і такий файл пропустила б (знайшов рецензент agy, Gemini 3.8 Flash).
+REPO_ROOT="$(dirname "$0")/../.."
 mapfile -t contract_paths < <(
   awk '/^❌ \*\*Не робить НІКОЛИ/ { on = 1; next } on && /^- Не виконує/ { exit } on' "$CLAUDE_MD" |
-    grep -oE '`[^`]+`' | tr -d '`' | grep -E '/|\.md$' | sed 's|/\*\*$|/x|'
+    grep -oE '`[^`]+`' | tr -d '`' | while IFS= read -r t; do
+    p="${t%/\*\*}"
+    [[ -e "$REPO_ROOT/$p" ]] || continue
+    if [[ "$p" != "$t" ]]; then echo "$p/x"; else echo "$p"; fi
+  done
 )
 # Порожній або скорочений перелік — поломка розбору, а не «усе гаразд».
 if [[ ${#contract_paths[@]} -lt 9 ]]; then
