@@ -284,13 +284,16 @@ fi
 # еталона. Еталоном є сам cad-worker.Dockerfile, а не список, переписаний сюди:
 # інакше нова бібліотека воркера лишилась би непоміченою.
 #
-# Порожній еталон — теж порушення. Якщо розбір нічого не знайшов (стадію
-# перейменовано, формат змінився), інваріант інакше «проходив» би, не
-# виконавшись, — той самий клас, що з grep в інваріанті 8.
+# Порожній або відсутній еталон — теж порушення. Якщо файла немає або розбір
+# нічого не знайшов (стадію перейменовано, формат змінився), інваріант інакше
+# «проходив» би, не виконавшись, — той самий клас, що з grep в інваріанті 8.
+# Перша редакція мовчки пропускала відсутні файли; знайшов рецензент (agy,
+# Gemini 3.8 Flash, PR #142).
 CAD_DOCKERFILE="$ROOT/infra/docker/cad-worker.Dockerfile"
 AGENT_DOCKERFILE="$ROLE/files/agent.Dockerfile"
-# apt_packages <файл> <регекс рядка FROM стадії> — пакети першого
-# `apt-get install` у цій стадії, до першого `&&` після нього.
+# apt_packages <файл> <регекс рядка FROM стадії> — пакети КОЖНОЇ інструкції
+# `apt-get install` у цій стадії: від `install` до найближчого `&&`. Пін версії
+# (`імʼя=версія`) відкидається, ім'я лишається.
 apt_packages() {
   awk -v stage="$2" '
     $0 ~ stage { in_stage = 1; next }
@@ -299,16 +302,20 @@ apt_packages() {
     grab {
       n = split($0, t, /[ \t\\]+/)
       for (i = 1; i <= n; i++) {
-        if (t[i] == "&&") exit
-        if (t[i] ~ /^[a-z0-9][a-z0-9.+-]+$/) print t[i]
+        if (t[i] == "&&") { grab = 0; break }
+        if (t[i] ~ /^[a-z0-9][a-z0-9.+-]+(=[^ ]*)?$/) { sub(/=.*/, "", t[i]); print t[i] }
       }
     }' "$1" | sort -u
 }
-if [[ -f "$CAD_DOCKERFILE" && -f "$AGENT_DOCKERFILE" ]]; then
+if [[ ! -f "$CAD_DOCKERFILE" || ! -f "$AGENT_DOCKERFILE" ]]; then
+  violations+=("немає $CAD_DOCKERFILE або $AGENT_DOCKERFILE — паритет образу агента не перевірено")
+else
   cad_pkgs="$(apt_packages "$CAD_DOCKERFILE" '^FROM .* AS runner$')"
   agent_pkgs="$(apt_packages "$AGENT_DOCKERFILE" '^FROM node:')"
   if [[ -z "$cad_pkgs" ]]; then
     violations+=("не знайдено жодного пакета в runtime-стадії (FROM … AS runner) $CAD_DOCKERFILE — паритет образу агента не перевірено")
+  elif [[ -z "$agent_pkgs" ]]; then
+    violations+=("в $AGENT_DOCKERFILE не знайдено apt-get install у стадії FROM node: — стадію перейменовано або бібліотек немає")
   else
     missing="$(comm -23 <(printf '%s\n' "$cad_pkgs") <(printf '%s\n' "$agent_pkgs") | tr '\n' ' ')"
     if [[ -n "${missing// /}" ]]; then
