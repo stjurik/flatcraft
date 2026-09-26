@@ -5,7 +5,7 @@
 # формат дає `git diff --name-only`) і валить job (exit 1), якщо ХОЧА Б один
 # зачіпає заборонену для ai-fix зону (packages/db/migrations, infra/,
 # .github/, CLAUDE.md, docs/03_DECISIONS.md, docs/12_TEMPLATE_CONTRACT.md,
-# packages/db/schema.ts, DXF/PDF-снапшоти).
+# packages/db/schema.ts, bend-матриця, DXF/PDF-снапшоти).
 #
 # Друга лінія оборони поверх `settings` permissions.deny у claude-code-action
 # (яка блокує запис МЕХАНІЧНО) — цей скрипт ловить те, що deny-rule могла
@@ -23,6 +23,8 @@ FORBIDDEN_PATTERNS=(
   '^docs/03_DECISIONS\.md$'
   '^docs/12_TEMPLATE_CONTRACT\.md$'
   '^packages/db/src/schema\.ts$'
+  # Bend-матриця — єдине джерело істини для гибки (CLAUDE.md §6.1, §13).
+  '^packages/cad-engine/data/bend-machine-esi\.yaml$'
   '^workers/cad/tests/snapshots/'
 )
 

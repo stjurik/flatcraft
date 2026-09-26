@@ -46,6 +46,8 @@ GUARD="${A8_GUARD:-/usr/local/bin/a8-guard}"
 RUNNER="${A8_RUNNER:-/usr/local/bin/a8-run-agent}"
 JOURNAL="${A8_JOURNAL:-/usr/local/bin/a8-journal}"
 DOCKER="${A8_DOCKER:-docker}"
+# Backstop заборонених шляхів — копія під root, яку агент змінити не може.
+FORBIDDEN="${A8_FORBIDDEN_CHECK:-/usr/local/lib/a8/check-forbidden-paths.sh}"
 
 Q="$A8_QUEUE_DIR"
 mkdir -p "$Q/running" "$Q/done" "$Q/failed" "$Q/rejected" "$A8_LOGS_DIR/tasks"
@@ -185,6 +187,10 @@ if [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git -C "$A8_REPO_DIR" r
   fail_task "worktree не на origin/main"
   exit 0
 fi
+# База для backstop'а (крок 6a) — ЗАПИСАНА ТУТ, у пам'яті тіку. Ref origin/main
+# лежить у репозиторії, який агент бачить на запис: `git update-ref` зробив би
+# diff від нього порожнім.
+base="$(git -C "$wt" rev-parse HEAD)"
 
 # ─── 4. Залежності і гучний pre-commit ─────────────────────────────────────
 # Залежності — у worktree, бо node_modules і venv між worktree не шаруються
@@ -293,6 +299,32 @@ if [[ "$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
   exit 0
 fi
 
+# ─── 6a. Backstop заборонених шляхів — до оракула і push ──────────────────
+# CLAUDE.md §6.1 обіцяє для A8 «deny-правила + backstop-скрипт». Deny-правила
+# ловлять Edit/Write, а не Bash: `echo > infra/x` чи `git mv CLAUDE.md …` їх
+# минають. Без цього кроку заборонене доходило б до push (a8-tick.test.sh,
+# сценарії 19).
+#
+# Що саме перевіряється і чому так:
+#   - база — SHA, записаний при створенні worktree, а не origin/main (агент
+#     може пересунути ref);
+#   - вершина — гілка, яка пушиться, а не HEAD: відокремлений HEAD на чистому
+#     коміті ховав би заборонений коміт на гілці. SHA вершини закріплюється тут
+#     і саме він пушиться в кроці 7 — оракул нижче виконує код агента і міг би
+#     зсунути гілку вже після перевірки;
+#   - `--no-renames`: інакше перенесення CLAUDE.md показало б лише нову назву;
+#   - `--no-replace-objects`: `git replace` підміняє вміст для diff, але push
+#     віддає справжні об'єкти.
+tip="$(git --no-replace-objects -C "$wt" rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+bout=""
+if [[ -z "$tip" ]] ||
+  ! changed="$(git --no-replace-objects -C "$wt" diff --name-only --no-renames "$base" "$tip" 2>>"$log")" ||
+  ! bout="$(printf '%s\n' "$changed" | bash "$FORBIDDEN" 2>&1)"; then
+  printf '%s\n' "$bout" >>"$log"
+  fail_task "forbidden-paths: $(sed -n 's/^  ✗ //p' <<<"$bout" | tr '\n' ' ')"
+  exit 0
+fi
+
 # ─── 6b. Оракул приймання — доводить МАШИНА ────────────────────────────────
 # `ok` від моделі означає лише «сесія завершилась без помилки», а коміти —
 # лише «щось записано». ЩО саме записано, доводить оракул із запису черги.
@@ -343,7 +375,7 @@ case "$A8_PUSH_CREDENTIAL_KIND" in
     ;;
   deploy_key)
     if GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_push -o IdentitiesOnly=yes -o BatchMode=yes" \
-      git -C "$wt" push "$A8_PUSH_SSH_URL" "$branch:$branch" >>"$log" 2>&1; then
+      git -C "$wt" push "$A8_PUSH_SSH_URL" "$tip:refs/heads/$branch" >>"$log" 2>&1; then
       "$GUARD" record ok
       finish ok ok pushed done
     else
@@ -352,7 +384,7 @@ case "$A8_PUSH_CREDENTIAL_KIND" in
     ;;
   token_file)
     if GIT_ASKPASS=/usr/local/bin/a8-git-askpass GIT_TERMINAL_PROMPT=0 \
-      git -C "$wt" -c credential.helper= push origin "$branch:$branch" >>"$log" 2>&1; then
+      git -C "$wt" -c credential.helper= push origin "$tip:refs/heads/$branch" >>"$log" 2>&1; then
       "$GUARD" record ok
       finish ok ok pushed done
     else

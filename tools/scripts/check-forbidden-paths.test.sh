@@ -43,6 +43,28 @@ assert_exit "CLAUDE.md.bak → 0 (no false positive)" 0 "$(printf 'CLAUDE.md.bak
 # Тест 7: порожній diff → exit 0.
 assert_exit "empty diff → 0" 0 ""
 
+# Тест 8: bend-матриця — єдине джерело істини для гибки (CLAUDE.md §13).
+# До 2026-09-26 скрипт мав 8 шаблонів проти 9 місць у §6.1, і саме цього бракувало.
+assert_exit "bend-machine-esi.yaml → 1" 1 "$(printf 'packages/cad-engine/data/bend-machine-esi.yaml\n')"
+
+# Тест 9: паритет із контрактом. Кожне місце з CLAUDE.md §6.1 «Не робить НІКОЛИ»
+# мусить блокуватись. Перелік береться з самого CLAUDE.md, а не переписується
+# сюди: інакше нове місце в контракті знову лишилось би без шаблону.
+CLAUDE_MD="$(dirname "$0")/../../CLAUDE.md"
+mapfile -t contract_paths < <(
+  awk '/^❌ \*\*Не робить НІКОЛИ/ { on = 1; next } on && /^- Не виконує/ { exit } on' "$CLAUDE_MD" |
+    grep -oE '`[^`]+`' | tr -d '`' | grep -E '/|\.md$' | sed 's|/\*\*$|/x|'
+)
+# Порожній або скорочений перелік — поломка розбору, а не «усе гаразд».
+if [[ ${#contract_paths[@]} -lt 9 ]]; then
+  echo "✗ паритет із CLAUDE.md §6.1: розібрано ${#contract_paths[@]} місць, очікувалось щонайменше 9"
+  fail=1
+else
+  for p in "${contract_paths[@]}"; do
+    assert_exit "§6.1: $p → 1" 1 "$p"
+  done
+fi
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1
