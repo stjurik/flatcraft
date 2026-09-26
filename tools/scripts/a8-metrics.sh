@@ -19,16 +19,19 @@
 #                  `failed`, `stopped`, `auth_stop` серію рвуть, події — ні;
 #   вікно        — записи з ts у [зараз − N днів, зараз] (крок 6: N = 14);
 #   покриття     — частка прогонів у вікні, де оракул справді виконався
-#                  (oracle_rc — число, не «-»);
+#                  (oracle_rc — число, не «-», і прогін не stopped: тоді rc=10
+#                  дала обгортка через kill switch, а не оракул);
 #   навч. зупинка — епізод kill switch (подія kill_switch або stopped через
 #                  kill switch). Новий епізод — після запису іншого типу або
 #                  паузи понад --episode-gap-min хв (дефолт 30 = 3 інтервали тіку
 #                  a8_tick_interval_minutes): поки STOP лежить, кожен тік пише
 #                  kill_switch, а черга, що простоює, не пише нічого. Епізод, якому
-#                  безпосередньо (не далі тієї самої паузи) передує auth_stop, не
-#                  рахується: той STOP пише сам тік, а не людина. Епізоди
-#                  рахуються за весь журнал і лише потім фільтруються за вікном —
-#                  інакше auth_stop за хвилину до межі вікна губився б;
+#                  передує прогін auth_stop не далі тієї самої паузи (події на
+#                  зразок busy між ними не рахуються), не навчальний: той STOP
+#                  пише сам тік, а не людина. Епізоди рахуються за весь журнал і
+#                  лише потім фільтруються за вікном за ЧАСОМ ПОЧАТКУ (навчальна
+#                  зупинка — момент, коли створено STOP) — інакше auth_stop за
+#                  хвилину до межі вікна губився б;
 #   правило трьох — клас = exit_class + перше слово detail до « :;=» (rc=1 і
 #                  rc=2 — один клас «rc»); рахуються failed, auth_stop і кожне
 #                  поле відхилення (reject:<поле>); ≥ 3 за весь переданий
@@ -159,17 +162,17 @@ def cls: (.exit_class // "?") + ":" + ([(.detail // "") | splits("[ :;=]")][0] /
      | ([ $all[] | select((t // -1) >= $s) | select(ks) ] | first) as $hit
      | if $hit == null then null else (($hit | t) - $s) end
    end) as $ks_s
-| (reduce $all[] as $r ({in: false, last_ks: null, prev: null, eps: []};
+| (reduce $all[] as $r ({in: false, last_ks: null, last_run: null, eps: []};
     ($r | t // 0) as $rt
     | if ($r | ks) then
         (if (.in | not) or (.last_ks != null and ($rt - .last_ks) > $gap) then
            .eps += [{t: $rt,
-                     auth: (.prev != null and .prev.event == "run" and .prev.result == "auth_stop"
-                            and ($rt - (.prev | t // 0)) <= $gap)}]
+                     auth: (.last_run != null and .last_run.result == "auth_stop"
+                            and ($rt - (.last_run | t // 0)) <= $gap)}]
          else . end)
         | .in = true | .last_ks = $rt
       else .in = false end
-    | .prev = $r)) as $ep
+    | (if $r.event == "run" then .last_run = $r else . end))) as $ep
 | ([ $ep.eps[] | select(.auth | not) | select(.t >= $from and .t <= $n) ] | length) as $drills
 | ([ $runs[] | select(.result == "failed" or .result == "auth_stop") | cls ]
    + [ $all[] | select(.event == "reject") | (.fields // [])[] | "reject:" + . ]
@@ -182,7 +185,7 @@ def cls: (.exit_class // "?") + ":" + ([(.detail // "") | splits("[ :;=]")][0] /
       runs: ($wruns | length),
       done: ([ $wruns[] | select(.result == "ok") ] | length),
       forbidden: ([ $wruns[] | select((.detail // "") | startswith("forbidden-paths")) ] | length),
-      oracle_runs: ([ $wruns[] | select((.oracle_rc // "-") != "-") ] | length),
+      oracle_runs: ([ $wruns[] | select((.oracle_rc // "-") != "-" and .result != "stopped") ] | length),
       oracle_green: ([ $wruns[] | select((.oracle_rc // "-") == "0") ] | length),
       oracle_missing_rejects: ([ $win[] | select(.event == "reject" and ((.fields // []) | index("oracle:missing"))) ] | length),
       kill_switch_drills: $drills
