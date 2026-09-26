@@ -274,6 +274,56 @@ if [[ -f "$BOOL_DEFAULTS" && -d "$TASKS" ]]; then
   done < <(sed -nE 's/^(a8_[a-z_]+): *(true|false) *(#.*)?$/\1/p' "$BOOL_DEFAULTS")
 fi
 
+# Інваріант 9 — образ агента несе всі системні бібліотеки runtime-стадії воркера.
+#
+# ЧОМУ. `uv sync` ставить Python-пакети, але не .so, яких потребує cadquery-ocp.
+# Образ агента їх не мав, і оракул воркера на A8 давав rc=2 (handoff 2026-09-23
+# §2 п.1): агент не міг довести жодної задачі в workers/cad. Живу поведінку
+# доводить V18 у verify.yml, але лише після застосування ролі на машині. Тут —
+# те, що CI може довести до merge: перелік у образі агента не відстає від
+# еталона. Еталоном є сам cad-worker.Dockerfile, а не список, переписаний сюди:
+# інакше нова бібліотека воркера лишилась би непоміченою.
+#
+# Порожній або відсутній еталон — теж порушення. Якщо файла немає або розбір
+# нічого не знайшов (стадію перейменовано, формат змінився), інваріант інакше
+# «проходив» би, не виконавшись, — той самий клас, що з grep в інваріанті 8.
+# Перша редакція мовчки пропускала відсутні файли; знайшов рецензент (agy,
+# Gemini 3.8 Flash, PR #142).
+CAD_DOCKERFILE="$ROOT/infra/docker/cad-worker.Dockerfile"
+AGENT_DOCKERFILE="$ROLE/files/agent.Dockerfile"
+# apt_packages <файл> <регекс рядка FROM стадії> — пакети КОЖНОЇ інструкції
+# `apt-get install` у цій стадії: від `install` до найближчого `&&`. Архітектура
+# (`імʼя:amd64`) і пін версії (`імʼя=версія`) відкидаються, ім'я лишається.
+apt_packages() {
+  awk -v stage="$2" '
+    $0 ~ stage { in_stage = 1; next }
+    in_stage && /^FROM / { exit }
+    in_stage && /apt-get install/ { grab = 1; sub(/.*apt-get install/, "") }
+    grab {
+      n = split($0, t, /[ \t\\]+/)
+      for (i = 1; i <= n; i++) {
+        if (t[i] == "&&") { grab = 0; break }
+        if (t[i] ~ /^[a-z0-9][a-z0-9.+-]+(:[a-z0-9-]+)?(=[^ ]*)?$/) { sub(/[:=].*/, "", t[i]); print t[i] }
+      }
+    }' "$1" | sort -u
+}
+if [[ ! -f "$CAD_DOCKERFILE" || ! -f "$AGENT_DOCKERFILE" ]]; then
+  violations+=("немає $CAD_DOCKERFILE або $AGENT_DOCKERFILE — паритет образу агента не перевірено")
+else
+  cad_pkgs="$(apt_packages "$CAD_DOCKERFILE" '^FROM .* AS runner$')"
+  agent_pkgs="$(apt_packages "$AGENT_DOCKERFILE" '^FROM node:')"
+  if [[ -z "$cad_pkgs" ]]; then
+    violations+=("не знайдено жодного пакета в runtime-стадії (FROM … AS runner) $CAD_DOCKERFILE — паритет образу агента не перевірено")
+  elif [[ -z "$agent_pkgs" ]]; then
+    violations+=("в $AGENT_DOCKERFILE не знайдено apt-get install у стадії FROM node: — стадію перейменовано або бібліотек немає")
+  else
+    missing="$(comm -23 <(printf '%s\n' "$cad_pkgs") <(printf '%s\n' "$agent_pkgs") | tr '\n' ' ')"
+    if [[ -n "${missing// /}" ]]; then
+      violations+=("в образі агента ($AGENT_DOCKERFILE) бракує бібліотек runtime-стадії воркера: ${missing% } — оракул workers/cad на A8 впаде (rc=2, handoff 2026-09-23 §2 п.1)")
+    fi
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -284,4 +334,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера"

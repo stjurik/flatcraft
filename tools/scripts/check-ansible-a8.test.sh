@@ -19,9 +19,17 @@ trap 'rm -rf "$tmproot"' EXIT
 # Будує дерево: $1 — тека, $2 — вміст a8.yml, $3 — вміст tasks/main.yml.
 make_tree() {
   local dir="$1"
-  mkdir -p "$dir/infra/ansible/roles/a8/tasks"
+  mkdir -p "$dir/infra/ansible/roles/a8/tasks" "$dir/infra/ansible/roles/a8/files" "$dir/infra/docker"
   printf '%s\n' "$2" >"$dir/infra/ansible/a8.yml"
   printf '%s\n' "$3" >"$dir/infra/ansible/roles/a8/tasks/main.yml"
+  # Мінімальна узгоджена пара для інваріанта 9: без Dockerfile'ів він
+  # червоніє (fail closed), а ці дерева перевіряють інші інваріанти.
+  printf '%s\n' 'FROM python:3.12-slim-bookworm AS runner' \
+    'RUN apt-get update && apt-get install -y --no-install-recommends \' \
+    '    libgl1 \' '    && rm -rf /var/lib/apt/lists/*' >"$dir/infra/docker/cad-worker.Dockerfile"
+  printf '%s\n' 'FROM node:22' 'RUN apt-get update \' \
+    ' && apt-get install -y --no-install-recommends libgl1 \' \
+    ' && rm -rf /var/lib/apt/lists/*' >"$dir/infra/ansible/roles/a8/files/agent.Dockerfile"
 }
 
 assert_exit() {
@@ -213,6 +221,8 @@ assert_exit "a8-run-agent у коментарі → 0" 0 "$tmproot/cmt"
 mut="$tmproot/mut"
 mkdir -p "$mut/infra"
 cp -r "$REPO/infra/ansible" "$mut/infra/ansible"
+# Еталон системних бібліотек образу агента (інваріант 9).
+cp -r "$REPO/infra/docker" "$mut/infra/docker"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -353,6 +363,92 @@ open(p, 'w').write(s)
 PY
 assert_exit "мутація 10: Jinja-умова в шаблоні без '| bool' → 1" 1 "$mut"
 cp "$REPO/infra/ansible/roles/a8/templates/a8-egress-refresh.sh.j2" "$mut/infra/ansible/roles/a8/templates/a8-egress-refresh.sh.j2"
+
+# Мутації 11–13 — інваріант 9, паритет системних бібліотек з образом воркера.
+AGENT_DF="infra/ansible/roles/a8/files/agent.Dockerfile"
+CAD_DF="infra/docker/cad-worker.Dockerfile"
+
+# 11: з образу агента зникла одна бібліотека — рівно та, без якої оракул
+# воркера на A8 давав rc=2 (libGL.so.1).
+python3 - "$mut/$AGENT_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "libgl1 libglu1-mesa"
+assert anchor in s, "фікстура застаріла: рядок пакетів в agent.Dockerfile виглядає інакше"
+s = s.replace(anchor, "libglu1-mesa", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 11: з образу агента прибрано libgl1 → 1" 1 "$mut"
+cp "$REPO/$AGENT_DF" "$mut/$AGENT_DF"
+
+# 12: воркер отримав нову бібліотеку, а агент — ні. Перевірка йде ЗА еталоном,
+# а не за списком, переписаним у скрипт.
+python3 - "$mut/$CAD_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "AS runner\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+assert anchor in s, "фікстура застаріла: runtime-стадія cad-worker.Dockerfile виглядає інакше"
+s = s.replace(anchor, anchor + "    libxkbcommon0 \\\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 12: у воркера нова бібліотека, в агента немає → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# 13: runtime-стадію перейменовано — розбір не знаходить жодного пакета.
+# Порожній еталон мусить бути червоним: інакше інваріант «проходить», не
+# виконавшись (той самий клас, що з grep у інваріанті 8).
+sed -i 's/ AS runner$/ AS runtime/' "$mut/$CAD_DF"
+assert_exit "мутація 13: еталон не розібрано (стадію перейменовано) → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# 14: еталона немає взагалі (перейменовано, видалено). Мовчазний пропуск тут
+# був першою редакцією інваріанта — знайшов рецензент (Gemini 3.8 Flash).
+rm "$mut/$CAD_DF"
+assert_exit "мутація 14: cad-worker.Dockerfile відсутній → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# 15: друга інструкція `apt-get install` у runtime-стадії воркера. Парсер,
+# що зупинявся на першому `&&`, її не бачив.
+python3 - "$mut/$CAD_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    && rm -rf /var/lib/apt/lists/*\n\nRUN useradd"
+assert anchor in s, "фікстура застаріла: кінець apt-шару runtime-стадії виглядає інакше"
+s = s.replace(anchor, "    && rm -rf /var/lib/apt/lists/*\nRUN apt-get update && apt-get install -y libxkbcommon0 && rm -rf /var/lib/apt/lists/*\n\nRUN useradd", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 15: друга apt-get install у воркері, в агента пакета немає → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# 16: пакет із піном версії (`імʼя=версія`) — теж пакет еталона.
+python3 - "$mut/$CAD_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "AS runner\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+assert anchor in s, "фікстура застаріла: runtime-стадія cad-worker.Dockerfile виглядає інакше"
+s = s.replace(anchor, anchor + "    libxkbcommon0=1.5.0-1 \\\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 16: у воркера пакет із піном версії, в агента немає → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# 17: пакет із суфіксом архітектури (`імʼя:amd64`) — теж пакет еталона.
+# Знайшов рецензент (agy, Claude Opus 4.6, PR #142).
+python3 - "$mut/$CAD_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "AS runner\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+assert anchor in s, "фікстура застаріла: runtime-стадія cad-worker.Dockerfile виглядає інакше"
+s = s.replace(anchor, anchor + "    libxkbcommon0:amd64 \\\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 17: у воркера пакет із :amd64, в агента немає → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"

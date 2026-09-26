@@ -496,7 +496,9 @@
 
 - name: Build the agent image
   # Будує лише коли образу з цим тегом немає або Dockerfile змінився. Тег несе
-  # версії, тож зміна версії завжди дає нову збірку; старий образ лишається.
+  # версії, тож зміна версії завжди дає нову збірку під новим тегом. Зміна
+  # Dockerfile без зміни версій перезбирає образ під ТИМ САМИМ тегом — старий
+  # лишається без тегу (коментар у files/agent.Dockerfile).
   ansible.builtin.command: >-
     docker build
     --build-arg CLAUDE_CODE_VERSION={{ a8_claude_code_version }}
