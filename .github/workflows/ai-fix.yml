@@ -35,7 +35,13 @@ env:
 
 jobs:
   fix:
-    if: github.event.label.name == 'ai-approved'
+    # Другий гейт до лейбла — лейбл `ai-approved` мусить поставити ВЛАСНИК.
+    # Порівняння з `github.repository_owner`, не з зашитим логіном: у чернетці
+    # `ai-cloud-developer.yml` стояло `== 'jstovbun'` (пошта, а не логін
+    # `stjurik`), тобто гейт не спрацював би жодного разу й лишився б непоміченим.
+    if: >-
+      github.event.label.name == 'ai-approved' &&
+      github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Дослівно з job `test` у ci.yml: без БД Будівельник не прожене *.int.test.ts.
@@ -88,6 +94,22 @@ jobs:
         run: |
           uv python install 3.12
           uv sync --extra dev
+
+      # Базовий прогін ДО агента. Без нього будь-яке падіння нижче читається як
+      # «агент зламав», хоча `main` міг приїхати вже червоним — саме так три дні
+      # (14–17.09) виглядав зламаний деплой. Крок розділяє ці два випадки, і
+      # `::error::` тут означає «не починай, проблема не в агенті».
+      - name: Baseline — чи здоровий main ДО агента
+        run: |
+          set -o pipefail
+          if ! pnpm typecheck; then
+            echo "::error::typecheck червоний ЩЕ ДО агента — проблема в main, не у фіксі"
+            exit 1
+          fi
+          if ! pnpm test; then
+            echo "::error::unit-тести червоні ЩЕ ДО агента — проблема в main, не у фіксі"
+            exit 1
+          fi
 
       - name: Claude fix
         # Pinned SHA — та сама причина, що в ai-triage.yml (ADR-035 §5.3).
@@ -199,3 +221,37 @@ jobs:
         run: |
           git fetch origin main
           git diff --name-only origin/main...HEAD | tools/scripts/check-forbidden-paths.sh
+
+      # Прапорець дрейфу CAD-виходів (CLAUDE.md §2.4, ADR-024). Зміна снапшота
+      # або експортованого креслення — це зміна того, що замовник отримає на
+      # виробництві. Не валимо job: буває легітимна регенерація. Але мовчки
+      # пропустити таку зміну не можна — рев'юер мусить її побачити.
+      - name: Прапорець дрейфу CAD-виходів
+        if: always()
+        run: |
+          git fetch origin main
+          drift=$(git diff --name-only origin/main...HEAD \
+                  | grep -E '\.(dxf|pdf)$|snapshots/' || true)
+          if [ -n "$drift" ]; then
+            echo "::warning::PR зачіпає CAD-виходи — потрібна ручна перевірка байт-детермінізму (CLAUDE.md §2.4):"
+            echo "$drift"
+          else
+            echo "CAD-виходи не зачеплені"
+          fi
+
+      # Сигнал про падіння — див. пояснення в ai-triage.yml.
+      - name: Сповістити про падіння
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_OPS_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_OPS_WEBHOOK не задано — сповіщення не надіслано"
+            exit 0
+          fi
+          curl -fsS -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"❌ **AI fix** впав — issue #%s\n%s"}' \
+                  "${{ github.event.issue.number }}" \
+                  "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")" \
+            > /dev/null

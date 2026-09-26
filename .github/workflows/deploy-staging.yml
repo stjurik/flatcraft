@@ -118,3 +118,24 @@ jobs:
           curl -fsS -o /dev/null -w "HTTP %{http_code}\n" https://staging.hart.crimea.ua/
           echo "→ api GET /health"
           curl -fsS https://api-staging.hart.crimea.ua/health
+
+      # Сигнал про падіння. Причина існування цього кроку конкретна: прогони
+      # #82–#84 (14–17.09) падали на `Pull latest images` через протермінований
+      # креденшал ghcr.io, і staging три дні не оновлювався. Дізнався про це
+      # yurii, відкривши список Actions; жоден механізм не повідомив.
+      # Порожній секрет друкується у лог ЯВНО — тиха відсутність сигналу
+      # відтворила б ту саму сліпу зону, яку цей крок закриває.
+      - name: Сповістити про падіння
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_OPS_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_OPS_WEBHOOK не задано — сповіщення не надіслано"
+            exit 0
+          fi
+          curl -fsS -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"❌ **Deploy to staging** впав\n%s"}' \
+                  "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")" \
+            > /dev/null
