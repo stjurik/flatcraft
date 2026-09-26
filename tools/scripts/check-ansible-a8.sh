@@ -292,8 +292,8 @@ fi
 CAD_DOCKERFILE="$ROOT/infra/docker/cad-worker.Dockerfile"
 AGENT_DOCKERFILE="$ROLE/files/agent.Dockerfile"
 # apt_packages <файл> <регекс рядка FROM стадії> — пакети КОЖНОЇ інструкції
-# `apt-get install` у цій стадії: від `install` до найближчого `&&`. Пін версії
-# (`імʼя=версія`) відкидається, ім'я лишається.
+# `apt-get install` у цій стадії: від `install` до найближчого `&&`. Архітектура
+# (`імʼя:amd64`) і пін версії (`імʼя=версія`) відкидаються, ім'я лишається.
 apt_packages() {
   awk -v stage="$2" '
     $0 ~ stage { in_stage = 1; next }
@@ -303,7 +303,7 @@ apt_packages() {
       n = split($0, t, /[ \t\\]+/)
       for (i = 1; i <= n; i++) {
         if (t[i] == "&&") { grab = 0; break }
-        if (t[i] ~ /^[a-z0-9][a-z0-9.+-]+(=[^ ]*)?$/) { sub(/=.*/, "", t[i]); print t[i] }
+        if (t[i] ~ /^[a-z0-9][a-z0-9.+-]+(:[a-z0-9-]+)?(=[^ ]*)?$/) { sub(/[:=].*/, "", t[i]); print t[i] }
       }
     }' "$1" | sort -u
 }

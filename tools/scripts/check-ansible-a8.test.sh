@@ -436,6 +436,20 @@ PY
 assert_exit "мутація 16: у воркера пакет із піном версії, в агента немає → 1" 1 "$mut"
 cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
 
+# 17: пакет із суфіксом архітектури (`імʼя:amd64`) — теж пакет еталона.
+# Знайшов рецензент (agy, Claude Opus 4.6, PR #142).
+python3 - "$mut/$CAD_DF" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "AS runner\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+assert anchor in s, "фікстура застаріла: runtime-стадія cad-worker.Dockerfile виглядає інакше"
+s = s.replace(anchor, anchor + "    libxkbcommon0:amd64 \\\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 17: у воркера пакет із :amd64, в агента немає → 1" 1 "$mut"
+cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else
