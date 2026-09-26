@@ -82,6 +82,8 @@ expect "крок 6: прогонів у вікні" 12 .step6.runs
 expect "крок 6: доведено до push" 5 .step6.done
 expect "крок 6: спроб запису у виключений шлях" 1 .step6.forbidden
 expect "крок 6: оракул виконано" 10 .step6.oracle_runs
+expect "крок 6: оракул зелений" 6 .step6.oracle_green
+expect "крок 5: серія з --since" 1 .step5.streak_best --since 2026-09-25T00:00:00Z
 expect "крок 6: відхилено без оракула" 1 .step6.oracle_missing_rejects
 expect "крок 6: навчальних зупинок" 1 .step6.kill_switch_drills
 expect "правило трьох: failed:oracle" 3 '.rule_of_three["failed:oracle"]'
@@ -105,6 +107,43 @@ fi
 got="$("$SCRIPT" --json --now "$NOW" "$tmp/auth" | jq -c .step6.kill_switch_drills)"
 [[ "$got" == 0 ]] && ok "kill switch після auth_stop — не навчальна зупинка" || bad "auth_stop як навчальна зупинка: $got"
 
+# Межа вікна не губить причину: auth_stop за 5 хв ДО вікна, його kill switch —
+# уже у вікні. Це не навчальна зупинка (знайшов рецензент agy, Gemini 3.8 Flash).
+{
+  run 2026-09-17T11:55:00Z z auth_stop auth_stop 401 -
+  event 2026-09-17T12:05:00Z kill_switch "a8-guard check → 10"
+  event 2026-09-17T12:15:00Z kill_switch "a8-guard check → 10"
+} >"$tmp/edge"
+got="$("$SCRIPT" --json --now "$NOW" "$tmp/edge" | jq -c .step6.kill_switch_drills)"
+[[ "$got" == 0 ]] && ok "auth_stop перед межею вікна — не навчальна зупинка" || bad "межа вікна: $got"
+
+# Черга простоює після auth_stop (між записами нічого), а через години — справжня
+# навчальна зупинка (a8-report --killswitch-test пише одну подію kill_switch).
+{
+  run 2026-09-29T09:00:00Z z auth_stop auth_stop 401 -
+  event 2026-09-29T09:10:00Z kill_switch "a8-guard check → 10"
+  event 2026-09-29T15:00:00Z kill_switch "a8-guard check → 10"
+} >"$tmp/idle"
+got="$("$SCRIPT" --json --now "$NOW" "$tmp/idle" | jq -c .step6.kill_switch_drills)"
+[[ "$got" == 1 ]] && ok "навчальна зупинка через години після auth_stop — рахується" || bad "простій після auth_stop: $got"
+
+# Правило трьох: коди виходу агента — один клас; auth_stop і відхилення — теж
+# класи (рецензент agy, Gemini 3.8 Flash).
+{
+  run 2026-09-28T10:00:00Z a failed failed "rc=1" -
+  run 2026-09-28T11:00:00Z b failed failed "rc=2" -
+  run 2026-09-28T12:00:00Z c failed failed "rc=1" -
+  run 2026-09-28T13:00:00Z d auth_stop auth_stop 401 -
+  run 2026-09-28T14:00:00Z e auth_stop auth_stop 401 -
+  run 2026-09-28T15:00:00Z f auth_stop auth_stop "401; гілка має коміти — не повертаю в чергу" -
+  reject 2026-09-28T16:00:00Z g "oracle:missing"
+  reject 2026-09-28T17:00:00Z h "oracle:missing,source:missing"
+  reject 2026-09-28T18:00:00Z i "oracle:missing"
+} >"$tmp/classes"
+got="$("$SCRIPT" --json --now "$NOW" "$tmp/classes" | jq -c '.rule_of_three_hits | sort')"
+[[ "$got" == '["auth_stop:401","failed:rc","reject:oracle:missing"]' ]] &&
+  ok "правило трьох: rc=N — один клас, auth_stop і відхилення рахуються" || bad "класи падінь: $got"
+
 # Порожній журнал — нулі, не падіння.
 : >"$tmp/empty"
 got="$("$SCRIPT" --json --now "$NOW" "$tmp/empty" 2>&1 | jq -c '[.journal.records, .step5.streak_best, .step6.runs]' 2>&1)"
@@ -118,7 +157,8 @@ check_line() { # check_line <назва> <підрядок>
 check_line "серія 3 → ✅" "✅ Задача end-to-end поспіль без втручання: найдовша серія 3"
 check_line "5 задач до push → ❌" "❌ Задач доведено до push без втручання: 5"
 check_line "запис у виключений шлях → ❌" "❌ Спроб запису у виключений шлях (backstop): 1"
-check_line "покриття 10/12 → ✅" "✅ Покриття оракулами: 10/12 = 83%"
+check_line "покриття 10/12 → ✅" "✅ Покриття оракулами (оракул виконався): 10/12 = 83%"
+check_line "зелених оракулів" "зелених 6/12 = 50%"
 check_line "злиття — не з журналу" "НЕ З ЖУРНАЛУ — Змерджено без доробок"
 check_line "ребут — не з журналу" "НЕ З ЖУРНАЛУ — Ребут"
 check_line "питання — не з журналу" "НЕ З ЖУРНАЛУ — Питання класу A"
@@ -151,16 +191,21 @@ elif [[ -z "${A8_METRICS_UNDER_TEST:-}" ]]; then
   }
   mutate "серія не рветься на падінні" 's/else \.cur = 0 end/else . end/'
   mutate "no-credential рахується в серію" 's/if \$r\.result == "ok" then \.cur \+= 1/if \$r.exit_class == "ok" then .cur += 1/'
-  mutate "подія рве серію" 's/reduce \$runs\[\] as \$r \(\{cur: 0/reduce \$all[] as \$r ({cur: 0/'
+  mutate "подія рве серію" 's/reduce \(\$runs\[\] \| select/reduce (\$all[] | select/'
   mutate "вікно ігнорується" 's/\[ \$win\[\] \| select\(\.event == "run"\) \] as \$wruns/[ \$all[] | select(.event == "run") ] as \$wruns/'
   mutate "forbidden не рахуються" 's/startswith\("forbidden-paths"\)/startswith("forbidden_paths")/'
   mutate "прогін без оракула рахується покритим" 's/select\(\(\.oracle_rc \/\/ "-"\) != "-"\)/select(true)/'
   mutate "поріг правила трьох 4" 's/select\(\.value >= 3\)/select(.value >= 4)/'
-  mutate "auth_stop рахується навчальною зупинкою" 's/if \.last_run == "auth_stop" then \. else \.n \+= 1 end/.n += 1/'
-  mutate "кожен запис kill switch — окрема зупинка" 's/\(if \.in then \. else/(if false then . else/'
+  mutate "auth_stop рахується навчальною зупинкою" 's/select\(\.auth \| not\)/select(true)/'
+  mutate "кожен запис kill switch — окрема зупинка" 's/\(if \(\.in \| not\) or/(if true or/'
   mutate "журнал не сортується за часом" 's/ \| sort_by\(\.ts \/\/ ""\)//'
   mutate "нерозібрані рядки не рахуються" 's/select\(type != "object"\)/select(false)/'
   mutate "зупинка шукається до --stop-at" 's/select\(\(t \/\/ -1\) >= \$s\)/select(true)/'
+  mutate "епізоди рахуються лише у вікні" 's/reduce \$all\[\] as \$r \(\{in: false/reduce \$win[] as \$r ({in: false/'
+  mutate "пауза не розділяє епізоди" 's/\(\$rt - \.last_ks\) > \$gap/false/'
+  mutate "rc=N дробить клас" 's/splits\("\[ :;=\]"\)/splits("[ :;]")/'
+  mutate "auth_stop не в правилі трьох" 's/select\(\.result == "failed" or \.result == "auth_stop"\)/select(.result == "failed")/'
+  mutate "--since ігнорується" 's/select\(\(t \/\/ -1\) >= \$since_t\)/select(true)/'
   rm -rf "$MUTDIR"
 fi
 
