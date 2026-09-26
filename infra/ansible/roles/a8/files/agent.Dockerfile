@@ -1,4 +1,4 @@
-# Образ агента A8 — node:22 + Claude Code + uv.
+# Образ агента A8 — node:22 + Claude Code + uv + системні бібліотеки CadQuery.
 #
 # ЧОМУ ОКРЕМИЙ ОБРАЗ (рішення yurii 2026-09-18, Q2-г). Демон запускає агента
 # через a8-run-agent, а в node:22 немає ні `claude`, ні `uv`: на хості вони
@@ -39,5 +39,16 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
 RUN corepack enable \
  && corepack prepare "pnpm@${PNPM_VERSION}" --activate
 COPY --from=uv /uv /uvx /usr/local/bin/
+# Системні бібліотеки CadQuery / OCP. `uv sync` ставить Python-пакети, але не
+# .so, яких потребує cadquery-ocp: без libGL.so.1 імпорт падає, і оракул воркера
+# `uv run --directory workers/cad pytest tests/templates/test_registry.py` на A8
+# давав rc=2 (handoff 2026-09-23 §2 п.1). Перелік — той самий, що в runtime-стадії
+# infra/docker/cad-worker.Dockerfile (обидва образи на Debian bookworm): агент
+# ганяє тести воркера на тих самих бібліотеках, що й прод. Паритет тримає
+# інваріант 9 у tools/scripts/check-ansible-a8.sh, живу поведінку — V18.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libgl1 libglu1-mesa libxrender1 libxext6 libxi6 libsm6 libfontconfig1 \
+ && rm -rf /var/lib/apt/lists/*
 # Користувача НЕ задаємо: UID визначає a8-run-agent (`--user 1002:1002`),
 # бо він мусить збігатися з власником репо на хості (вимір №6).
