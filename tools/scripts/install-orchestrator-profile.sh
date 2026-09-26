@@ -24,8 +24,15 @@
 #      попередження — але не видаляються: це рішення yurii.
 #
 # Використання:
-#   tools/scripts/install-orchestrator-profile.sh           # злити
-#   tools/scripts/install-orchestrator-profile.sh --check   # лише перевірити: 0 = усе на місці
+#   tools/scripts/install-orchestrator-profile.sh             # злити
+#   tools/scripts/install-orchestrator-profile.sh --check     # лише перевірити: 0 = усе на місці
+#   tools/scripts/install-orchestrator-profile.sh --replace   # дозволи — РІВНО профіль
+#
+# --replace — для прибирання. Кожне «Так, більше не питати» дописує в локальний
+# файл одноразовий дозвіл на одну конкретну команду; за місяць їх набираються
+# десятки, і межа стає нечитабельною (CLAUDE.md §6.2). --replace замінює розділ
+# permissions профілем цілком (allow, ask, deny, additionalDirectories), решту
+# ключів локального файла лишає, перед записом робить резервну копію поза репо.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -135,11 +142,21 @@ authentic_hook() { # пише хук з origin/main у HOOK_WANT; код 1 — �
 
 current='{}'
 [[ -f "$LOCAL" ]] && current="$(cat "$LOCAL")"
-merged="$(jq -s '
+MODE="${1:-}"
+# Злиття — об'єднання множин у кожному списку profile.permissions; з --replace —
+# список профілю замість локального.
+merged="$(jq -s --arg mode "$MODE" '
   .[0] as $l | .[1] as $p
-  | $l | .permissions = (($l.permissions // {})
-      + { allow: ((($l.permissions.allow // []) + ($p.permissions.allow // [])) | unique),
-          deny:  ((($l.permissions.deny  // []) + ($p.permissions.deny  // [])) | unique) })
+  | def lists: ["allow", "ask", "deny", "additionalDirectories"];
+  $l | .permissions = (($l.permissions // {})
+      + (reduce lists[] as $k ({};
+          if $mode == "--replace" then
+            (if ($p.permissions[$k] // null) == null then . else .[$k] = ($p.permissions[$k] | unique) end)
+          else
+            (((($l.permissions[$k] // []) + ($p.permissions[$k] // [])) | unique) as $v
+             | if $v == [] then . else .[$k] = $v end)
+          end)))
+  | if $mode == "--replace" then .permissions |= with_entries(select(.key as $k | (lists | index($k)) == null or ($p.permissions[$k] // null) != null)) else . end
   | if ($p.hooks // {}) == {} then .
     else .hooks = reduce ($p.hooks | keys[]) as $e (($l.hooks // {});
       .[$e] = (((.[$e] // []) + $p.hooks[$e]) | unique))
@@ -173,9 +190,13 @@ hook_state() { # друкує: none | noorigin | missing | ok | drift
 # звірити копію, і тоді не змінюємо нічого — ні налаштувань, ні копії.
 hs="$(hook_state)"
 
-if [[ "${1:-}" == --check ]]; then
+if [[ "$MODE" == --check ]]; then
   if same_as_sets "$merged" "$current" && [[ "$hs" == ok || "$hs" == none ]]; then
     echo "OK: профіль оркестратора вже в $LOCAL"
+    # Інформація, не помилка: скільки дозволів накопичилось понад профіль.
+    extra="$(jq -n --argjson l "$current" --slurpfile p "$PROFILE" \
+      '(($l.permissions.allow // []) - ($p[0].permissions.allow // [])) | length')"
+    ((extra > 0)) && echo "  понад профіль у локальному файлі дозволів: $extra — прибирає --replace"
     exit 0
   fi
   same_as_sets "$merged" "$current" ||
@@ -212,7 +233,11 @@ else
   printf '%s\n' "$merged" >"$LOCAL.tmp" && mv "$LOCAL.tmp" "$LOCAL"
   added_a=$(($(jq '.permissions.allow | length' <<<"$merged") - $(jq '.permissions.allow // [] | length' <<<"$current")))
   added_d=$(($(jq '.permissions.deny | length' <<<"$merged") - $(jq '.permissions.deny // [] | length' <<<"$current")))
-  echo "Додано: дозволів $added_a, заборон $added_d → $LOCAL"
+  if [[ "$MODE" == --replace ]]; then
+    echo "Замінено: дозволи — рівно профіль ($(jq '.permissions.allow | length' <<<"$merged") allow, $(jq '.permissions.deny | length' <<<"$merged") deny) → $LOCAL"
+  else
+    echo "Додано: дозволів $added_a, заборон $added_d → $LOCAL"
+  fi
 fi
 
 # Попередження, а не видалення: те, що yurii колись погодив, — його рішення.
