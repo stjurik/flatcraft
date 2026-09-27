@@ -5,24 +5,33 @@
 # Що СПРАВЖНЄ: сам скрипт і сам профіль `.claude/settings.orchestrator.json`
 # з репозиторію (сценарій 1 — CI тримає профіль чесним на кожному PR).
 # Що ПІДМІНЕНО: репозиторій — тимчасовий git, тека резервних копій — тимчасова.
+# Сценарій 28 — мутації: набір проганяється проти навмисно зламаних копій
+# інсталятора (INSTALLER_UNDER_TEST) і мусить упасти на кожній.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-SCRIPT="$HERE/install-orchestrator-profile.sh"
+SCRIPT="${INSTALLER_UNDER_TEST:-$HERE/install-orchestrator-profile.sh}"
 REAL_PROFILE="$REPO_ROOT/.claude/settings.orchestrator.json"
 fail=0
+T=""
+p=""
+M=""
+trap 'rm -rf ${T:+"$T"} ${p:+"$p"} ${M:+"$M"}' EXIT
 ok() { echo "✓ $1"; }
 bad() {
   echo "✗ $1"
   fail=1
+  # Під мутантом досить першого провалу: мутанта вбито, далі — марний час CI.
+  [[ -z "${INSTALLER_UNDER_TEST:-}" ]] || exit 1
 }
 
 setup() { # setup [файл-профілю]
   T="$(mktemp -d)"
   git -C "$T" init -q
   mkdir -p "$T/.claude" "$T/tools/scripts" "$T/backups"
-  cp "$SCRIPT" "$HERE/log-permission-request.sh" "$T/tools/scripts/"
+  cp "$HERE/log-permission-request.sh" "$T/tools/scripts/"
+  cp "$SCRIPT" "$T/tools/scripts/install-orchestrator-profile.sh"
   cp "${1:-$REAL_PROFILE}" "$T/.claude/settings.orchestrator.json"
   LOCAL="$T/.claude/settings.local.json"
   HOOK_COPY="$T/hooks/log-permission-request.sh"
@@ -105,7 +114,9 @@ for danger in 'Bash(ssh a8-ts *)' 'Bash(*)' 'Bash(gh api *)' 'Bash(git push --fo
   'Read(//home/yurii/**)' 'Bash(gh auth refresh -s workflow)' \
   'Bash(git *)' 'Bash(git -c alias.x=y x)' 'Bash(bash tools/scripts/*)' 'Bash(tools/scripts/*)' \
   'Bash(uv run --directory workers/cad *)' 'Bash(pnpm --filter * run *)' 'Bash(pnpm exec vitest *)' \
-  'Bash(npx prettier *)' 'Bash(sort *)' 'Bash(jq *)' 'Bash(python3 -c *)' 'Bash(bash -c *)'; do
+  'Bash(npx prettier *)' 'Bash(sort *)' 'Bash(jq *)' 'Bash(python3 -c *)' 'Bash(bash -c *)' \
+  'Bash(pnpx x *)' 'Bash(uvx *)' 'Bash(npm exec *)' 'Bash(npm run *)' 'Bash(bash tools/scripts/*.sh)' \
+  'Bash(pnpm -F * exec *)' 'Bash(pnpm -r exec *)' 'Bash(pnpm *)' 'Bash(pnpx evil)' 'Bash(make *)'; do
   p="$(with_allow "$danger")"
   setup "$p"
   echo '{"permissions":{"allow":["Bash(make foo)"]}}' >"$LOCAL"
@@ -125,13 +136,16 @@ done
 # Перша редакція вважала a8-ro винятком («межу тримає сам A8»), але
 # `ssh a8-ro -o ProxyCommand=…` запускає команду на T470 ще до з'єднання
 # (man ssh_config). Рецензія PR #141, Gemini 3.8 Flash, 2026-09-27.
-p="$(with_allow 'Bash(ssh a8-ro *)')"
-setup "$p"
-out="$(run)"
-[[ $? == 1 && "$out" == *"ssh a8-ro"* ]] && ok "ssh a8-ro * відхилено — ProxyCommand дає локальне виконання" ||
-  bad "ssh a8-ro * пройшов: $out"
-teardown
-rm -f "$p"
+# Точна команда без `*` — теж відмова: виняток для неї додається окремим PR
+# після рішення yurii про ключ a8-ro (клас A, docs/promts/orchestrator-autonomy.md §6).
+for rule in 'Bash(ssh a8-ro *)' 'Bash(ssh a8-ro uptime)'; do
+  p="$(with_allow "$rule")"
+  setup "$p"
+  out="$(run)"
+  [[ $? == 1 && "$out" == *"$rule"* ]] && ok "ssh відхилено: $rule" || bad "ssh пройшов: $rule — $out"
+  teardown
+  rm -f "$p"
+done
 
 # ─── 8. Бракує обов'язкової заборони → відмова ─────────────────────────────
 p="$(mktemp)"
@@ -390,6 +404,91 @@ out="$(run --check)"
   ok "--check: небезпечний дозвіл у локальному файлі названо (OK лишається — профіль на місці)" ||
   bad "--check промовчав про небезпечний дозвіл: $out"
 teardown
+
+# ─── 27. Жодного `| grep -q` під pipefail ──────────────────────────────────
+# Регресія 2026-09-27: `printf … | grep -qxF` у danger_in зрідка казав «не знайдено»
+# на знайденому (grep -q виходить першим → SIGPIPE у printf → pipefail), і
+# перевірене правило ставало небезпечним — 8 хибних відмов на 320 викликів під
+# паралельним навантаженням. Випадковий збій тест ловить лише випадково (контроль
+# сценарію 28), тож тут — детермінована заборона самої конструкції.
+pipes="$(grep -nE '^[^#]*\|[[:space:]]*grep -[[:alpha:]]*q' "$SCRIPT")"
+[[ -z "$pipes" ]] && ok "в інсталяторі немає «| grep -q» (SIGPIPE + pipefail = хибне «не знайдено»)" ||
+  bad "в інсталяторі є «| grep -q» під pipefail: $pipes"
+
+# ─── 28. Мутації: кожна гарантія інсталятора тримається хоч одним тестом ────
+# Зелений набір доводить лише, що код робить те, що перевіряє автор тестів
+# (CLAUDE.md §0 п.1). Тому інсталятор ламається по одному місцю, і весь набір
+# проганяється проти кожного мутанта: вижив — отже, цю гарантію не перевіряє
+# жоден тест. Рецензія #141: мутації, про які писав PR, у репо не лишились, а
+# неповторюване твердження — не доказ. Тепер вони тут і йдуть у CI з рештою.
+# Спершу — контроль: незмінена копія через той самий механізм мусить пройти,
+# інакше «вбиті» мутанти нічого не доводять.
+clip() { # clip <текст> — перші 90 символів; у локалі C bash рахує байти й ріже літеру
+  local LC_ALL=C.UTF-8
+  if ((${#1} > 90)); then echo "${1:0:90}…"; else echo "$1"; fi
+}
+mutant_names=() mutant_from=() mutant_to=()
+mutant() { # mutant <назва> <було> <стало> — «було» мусить стояти в інсталяторі рівно раз
+  mutant_names+=("$1") mutant_from+=("$2") mutant_to+=("$3")
+}
+# shellcheck disable=SC2016 # «було»/«стало» — дослівний текст інсталятора, не розгортається
+{
+  mutant 'контроль: копія без змін' '' ''
+  mutant 'правило з * поза переліком проходить' 'elif [[ "$rule" == *' 'elif false && [[ "$rule" == *'
+  mutant 'з переліку випала перевірена форма' "  'Bash(git status *)'" ''
+  mutant 'git -c не небезпечний' '^Bash\(git (\*|-c|-C)' '^Bash\(git (\*|-C)'
+  mutant 'pnpx не небезпечний' '^Bash\((pnpx|uvx' '^Bash\((uvx'
+  mutant 'ssh a8-ro — виняток' '^Bash\(ssh |' '^Bash\(ssh (?!a8-ro )|'
+  mutant "обов'язкова заборона gh pr merge випала" "  'Bash(gh pr merge:*)'" ''
+  mutant 'чужий хук проходить' 'select(.type != "command" or .command != $c or has("args"))' 'select(false)'
+  mutant 'хук із робочого дерева' 'git -C "$ROOT" show "$sha:$HOOK_PATH" >"$HOOK_WANT"' 'cat "$ROOT/$HOOK_PATH" >"$HOOK_WANT"'
+  mutant '--replace лишає одноразові allow' 'if $mode == "--replace" and (grants' 'if false and (grants'
+  mutant '--replace скидає власні deny/ask' 'def grants: ["allow", "additionalDirectories"];' 'def grants: ["allow", "ask", "deny", "additionalDirectories"];'
+  mutant '--replace зливає чужі хуки' 'elif $mode == "--replace" then .hooks = $p.hooks' 'elif false then .hooks = $p.hooks'
+  mutant '~/ не розгортається' 'def expand: map(if startswith("~/") then $home + .[1:] else . end);' 'def expand: .;'
+  mutant 'зайві аргументи мовчки приймаються' 'if (($# > 1)) || [[' 'if false && [['
+  mutant '--check мовчить про небезпечне' 'risky="$(danger_in "$LOCAL")"' 'risky=""'
+}
+# Під мутантом (INSTALLER_UNDER_TEST) не запускаємо мутацій удруге; після
+# провалу набору вони теж нічого не доведуть — «вбиті» були б і без мутації.
+if [[ -z "${INSTALLER_UNDER_TEST:-}" && "$fail" -eq 0 ]]; then
+  M="$(mktemp -d)"
+  src="$(<"$SCRIPT")"
+  jobs_max="$(nproc 2>/dev/null || echo 2)"
+  for i in "${!mutant_names[@]}"; do
+    from="${mutant_from[$i]}" to="${mutant_to[$i]}" m="$src"
+    if [[ -n "$from" ]]; then
+      rest="${src#*"$from"}"
+      # Інсталятор змінили, а мутацію ні — вона вже нічого не ламає і «виживала»
+      # б мовчки. Тому застаріла мутація — провал, а не пропуск.
+      if [[ "$rest" == "$src" || "$rest" == *"$from"* ]]; then
+        bad "мутант «${mutant_names[$i]}»: текст не знайдено рівно один раз — мутація застаріла"
+        continue
+      fi
+      m="${src/"$from"/"$to"}"
+    fi
+    printf '%s\n' "$m" >"$M/$i.sh"
+    while (($(jobs -rp | wc -l) >= jobs_max)); do wait -n; done
+    (
+      INSTALLER_UNDER_TEST="$M/$i.sh" bash "$HERE/$(basename "$0")" >"$M/$i.out" 2>&1
+      echo $? >"$M/$i.rc"
+    ) &
+  done
+  wait
+  for i in "${!mutant_names[@]}"; do
+    [[ -f "$M/$i.rc" ]] || continue
+    rc="$(<"$M/$i.rc")"
+    killer="$(grep -m1 '^✗ ' "$M/$i.out")"
+    if ((i == 0)); then
+      [[ $rc == 0 ]] && ok "мутації: контроль — незмінена копія проходить увесь набір" ||
+        bad "мутації: контроль упав (rc=$rc) — механізм зламаний: ${killer#✗ }"
+    elif [[ $rc == 1 && -n "$killer" ]]; then
+      ok "мутанта вбито: ${mutant_names[$i]} ← $(clip "${killer#✗ }")"
+    else
+      bad "мутант ВИЖИВ: ${mutant_names[$i]} — цю гарантію не перевіряє жоден тест (rc=$rc)"
+    fi
+  done
+fi
 
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"

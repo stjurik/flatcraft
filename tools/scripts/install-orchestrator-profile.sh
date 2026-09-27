@@ -14,7 +14,7 @@
 #
 # ЩО ГАРАНТУЄ (перевіряє .test.sh, а CI — на кожному PR):
 #   1. у профілі немає небезпечних дозволів — інакше відмова, локальний файл
-#      не змінюється;
+#      не змінюється; правило з `*` — лише дослівно з переліку WILDCARD_OK;
 #   2. у профілі є всі обов'язкові заборони — інакше відмова;
 #   3. злиття лише ДОДАЄ: чужі записи yurii лишаються, повторний запуск нічого
 #      не змінює;
@@ -30,9 +30,10 @@
 #
 # --replace — для прибирання. Кожне «Так, більше не питати» дописує в локальний
 # файл одноразовий дозвіл на одну конкретну команду; за місяць їх набираються
-# десятки, і межа стає нечитабельною (CLAUDE.md §6.2). --replace замінює розділ
-# permissions профілем цілком (allow, ask, deny, additionalDirectories), решту
-# ключів локального файла лишає, перед записом робить резервну копію поза репо.
+# десятки, і межа стає нечитабельною (CLAUDE.md §6.2). --replace скидає до профілю
+# те, що ДАЄ права (allow, additionalDirectories, hooks), а те, що ОБМЕЖУЄ (deny,
+# ask), лишає й доповнює профілем; решту ключів локального файла не чіпає, перед
+# записом робить резервну копію поза репо.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -88,7 +89,7 @@ HOOK_CMD='bash "$HOME/.flatcraft/hooks/log-permission-request.sh"'
 #   інтерпретатори   — python, node, perl, bash -c тощо.
 # У режимі Auto allow-правило ще й ВИМИКАЄ перевірку класифікатором для
 # збіжних команд, тож широкий allow знімає захист, а не кліки.
-DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh |^Bash\(git (\*|-c|-C)|^Bash\((bash |sh )?(\./)?tools/scripts/\*\)|^Bash\((bash|sh) (-c|\*)|^Bash\(uv run (?!--directory workers/cad (pytest|ruff|mypy) \*\)$)|^Bash\(pnpm (--filter \S+ )?(run|exec|dlx) |^Bash\(pnpm --filter \*|^Bash\(npx (?!prettier --check \*\)$)|^Bash\((sort|jq|cut|uniq|tr|date|printf|comm|column|awk|sed|tee|xargs|find|env|python3?|node|perl|ruby) |^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
+DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh |^Bash\(git (\*|-c|-C)|^Bash\((bash |sh )?(\./)?tools/scripts/\*\)|^Bash\((bash|sh) (-c|\*)|^Bash\(uv run (?!--directory workers/cad (pytest|ruff|mypy) \*\)$)|^Bash\(pnpm (--filter \S+ )?(run|exec|dlx) |^Bash\(pnpm --filter \*|^Bash\(npx (?!prettier --check \*\)$)|^Bash\((pnpx|uvx|bunx|deno|bun) |^Bash\((npm|yarn) (exec|run|x|dlx) |^Bash\(pnpm (\S+ )*(run|exec|dlx|x) |^Bash\((sort|jq|cut|uniq|tr|date|printf|comm|column|awk|sed|tee|xargs|find|env|python3?|node|perl|ruby) |^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
 
 REQUIRED_DENY=(
   'Bash(git push --force:*)'
@@ -105,8 +106,70 @@ REQUIRED_DENY=(
   'Bash(agy *--dangerously-skip-permissions*)'
 )
 
+# Правила з `*` — лише ПЕРЕВІРЕНІ форми. Шаблон ловить відомі небезпечні форми,
+# але перелік обходів нескінченний: після DANGER_RE рецензія #141 знайшла ще
+# `pnpx *`, `uvx *`, `npm exec|run *`, `bash tools/scripts/*.sh`, `pnpm -F * exec *`.
+# Тому навпаки: будь-яке правило з `*`, якого тут немає дослівно, — відмова.
+# Нова широка форма потребує PR саме в цей перелік — окремий, помітний крок, а не
+# рядок серед десятків у профілі. Правила без `*` перевіряє лише DANGER_RE.
+WILDCARD_OK=(
+  'Bash(git status *)'
+  'Bash(git log *)'
+  'Bash(git diff *)'
+  'Bash(git show *)'
+  'Bash(git fetch *)'
+  'Bash(git rev-parse *)'
+  'Bash(git ls-remote *)'
+  'Bash(git branch --list *)'
+  'Bash(git worktree list *)'
+  'Bash(git worktree add *)'
+  'Bash(git switch *)'
+  'Bash(git add *)'
+  'Bash(git commit *)'
+  'Bash(git push -u origin *)'
+  'Bash(gh pr view *)'
+  'Bash(gh pr list *)'
+  'Bash(gh pr checks *)'
+  'Bash(gh pr diff *)'
+  'Bash(gh pr create --draft *)'
+  'Bash(gh run list *)'
+  'Bash(gh run view *)'
+  'Bash(gh issue view *)'
+  'Bash(gh issue list *)'
+  'Bash(pnpm test *)'
+  'Bash(pnpm vitest *)'
+  'Bash(pnpm lint *)'
+  'Bash(pnpm typecheck *)'
+  'Bash(npx prettier --check *)'
+  'Bash(uv run --directory workers/cad pytest *)'
+  'Bash(uv run --directory workers/cad ruff *)'
+  'Bash(uv run --directory workers/cad mypy *)'
+  'Bash(bash tools/scripts/*.test.sh)'
+  'Bash(bash tools/scripts/a8-report.sh -o *)'
+  'Bash(agy -p *)'
+  'Bash(bash tools/scripts/check-agy-scope.sh *)'
+  'Bash(tools/scripts/check-agy-scope.sh *)'
+  'Bash(bash ~/.flatcraft/hooks/log-permission-request.sh --count *)'
+)
+
+# Порівняння в самому bash, без `printf … | grep -q`: grep -q виходить на першому
+# збігу, printf отримує SIGPIPE, і з pipefail «знайдено» перетворювалось на «не
+# знайдено» — перевірене правило зрідка ставало небезпечним. Знайшли мутаційні
+# прогони сценарію 28 під паралельним навантаженням: 8 хибних відмов на 320 викликів.
+wildcard_ok() { # wildcard_ok <правило> — 0, якщо правило є в переліку дослівно
+  local w
+  for w in "${WILDCARD_OK[@]}"; do [[ "$w" == "$1" ]] && return 0; done
+  return 1
+}
+
 danger_in() { # danger_in <файл> — друкує небезпечні дозволи (порожньо = чисто)
-  jq -r '.permissions.allow // [] | .[]' "$1" | grep -P "$DANGER_RE" || true
+  jq -r '.permissions.allow // [] | .[]' "$1" | while IFS= read -r rule; do
+    if grep -qP "$DANGER_RE" <<<"$rule"; then
+      echo "$rule"
+    elif [[ "$rule" == *'*'* ]] && ! wildcard_ok "$rule"; then
+      echo "$rule"
+    fi
+  done
 }
 
 [[ -f "$PROFILE" ]] || { echo "відмова: немає $PROFILE" >&2; exit 2; }
