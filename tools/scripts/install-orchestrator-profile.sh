@@ -72,8 +72,23 @@ HOOK_CMD='bash "$HOME/.flatcraft/hooks/log-permission-request.sh"'
 # Дозвіл, що пропускає ДОВІЛЬНУ дію: будь-яку команду, будь-яку віддалену
 # команду на A8 (префікс ssh обмежує те, що ДО команди, а не ПІСЛЯ — див.
 # a8-ro-shell.sh), запис через gh api, merge, креденшали, root, живий Discord.
-# Єдиний дозволений ssh — `ssh a8-ro`: там межу тримає сам A8 (a8-ro-shell).
-DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh (?!a8-ro )|^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
+#
+# Будь-який `ssh` — теж: `ssh a8-ro -o ProxyCommand=…` виконує команду ЛОКАЛЬНО
+# («executed using the user's shell», man ssh_config), тож обмеження на боці A8
+# тут не рятує (рецензія PR #141, Gemini 3.8 Flash, 2026-09-27).
+#
+# Шаблон із `*` одразу по імені програми, що сама виконує чи пише довільне:
+#   git *            — `git -c alias.x='!…' x`, `-c core.pager=…` (документація
+#                      Claude Code: `-c` «makes git run a program you name»);
+#   tools/scripts/*  — оркестратор пише новий скрипт без кліку і запускає його
+#                      (`*.test.sh` лишається: тести — і є виконання його коду, #134);
+#   uv run … *       — будь-яка програма, крім трьох перевірок воркера;
+#   pnpm run|exec|dlx, pnpm --filter *, npx — будь-який скрипт чи пакет;
+#   sort/jq/cut/… *  — читають будь-який файл, `sort -o` перезаписує;
+#   інтерпретатори   — python, node, perl, bash -c тощо.
+# У режимі Auto allow-правило ще й ВИМИКАЄ перевірку класифікатором для
+# збіжних команд, тож широкий allow знімає захист, а не кліки.
+DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh |^Bash\(git (\*|-c|-C)|^Bash\((bash |sh )?(\./)?tools/scripts/\*\)|^Bash\((bash|sh) (-c|\*)|^Bash\(uv run (?!--directory workers/cad (pytest|ruff|mypy) \*\)$)|^Bash\(pnpm (--filter \S+ )?(run|exec|dlx) |^Bash\(pnpm --filter \*|^Bash\(npx (?!prettier --check \*\)$)|^Bash\((sort|jq|cut|uniq|tr|date|printf|comm|column|awk|sed|tee|xargs|find|env|python3?|node|perl|ruby) |^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
 
 REQUIRED_DENY=(
   'Bash(git push --force:*)'
@@ -87,7 +102,6 @@ REQUIRED_DENY=(
   'Edit(workers/cad/tests/snapshots/**)'
   'Edit(packages/cad-engine/data/bend-machine-esi.yaml)'
   'Edit(~/.flatcraft/**)'
-  'Write(~/.flatcraft/**)'
   'Bash(agy *--dangerously-skip-permissions*)'
 )
 
@@ -143,21 +157,34 @@ authentic_hook() { # пише хук з origin/main у HOOK_WANT; код 1 — �
 current='{}'
 [[ -f "$LOCAL" ]] && current="$(cat "$LOCAL")"
 MODE="${1:-}"
-# Злиття — об'єднання множин у кожному списку profile.permissions; з --replace —
-# список профілю замість локального.
-merged="$(jq -s --arg mode "$MODE" '
+# Лише один аргумент і лише відомий: `--replace --check` мовчки виконав би
+# --replace (рецензія PR #141).
+if (($# > 1)) || [[ -n "$MODE" && "$MODE" != --check && "$MODE" != --replace ]]; then
+  echo "використання: $(basename "$0") [--check | --replace]" >&2
+  exit 2
+fi
+# Злиття — об'єднання множин у кожному списку. --replace скидає до профілю все,
+# що ДАЄ права (allow, additionalDirectories, hooks: саме туди кліки «більше не
+# питати» дописують одноразові записи), а все, що ОБМЕЖУЄ (deny, ask), лишає й
+# доповнює профілем: власні заборони yurii не зникають мовчки.
+# `~/` у additionalDirectories розгортається тут, у локальному файлі: чи розгортає
+# його Claude Code сам, документація не каже, а в git абсолютного шляху з іменем
+# користувача бути не повинно.
+merged="$(jq -s --arg mode "$MODE" --arg home "$HOME" '
   .[0] as $l | .[1] as $p
-  | def lists: ["allow", "ask", "deny", "additionalDirectories"];
-  $l | .permissions = (($l.permissions // {})
+  | def grants: ["allow", "additionalDirectories"];
+  def lists: ["allow", "ask", "deny", "additionalDirectories"];
+  def expand: map(if startswith("~/") then $home + .[1:] else . end);
+  ($p | .permissions.additionalDirectories |= (if . == null then null else expand end)) as $p
+  | $l | .permissions = (($l.permissions // {})
       + (reduce lists[] as $k ({};
-          if $mode == "--replace" then
-            (if ($p.permissions[$k] // null) == null then . else .[$k] = ($p.permissions[$k] | unique) end)
-          else
-            (((($l.permissions[$k] // []) + ($p.permissions[$k] // [])) | unique) as $v
-             | if $v == [] then . else .[$k] = $v end)
-          end)))
-  | if $mode == "--replace" then .permissions |= with_entries(select(.key as $k | (lists | index($k)) == null or ($p.permissions[$k] // null) != null)) else . end
+          (if $mode == "--replace" and (grants | index($k)) != null
+           then ($p.permissions[$k] // [])
+           else (($l.permissions[$k] // []) + ($p.permissions[$k] // [])) end | unique) as $v
+          | if $v == [] then . else .[$k] = $v end)))
+  | if $mode == "--replace" then .permissions |= with_entries(select(.key as $k | (grants | index($k)) == null or ($p.permissions[$k] // null) != null)) else . end
   | if ($p.hooks // {}) == {} then .
+    elif $mode == "--replace" then .hooks = $p.hooks
     else .hooks = reduce ($p.hooks | keys[]) as $e (($l.hooks // {});
       .[$e] = (((.[$e] // []) + $p.hooks[$e]) | unique))
     end
@@ -197,6 +224,10 @@ if [[ "$MODE" == --check ]]; then
     extra="$(jq -n --argjson l "$current" --slurpfile p "$PROFILE" \
       '(($l.permissions.allow // []) - ($p[0].permissions.allow // [])) | length')"
     ((extra > 0)) && echo "  понад профіль у локальному файлі дозволів: $extra — прибирає --replace"
+    # Небезпечні дозволи в локальному файлі — теж сказати, а не мовчати (рецензія #141).
+    risky="$(danger_in "$LOCAL")"
+    [[ -n "$risky" ]] && echo "  ⚠ у локальному файлі дозволи, що пропускають довільні дії — прибирає --replace:" &&
+      sed 's/^/    • /' <<<"$risky"
     exit 0
   fi
   same_as_sets "$merged" "$current" ||

