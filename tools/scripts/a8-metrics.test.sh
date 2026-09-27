@@ -217,6 +217,49 @@ rc=0
 "$SCRIPT" --stop-at вчора "$tmp/journal" >/dev/null 2>&1 || rc=$?
 [[ "$rc" == 2 ]] && ok "--stop-at не в ISO → код 2" || bad "--stop-at вчора → rc=$rc"
 
+# Контракт із демоном: метрика спирається на рядки, які пишуть тік, логіка
+# черги і журнал. Синтетичний журнал вище складено руками; якщо тік перестане
+# писати, скажімо, «forbidden-paths: …», метрика мовчки рахуватиме 0, а тести
+# вище лишаться зеленими. Тому кожен рядок-опора звіряється з джерелом.
+ROOT="$(cd "$HERE/../.." && pwd)"
+CONTRACT=(
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish ok ok'                     # result=ok — серія, done
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish no-credential '            # рве серію
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish failed failed'             # правило трьох
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish stopped stopped'           # не вердикт
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish auth_stop auth_stop'       # не навчальна зупинка
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::fail_task "forbidden-paths: '     # крок 6: backstop
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::kill switch під час оракула'      # ks: «kill switch»
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::"$JOURNAL" event "$gstate"'       # подія kill_switch
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::oracle_rc="-"'                    # «до оракула не дійшло»
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::oracle_rc="$orc"'                 # код оракула
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::branch="ai/$id"'                  # гілка для --merged
+  'tools/scripts/a8-tick-logic.sh::10) echo kill_switch ;;'                          # стан guard → подія
+  'tools/scripts/a8-tick-logic.sh::echo "stopped $(a8_guard_state "$rc")"'           # ks: detail kill_switch
+  'tools/scripts/a8-tick-logic.sh::echo "auth_stop 401"'                             # клас auth_stop:401
+  'tools/scripts/a8-tick-logic.sh::reasons+=("oracle:missing")'                      # відхилено без оракула
+  'infra/ansible/roles/a8/templates/a8-journal.sh.j2::event:"run", task:$task'       # запис прогону, task
+  'infra/ansible/roles/a8/templates/a8-journal.sh.j2::event:"reject", task:$task'    # запис відхилення
+  'infra/ansible/roles/a8/templates/a8-journal.sh.j2::fields:($r|split(","))'        # поля відхилення
+  'infra/ansible/roles/a8/templates/a8-journal.sh.j2::oracle|oracle_rc|branch|worktree|exit_class|detail' # ключі
+)
+contract() { # contract <корінь> — друкує, чого бракує; порожньо = контракт тримається
+  local c
+  for c in "${CONTRACT[@]}"; do
+    grep -qF -- "${c#*::}" "$1/${c%%::*}" 2>/dev/null || printf '%s: %s\n' "${c%%::*}" "${c#*::}"
+  done
+}
+gap="$(contract "$ROOT")"
+[[ -z "$gap" ]] && ok "контракт: ${#CONTRACT[@]} рядків, на які спирається метрика, є в тіку, логіці черги й журналі" ||
+  bad "контракт порушено — метрика рахує те, чого демон не пише:"$'\n'"$gap"
+# Контроль: той самий тік, але деталь backstop перейменовано — контракт мусить це побачити.
+mkdir -p "$tmp/c/infra/ansible/roles/a8/templates" "$tmp/c/tools/scripts"
+cp "$ROOT"/infra/ansible/roles/a8/templates/a8-{tick,journal}.sh.j2 "$tmp/c/infra/ansible/roles/a8/templates/"
+cp "$ROOT/tools/scripts/a8-tick-logic.sh" "$tmp/c/tools/scripts/"
+sed -i 's/"forbidden-paths: /"forbidden_paths: /' "$tmp/c/infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+[[ "$(contract "$tmp/c")" == *'forbidden-paths'* ]] && ok "контракт: перейменована деталь backstop у тіку → червоне" ||
+  bad "контракт не помітив перейменованої деталі forbidden-paths"
+
 # КОНТРОЛЬ ПЕРЕД МУТАЦІЯМИ: на червоному базисі кожен мутант «убитий» за
 # визначенням (той самий урок, що в a8-tick.test.sh).
 if [[ -z "${A8_METRICS_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
