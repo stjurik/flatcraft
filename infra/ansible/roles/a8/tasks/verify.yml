@@ -592,6 +592,144 @@
     fail_msg: "Контейнер {{ a8_container_image }}: rc={{ a8_v_image.rc }}, '{{ a8_v_image.stdout }} {{ a8_v_image.stderr }}'"
     quiet: true
 
+# ─── V18. Оракул воркера CadQuery проходить у контейнері ───────────────────
+# Поведінка, а не стан: у свіжому worktree, у справжньому контейнері, після
+# `uv sync` — рівно та команда, яка на A8 давала rc=2 без системних бібліотек
+# (handoff 2026-09-23 §2 п.1: libGL.so.1). V15 доводить, що uv є; інваріант 9
+# у check-ansible-a8.sh — що перелік бібліотек не відстає від образу воркера;
+# лише V18 доводить, що агент справді може прогнати тести workers/cad.
+#
+# Worktree одноразовий і прибирається в `always`: verify не має права лишати
+# слідів у дереві, з яким працює демон (README §5). Шлях фіксований, тож
+# залишок перерваного прогону прибирається перед стартом — і реєстрація в git,
+# і сама тека: тека без реєстрації валила б `worktree add` («already exists»)
+# раніше, ніж дійде до тесту (знайшов рецензент, agy Gemini 3.8 Flash).
+- name: V18 — CadQuery registry test in a throwaway worktree inside the container
+  become: true
+  become_user: "{{ a8_agent_user }}"
+  block:
+    - name: V18a — drop a leftover worktree registration from an interrupted run
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"
+      changed_when: false
+      failed_when: false
+
+    - name: V18a — prune stale worktree registrations
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - prune
+      changed_when: false
+
+    - name: V18a — remove a leftover directory without registration
+      ansible.builtin.file:
+        path: "{{ a8_worktrees_dir }}/verify-cad"
+        state: absent
+
+    - name: V18b — fetch origin/main, as the tick does before a task
+      # Без fetch тест ішов би на тому origin/main, що лишився від останнього
+      # тіку. Невдалий fetch не валить перевірку: тест піде на локальному
+      # origin/main, і V18e про це скаже.
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - fetch
+          - --quiet
+          - origin
+          - main
+      register: a8_v_cad_fetch
+      changed_when: false
+      failed_when: false
+
+    - name: V18b — create a throwaway worktree at origin/main
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - add
+          - --quiet
+          - --detach
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - origin/main
+      changed_when: false
+
+    - name: V18b — which commit is under test
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - rev-parse
+          - --short
+          - HEAD
+      register: a8_v_cad_sha
+      changed_when: false
+
+    - name: V18c — uv sync, then the registry test, inside the container
+      # Та сама послідовність, що в тіку (`cd workers/cad && uv sync`), і
+      # дослівно оракул із handoff. SYNC_OK розділяє два можливі джерела
+      # ненульового коду: без маркера падіння `uv sync` (мережа, lockfile)
+      # виглядало б як брак бібліотек.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - (cd workers/cad && uv sync --quiet) && echo SYNC_OK && uv run --directory workers/cad pytest tests/templates/test_registry.py -q
+      register: a8_v_cad
+      changed_when: false
+      failed_when: false
+  always:
+    - name: V18d — remove the throwaway worktree
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"
+      changed_when: false
+      failed_when: false
+
+    - name: V18d — make sure nothing is left on disk
+      ansible.builtin.file:
+        path: "{{ a8_worktrees_dir }}/verify-cad"
+        state: absent
+
+- name: V18e — the worker's registry test passes inside the agent container
+  ansible.builtin.assert:
+    that:
+      - a8_v_cad.rc == 0
+    fail_msg: >-
+      rc={{ a8_v_cad.rc }} на {{ a8_v_cad_sha.stdout }};
+      uv sync: {{ 'пройшов — rc дав сам тест' if 'SYNC_OK' in a8_v_cad.stdout else 'НЕ пройшов — rc дав uv sync, до тесту не дійшло' }};
+      fetch: {{ 'OK' if a8_v_cad_fetch.rc == 0 else 'не вдався — тест ішов на локальному origin/main' }}.
+      Якщо sync пройшов, а в хвості ImportError libGL.so.1 — в образі бракує бібліотек (до цього PR на A8 було саме так, rc=2).
+      Хвіст stdout: {{ (a8_v_cad.stdout_lines | default([]))[-5:] | join(' | ') }}
+      Хвіст stderr: {{ (a8_v_cad.stderr_lines | default([]))[-5:] | join(' | ') }}
+    success_msg: >-
+      test_registry.py у контейнері агента: rc=0 на {{ a8_v_cad_sha.stdout }}
+      (fetch {{ 'OK' if a8_v_cad_fetch.rc == 0 else 'не вдався, локальний origin/main' }}) —
+      {{ (a8_v_cad.stdout_lines | default([''])) | last }}
+    quiet: true
+
 # ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────
 - name: V16a — feed a write command to a8-ro-shell
   ansible.builtin.command: /usr/local/bin/a8-ro-shell
