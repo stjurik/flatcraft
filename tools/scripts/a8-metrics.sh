@@ -18,9 +18,15 @@
 #   поспіль      — серед записів `run`, у порядку часу; `no-credential`,
 #                  `failed`, `stopped`, `auth_stop` серію рвуть, події — ні;
 #   вікно        — записи з ts у [зараз − N днів, зараз] (крок 6: N = 14);
-#   покриття     — частка прогонів у вікні, де оракул справді виконався
-#                  (oracle_rc — число, не «-», і прогін не stopped: тоді rc=10
-#                  дала обгортка через kill switch, а не оракул);
+#   покриття     — частка ЗАДАЧ у вікні (docs/02: «≥ 80 % задач»), чий
+#                  останній вердикт оракула однозначний — зелений (rc=0) чи
+#                  червоний (rc 1–123); рішення yurii 2026-09-27. Не вердикт:
+#                  «-» (до оракула не дійшло), прогін stopped (rc=10 дала
+#                  обгортка через kill switch), rc ≥ 124 (тайм-аут, збій docker
+#                  чи запуску, сигнал — оракул не відповів). Задача, змерджена
+#                  всупереч червоному останньому вердикту, покритою НЕ
+#                  вважається; злиття в журналі немає — перелік змерджених
+#                  гілок дає --merged. «Лише зелені» друкуються окремим рядком;
 #   навч. зупинка — епізод kill switch (подія kill_switch або stopped через
 #                  kill switch). Новий епізод — після запису іншого типу або
 #                  паузи понад --episode-gap-min хв (дефолт 30 = 3 інтервали тіку
@@ -51,6 +57,8 @@
 #                     тоді друкується час до першої зупинки (критерій ≤ 60 с)
 #   --since ISO       серію кроку 5 рахувати лише з цього моменту (початок виміру)
 #   --episode-gap-min N  пауза, що розділяє епізоди kill switch (дефолт 30)
+#   --merged FILE     гілки змерджених PR, по одній на рядок, напр.:
+#                     gh pr list --state merged --limit 1000 --json headRefName --jq '.[].headRefName'
 #   --json            числа в JSON замість тексту
 set -uo pipefail
 
@@ -60,6 +68,7 @@ NOW=""
 STOP_AT=""
 SINCE=""
 GAP_MIN=30
+MERGED_FILE=""
 FROM_A8=0
 JSON=0
 files=()
@@ -95,6 +104,11 @@ while (($# > 0)); do
     --episode-gap-min)
       GAP_MIN="${2:-}"
       [[ "$GAP_MIN" =~ ^[0-9]+$ ]] || die "--episode-gap-min потребує цілого числа"
+      shift 2
+      ;;
+    --merged)
+      MERGED_FILE="${2:-}"
+      [[ -n "$MERGED_FILE" && -r "$MERGED_FILE" ]] || die "--merged потребує файлу, який можна прочитати"
       shift 2
       ;;
     --from-a8)
@@ -137,13 +151,18 @@ else
   cat >"$journal"
 fi
 
+merged_list=""
+[[ -n "$MERGED_FILE" ]] && merged_list="$(cat -- "$MERGED_FILE")"
 metrics="$(jq -R -s --arg now "$NOW" --arg stop "$STOP_AT" --arg since "$SINCE" \
-  --argjson days "$WINDOW_DAYS" --argjson gap "$((GAP_MIN * 60))" '
+  --argjson days "$WINDOW_DAYS" --argjson gap "$((GAP_MIN * 60))" \
+  --arg merged "$merged_list" --argjson mchecked "$([[ -n "$MERGED_FILE" ]] && echo true || echo false)" '
 def t: (.ts // "") | (try fromdateiso8601 catch null);
 def ks: .event == "kill_switch"
   or (.event == "run" and .result == "stopped"
       and (((.detail // "") | startswith("kill_switch")) or ((.detail // "") | contains("kill switch"))));
 def cls: (.exit_class // "?") + ":" + ([(.detail // "") | splits("[ :;=]")][0] // "");
+def verdict: select(.result != "stopped") | (.oracle_rc // "-")
+  | select(test("^[0-9]+$")) | tonumber | select(. <= 123);
 
 (split("\n") | map(select(length > 0))) as $lines
 | [ $lines[] | (try fromjson catch null) ] as $parsed
@@ -174,6 +193,10 @@ def cls: (.exit_class // "?") + ":" + ([(.detail // "") | splits("[ :;=]")][0] /
       else .in = false end
     | (if $r.event == "run" then .last_run = $r else . end))) as $ep
 | ([ $ep.eps[] | select(.auth | not) | select(.t >= $from and .t <= $n) ] | length) as $drills
+| [ $merged | splits("\n") | select(length > 0) ] as $mset
+| [ $wruns | group_by(.task // "")[]
+    | {branch: (.[0].branch // ("ai/" + (.[0].task // ""))), last: ([ .[] | verdict ] | last)}
+    | . + {merged: (.branch | IN($mset[]))} ] as $tasks
 | ([ $runs[] | select(.result == "failed" or .result == "auth_stop") | cls ]
    + [ $all[] | select(.event == "reject") | (.fields // [])[] | "reject:" + . ]
    | group_by(.) | map({key: .[0], value: length}) | from_entries) as $classes
@@ -185,8 +208,11 @@ def cls: (.exit_class // "?") + ":" + ([(.detail // "") | splits("[ :;=]")][0] /
       runs: ($wruns | length),
       done: ([ $wruns[] | select(.result == "ok") ] | length),
       forbidden: ([ $wruns[] | select((.detail // "") | startswith("forbidden-paths")) ] | length),
-      oracle_runs: ([ $wruns[] | select((.oracle_rc // "-") != "-" and .result != "stopped") ] | length),
-      oracle_green: ([ $wruns[] | select((.oracle_rc // "-") == "0") ] | length),
+      tasks: ($tasks | length),
+      oracle_covered: ([ $tasks[] | select(.last != null and (.last == 0 or (.merged | not))) ] | length),
+      oracle_green: ([ $tasks[] | select(.last == 0) ] | length),
+      merged_checked: $mchecked,
+      merged_despite_red: (if $mchecked then ([ $tasks[] | select(.last != null and .last != 0 and .merged) ] | length) else null end),
       oracle_missing_rejects: ([ $win[] | select(.event == "reject" and ((.fields // []) | index("oracle:missing"))) ] | length),
       kill_switch_drills: $drills
     },
@@ -221,9 +247,13 @@ def mark(c): if c then "✅" else "❌" end;
 "  НЕ З ЖУРНАЛУ — Змерджено без доробок ≥ 8 з 10: GitHub — PR з гілок ai/*, чи є коміти yurii поверх",
 "  \(mark(.step6.forbidden == 0)) Спроб запису у виключений шлях (backstop): \(.step6.forbidden) (треба 0)",
 "      деталь forbidden-paths пише backstop тіку (крок 6a, PR #143)",
-(if .step6.runs == 0
- then "  —  Покриття оракулами: прогонів у вікні немає"
- else "  \(mark(.step6.oracle_runs * 100 >= .step6.runs * 80)) Покриття оракулами (оракул виконався): \(.step6.oracle_runs)/\(.step6.runs) = \((.step6.oracle_runs * 100 / .step6.runs) | floor)% (треба ≥ 80); зелених \(.step6.oracle_green)/\(.step6.runs) = \((.step6.oracle_green * 100 / .step6.runs) | floor)%; відхилено без оракула: \(.step6.oracle_missing_rejects)\n      «програмний доказ приймання» тут — оракул виконався, зелений чи червоний; якщо рахувати лише зелені — число «зелених»" end),
+(if .step6.tasks == 0
+ then "  —  Покриття оракулами: задач у вікні немає"
+ else "  \(mark(.step6.oracle_covered * 100 >= .step6.tasks * 80)) Покриття оракулами (однозначний вердикт, зелений чи червоний): \(.step6.oracle_covered)/\(.step6.tasks) задач = \((.step6.oracle_covered * 100 / .step6.tasks) | floor)% (треба ≥ 80)",
+      (if .step6.merged_checked
+       then "      змерджених всупереч червоному оракулу (не покриті): \(.step6.merged_despite_red)"
+       else "      змерджені всупереч червоному оракулу НЕ ЗВІРЕНО — передай --merged <файл гілок змерджених PR>" end),
+      "  Лише зелені (довідково): \(.step6.oracle_green)/\(.step6.tasks) задач = \((.step6.oracle_green * 100 / .step6.tasks) | floor)%; відхилено без оракула: \(.step6.oracle_missing_rejects)" end),
 "  НЕ З ЖУРНАЛУ — Питання класу A ≤ 3 на 10 задач, 0 невалідних: механізму питань ще немає",
 "  \(mark(.step6.kill_switch_drills >= 1)) Навчальних зупинок kill switch: \(.step6.kill_switch_drills) (треба ≥ 1)",
 "",

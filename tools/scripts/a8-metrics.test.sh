@@ -36,7 +36,8 @@ reject() { jq -nc --arg ts "$1" --arg t "$2" --arg f "$3" '{ts:$ts, event:"rejec
 
 # Відомі відповіді (вікно 14 днів до NOW = з 2026-09-17T12:00:00Z):
 #   серія ok: найдовша 3 (22, 23, 24), поточна 0;
-#   у вікні 12 прогонів, з них ok 5, forbidden 1, оракул виконано 9 (k — stopped, rc=10 від обгортки);
+#   у вікні 12 прогонів (12 задач, по прогону на задачу), з них ok 5, forbidden 1;
+#   покрито оракулом 9 задач (k — stopped, rc=10 від обгортки), зелених 6;
 #   відхилено без оракула 1; навчальних зупинок 1;
 #   правило трьох: failed:oracle = 3; нерозібраних рядків 1.
 {
@@ -81,8 +82,10 @@ expect "крок 5: після останньої зупинки — зупин�
 expect "крок 6: прогонів у вікні" 12 .step6.runs
 expect "крок 6: доведено до push" 5 .step6.done
 expect "крок 6: спроб запису у виключений шлях" 1 .step6.forbidden
-expect "крок 6: оракул виконано" 9 .step6.oracle_runs
+expect "крок 6: задач у вікні" 12 .step6.tasks
+expect "крок 6: покрито оракулом (зелений чи червоний)" 9 .step6.oracle_covered
 expect "крок 6: оракул зелений" 6 .step6.oracle_green
+expect "крок 6: без --merged злиття не звірено" '[false,null]' '[.step6.merged_checked, .step6.merged_despite_red]'
 expect "крок 5: серія з --since" 1 .step5.streak_best --since 2026-09-25T00:00:00Z
 expect "крок 6: відхилено без оракула" 1 .step6.oracle_missing_rejects
 expect "крок 6: навчальних зупинок" 1 .step6.kill_switch_drills
@@ -155,6 +158,39 @@ got="$("$SCRIPT" --json --now "$NOW" "$tmp/classes" | jq -c '.rule_of_three_hits
 [[ "$got" == '["auth_stop:401","failed:rc","reject:oracle:missing"]' ]] &&
   ok "правило трьох: rc=N — один клас, auth_stop і відхилення рахуються" || bad "класи падінь: $got"
 
+# Покриття — по ЗАДАЧАХ і за ОСТАННІМ вердиктом (рішення yurii 2026-09-27):
+# зелений чи червоний — покрито; тайм-аут оракула — не вердикт; змерджена
+# всупереч червоному — не покрито.
+#   p: червоний, потім зелений (повтор)  → покрито, зелена; змерджена — усе одно покрито;
+#   q: тайм-аут оракула rc=124           → не покрито;
+#   r: червоний, змерджена               → покрито без --merged, не покрито з --merged;
+#   s: червоний, не змерджена            → покрито;
+#   u: зелений, змерджена                → покрито, зелена.
+{
+  run 2026-09-20T10:00:00Z p failed failed "oracle rc=1" 1
+  run 2026-09-21T10:00:00Z p ok ok pushed 0
+  run 2026-09-22T10:00:00Z q failed failed "oracle rc=124" 124
+  run 2026-09-23T10:00:00Z r failed failed "oracle rc=1" 1
+  run 2026-09-24T10:00:00Z s failed failed "oracle rc=1" 1
+  run 2026-09-25T10:00:00Z u ok ok pushed 0
+} >"$tmp/cov"
+printf '%s\n' ai/p ai/r ai/u feat/unrelated >"$tmp/merged"
+cov() { "$SCRIPT" --json --now "$NOW" "$@" "$tmp/cov" | jq -c '[.step6.tasks, .step6.oracle_covered, .step6.oracle_green, .step6.merged_despite_red]'; }
+got="$(cov)"
+[[ "$got" == "[5,4,2,null]" ]] && ok "покриття без --merged: 4/5 задач, зелених 2" || bad "покриття без --merged: $got (очікував [5,4,2,null])"
+got="$(cov --merged "$tmp/merged")"
+[[ "$got" == "[5,3,2,1]" ]] && ok "покриття з --merged: змерджена всупереч червоному (r) не покрита → 3/5" ||
+  bad "покриття з --merged: $got (очікував [5,3,2,1])"
+covtext="$("$SCRIPT" --now "$NOW" --merged "$tmp/merged" "$tmp/cov")"
+[[ "$covtext" == *"❌ Покриття оракулами (однозначний вердикт, зелений чи червоний): 3/5 задач = 60%"* &&
+  "$covtext" == *"змерджених всупереч червоному оракулу (не покриті): 1"* &&
+  "$covtext" == *"Лише зелені (довідково): 2/5 задач = 40%"* ]] &&
+  ok "текст з --merged: 3/5 → ❌, одна змерджена всупереч червоному, лише зелені окремим рядком" ||
+  bad "текст з --merged: $covtext"
+rc=0
+"$SCRIPT" --merged "$tmp/немає" "$tmp/cov" >/dev/null 2>&1 || rc=$?
+[[ "$rc" == 2 ]] && ok "--merged без файлу → код 2" || bad "--merged без файлу → rc=$rc"
+
 # Порожній журнал — нулі, не падіння.
 : >"$tmp/empty"
 got="$("$SCRIPT" --json --now "$NOW" "$tmp/empty" 2>&1 | jq -c '[.journal.records, .step5.streak_best, .step6.runs]' 2>&1)"
@@ -168,8 +204,9 @@ check_line() { # check_line <назва> <підрядок>
 check_line "серія 3 → ✅" "✅ Задача end-to-end поспіль без втручання: найдовша серія 3"
 check_line "5 задач до push → ❌" "❌ Задач доведено до push без втручання: 5"
 check_line "запис у виключений шлях → ❌" "❌ Спроб запису у виключений шлях (backstop): 1"
-check_line "покриття 9/12 → ❌" "❌ Покриття оракулами (оракул виконався): 9/12 = 75%"
-check_line "зелених оракулів" "зелених 6/12 = 50%"
+check_line "покриття 9/12 → ❌" "❌ Покриття оракулами (однозначний вердикт, зелений чи червоний): 9/12 задач = 75%"
+check_line "злиття всупереч червоному — не звірено" "змерджені всупереч червоному оракулу НЕ ЗВІРЕНО"
+check_line "лише зелені окремим рядком" "Лише зелені (довідково): 6/12 задач = 50%"
 check_line "злиття — не з журналу" "НЕ З ЖУРНАЛУ — Змерджено без доробок"
 check_line "ребут — не з журналу" "НЕ З ЖУРНАЛУ — Ребут"
 check_line "питання — не з журналу" "НЕ З ЖУРНАЛУ — Питання класу A"
@@ -205,7 +242,7 @@ elif [[ -z "${A8_METRICS_UNDER_TEST:-}" ]]; then
   mutate "подія рве серію" 's/reduce \(\$runs\[\] \| select/reduce (\$all[] | select/'
   mutate "вікно ігнорується" 's/\[ \$win\[\] \| select\(\.event == "run"\) \] as \$wruns/[ \$all[] | select(.event == "run") ] as \$wruns/'
   mutate "forbidden не рахуються" 's/startswith\("forbidden-paths"\)/startswith("forbidden_paths")/'
-  mutate "прогін без оракула рахується покритим" 's/select\(\(\.oracle_rc \/\/ "-"\) != "-" and/select(true and/'
+  mutate "прогін без оракула рахується покритим" 's/select\(test\("\^\[0-9\]\+\$"\)\)/select(true)/'
   mutate "поріг правила трьох 4" 's/select\(\.value >= 3\)/select(.value >= 4)/'
   mutate "auth_stop рахується навчальною зупинкою" 's/select\(\.auth \| not\)/select(true)/'
   mutate "кожен запис kill switch — окрема зупинка" 's/\(if \(\.in \| not\) or/(if true or/'
@@ -216,7 +253,11 @@ elif [[ -z "${A8_METRICS_UNDER_TEST:-}" ]]; then
   mutate "пауза не розділяє епізоди" 's/\(\$rt - \.last_ks\) > \$gap/false/'
   mutate "rc=N дробить клас" 's/splits\("\[ :;=\]"\)/splits("[ :;]")/'
   mutate "auth_stop не в правилі трьох" 's/select\(\.result == "failed" or \.result == "auth_stop"\)/select(.result == "failed")/'
-  mutate "stopped рахується виконаним оракулом" 's/ and \.result != "stopped"\)/)/'
+  mutate "stopped рахується виконаним оракулом" 's/def verdict: select\(\.result != "stopped"\) \| /def verdict: /'
+  mutate "тайм-аут оракула — вердикт" 's/ \| select\(\. <= 123\)//'
+  mutate "перший вердикт замість останнього" 's/\[ \.\[\] \| verdict \] \| last/[ .[] | verdict ] | first/'
+  mutate "змерджена всупереч червоному — покрита" 's/\(\.last == 0 or \(\.merged \| not\)\)/true/'
+  mutate "покриття по прогонах, а не по задачах" 's/group_by\(\.task \/\/ ""\)\[\]/.[] | [.]/'
   mutate "причина — останній запис, а не прогін" 's/\.last_run != null and \.last_run\.result == "auth_stop"/.prev != null and .prev.event == "run" and .prev.result == "auth_stop"/'
   mutate "--since ігнорується" 's/select\(\(t \/\/ -1\) >= \$since_t\)/select(true)/'
   rm -rf "$MUTDIR"
