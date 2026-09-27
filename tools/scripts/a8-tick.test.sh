@@ -62,7 +62,10 @@ ENV
   # origin = bare-репо з одним комітом; головний клон — як /home/agent/hart.
   git init -q --bare -b main "$ROOT/origin.git"
   git clone -q "$ROOT/origin.git" "$ROOT/seed" 2>/dev/null
-  git -C "$ROOT/seed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  # CLAUDE.md у базі — щоб було що перейменувати (сценарій 19c).
+  echo contract >"$ROOT/seed/CLAUDE.md"
+  git -C "$ROOT/seed" add CLAUDE.md
+  git -C "$ROOT/seed" -c user.email=t@t -c user.name=t commit -q -m init
   git -C "$ROOT/seed" push -q origin main
   git clone -q "$ROOT/origin.git" "$ROOT/repo"
 
@@ -105,6 +108,45 @@ case "${AGENT_MODE:-commit}" in
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
     touch "$STOPFILE"
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  forbidden | moveorigin | detach | replace)
+    # Заборонений шлях через Bash — те, чого deny-правила Edit/Write не бачать.
+    mkdir -p "$wt/infra" && echo x >"$wt/infra/x"
+    git -C "$wt" add infra/x
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m forbidden
+    case "$AGENT_MODE" in
+      moveorigin)
+        # Чистий коміт зверху, а origin/main пересунуто на заборонений: diff від
+        # origin/main бачить лише чистий коміт.
+        git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m clean
+        git -C "$wt" update-ref refs/remotes/origin/main HEAD~1 ;;
+      detach)
+        # Гілка лишається на забороненому коміті, HEAD — на чистому поруч.
+        git -C "$wt" checkout -q --detach HEAD~1
+        git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m clean ;;
+      replace)
+        # Для diff заборонений коміт підмінено чистим, push віддасть справжній.
+        f="$(git -C "$wt" rev-parse HEAD)"
+        c="$(git -C "$wt" -c user.email=a@a -c user.name=a commit-tree "HEAD~1^{tree}" -p HEAD~1 -m clean)"
+        git -C "$wt" replace "$f" "$c" ;;
+    esac
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  cyrillic | quote)
+    # Не-ASCII або лапки в імені: `git diff --name-only` бере такий шлях у лапки
+    # з вісімковими кодами ("infra/\321\202…"), і шаблон ^infra/ його не бачить.
+    mkdir -p "$wt/infra"
+    if [[ "$AGENT_MODE" == cyrillic ]]; then echo x >"$wt/infra/тест.sh"; else echo x >"$wt/infra/a\"b"; fi
+    git -C "$wt" add -A infra
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m odd-name
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  detachonly)
+    # Коміт на відокремленому HEAD, гілка лишилась на базі: пушити нічого.
+    git -C "$wt" checkout -q --detach
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m detached
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  rename)
+    git -C "$wt" mv CLAUDE.md notes.md
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m rename
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
@@ -119,6 +161,7 @@ STUB
   export A8_CONFIG="$ETC/a8.env" A8_TICK_LOGIC="$HERE/a8-tick-logic.sh"
   export A8_GUARD="$BIN/a8-guard" A8_RUNNER="$BIN/a8-run-agent"
   export A8_JOURNAL="$BIN/a8-journal" A8_DOCKER="$BIN/docker"
+  export A8_FORBIDDEN_CHECK="$HERE/check-forbidden-paths.sh"
 }
 teardown() { rm -rf "$ROOT"; }
 
@@ -490,6 +533,79 @@ EOF
   grep -q failed "$LOGS/last-results" 2>/dev/null &&
     bad "зупинка людиною зарахована в падіння поспіль" || ok "зупинка людиною не зарахована в падіння"
   teardown
+
+  # ─── 19. Backstop заборонених шляхів ─────────────────────────────────────
+  # CLAUDE.md §6.1: «deny-правила + backstop-скрипт». Deny-правила ловлять
+  # Edit/Write, а не Bash — тож кожен сценарій пише заборонене саме через
+  # git/bash. Оракул скрізь ЗЕЛЕНИЙ і креденшал є: зупинити push мусить
+  # backstop, а не щось інше.
+  forbidden_case() { # forbidden_case <режим> <опис>
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(valid a)"
+    AGENT_MODE="$1" tick
+    if [[ "$(jl .result)" == failed && "$(jl .detail)" == forbidden-paths* ]] &&
+      ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+      ok "$2 → failed forbidden-paths, на origin нічого"
+    else
+      bad "$2: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a || echo немає)"
+    fi
+    teardown
+  }
+  # 19a. Базовий випадок.
+  forbidden_case forbidden "агент записав infra/x через bash"
+  # 19b. Контроль: чиста робота backstop проходить.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == ok && "$(jl .detail)" == pushed ]] &&
+    ok "чиста робота → backstop пропускає, push ok" || bad "backstop на чистій роботі: $(last)"
+  teardown
+  # 19c. Перейменування: без --no-renames diff показав би лише notes.md.
+  forbidden_case rename "CLAUDE.md перейменовано в notes.md"
+  # 19d. Diff від SHA бази, а не від origin/main, який агент може пересунути.
+  forbidden_case moveorigin "origin/main пересунуто на заборонений коміт"
+  # 19e. Перевіряється те, що пушиться (гілка), а не HEAD.
+  forbidden_case detach "гілка на забороненому, HEAD — на чистому"
+  # 19f. `git replace` підміняє вміст для diff, але не для push.
+  forbidden_case replace "заборонений коміт підмінено через git replace"
+  # 19h. Кирилиця й лапки в імені — `git diff` без -z бере шлях у лапки.
+  forbidden_case cyrillic "infra/тест.sh (кирилиця в імені)"
+  forbidden_case quote "infra/a\"b (лапки в імені)"
+  # 19i. «Є коміти» рахується від бази до гілки, а не від origin/main до HEAD:
+  # коміт на відокремленому HEAD інакше дав би push гілки без змін як «ok».
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=detachonly tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == no-commits ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "коміт лише на відокремленому HEAD → failed no-commits, нічого не запушено"
+  else
+    bad "коміт на відокремленому HEAD: $(last)"
+  fi
+  teardown
+  # 19j. Скрипта backstop немає (роль не доставила) → fail closed, з поясненням.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  A8_FORBIDDEN_CHECK="$ROOT/немає.sh" AGENT_MODE=work tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == "forbidden-paths: перевірку не виконано"* ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "скрипта backstop немає → failed «перевірку не виконано», нічого не запушено"
+  else
+    bad "backstop без скрипта: $(last)"
+  fi
+  teardown
+  # 19g. Оракул виконує код агента й може зсунути гілку ПІСЛЯ перевірки.
+  # Пушиться рівно той SHA, що пройшов backstop.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt && mkdir -p infra && echo x >infra/x && git add infra/x && git -c user.email=o@o -c user.name=o commit -q -m sneaky')"
+  AGENT_MODE=work tick
+  if [[ "$(jl .result)" == ok ]] && git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    [[ -z "$(git -C "$ROOT/origin.git" ls-tree -r --name-only ai/a -- infra)" ]]; then
+    ok "оракул зсунув гілку після backstop → запушено перевірений SHA, без infra/"
+  else
+    bad "зсув гілки після backstop: $(last); infra на origin: $(git -C "$ROOT/origin.git" ls-tree -r --name-only ai/a -- infra 2>&1)"
+  fi
+  teardown
 }
 
 run_scenarios
@@ -568,6 +684,16 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "oracle_rc завжди зелений" 's/oracle_rc="\$orc"/oracle_rc=0/'
   mutate "kill switch під час оракула як червоний оракул" 's/  if \[\[ -e "\$A8_KILL_SWITCH" \]\]; then\n    finish stopped[^\n]*\n    exit 0\n  fi\n//'
   mutate "стани guard злиті в один" 's/"\$JOURNAL" event "\$gstate"/"\$JOURNAL" event stopped/'
+  # Backstop заборонених шляхів (сценарії 19): кожне рішення кроку 6a — окрема
+  # мутація, бо кожне закриває окремий обхід.
+  mutate "backstop не викликає скрипт" 's/\| bash "\$FORBIDDEN" 2>&1\)/| true 2>\&1)/'
+  mutate "backstop від origin/main, а не від бази" 's/--no-renames "\$base" "\$tip"/--no-renames origin\/main "\$tip"/'
+  mutate "backstop без --no-renames" 's/--name-only --no-renames "/--name-only "/'
+  mutate "backstop перевіряє HEAD, а не гілку" 's/rev-parse --verify --quiet "refs\/heads\/\$branch\^\{commit\}"/rev-parse --verify --quiet HEAD/'
+  mutate "backstop бачить підміну git replace" 's/git --no-replace-objects -C "\$wt" diff/git -C "\$wt" diff/'
+  mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
+  mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
+  mutate "no-commits від origin/main до HEAD" 's/rev-list --count "\$base\.\.\$tip"/rev-list --count origin\/main..HEAD/'
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"

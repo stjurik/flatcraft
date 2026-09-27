@@ -559,6 +559,38 @@
       tick/timer: {{ a8_v_tick.stdout | replace('\n', ' ') }}; очікувано enabled={{ a8_tick_timer_enabled }}
     quiet: true
 
+# ─── V19. Backstop заборонених шляхів: встановлено те, що доведено в CI ─────
+- name: V19a — checksum of the installed forbidden-paths backstop
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/check-forbidden-paths.sh
+    checksum_algorithm: sha256
+  register: a8_v_forbidden
+
+- name: V19b — checksum of the backstop in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/check-forbidden-paths.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_forbidden_repo
+
+- name: V19c — backstop on A8 is byte-identical to the tested copy and owned by root
+  # Тік кличе саме цей файл (крок 6a). Інша копія або копія, яку може змінити
+  # agent, означала б, що зелений a8-tick.test.sh нічого не каже про A8.
+  ansible.builtin.assert:
+    that:
+      - a8_v_forbidden.stat.exists
+      - a8_v_forbidden.stat.checksum == a8_v_forbidden_repo.stat.checksum
+      - a8_v_forbidden.stat.pw_name == 'root'
+      - not a8_v_forbidden.stat.woth
+      - not a8_v_forbidden.stat.wgrp
+    fail_msg: >-
+      /usr/local/lib/a8/check-forbidden-paths.sh: exists={{ a8_v_forbidden.stat.exists }},
+      sha256 A8={{ a8_v_forbidden.stat.checksum | default('—') }} repo={{ a8_v_forbidden_repo.stat.checksum }},
+      власник={{ a8_v_forbidden.stat.pw_name | default('—') }}
+    success_msg: "backstop заборонених шляхів: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
+    quiet: true
+
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
 - name: V15a — ask the container for claude, uv and pnpm versions
   # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
