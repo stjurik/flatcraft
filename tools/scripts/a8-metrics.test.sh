@@ -229,7 +229,8 @@ CONTRACT=(
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish stopped stopped'           # не вердикт
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish auth_stop auth_stop'       # не навчальна зупинка
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::fail_task "forbidden-paths: '     # крок 6: backstop
-  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::kill switch під час оракула'      # ks: «kill switch»
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::finish stopped stopped "kill switch $1' # ks: «kill switch»
+  'infra/ansible/roles/a8/templates/a8-tick.sh.j2::"$JOURNAL" event kill_switch "STOP помічено' # --stop-at: мить, коли помічено
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::"$JOURNAL" event "$gstate"'       # подія kill_switch
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::oracle_rc="-"'                    # «до оракула не дійшло»
   'infra/ansible/roles/a8/templates/a8-tick.sh.j2::oracle_rc="$orc"'                 # код оракула
