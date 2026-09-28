@@ -179,6 +179,11 @@ case "${AGENT_MODE:-commit}" in
     touch "$STOPFILE"
     sleep 30 ;;
   oom) exit 137 ;;
+  authstop)
+    # 401, а людина саме створила STOP.
+    touch "$STOPFILE"
+    echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'
+    exit 1 ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
@@ -193,6 +198,11 @@ STUB
   cat >"$BIN/docker" <<STUB
 #!/usr/bin/env bash
 echo "docker \$*" >>"$LOGS/docker-calls"
+# DOCKER_KILL_FAIL_ONCE: перший kill б'є в порожнечу — контейнера ще немає.
+if [[ "\$1" == kill && -n "\${DOCKER_KILL_FAIL_ONCE:-}" && ! -e "$LOGS/kill-failed-once" ]]; then
+  : >"$LOGS/kill-failed-once"
+  exit 1
+fi
 if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
   kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
   [[ -n "\${DOCKER_RM_STOP:-}" ]] && rm -f "$ROOT/STOP"
@@ -415,6 +425,8 @@ run_scenarios() {
     ok "сирота записана в last-results як failed (рахується до паузи)" || bad "orphan last-results: $(cat "$LOGS/last-results" 2>/dev/null)"
   grep -q 'docker kill a8-orph' "$LOGS/docker-calls" 2>/dev/null &&
     ok "сирота → контейнер a8-orph убито (міг працювати без нагляду)" || bad "orphan kill: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  grep -q 'docker kill .*a8-orph-oracle' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "сирота → і контейнер оракула a8-orph-oracle убито" || bad "orphan oracle kill: $(cat "$LOGS/docker-calls" 2>/dev/null)"
   teardown
 
   # 9b. Класифікатор упав → failed, НЕ push і НЕ done (fail closed).
@@ -682,13 +694,18 @@ EOF
   }
 
   # 20a–c. STOP на залежностях і хуку: наступний старт контейнера отримує 10.
-  for stage in pnpm uvsync hook; do
+  # Агент не запускався — денний ліміт не витрачено; назва етапу — чесна.
+  for case in "pnpm:під час залежностей" "uvsync:під час перевірки хука" "hook:перед агентом"; do
+    stage="${case%%:*}" want="kill switch ${case#*:}"
     setup
     enqueue 001-a "$(valid a)"
     STOP_DURING="$stage" tick
     requeued "STOP під час $stage"
     grep -q 'run-agent claude' "$LOGS/runner-calls" 2>/dev/null && bad "STOP під час $stage: агента все одно запущено" ||
       ok "STOP під час $stage: агента не запущено"
+    [[ "$(jl .detail)" == "$want" && ! -s "$LOGS/counter-$(date -u +%Y-%m-%d)" ]] &&
+      ok "STOP під час $stage: деталь «$want», денний ліміт не витрачено" ||
+      bad "STOP під час $stage: деталь «$(jl .detail)», лічильник «$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null)»"
     teardown
   done
 
@@ -697,6 +714,8 @@ EOF
   enqueue 001-a "$(valid a)"
   DEPS_RC=10 tick
   requeued "код 10 на залежностях без STOP"
+  [[ ! -s "$LOGS/counter-$(date -u +%Y-%m-%d)" ]] && ok "код 10 на залежностях: денний ліміт не витрачено" ||
+    bad "код 10 на залежностях: лічильник $(cat "$LOGS/counter-$(date -u +%Y-%m-%d)")"
   teardown
 
   # 20e. STOP посеред довгої сесії агента з комітами: спостерігач помічає його
@@ -767,6 +786,28 @@ EOF
   [[ "$(jl .detail)" == *"перед push"* && "$(jl .oracle_rc)" == 0 ]] &&
     ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
     ok "STOP перед push: оракул зелений, на origin нічого, деталь «перед push»" || bad "STOP перед push: $(last)"
+  teardown
+
+  # 20l. 401 разом зі STOP: причина 401 важливіша — auth_stop, і файл STOP
+  # містить «claude setup-token», а не порожній рядок людини.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=authstop tick
+  [[ "$(jl .result)" == auth_stop ]] && grep -q 'setup-token' "$ROOT/STOP" &&
+    ok "401 і STOP одночасно → auth_stop, у STOP — причина 401" || bad "401 і STOP: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
+
+  # 20m. Перший docker kill б'є в порожнечу (контейнера ще немає): спостерігач
+  # не здається, а повторює kill наступного інтервалу.
+  setup
+  enqueue 001-a "$(valid a)"
+  t0="$(date +%s)"
+  DOCKER_KILL_FAIL_ONCE=1 AGENT_MODE=sleepstop tick
+  dt=$(($(date +%s) - t0))
+  kills="$(grep -cx 'docker kill a8-a' "$LOGS/docker-calls" 2>/dev/null)"
+  [[ "$(jl .result)" == stopped ]] && ((dt < 10 && kills >= 2)) &&
+    ok "перший kill не влучив → спостерігач повторив (${kills} спроби), зупинка за ${dt} с" ||
+    bad "повтор kill: $(last); спроб ${kills:-0}; ${dt} с"
   teardown
 
   # 20k. Спостерігач не переживає тік: ні звичайну задачу, ні TERM (systemd
@@ -844,7 +885,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # поведінку не впливає — і мутація почала ВИЖИВАТИ (CI на PR #126). Мутація,
   # що не розрізняє правильне і зламане, гірша за відсутню: вона додає рядок
   # «убита» і забирає увагу. Замість неї нижче — інваріант, який досі правда.
-  mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# STOP або мітка/\n\n# STOP або мітка/'
+  mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 6\./\n\n# ─── 6./'
   mutate "контейнер не вбивається при таймауті" 's/\[\[ "\$rc" == 124 \]\] && "\$DOCKER" kill[^\n]*\n//'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
@@ -884,7 +925,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "STOP на залежностях як падіння" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n//'
   mutate "STOP на хуку як падіння" 's/  if \(\(hrc == 10\)\) \|\| stop_requested; then stop_task "під час перевірки хука"; fi\n//'
   mutate "код 10 без STOP на залежностях як падіння" 's/if \(\(drc == 10\)\) \|\| stop_requested/if stop_requested/'
-  mutate "STOP після агента ігнорується" 's/if stop_requested; then stop_task "під час агента"; fi\n//'
+  mutate "STOP після агента ігнорується" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested; then stop_task "під час агента"; fi\n//'
   mutate "спостерігач агента не стартує" 's/watch_start "\$A8_CONTAINER_NAME" "під час агента"\n//'
   mutate "спостерігач не зупиняє контейнер" 's/        "\$DOCKER" kill "\$1" >\/dev\/null 2>&1\n//'
   mutate "спостерігач оракула зупиняє контейнер агента" 's/watch_start "\$oracle_container"/watch_start "a8-\$id"/'
@@ -895,6 +936,11 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "trap EXIT прибрано" 's/\ntrap watch_stop EXIT\n/\n/'
   mutate "спостерігач не бачить, що тіку вже немає" 's/while kill -0 "\$\$" 2>\/dev\/null; do/while :; do/'
   mutate "перевірку STOP перед push прибрано" 's/if stop_requested; then stop_task "перед push"; fi\n//'
+  mutate "спостерігач одноразовий" 's/(        "\$DOCKER" kill "\$1" >\/dev\/null 2>&1\n)/$1        exit 0\n/'
+  mutate "зупинка на залежностях спалює денний ліміт" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n  "\$GUARD" count >\/dev\/null\n/  "\$GUARD" count >\/dev\/null\n  if ((drc == 10)) || stop_requested; then stop_task "під час залежностей"; fi\n/'
+  mutate "без перевірки STOP перед агентом" 's/if stop_requested; then stop_task "перед агентом"; fi\n//'
+  mutate "контейнер оракула сироти не вбито" 's/"a8-\$oid" "a8-\$oid-oracle"/"a8-\$oid"/'
+  mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
   wait
   for i in $(seq 1 "$n"); do

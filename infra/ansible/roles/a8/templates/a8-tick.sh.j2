@@ -74,10 +74,11 @@ now() { date +%s; }
 for orphan in "$Q"/running/*.json; do
   [[ -e "$orphan" ]] || continue
   oid="$(field id "$orphan")"
-  # Тік міг померти, поки агент працював: контейнер живе без нагляду. Ім'я
-  # детерміноване (a8-<id>), тож убити його можна й без пам'яті про запуск.
-  # Знайдено рев'юером (agy, рев'ю №1 демона).
-  [[ -n "$oid" ]] && "$DOCKER" kill "a8-$oid" >/dev/null 2>&1
+  # Тік міг померти, поки агент чи оракул працював: контейнер живе без нагляду.
+  # Імена детерміновані (a8-<id>, a8-<id>-oracle), тож убити їх можна й без
+  # пам'яті про запуск. Знайдено рев'юером (agy, рев'ю №1 демона); контейнер
+  # оракула — рецензією PR #146 (Gemini 3.8 Flash): README обіцяв, код не робив.
+  [[ -n "$oid" ]] && "$DOCKER" kill "a8-$oid" "a8-$oid-oracle" >/dev/null 2>&1
   "$GUARD" count >/dev/null
   "$GUARD" record failed
   "$JOURNAL" append "${oid:-unknown}" "$(field source "$orphan")" failed 0 "-" \
@@ -205,17 +206,24 @@ stop_task() { # stop_task <коли: «під час агента», «пере�
 #   - при будь-якому виході з тіку, зокрема TERM від systemd, — trap EXIT;
 #   - якщо тік убито KILL і trap не спрацював — сам, за один інтервал: `$$` у
 #     підоболонці — PID тіку, і `kill -0` бачить, що його вже немає.
+#
+# Помітивши STOP, спостерігач не виходить, а повторює `docker kill` щоінтервалу,
+# доки етап не скінчиться: STOP міг з'явитись, коли обгортка вже пройшла
+# check-run, а контейнера ще немає, — перший kill тоді б'є в порожнечу, і
+# контейнер працював би всю сесію. Подія в журналі — одна, на першу мить.
 watcher=""
 watch_start() { # watch_start <контейнер> <коли>
   (
     trap 'kill "$s" 2>/dev/null; exit 0' TERM
-    s=""
+    s="" noticed=0
     while kill -0 "$$" 2>/dev/null; do
-      if [[ -e "$A8_KILL_SWITCH" ]]; then
-        : >"$seen"
-        "$JOURNAL" event kill_switch "STOP помічено $2 — зупиняю контейнер $1"
+      if ((noticed)) || [[ -e "$A8_KILL_SWITCH" ]]; then
+        if ((!noticed)); then
+          noticed=1
+          : >"$seen"
+          "$JOURNAL" event kill_switch "STOP помічено $2 — зупиняю контейнер $1"
+        fi
         "$DOCKER" kill "$1" >/dev/null 2>&1
-        exit 0
       fi
       sleep "$WATCH_S" &
       s=$!
@@ -269,8 +277,9 @@ if ((drc == 0)); then
   "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync' >>"$log" 2>&1 || drc=$?
 fi
 if ((drc != 0)); then
-  "$GUARD" count >/dev/null
+  # Зупинка — ДО лічильника: агент не запускався, денний ліміт не витрачено.
   if ((drc == 10)) || stop_requested; then stop_task "під час залежностей"; fi
+  "$GUARD" count >/dev/null
   fail_task "deps"
   exit 0
 fi
@@ -279,11 +288,14 @@ fi
 hrc=0
 "$RUNNER" "$wt" bash tools/scripts/check-hook-loud.sh >>"$log" 2>&1 || hrc=$?
 if ((hrc != 0)); then
-  "$GUARD" count >/dev/null
   if ((hrc == 10)) || stop_requested; then stop_task "під час перевірки хука"; fi
+  "$GUARD" count >/dev/null
   fail_task "hooks-decorative"
   exit 0
 fi
+# STOP з'явився, поки йшов хук, а хук устиг скінчитись: агента ще немає —
+# зупинка до старту, без лічильника, з чесною назвою етапу.
+if stop_requested; then stop_task "перед агентом"; fi
 
 # ─── 5. Агент — лише через a8-run-agent ────────────────────────────────────
 # Формулювання пише СУПЕРВІЗОР; текст задачі — дані в ньому (OQ-34 п.3).
@@ -333,13 +345,15 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 # (сценарій 5b + мутація «задача не рахується після запуску»).
 "$GUARD" count >/dev/null
 
+# ─── 6. Класифікація ───────────────────────────────────────────────────────
+read -r cls detail < <(logic classify "$rc" "$out")
 # STOP або мітка спостерігача → зупинка, який би код не повернув контейнер:
 # 137 від `docker kill`, 0, якщо агент устиг закінчити, 10 від обгортки.
 # Без них 137 іде в класифікатор і стає падінням (OOM, чуже вбивство).
-if stop_requested; then stop_task "під час агента"; fi
-
-# ─── 6. Класифікація ───────────────────────────────────────────────────────
-read -r cls detail < <(logic classify "$rc" "$out")
+# Виняток — 401: його причина (потрібен claude setup-token) мусить потрапити і
+# в журнал, і в сам файл STOP, інакше людина зніме STOP, а наступна задача
+# знову впаде на 401.
+if [[ "$cls" != auth_stop ]] && stop_requested; then stop_task "під час агента"; fi
 case "$cls" in
   auth_stop)
     # STOP усієї черги (ADR-039 §4): потрібен інтерактивний логін. Kill switch —
