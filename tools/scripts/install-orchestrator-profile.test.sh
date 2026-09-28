@@ -433,6 +433,32 @@ for d in 'Bash(git push * main)' 'Bash(git push * main *)' 'Bash(pnpm *discord:a
   rm -f "$p"
 done
 
+# ─── 33. --check попереджає про Claude Code, старіший за 2.1.282 ────────────
+# До 2.1.282 `Bash(git push * :**)` не діє: на T470 CLI 2.1.280 виконав
+# `git push -u origin :feat/x` 3 з 3 (рецензія #141, 2026-09-28). Попередження, не
+# відмова: профіль на місці, а оновлення — дія yurii.
+fake_claude() { # fake_claude <версія|порожньо> → тека зі стабом claude
+  local d
+  d="$(mktemp -d)"
+  if [[ -n "$1" ]]; then printf '#!/bin/sh\necho "%s (Claude Code)"\n' "$1" >"$d/claude"; else printf '#!/bin/sh\nexit 127\n' >"$d/claude"; fi
+  chmod +x "$d/claude"
+  echo "$d"
+}
+setup
+run >/dev/null
+for case in "2.1.280|так" "2.1.281|так" "2.1.282|ні" "2.1.283|ні" "2.2.0|ні" "|ні"; do
+  v="${case%|*}" want="${case#*|}"
+  d="$(fake_claude "$v")"
+  out="$(PATH="$d:$PATH" run --check)"
+  rc=$?
+  warned=ні
+  [[ "$out" == *"Claude Code у терміналі — $v"* && "$out" == *"claude update"* ]] && warned=так
+  [[ $rc == 0 && "$warned" == "$want" ]] && ok "--check, Claude Code «${v:-не запускається}»: попередження — $want, OK лишається" ||
+    bad "--check, Claude Code «${v:-не запускається}»: попередження $warned (треба $want), rc=$rc: $out"
+  rm -rf "$d"
+done
+teardown
+
 # ─── 32. Кінцеве `:*` після `*` чи пробілу — відмова ────────────────────────
 # `Bash(git push * :*)` у першій редакції #141 мав забороняти `git push origin
 # :гілка`, але Claude Code читає кінцеве `:*` як стару форму префікса, і правило не
@@ -516,8 +542,8 @@ allow|gh issue view 5
 allow|pnpm test
 allow|pnpm vitest run packages/cad-engine
 allow|pnpm lint
-allow|git status
-allow|git log --oneline -5
+allow|git add README.md
+allow|git commit -m probe
 allow|bash tools/scripts/install-orchestrator-profile.test.sh
 allow|bash tools/scripts/install-agy-permissions.test.sh
 ask|bash tools/scripts/install-orchestrator-profile.sh --replace
@@ -573,6 +599,7 @@ mutant() { # mutant <назва> <було> <стало> — «було» мус
   mutant '--check мовчить про небезпечне' 'risky="$(danger_in "$LOCAL")"' 'risky=""'
   mutant '--check без профілю мовчить про небезпечне' '  warn_risky >&2' ''
   mutant 'правило-пастка :* проходить' 'if [[ -n "$trap_rules" ]]; then' 'if false; then'
+  mutant 'стара версія Claude Code — мовчки' $'    old_claude\n    exit 0' '    exit 0'
   mutant 'push у main — не обов'"'"'язкова заборона' "  'Bash(git push * main)'" ''
 }
 # Під мутантом (INSTALLER_UNDER_TEST) не запускаємо мутацій удруге; після

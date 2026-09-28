@@ -301,6 +301,20 @@ hook_state() { # друкує: none | noorigin | missing | ok | drift
 # звірити копію, і тоді не змінюємо нічого — ні налаштувань, ні копії.
 hs="$(hook_state)"
 
+# Найстаріша версія Claude Code, на якій профіль діє, як написано. До 2.1.282 правило
+# з `*` одразу після двокрапки не діє жодною формою, тож `Bash(git push * :**)` не
+# забороняє видалення гілки через `:гілка`. Виміряно 2026-09-28 на `echo` з контролем:
+# 2.1.280 і 2.1.281 — ні, 2.1.282 (оркестратор на T470) і 2.1.283 — так. Перевіряємо
+# CLI з PATH: headless-прогони йдуть через нього. Сесію у VS Code міряє
+# `CLAUDE_BIN=… probe-profile-rules.sh`.
+MIN_CLAUDE="2.1.282"
+old_claude() { # друкує попередження, якщо claude з PATH старіший за MIN_CLAUDE
+  local v
+  v="$(claude --version 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')" || return 0
+  [[ -n "$v" && "$(printf '%s\n%s\n' "$MIN_CLAUDE" "$v" | sort -V | head -1)" != "$MIN_CLAUDE" ]] || return 0
+  echo "  ⚠ Claude Code у терміналі — $v, а профіль діє, як написано, з $MIN_CLAUDE: заборона видалення гілки через «:гілка» тут не діє — оновіть: claude update"
+}
+
 if [[ "$MODE" == --check ]]; then
   # Небезпечні дозволи в локальному файлі — сказати, а не мовчати, і за будь-якого
   # результату перевірки: перша редакція називала їх лише тоді, коли профіль уже
@@ -319,6 +333,7 @@ if [[ "$MODE" == --check ]]; then
       '(($l.permissions.allow // []) - ($p[0].permissions.allow // [])) | length')"
     ((extra > 0)) && echo "  понад профіль у локальному файлі дозволів: $extra — прибирає --replace"
     warn_risky
+    old_claude
     exit 0
   fi
   same_as_sets "$merged" "$current" ||
@@ -327,6 +342,7 @@ if [[ "$MODE" == --check ]]; then
   [[ "$hs" == missing ]] && echo "НЕ ВСТАНОВЛЕНО: немає копії хука $HOOK_DST" >&2
   [[ "$hs" == drift ]] && echo "НЕ ВСТАНОВЛЕНО: копія хука $HOOK_DST розійшлась із main на origin — запустіть без --check" >&2
   warn_risky >&2
+  old_claude >&2
   exit 1
 fi
 
