@@ -329,17 +329,17 @@ make_net_tree "$tmproot/n9" '' '#!/usr/bin/env bash
 exec docker run --rm \
   --network host \
   hart-agent:test "$@"'
-assert_exit "10: обгортка з --network host → 1" 1 "$tmproot/n9" "шаблон ролі задає мережу контейнера"
+assert_exit "10: обгортка з --network host → 1" 1 "$tmproot/n9" "шаблон чи файл ролі задає мережу контейнера"
 
 make_net_tree "$tmproot/n10" '' '#!/usr/bin/env bash
 exec docker run --rm --net=a8net hart-agent:test "$@"'
-assert_exit "10: обгортка з --net=a8net → 1" 1 "$tmproot/n10" "шаблон ролі задає мережу контейнера"
+assert_exit "10: обгортка з --net=a8net → 1" 1 "$tmproot/n10" "шаблон чи файл ролі задає мережу контейнера"
 
 make_net_tree "$tmproot/n11" '' '#!/usr/bin/env bash
 OPT_ARGS=()
 OPT_ARGS+=(--network a8net)
 exec docker run --rm "${OPT_ARGS[@]}" hart-agent:test "$@"'
-assert_exit "10: --network через масив прапорців → 1" 1 "$tmproot/n11" "шаблон ролі задає мережу контейнера"
+assert_exit "10: --network через масив прапорців → 1" 1 "$tmproot/n11" "шаблон чи файл ролі задає мережу контейнера"
 
 # Пояснення в обох видах коментарів — не порушення; схожий прапорець — теж.
 make_net_tree "$tmproot/n12" '' '#!/usr/bin/env bash
@@ -363,7 +363,7 @@ assert_exit "10: в обгортці немає docker run → 1" 1 "$tmproot/n1
 make_net_tree "$tmproot/n15"
 printf '%s\n' '#!/usr/bin/env bash' 'docker run --rm --network host alpine true' \
   >"$tmproot/n15/infra/ansible/roles/a8/templates/a8-tick.sh.j2"
-assert_exit "10: --network в іншому шаблоні ролі → 1" 1 "$tmproot/n15" "шаблон ролі задає мережу контейнера"
+assert_exit "10: --network в іншому шаблоні ролі → 1" 1 "$tmproot/n15" "шаблон чи файл ролі задає мережу контейнера"
 
 # Знахідки рецензії PR #147 (agy, Gemini 3.8 Flash) і звірки оркестратора.
 # Повторений прапорець бере останнє значення.
@@ -420,11 +420,11 @@ assert_exit "10: --network host як значення --build-arg → 1" 1 "$tmp
 # bash склеює лапки й \ в одне слово.
 make_net_tree "$tmproot/n22" '' '#!/usr/bin/env bash
 exec docker run --rm --net""work=host hart-agent:test "$@"'
-assert_exit "10: обгортка з --net\"\"work=host → 1" 1 "$tmproot/n22" "шаблон ролі задає мережу контейнера"
+assert_exit "10: обгортка з --net\"\"work=host → 1" 1 "$tmproot/n22" "шаблон чи файл ролі задає мережу контейнера"
 
 make_net_tree "$tmproot/n23" '' '#!/usr/bin/env bash
 exec docker run --rm --net\work=host hart-agent:test "$@"'
-assert_exit "10: обгортка з --net\\work=host → 1" 1 "$tmproot/n23" "шаблон ролі задає мережу контейнера"
+assert_exit "10: обгортка з --net\\work=host → 1" 1 "$tmproot/n23" "шаблон чи файл ролі задає мережу контейнера"
 
 # Jinja-коментар — пояснення, до docker не доходить.
 make_net_tree "$tmproot/n24" '' '#!/usr/bin/env bash
@@ -437,7 +437,7 @@ make_net_tree "$tmproot/n25" '' '#!/usr/bin/env bash
 exec docker run --rm \
   --label " #" --network host \
   hart-agent:test "$@"'
-assert_exit "10: --network після \" #\" у лапках → 1" 1 "$tmproot/n25" "шаблон ролі задає мережу контейнера"
+assert_exit "10: --network після \" #\" у лапках → 1" 1 "$tmproot/n25" "шаблон чи файл ролі задає мережу контейнера"
 
 # Міст фільтра й міст docker.
 DAEMON_BR0='{
@@ -470,6 +470,46 @@ assert_exit "10: обгортку ставить copy з files/ → 1" 1 "$tmpro
 make_net_tree "$tmproot/n31"
 rm "$tmproot/n31/infra/ansible/roles/a8/tasks/runner.yml"
 assert_exit "10: немає задачі, що ставить обгортку → 1" 1 "$tmproot/n31" "не видно, звідки береться обгортка"
+
+# Контрприклади окремої сесії Claude (PR #147, ліміт Opus в agy вичерпано).
+# Блок `|`: кожен рядок — окрема команда; перевіряється кожна збірка, не остання.
+make_net_tree "$tmproot/n32"
+printf '%s\n' '---' '- name: Build all images' '  ansible.builtin.shell: |' \
+  '    docker build -t pre-img:latest /etc/a8/pre' \
+  '    docker build --network host -t hart-agent:test /etc/a8/image' \
+  >"$tmproot/n32/infra/ansible/roles/a8/tasks/extra.yml"
+assert_exit "10: дві збірки в shell: |, перша без мережі → 1" 1 "$tmproot/n32" "docker build без --network host"
+
+# Той самий блок, обидві з мережею хоста — зелено.
+make_net_tree "$tmproot/n33"
+printf '%s\n' '---' '- name: Build all images' '  ansible.builtin.shell: |' \
+  '    docker build --network host -t pre-img:latest /etc/a8/pre' \
+  '    docker build --network host -t hart-agent:test /etc/a8/image' \
+  >"$tmproot/n33/infra/ansible/roles/a8/tasks/extra.yml"
+assert_exit "10: дві збірки в shell: |, обидві з мережею хоста → 0" 0 "$tmproot/n33"
+
+# Шаблони в підтеках і файли ролі теж ідуть на хост.
+make_net_tree "$tmproot/n34"
+mkdir -p "$tmproot/n34/infra/ansible/roles/a8/templates/helpers"
+printf '%s\n' '#!/usr/bin/env bash' 'exec docker run --rm --network host alpine true' \
+  >"$tmproot/n34/infra/ansible/roles/a8/templates/helpers/diag.sh.j2"
+assert_exit "10: --network у templates/helpers/ → 1" 1 "$tmproot/n34" "шаблон чи файл ролі задає мережу контейнера"
+
+make_net_tree "$tmproot/n35"
+printf '%s\n' '#!/usr/bin/env bash' 'exec docker run --rm --net=host alpine true' \
+  >"$tmproot/n35/infra/ansible/roles/a8/files/diag.sh"
+assert_exit "10: --net=host у files/ → 1" 1 "$tmproot/n35" "шаблон чи файл ролі задає мережу контейнера"
+
+# Лапки YAML навколо значення — те саме значення.
+make_net_tree "$tmproot/n36"
+printf '%s\n' "a8_egress_bridge: 'docker0'" >"$tmproot/n36/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "10: a8_egress_bridge: 'docker0' в одинарних лапках → 0" 0 "$tmproot/n36"
+
+# host_vars перекриває defaults і group_vars.
+make_net_tree "$tmproot/n37"
+mkdir -p "$tmproot/n37/infra/ansible/host_vars"
+printf '%s\n' 'a8_egress_bridge: br-custom' >"$tmproot/n37/infra/ansible/host_vars/a8.yml"
+assert_exit "10: host_vars переносить фільтр на br-custom → 1" 1 "$tmproot/n37" "міст egress-фільтра (br-custom)"
 
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
@@ -735,7 +775,7 @@ assert anchor in s, "фікстура застаріла: обгортка бі�
 s = s.replace(anchor, anchor + "  --network host \\\n", 1)
 open(p, 'w').write(s)
 PY
-assert_exit "мутація 19: обгортка запускає агента з --network host → 1" 1 "$mut" "шаблон ролі задає мережу контейнера"
+assert_exit "мутація 19: обгортка запускає агента з --network host → 1" 1 "$mut" "шаблон чи файл ролі задає мережу контейнера"
 cp "$REPO/$RUNNER" "$mut/$RUNNER"
 
 # 20: агент у власній мережі — свій міст br-…, правило на docker0 його не бачить.
@@ -748,7 +788,7 @@ assert anchor in s, "фікстура застаріла: необов'язко�
 s = s.replace(anchor, anchor + "OPT_ARGS+=(--net=a8-agents)\n", 1)
 open(p, 'w').write(s)
 PY
-assert_exit "мутація 20: обгортка додає --net=a8-agents → 1" 1 "$mut" "шаблон ролі задає мережу контейнера"
+assert_exit "мутація 20: обгортка додає --net=a8-agents → 1" 1 "$mut" "шаблон чи файл ролі задає мережу контейнера"
 cp "$REPO/$RUNNER" "$mut/$RUNNER"
 
 # 21: повтор прапорця у збірці — останнє значення bridge.
