@@ -334,46 +334,86 @@ fi
 # контейнер (V6a у контролі й після застосування). Збірку робить роль від root
 # з Dockerfile'а в git, а не агент; allowlist охороняє агента під час роботи.
 #
-# Дві половини, і друга важливіша за першу:
-#   а) кожен `docker build` у задачах ролі несе `--network host` — інакше
-#      увімкнений примус egress ламає збірку;
+# Три частини, і дві останні важливіші за першу:
+#   а) кожен `docker build` у задачах ролі (з підтеками) несе `--network host`,
+#      і це ОСТАННЄ значення `--network` у команді: повторений прапорець бере
+#      останнє (`--network host --network bridge` — це bridge);
 #   б) у шаблонах ролі — насамперед в обгортці a8-run-agent, єдиному місці, де
 #      описано `docker run`, — немає `--network`/`--net` з БУДЬ-яким значенням.
 #      Не лише `host`: мережа з `docker network create` має власний міст br-…,
-#      а правила примусу стоять на `-i docker0`, тож агент на ній вийшов би
-#      з-під фільтра так само, як із `host`.
+#      а правила примусу стоять на одному мості, тож агент на ній вийшов би
+#      з-під фільтра так само, як із `host`. І обгортку ставить саме цей
+#      шаблон — інакше перевірка шаблону нічого б не доводила;
+#   в) міст фільтра (`a8_egress_bridge`) — той самий, куди docker кладе
+#      контейнер без `--network`: docker0, якщо daemon.json не задає "bridge".
+#      Інакше агент без жодного прапорця опинився б поза фільтром.
+# Дірки в а), б) і в) знайшов рецензент (agy, Gemini 3.8 Flash, PR #147):
+# останнє значення, підтеки tasks/, `--net""work`, "bridge" у daemon.json,
+# обгортка не з шаблону.
 # Жодного `docker build` у задачах, обгортки немає або в ній немає `docker run` —
 # теж порушення: інакше інваріант «проходив» би, не виконавшись (той самий клас,
 # що в інваріантах 8 і 9). Збірку модулем замість команди доведеться описати
-# тут заново — це свідомо.
+# тут заново — це свідомо; `docker compose build` прапорця `--network` не має,
+# тож теж червоніє.
 #
 # Задачу читаємо цілою, від `- name:` до наступного: рядкова форма (`command: >-`)
 # і argv-форма (`- docker` / `- build` / `- --network` / `- host`) після
-# склеювання рядків дають той самий текст. Не рахуються коментарі й сама назва
-# задачі: «Build … with --network host» у назві прапорцем не є. Прапорець мусить
-# стояти ПІСЛЯ `build` і до `;`/`&` — тобто в тій самій команді, а не в сусідній.
+# склеювання рядків дають той самий текст. Збірка — `docker … build`, де між ними
+# будь-які слова без `:` (`buildx`, `image`, `compose -f x.yml`); двокрапка —
+# це вже наступний ключ задачі. Не рахуються коментарі й сама назва
+# задачі: «Build … with --network host» у назві прапорцем не є. Команди в одній
+# задачі ділимо на `&&`, `||` і `; ` — прапорець мусить стояти в команді збірки,
+# а не в сусідній. Лапки навколо значення (`--network "host"`) не розпізнаються —
+# це хибне порушення, безпечний бік; пишіть без лапок.
+task_files=()
 if [[ -d "$TASKS" ]]; then
+  while IFS= read -r f; do task_files+=("$f"); done < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+fi
+build_report="BUILDS 0 RUNNERS 0"
+if [[ ${#task_files[@]} -gt 0 ]]; then
   build_report="$(awk '
-    function flush() {
-      if (text ~ / docker( buildx| image)? build( |$)/) {
-        builds++
-        if (text !~ / docker( buildx| image)? build( [^;&]*)? --network[ =]host( |$)/) print "NOHOST " file ":" start
+    function check(seg,   rest, val) {
+      if (seg !~ / docker( [^ :]+)* build( |$)/) return
+      builds++
+      sub(/.* docker( [^ :]+)* build( |$)/, " ", seg)
+      val = ""
+      rest = seg
+      while (match(rest, / --network[ =][^ ]*/)) {
+        val = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
       }
+      sub(/^ --network[ =]/, "", val)
+      if (val != "host") print "NOHOST " file ":" start
+    }
+    function flush(   n, i, segs) {
+      if (text ~ / dest: \/usr\/local\/bin\/a8-run-agent( |$)/) {
+        runners++
+        if (text !~ / src: a8-run-agent\.sh\.j2( |$)/) print "RUNNERSRC " file ":" start
+      }
+      n = split(text, segs, /&&|\|\||; |;$/)
+      for (i = 1; i <= n; i++) check(" " segs[i])
       text = ""
     }
     FNR == 1 { flush() }
     /^[ \t]*- name:/ { flush(); file = FILENAME; start = FNR; next }
     /^[ \t]*#/ { next }
     { line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line); gsub(/[ \t]+/, " ", line); text = text " " line }
-    END { flush(); print "BUILDS " builds + 0 }
-  ' "$TASKS"/*.yml)"
-  while IFS= read -r hit; do
-    [[ -z "$hit" ]] && continue
-    violations+=("docker build без --network host (увімкнений примус egress відріже apt-get у збірці, образу не буде): ${hit#NOHOST }")
-  done < <(grep '^NOHOST ' <<<"$build_report" || true)
-  if [[ "$build_report" == *"BUILDS 0"* ]]; then
-    violations+=("у $TASKS немає жодного 'docker build' — мережу збірки образу агента не перевірено")
-  fi
+    END { flush(); print "BUILDS " builds + 0 " RUNNERS " runners + 0 }
+  ' "${task_files[@]}")"
+fi
+while IFS= read -r hit; do
+  [[ -z "$hit" ]] && continue
+  violations+=("docker build без --network host останнім значенням (увімкнений примус egress відріже apt-get у збірці, образу не буде; пишіть --network host без лапок): ${hit#NOHOST }")
+done < <(grep '^NOHOST ' <<<"$build_report" || true)
+while IFS= read -r hit; do
+  [[ -z "$hit" ]] && continue
+  violations+=("обгортку ставить не шаблон a8-run-agent.sh.j2 — перевірка шаблону нічого не доводить: ${hit#RUNNERSRC }")
+done < <(grep '^RUNNERSRC ' <<<"$build_report" || true)
+if [[ "$build_report" == *"BUILDS 0 "* ]]; then
+  violations+=("у $TASKS немає жодного 'docker build' — мережу збірки образу агента не перевірено")
+fi
+if [[ "$build_report" == *"RUNNERS 0"* ]]; then
+  violations+=("у $TASKS немає задачі з 'dest: /usr/local/bin/a8-run-agent' — не видно, звідки береться обгортка")
 fi
 if [[ ! -f "$RUNNER_TPL" ]]; then
   violations+=("немає обгортки $RUNNER_TPL — мережу контейнера агента не перевірено")
@@ -383,17 +423,39 @@ fi
 if [[ -d "$ROLE/templates" ]]; then
   while IFS= read -r hit; do
     [[ -z "$hit" ]] && continue
-    violations+=("шаблон ролі задає мережу контейнера (агент вийде з-під egress-фільтра на docker0): $hit")
+    violations+=("шаблон ролі задає мережу контейнера (агент вийде з-під egress-фільтра): $hit")
   done < <(
-    # Коментарі в обгортці двох видів: рядок з `#` і `` `# …` `` посеред
-    # команди. Обидва знімаємо, щоб пояснення «чому тут немає --network» не
-    # стало порушенням.
+    # Знімаємо лише те, що точно не дійде до docker: рядок-коментар, `` `# …` ``
+    # посеред команди і Jinja-коментар `{# … #}` в одному рядку. Коментар у
+    # кінці рядка коду НЕ знімаємо: ` #` усередині лапок коментарем не є, і
+    # зрізання ховало б прапорець після нього. Потім прибираємо лапки й `\`:
+    # bash склеює `--net""work` і `--net\work` у `--network`.
     for f in "$ROLE/templates"/*; do
       [[ -f "$f" ]] || continue
-      sed -E -e 's/`#[^`]*`//g' -e 's/(^|[[:space:]])#.*$//' "$f" |
+      sed -E -e 's/^[[:space:]]*#.*$//' -e 's/`#[^`]*`//g' -e 's/\{#.*#\}//g' -e "s/[\"'\\\\]//g" "$f" |
         grep -nE -e '--net(work)?([[:space:]=]|$)' | sed "s|^|$f:|" || true
     done
   )
+fi
+DAEMON_TPL="$ROLE/templates/daemon.json.j2"
+docker_bridge="docker0"
+if [[ -f "$DAEMON_TPL" ]] && grep -q '"bridge"' "$DAEMON_TPL"; then
+  docker_bridge="$(sed -nE 's/.*"bridge"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$DAEMON_TPL" | tail -1)"
+  docker_bridge="${docker_bridge:-<не розібрано>}"
+fi
+egress_sources=()
+for f in "$ROLE/defaults/main.yml" "$ROOT/infra/ansible/group_vars/a8.yml"; do
+  [[ -f "$f" ]] && egress_sources+=("$f")
+done
+egress_bridge=""
+if [[ ${#egress_sources[@]} -gt 0 ]]; then
+  # group_vars іде другим і перекриває defaults — як і в Ansible.
+  egress_bridge="$(sed -nE 's/^a8_egress_bridge:[[:space:]]*"?([^"#[:space:]]*)"?.*/\1/p' "${egress_sources[@]}" | tail -1)"
+fi
+if [[ -z "$egress_bridge" ]]; then
+  violations+=("a8_egress_bridge не знайдено ні в defaults, ні в group_vars/a8.yml — не видно, на якому мості стоїть egress-фільтр")
+elif [[ "$egress_bridge" != "$docker_bridge" ]]; then
+  violations+=("міст egress-фільтра ($egress_bridge) не той, куди docker кладе контейнер без --network ($docker_bridge, daemon.json.j2) — агент поза фільтром")
 fi
 
 if [[ ${#violations[@]} -gt 0 ]]; then
