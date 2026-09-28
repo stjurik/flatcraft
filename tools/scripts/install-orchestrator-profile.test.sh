@@ -405,6 +405,129 @@ out="$(run --check)"
   bad "--check промовчав про небезпечний дозвіл: $out"
 teardown
 
+# ─── 29. --check називає небезпечне й тоді, коли профіль встановлено не весь ─
+# Рецензія #141 (повторна, 2026-09-28): вихід «НЕ ВСТАНОВЛЕНО» стояв раніше за
+# попередження, і найгірший випадок — старий файл без профілю, зате з `git *` —
+# мовчав.
+setup
+echo '{"permissions":{"allow":["Bash(git *)"]}}' >"$LOCAL"
+out="$(run --check)"
+[[ $? == 1 && "$out" == *"НЕ ВСТАНОВЛЕНО"* && "$out" == *"⚠"* && "$out" == *"Bash(git *)"* ]] &&
+  ok "--check: профіль не встановлено — «НЕ ВСТАНОВЛЕНО» і небезпечний дозвіл названо" ||
+  bad "--check без профілю промовчав про небезпечний дозвіл: $out"
+rm -f "$LOCAL"
+out="$(run --check)"
+[[ $? == 1 && "$out" != *"⚠"* ]] && ok "--check без локального файла — «НЕ ВСТАНОВЛЕНО», без падіння й без ⚠" ||
+  bad "--check без локального файла: $out"
+teardown
+
+# ─── 30. Заборони на push у main і живий Discord — обов'язкові ─────────────
+for d in 'Bash(git push * main)' 'Bash(git push * main *)' 'Bash(pnpm *discord:apply*)' 'Bash(pnpm * apply*)'; do
+  p="$(mktemp)"
+  jq --arg d "$d" '.permissions.deny -= [$d]' "$REAL_PROFILE" >"$p"
+  setup "$p"
+  out="$(run)"
+  [[ $? == 1 && "$out" == *"$d"* && ! -f "$LOCAL" ]] && ok "без заборони $d — відмова" ||
+    bad "профіль без заборони $d пройшов: $out"
+  teardown
+  rm -f "$p"
+done
+
+# ─── 32. Кінцеве `:*` після `*` чи пробілу — відмова ────────────────────────
+# `Bash(git push * :*)` у першій редакції #141 мав забороняти `git push origin
+# :гілка`, але Claude Code читає кінцеве `:*` як стару форму префікса, і правило не
+# діяло (перевірено справжнім Claude Code 2.1.283, 2026-09-28).
+for rule in 'Bash(git push * :*)' 'Bash(git push *:*)'; do
+  p="$(mktemp)"
+  jq --arg r "$rule" '.permissions.deny += [$r]' "$REAL_PROFILE" >"$p"
+  setup "$p"
+  out="$(run)"
+  [[ $? == 1 && "$out" == *"$rule"* && "$out" == *"стару форму"* && ! -f "$LOCAL" ]] &&
+    ok "правило-пастка $rule — відмова з поясненням" || bad "правило-пастка $rule пройшло: $out"
+  teardown
+  rm -f "$p"
+done
+
+# ─── 31. Зразки команд проти профілю: що заборонено, що проходить без кліку ─
+# Рецензія #141 знайшла дві форми, які deny пропускали: `git push -u origin main`
+# і `pnpm run discord:apply`. Тут команди перевіряються проти правил профілю за
+# документацією Claude Code: правила в порядку deny → ask → allow; `*` — будь-яка
+# послідовність будь-де; старе `:*` дорівнює ` *`; хвостове ` *` пропускає й саму
+# команду без аргументів. Це ЕМУЛЯЦІЯ, а не справжній механізм Claude Code:
+# обгортки (timeout, nice…) і складені команди (&&, |) вона не розбирає, тож
+# зразки — прості команди. Ті самі зразки на справжньому Claude Code перевіряє
+# tools/scripts/probe-profile-rules.sh (вручну, не в CI; 2026-09-28, 2.1.283 — 43/43).
+# Зразок додається рядком «очікування|команда» — обидва читають його звідси.
+rule_matches() { # rule_matches <Bash(правило)> <команда>
+  local p="${1#Bash(}" cmd="$2"
+  p="${p%)}"
+  [[ "$p" == *':*' ]] && p="${p%:*} *"
+  # shellcheck disable=SC2053 # правило навмисно без лапок — це шаблон
+  if [[ "$p" == *' *' && "$cmd" == ${p%' *'} ]]; then return 0; fi
+  # shellcheck disable=SC2053
+  [[ "$cmd" == $p ]]
+}
+verdict() { # verdict <команда> → deny | ask | allow | питає
+  local kind r
+  for kind in deny ask allow; do
+    while IFS= read -r r; do
+      rule_matches "$r" "$1" && {
+        echo "$kind"
+        return
+      }
+    done < <(jq -r --arg k "$kind" '.permissions[$k] // [] | .[] | select(startswith("Bash("))' "$REAL_PROFILE")
+  done
+  echo питає
+}
+while IFS='|' read -r want cmd; do
+  got="$(verdict "$cmd")"
+  [[ "$got" == "$want" ]] && ok "$want: $cmd" || bad "очікував $want, вийшло $got: $cmd"
+done <<'EOF'
+deny|git push -u origin main
+deny|git push origin main
+deny|git push --set-upstream origin main
+deny|git push -u origin main --tags
+deny|git push -u origin HEAD:main
+deny|git push -u origin refs/heads/main
+deny|git push -u origin +feat/x
+deny|git push --force origin feat/x
+deny|git push -u origin :feat/x
+deny|pnpm discord:apply
+deny|pnpm run discord:apply
+deny|pnpm --filter @flatcraft/discord-tools apply
+deny|pnpm -F @flatcraft/discord-tools apply
+deny|pnpm --filter=@flatcraft/discord-tools apply
+deny|pnpm -C infra/discord apply
+deny|pnpm --dir infra/discord run apply
+deny|npx tsx infra/discord/scripts/apply.ts
+deny|gh issue edit 5 --add-label ai-approved
+deny|gh pr edit 5 --add-label ai-approved
+deny|gh issue create --title x --label ai-approved
+deny|gh -R stjurik/flatcraft issue edit 5 --add-label ai-approved
+deny|gh api repos/stjurik/flatcraft/issues/5/labels -f labels[]=ai-approved
+deny|gh pr merge 5
+allow|git push -u origin feat/x
+allow|git push -u origin feat/main
+allow|git push -u origin main-notes
+allow|git push -u origin HEAD:feat/x
+allow|gh issue list --label ai-approved
+allow|gh pr list --label ai-approved
+allow|gh issue view 5
+allow|pnpm test
+allow|pnpm vitest run packages/cad-engine
+allow|pnpm lint
+allow|git status
+allow|git log --oneline -5
+allow|bash tools/scripts/install-orchestrator-profile.test.sh
+allow|bash tools/scripts/install-agy-permissions.test.sh
+ask|bash tools/scripts/install-orchestrator-profile.sh --replace
+ask|bash tools/scripts/install-agy-permissions.sh
+ask|tools/scripts/install-orchestrator-profile.sh
+allow|bash tools/scripts/measure-deny.test.sh
+ask|bash tools/scripts/measure-trust.sh
+питає|pnpm --filter @flatcraft/discord-tools snapshot
+EOF
+
 # ─── 27. Жодного `| grep -q` під pipefail ──────────────────────────────────
 # Регресія 2026-09-27: `printf … | grep -qxF` у danger_in зрідка казав «не знайдено»
 # на знайденому (grep -q виходить першим → SIGPIPE у printf → pipefail), і
@@ -448,6 +571,9 @@ mutant() { # mutant <назва> <було> <стало> — «було» мус
   mutant '~/ не розгортається' 'def expand: map(if startswith("~/") then $home + .[1:] else . end);' 'def expand: .;'
   mutant 'зайві аргументи мовчки приймаються' 'if (($# > 1)) || [[' 'if false && [['
   mutant '--check мовчить про небезпечне' 'risky="$(danger_in "$LOCAL")"' 'risky=""'
+  mutant '--check без профілю мовчить про небезпечне' '  warn_risky >&2' ''
+  mutant 'правило-пастка :* проходить' 'if [[ -n "$trap_rules" ]]; then' 'if false; then'
+  mutant 'push у main — не обов'"'"'язкова заборона' "  'Bash(git push * main)'" ''
 }
 # Під мутантом (INSTALLER_UNDER_TEST) не запускаємо мутацій удруге; після
 # провалу набору вони теж нічого не доведуть — «вбиті» були б і без мутації.

@@ -104,6 +104,14 @@ REQUIRED_DENY=(
   'Edit(packages/cad-engine/data/bend-machine-esi.yaml)'
   'Edit(~/.flatcraft/**)'
   'Bash(agy *--dangerously-skip-permissions*)'
+  # Push у main найчастішою формою: `git push -u origin main` збігається з allow
+  # `git push -u origin *`, а захист гілки на GitHub адмінський токен обходить
+  # (enforce_admins вимкнено, замір №7). Рецензія #141, 2026-09-28.
+  'Bash(git push * main)'
+  'Bash(git push * main *)'
+  # Живий Discord (ADR-023): і через кореневий скрипт, і через пакет напряму.
+  'Bash(pnpm *discord:apply*)'
+  'Bash(pnpm * apply*)'
 )
 
 # Правила з `*` — лише ПЕРЕВІРЕНІ форми. Шаблон ловить відомі небезпечні форми,
@@ -188,6 +196,19 @@ done
 if ((${#missing[@]})); then
   echo "відмова: у профілі бракує обов'язкових заборон — локальний файл не змінено:" >&2
   printf '  ✗ %s\n' "${missing[@]}" >&2
+  exit 1
+fi
+
+# Кінцеве `:*` Claude Code читає як стару форму «префікс і будь-які аргументи», а не
+# як «двокрапка, далі що завгодно». Тож `Bash(git push * :*)` не забороняв
+# `git push origin :гілка` — перевірено справжнім Claude Code 2.1.283 2026-09-28
+# (`Bash(echo * :*)` пропустив `echo a :b`, а `Bash(echo * :**)` — ні). Стара форма
+# має сенс лише після простого префікса; `*` чи пробіл перед кінцевим `:*` — пастка.
+trap_rules="$(jq -r '.permissions | (.allow // []) + (.ask // []) + (.deny // []) | .[]
+  | select(test("^Bash\\(.*(\\*|\\s):\\*\\)$"))' "$PROFILE")"
+if [[ -n "$trap_rules" ]]; then
+  echo "відмова: кінцеве :* після * чи пробілу Claude Code читає як стару форму префікса, а не як двокрапку — правило не діє, як написано (пишіть :** ):" >&2
+  printf '  ✗ %s\n' "$trap_rules" >&2
   exit 1
 fi
 
@@ -281,16 +302,23 @@ hook_state() { # друкує: none | noorigin | missing | ok | drift
 hs="$(hook_state)"
 
 if [[ "$MODE" == --check ]]; then
+  # Небезпечні дозволи в локальному файлі — сказати, а не мовчати, і за будь-якого
+  # результату перевірки: перша редакція називала їх лише тоді, коли профіль уже
+  # встановлено повністю (рецензія #141).
+  risky=""
+  [[ -f "$LOCAL" ]] && risky="$(danger_in "$LOCAL")"
+  warn_risky() {
+    [[ -n "$risky" ]] || return 0
+    echo "  ⚠ у локальному файлі дозволи, що пропускають довільні дії — прибирає --replace:"
+    sed 's/^/    • /' <<<"$risky"
+  }
   if same_as_sets "$merged" "$current" && [[ "$hs" == ok || "$hs" == none ]]; then
     echo "OK: профіль оркестратора вже в $LOCAL"
     # Інформація, не помилка: скільки дозволів накопичилось понад профіль.
     extra="$(jq -n --argjson l "$current" --slurpfile p "$PROFILE" \
       '(($l.permissions.allow // []) - ($p[0].permissions.allow // [])) | length')"
     ((extra > 0)) && echo "  понад профіль у локальному файлі дозволів: $extra — прибирає --replace"
-    # Небезпечні дозволи в локальному файлі — теж сказати, а не мовчати (рецензія #141).
-    risky="$(danger_in "$LOCAL")"
-    [[ -n "$risky" ]] && echo "  ⚠ у локальному файлі дозволи, що пропускають довільні дії — прибирає --replace:" &&
-      sed 's/^/    • /' <<<"$risky"
+    warn_risky
     exit 0
   fi
   same_as_sets "$merged" "$current" ||
@@ -298,6 +326,7 @@ if [[ "$MODE" == --check ]]; then
   [[ "$hs" == noorigin ]] && echo "НЕ ПЕРЕВІРЕНО: немає зв'язку з origin — копію хука нема з чим звірити" >&2
   [[ "$hs" == missing ]] && echo "НЕ ВСТАНОВЛЕНО: немає копії хука $HOOK_DST" >&2
   [[ "$hs" == drift ]] && echo "НЕ ВСТАНОВЛЕНО: копія хука $HOOK_DST розійшлась із main на origin — запустіть без --check" >&2
+  warn_risky >&2
   exit 1
 fi
 
