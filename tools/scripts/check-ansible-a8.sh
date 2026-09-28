@@ -324,6 +324,78 @@ else
   fi
 fi
 
+# Інваріант 10 — образ збирається в мережі хоста, агент працює без неї.
+#
+# ЧОМУ. Egress-allowlist — це DROP у ланцюзі DOCKER-USER для всього, що йде з
+# мосту docker0 не до адрес набору. BuildKit у dockerd виконує RUN-кроки збірки
+# на тому самому мості, тож фільтр, що охороняє агента, різав і збірку образу:
+# 2026-09-28 `apt-get update` з agent.Dockerfile не дістав deb.debian.org
+# (connection timed out), образу не стало, і впали всі перевірки, що запускають
+# контейнер (V6a у контролі й після застосування). Збірку робить роль від root
+# з Dockerfile'а в git, а не агент; allowlist охороняє агента під час роботи.
+#
+# Дві половини, і друга важливіша за першу:
+#   а) кожен `docker build` у задачах ролі несе `--network host` — інакше
+#      увімкнений примус egress ламає збірку;
+#   б) у шаблонах ролі — насамперед в обгортці a8-run-agent, єдиному місці, де
+#      описано `docker run`, — немає `--network`/`--net` з БУДЬ-яким значенням.
+#      Не лише `host`: мережа з `docker network create` має власний міст br-…,
+#      а правила примусу стоять на `-i docker0`, тож агент на ній вийшов би
+#      з-під фільтра так само, як із `host`.
+# Жодного `docker build` у задачах, обгортки немає або в ній немає `docker run` —
+# теж порушення: інакше інваріант «проходив» би, не виконавшись (той самий клас,
+# що в інваріантах 8 і 9). Збірку модулем замість команди доведеться описати
+# тут заново — це свідомо.
+#
+# Задачу читаємо цілою, від `- name:` до наступного: рядкова форма (`command: >-`)
+# і argv-форма (`- docker` / `- build` / `- --network` / `- host`) після
+# склеювання рядків дають той самий текст. Не рахуються коментарі й сама назва
+# задачі: «Build … with --network host» у назві прапорцем не є. Прапорець мусить
+# стояти ПІСЛЯ `build` і до `;`/`&` — тобто в тій самій команді, а не в сусідній.
+if [[ -d "$TASKS" ]]; then
+  build_report="$(awk '
+    function flush() {
+      if (text ~ / docker( buildx| image)? build( |$)/) {
+        builds++
+        if (text !~ / docker( buildx| image)? build( [^;&]*)? --network[ =]host( |$)/) print "NOHOST " file ":" start
+      }
+      text = ""
+    }
+    FNR == 1 { flush() }
+    /^[ \t]*- name:/ { flush(); file = FILENAME; start = FNR; next }
+    /^[ \t]*#/ { next }
+    { line = $0; sub(/^[ \t]*(-[ \t]+)?/, "", line); gsub(/[ \t]+/, " ", line); text = text " " line }
+    END { flush(); print "BUILDS " builds + 0 }
+  ' "$TASKS"/*.yml)"
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("docker build без --network host (увімкнений примус egress відріже apt-get у збірці, образу не буде): ${hit#NOHOST }")
+  done < <(grep '^NOHOST ' <<<"$build_report" || true)
+  if [[ "$build_report" == *"BUILDS 0"* ]]; then
+    violations+=("у $TASKS немає жодного 'docker build' — мережу збірки образу агента не перевірено")
+  fi
+fi
+if [[ ! -f "$RUNNER_TPL" ]]; then
+  violations+=("немає обгортки $RUNNER_TPL — мережу контейнера агента не перевірено")
+elif ! grep -qE '^[^#]*docker[[:space:]]+run([[:space:]]|$)' "$RUNNER_TPL"; then
+  violations+=("в обгортці $RUNNER_TPL не знайдено 'docker run' — мережу контейнера агента не перевірено")
+fi
+if [[ -d "$ROLE/templates" ]]; then
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("шаблон ролі задає мережу контейнера (агент вийде з-під egress-фільтра на docker0): $hit")
+  done < <(
+    # Коментарі в обгортці двох видів: рядок з `#` і `` `# …` `` посеред
+    # команди. Обидва знімаємо, щоб пояснення «чому тут немає --network» не
+    # стало порушенням.
+    for f in "$ROLE/templates"/*; do
+      [[ -f "$f" ]] || continue
+      sed -E -e 's/`#[^`]*`//g' -e 's/(^|[[:space:]])#.*$//' "$f" |
+        grep -nE -e '--net(work)?([[:space:]=]|$)' | sed "s|^|$f:|" || true
+    done
+  )
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -334,4 +406,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network"
