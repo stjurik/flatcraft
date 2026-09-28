@@ -43,6 +43,7 @@ done <<'EOF'
 дозволи й безпека|tools/scripts/install-orchestrator-profile.sh
 дозволи й безпека|tools/scripts/check-forbidden-paths.test.sh
 дозволи й безпека|tools/scripts/claude-review-session.sh
+дозволи й безпека|tools/scripts/probe-profile-rules.sh
 дозволи й безпека|tools/scripts/review-class.sh
 дозволи й безпека|tools/scripts/agy-opus-budget.sh
 дозволи й безпека|infra/ansible/roles/firewall/tasks/main.yml

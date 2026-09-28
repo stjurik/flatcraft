@@ -37,6 +37,7 @@ RULES=(
   'дозволи й безпека|tools/scripts/measure-trust*'
   'дозволи й безпека|tools/scripts/trust-worktree*'
   'дозволи й безпека|tools/scripts/claude-review-session*'
+  'дозволи й безпека|tools/scripts/probe-profile-rules*'
   # Сам механізм рецензії: PR, що його послаблює, не має проходити з однією рецензією.
   'дозволи й безпека|tools/scripts/review-class*'
   'дозволи й безпека|tools/scripts/agy-opus-budget*'
