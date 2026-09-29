@@ -6,6 +6,39 @@
 
 ---
 
+## Run 7 Етап 2 — z_bracket на Template Registry (2026-08-07)
+
+- **Завершено** (2026-08-07, ADR-033, `docs/12` §6 PR 6, трек T2): **PR #101**
+  (коміт злиття `884eef4`) — четвертий із шести шаблонів переїхав на Template
+  Registry; у `TEMPLATE_REGISTRY` тепер 4/6 (`perforated_panel`,
+  `corner_angle`, `l_bracket`, `z_bracket`).
+- **Зміни:** `packages/templates/src/z-bracket/index.ts` — `TemplateDefinition`
+  з `kind:"extrude"` (той самий `SceneBuilderKind`, що ввів `l_bracket`):
+  Z-профіль — чистий 2D-контур із 3 секцій і 2 внутрішніх гибів, тому generic
+  `ExtrudeScene` покриває його без окремої сцени. `buildShapeCommands`
+  перенесено в `packages/cad-engine/src/geometry/z-bracket.ts`, react-free
+  (conformance §3.5). Видалено `z-bracket-{editor,studio,viewport}.tsx` і
+  `packages/ui/src/3d-viewport/z-bracket-scene.tsx` — на відміну від
+  `l_bracket`, чия сцена лишилась через незалежного споживача
+  `hero-loop-demo` (issue #93), у `z-bracket-scene.tsx` споживачів не було, і
+  DoD `docs/12` (`~~<slug>-scene.tsx~~`) виконано повністю. `geometry.ts` —
+  мінус 93 рядки z-специфічної геометрії. Реєстри TS і Python оновлено, разом
+  з регенерованим `ts_registry_slugs.json` (паритет 4/4).
+- Напрям гибів `[down, up]` (CLAUDE.md §7, ADR-019) лишається в definition
+  без змін.
+- **Тести** (усі на одному дереві): typecheck ×4 зелені; unit 269
+  (cad-engine 71, templates 30, ui 96, web 72); pytest 344; Playwright e2e
+  129 (у т.ч. `z-bracket.spec.ts`, `registry.spec.ts` smoke, bend-matrix);
+  eslint ×4 + next lint; ruff check/format + mypy --strict (58 файлів);
+  export-registry regen без дифу.
+- **Походження:** джерело роботи — WIP-коміт `0dcc747` у гілці
+  `feat/migrate-z-bracket` (Master Run 13). Гілку перебудовано від свіжого
+  `origin/main`: tree-hash ідентичний верифікованому. Сама WIP-гілка до
+  `main` НЕ влита — міграція пройшла окремим PR, гілка лишається осторонь.
+- _Запис у `docs/13` — борг (issue #78)._
+
+---
+
 ## Master Run 10+11 — перший наскрізний прохід ai-bugfix конвеєра (2026-08-03)
 
 - **Завершено** (2026-08-03, ADR-035, трек T1): конвеєр «issue → тріаж у CI → approve → фікс у CI → незалежне рев'ю → merge» уперше відпрацював від початку до кінця **без жодної локальної Claude Code-сесії на написання коду**. Acceptance-кейс — issue **#84** (посилання «Telegram» у футері вело на заглушку `/soon`, канал не існує). Ланцюг: тріаж-прогін `30616535686` (2026-07-31 08:30, перший `success` за всю історію workflow) → лейбл `ai-approved` від yurii → фікс-прогін `30700893565` (2026-08-01 13:01) → draft PR **#97** → мультиагентне рев'ю → merge `d4c81be` (2026-08-03 10:07) → деплой `30804539176` → перевірка на staging: `Telegram` у HTML `/` і `/en` — 0 збігів, GitHub/Discord/`/soon` на місці.
