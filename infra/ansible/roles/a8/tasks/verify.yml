@@ -847,9 +847,15 @@
       - &a8_egress_probe |
         set -o pipefail
         echo @@PROBE_START@@
-        getent ahostsv4 {{ a8_egress_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 > /tmp/a8-probe-ip && grep -q . /tmp/a8-probe-ip && echo @@DNS4_OK@@ && sed 's/.*/@@IP=&@@/' /tmp/a8-probe-ip || echo @@DNS4_FAIL@@
-        grep -q . /tmp/a8-probe-ip && xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/80" && exit 0; done; exit 1' < /tmp/a8-probe-ip && echo @@EGRESS_REACHED@@ || echo @@EGRESS_BLOCKED@@
-        getent ahostsv4 {{ a8_egress_allowed_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 | xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/443" && exit 0; done; exit 1' && echo @@ALLOWED_REACHED@@ || echo @@ALLOWED_BLOCKED@@
+        getent ahostsv4 {{ a8_egress_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 > /tmp/a8-probe-ip \
+          && grep -q . /tmp/a8-probe-ip && echo @@DNS4_OK@@ && sed 's/.*/@@IP=&@@/' /tmp/a8-probe-ip \
+          || echo @@DNS4_FAIL@@
+        grep -q . /tmp/a8-probe-ip \
+          && xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/80" && exit 0; done; exit 1' < /tmp/a8-probe-ip \
+          && echo @@EGRESS_REACHED@@ || echo @@EGRESS_BLOCKED@@
+        getent ahostsv4 {{ a8_egress_allowed_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 \
+          | xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/443" && exit 0; done; exit 1' \
+          && echo @@ALLOWED_REACHED@@ || echo @@ALLOWED_BLOCKED@@
         grep -qE '^[0-9a-f]+ [0-9a-f]+ [0-9a-f]+ 00 ' /proc/net/if_inet6 2>/dev/null && echo @@GLOBAL_IPV6@@ || echo @@NO_GLOBAL_IPV6@@
   register: a8_v_egress_agent
   changed_when: false
@@ -937,7 +943,8 @@
       if '@@EGRESS_REACHED@@' in a8_v_egress_agent.stdout else
       ('Агент має глобальну IPv6-адресу — фільтр лише IPv4, її ніщо не фільтрує'
       if '@@GLOBAL_IPV6@@' in a8_v_egress_agent.stdout else
-      ('Агент не дістав навіть дозволену ' + a8_egress_allowed_probe_host + ' — шлях через docker0 чи NAT зламано, тож BLOCKED не доводить фільтра: вимір недійсний'
+      ('Агент не дістав навіть дозволену ' + a8_egress_allowed_probe_host
+      + ' — шлях через docker0 чи NAT зламано, тож BLOCKED не доводить фільтра: вимір недійсний'
       if '@@ALLOWED_REACHED@@' not in a8_v_egress_agent.stdout else
       'Агент не отримав IPv4-адреси цілі від DNS — вимір недійсний (DNS контейнера мусить бути в наборі, V9b)'))) }}.
       stdout={{ a8_v_egress_agent.stdout | replace('\n', ' ') }}, rc={{ a8_v_egress_agent.rc }}
