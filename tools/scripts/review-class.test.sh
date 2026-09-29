@@ -74,6 +74,7 @@ CI|tools/scripts/prove-red-before-green.sh
 правила й контракт|docs/promts/orchestrator-autonomy.md
 правила й контракт|docs/15_LLM_PROMPTS.md
 правила й контракт|docs/promts/ai-review-local.md
+правила й контракт|tools/scripts/agy-stats-summary.sh
 інфраструктура|infra/ansible/roles/base/tasks/main.yml
 інфраструктура|infra/ansible/roles/backups/tasks/main.yml
 інфраструктура|infra/ansible/site.yml
@@ -113,7 +114,7 @@ expect "роль A8 — «роль і демон A8», не «інфрастру
 expect "перенесення файла з .claude/ — ризиковий за старим шляхом" 0 \
   $'.claude/settings.a8.json\ndocs/old-settings.json\n' "клас: ризиковий" ".claude/settings.a8.json"
 
-# ─── 5b. Журнал іспиту: дописати — звичайно, змінити старе — ризиково ───────
+# ─── 5b. Журнал іспиту: дописати рядок — звичайно, решта — ризиково ────────
 # Тимчасовий git: база з журналом і гілки з різними змінами. Скрипт звіряє
 # merge-base(REVIEW_CLASS_BASE, REVIEW_CLASS_HEAD) з REVIEW_CLASS_HEAD.
 J=docs/promts/inputs/agy-stats.md
@@ -143,6 +144,9 @@ branch edit-row 's/\*\*1\*\*/**0**/'
 branch edit-rule 's/не нижче 50%/не нижче 80%/'
 branch edit-escaped 's/рецензія #1 \\\| diff/рецензія #1 \\| інше/'
 branch removed --rm
+# Нове правило не переписує старе, а дописується — старі рядки всі на місці.
+branch add-rule 's/(> Вердикт[^\n]*\n)/$1>\n> Виклики з позначкою «пробний» у вікно не йдуть.\n/'
+branch add-note 's/\z/\nПримітка: рецензію #2 не рахувати.\n/'
 "${GIT[@]}" switch -q --orphan fresh && mkdir -p "$G/docs/promts/inputs" && echo "| 2026-09-29 | x | y | **0** |" >"$G/$J" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm fresh
 journal_case() { # journal_case <назва> <гілка> <база> <очікуваний клас>
@@ -156,10 +160,12 @@ journal_case "змінено вигадки в старому рядку" edit-r
 journal_case "змінено правило в шапці (50% → 80%)" edit-rule base ризиковий
 journal_case "змінено клітинку з \\| усередині" edit-escaped base ризиковий
 journal_case "журнал видалено" removed base ризиковий
+journal_case "дописано нове правило в шапку" add-rule base ризиковий
+journal_case "дописано примітку під таблицею" add-note base ризиковий
 journal_case "журналу в базі не було" fresh fresh звичайний
 journal_case "базу не знайдено — сумнів проти PR" append немає-такої-гілки ризиковий
 out="$(cd "$G" && printf '%s\n' "$J" | REVIEW_CLASS_BASE=base REVIEW_CLASS_HEAD=edit-row bash "$SCRIPT")"
-[[ "$out" == *"правила й контракт: $J — змінено зміст старих рядків"* ]] &&
+[[ "$out" == *"правила й контракт: $J — змінено старий зміст журналу іспиту"* ]] &&
   ok "журнал: у виводі — категорія і причина" || bad "журнал: без причини: $out"
 rm -rf "$G"
 
@@ -199,6 +205,9 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "журнал не перевіряється" '    journal_rows_changed &&' '    false &&'
   mutate "без бази — «звичайний»" 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1'
   mutate "вирівнювання — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' ''
+  mutate "дописаний абзац — «звичайний»" "| awk '!/^\\|/')\"" "| awk '0')\""
+  mutate "дописаний рядок таблиці — теж «ризиковий»" "| awk '!/^\\|/')\"" "| cat)\""
+  mutate "agy-stats-summary не ризиковий" "  'правила й контракт|tools/scripts/agy-stats-summary*'" ''
   mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$JOURNAL" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$JOURNAL" 2>/dev/null)" || return 1'
 fi
 
