@@ -484,6 +484,66 @@ while IFS= read -r hit; do
   fi
 done <<<"$egress_bridges"
 
+# Інваріант 11 — `uv sync` для агента ставить те саме, що CI.
+#
+# ЧОМУ. CI ставить `uv sync --extra dev` (.github/workflows/ci.yml): pytest, mypy
+# і ruff живуть в extra `dev` (workers/cad/pyproject.toml). Тік, V18c і
+# autorun.sh робили голий `uv sync`, тож у контейнері агента pytest не було.
+# Застосування 2026-09-29: V18e — rc=2, «Failed to spawn: `pytest` … No such
+# file or directory». З тієї самої причини впав би оракул кожної задачі в
+# workers/cad і pre-commit на кожному Python-коміті (lefthook: `uv run ruff`,
+# `uv run mypy`).
+#
+# Еталон — рядок `uv sync` у CI, а не список, переписаний сюди: нове extra в CI
+# без правки ролі червонить інваріант. Немає еталона або жодного `uv sync` у
+# ролі — теж порушення (той самий клас, що в інваріантах 8–10).
+#
+# Шукаємо в задачах і шаблонах ролі та в tools/scripts/autorun.sh (той самий
+# крок для локального автономного прогону). Командою вважаємо `uv sync`, за
+# яким іде прапорець, кінець рядка чи межа команди (`)`, лапка, `;`, `&`, `|`);
+# проза на кшталт «uv sync падає» чи «uv sync: пройшов» командою не є.
+# Коментарі (рядок з `#` і `` `# …` `` посеред команди) не рахуються.
+CI_WF="$ROOT/.github/workflows/ci.yml"
+ci_line=""
+[[ -f "$CI_WF" ]] && ci_line="$(grep -E '^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*uv sync' "$CI_WF" | head -1 || true)"
+if [[ -z "$ci_line" ]]; then
+  violations+=("у $CI_WF немає кроку 'run: uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
+else
+  ci_extras="$(grep -oE -- '--extra[= ][^ ]+|--all-extras' <<<"$ci_line" | sed -E 's/^--extra=/--extra /' | sort -u || true)"
+  uv_files=()
+  while IFS= read -r f; do uv_files+=("$f"); done < <(
+    {
+      find "$ROLE/tasks" "$ROLE/templates" -type f 2>/dev/null
+      [[ -f "$ROOT/tools/scripts/autorun.sh" ]] && echo "$ROOT/tools/scripts/autorun.sh"
+    } | sort
+  )
+  uv_hits=0
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    uv_hits=$((uv_hits + 1))
+    cmd="$(sed -E "s/.*uv sync//; s/[)'\";&|].*//" <<<"$hit")"
+    while IFS= read -r req; do
+      [[ -z "$req" ]] && continue
+      if [[ "$req" == --all-extras ]]; then
+        [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
+      else
+        name="${req#--extra }"
+        [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
+        [[ "$cmd" =~ (^|[[:space:]])--extra[[:space:]=]$name([[:space:]]|$) ]] && continue
+      fi
+      violations+=("uv sync без '$req', який ставить CI (без нього в контейнері немає pytest/mypy/ruff — оракул і pre-commit Python падають): ${hit%%:*}:$(cut -d: -f2 <<<"$hit")")
+    done <<<"$ci_extras"
+  done < <(
+    for f in "${uv_files[@]}"; do
+      sed -E -e 's/^[[:space:]]*#.*$//' -e 's/`#[^`]*`//g' "$f" |
+        grep -nE "uv sync([[:space:]]+-|[[:space:]]*(\$|[)'\";&|]))" | sed "s|^|$f:|" || true
+    done
+  )
+  if ((uv_hits == 0)); then
+    violations+=("у ролі A8 і autorun.sh не знайдено жодного 'uv sync' — паритет із CI не перевірено")
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -494,4 +554,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI"

@@ -712,7 +712,8 @@
       changed_when: false
 
     - name: V18c — uv sync, then the registry test, inside the container
-      # Та сама послідовність, що в тіку (`cd workers/cad && uv sync`), і
+      # Та сама послідовність, що в тіку (`cd workers/cad && uv sync --extra dev`,
+      # як у CI: без `dev` немає pytest — 2026-09-29 «Failed to spawn: pytest»), і
       # дослівно оракул із handoff. SYNC_OK розділяє два можливі джерела
       # ненульового коду: без маркера падіння `uv sync` (мережа, lockfile)
       # виглядало б як брак бібліотек.
@@ -722,7 +723,7 @@
           - "{{ a8_worktrees_dir }}/verify-cad"
           - bash
           - -c
-          - (cd workers/cad && uv sync --quiet) && echo SYNC_OK && uv run --directory workers/cad pytest tests/templates/test_registry.py -q
+          - (cd workers/cad && uv sync --extra dev --quiet) && echo SYNC_OK && uv run --directory workers/cad pytest tests/templates/test_registry.py -q
       register: a8_v_cad
       changed_when: false
       failed_when: false
