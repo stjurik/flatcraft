@@ -667,7 +667,8 @@ fi
 #   - daemon.json ставить не цей шаблон — тоді перевірка шаблону нічого не доводить.
 DAEMON_TPL="$ROLE/templates/daemon.json.j2"
 if [[ -f "$DAEMON_TPL" ]]; then
-  daemon_flat="$(tr '\n' ' ' <"$DAEMON_TPL" | sed -E 's/\{#[^#]*#\}//g')"
+  # Jinja-коментар знімається цілком, навіть якщо всередині є `#` (окрема сесія Claude, PR #150).
+  daemon_flat="$(tr '\n' ' ' <"$DAEMON_TPL" | sed -E 's/\{#([^#]|#[^}])*#\}//g')"
   while IFS= read -r val; do
     [[ -z "$val" ]] && continue
     [[ "$val" == false ]] && continue
@@ -681,14 +682,33 @@ while IFS= read -r hit; do
   [[ -z "$hit" ]] && continue
   violations+=("шаблон чи файл ролі передає dockerd прапорець IPv6 — egress-фільтр лише IPv4: $hit")
 done < <(grep -rnE -e '--(ipv6|fixed-cidr-v6)([[:space:]=]|$)' "$ROLE/templates" "$ROLE/files" 2>/dev/null || true)
-daemon_task="$(awk '
-  /^[ \t]*- name:/ { if (blk ~ /dest: \/etc\/docker\/daemon\.json/) print blk; blk = "" }
-  { blk = blk "\n" $0 }
-  END { if (blk ~ /dest: \/etc\/docker\/daemon\.json/) print blk }' "$TASKS"/*.yml 2>/dev/null)"
-if [[ -z "$daemon_task" ]]; then
+# IPv6 може з'явитись і в задачах: `copy: content:` з daemon.json, `jq '.ipv6=true'`,
+# drop-in із `--ipv6` інлайном (окрема сесія Claude, PR #150). verify.yml не
+# рахується — там IPv6 лише перевіряють.
+while IFS= read -r hit; do
+  [[ -z "$hit" ]] && continue
+  violations+=("задача ролі вмикає IPv6 для docker — egress-фільтр лише IPv4: $hit")
+done < <(find "$TASKS" "$ROLE/handlers" -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name 'verify.yml' 2>/dev/null | sort |
+  xargs -r grep -inHE -e '--ipv6|fixed-cidr-v6|"ipv6"|[.]ipv6|ipv6[[:space:]]*[:=][[:space:]]*true' 2>/dev/null |
+  awk -F: '{ l = $0; sub(/^[^:]*:[^:]*:/, "", l) } l !~ /^[[:space:]]*#/' || true)
+# Кожна задача, що пише /etc/docker/daemon.json, мусить брати шаблон daemon.json.j2 і
+# не мати `content:` — інакше друга задача перезапише файл, а перевірка шаблону
+# нічого не доведе. Лапки навколо шляхів не важать.
+daemon_tasks="$(awk '
+  function flush() { if (blk ~ /dest: *\/etc\/docker\/daemon\.json/) { gsub(/\n/, "\036", blk); print blk } blk = "" }
+  /^[ \t]*- name:/ { flush() }
+  /^[ \t]*#/ { next }
+  { line = $0; gsub(/["\047]/, "", line); blk = blk "\n" line }
+  END { flush() }' "$TASKS"/*.yml 2>/dev/null)"
+if [[ -z "$daemon_tasks" ]]; then
   violations+=("у задачах ролі немає 'dest: /etc/docker/daemon.json' — не видно, звідки береться daemon.json, IPv6 не перевірено")
-elif [[ "$daemon_task" != *"src: daemon.json.j2"* ]]; then
-  violations+=("daemon.json ставить не шаблон daemon.json.j2 — перевірка IPv6 у шаблоні нічого не доводить")
+else
+  while IFS= read -r blk; do
+    [[ -z "$blk" ]] && continue
+    if [[ "$blk" != *"src: daemon.json.j2"* || "$blk" == *"content:"* ]]; then
+      violations+=("daemon.json ставить не шаблон daemon.json.j2 (інший src чи content:) — перевірка IPv6 у шаблоні нічого не доводить: ${blk%%$'\036'*}${blk#*$'\036'}")
+    fi
+  done <<<"$daemon_tasks"
 fi
 
 # Інваріант 13 — живий вимір фільтра (V20) міряє те, що треба.
@@ -716,42 +736,89 @@ while IFS= read -r f; do vars_files+=("$f"); done < <(
     find "$ANSIBLE_DIR/group_vars" "$ANSIBLE_DIR/host_vars" -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name '*vault*' 2>/dev/null | sort
   }
 )
-probe_hosts=""
+# var_values <ім'я> — усі значення скалярної змінної у vars_files (лапки знято).
+var_values() {
+  [[ ${#vars_files[@]} -gt 0 ]] || return 0
+  sed -nE "s/^$1:[[:space:]]*[\"']?([^\"'#]*[^\"'#[:space:]])[\"']?[[:space:]]*(#.*)?\$/\\1/p" "${vars_files[@]}" | sort -u
+}
+# allow_domains — усі записи a8_egress_domains у vars_files: і блоком, і в рядок [a, b].
 allow_domains=""
 if [[ ${#vars_files[@]} -gt 0 ]]; then
-  probe_hosts="$(sed -nE "s/^a8_egress_probe_host:[[:space:]]*[\"']?([^\"'#[:space:]]+)[\"']?.*/\\1/p" "${vars_files[@]}" | sort -u)"
-  allow_domains="$(awk '/^a8_egress_domains:/ { d = 1; next } d && /^[^ #-]/ { d = 0 } d' "${vars_files[@]}" |
-    sed -E "s/#.*//; s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g; s/[[:space:]]+\$//" | { grep -v '^$' || true; } | sort -u)"
+  allow_domains="$(awk '
+    /^a8_egress_domains:/ {
+      rest = $0; sub(/^a8_egress_domains:[ \t]*/, "", rest); sub(/#.*/, "", rest)
+      if (rest ~ /^\[/) { gsub(/[][]/, "", rest); n = split(rest, a, ","); for (i = 1; i <= n; i++) print a[i]; next }
+      d = 1; next
+    }
+    d && /^[^ #-]/ { d = 0 }
+    d' "${vars_files[@]}" |
+    sed -E "s/#.*//; s/^[[:space:]]*-?[[:space:]]*//; s/[\"']//g; s/[[:space:]]+\$//" | { grep -v '^$' || true; } | sort -u)"
 fi
+probe_hosts="$(var_values a8_egress_probe_host)"
+allowed_hosts="$(var_values a8_egress_allowed_probe_host)"
 if ! grep -qE '^a8_egress_probe_host:' "$ROLE/defaults/main.yml" 2>/dev/null || [[ -z "$probe_hosts" ]]; then
   violations+=("немає a8_egress_probe_host у defaults — живий вимір фільтра (V20) не має цілі")
-else
-  while IFS= read -r h; do
-    [[ -z "$h" ]] && continue
-    violations+=("a8_egress_probe_host ($h) є в a8_egress_domains — проба V20 має бути поза allowlist, інакше її «REACHED» — норма")
-  done < <(comm -12 <(printf '%s\n' "$probe_hosts") <(printf '%s\n' "$allow_domains"))
 fi
+if ! grep -qE '^a8_egress_allowed_probe_host:' "$ROLE/defaults/main.yml" 2>/dev/null || [[ -z "$allowed_hosts" ]]; then
+  violations+=("немає a8_egress_allowed_probe_host у defaults — V20 не має позитивного контролю шляху через docker0")
+fi
+# Цілі — буквальні імена: Jinja (`{{ a8_egress_domains | last }}`) статично не звірити
+# з allowlist (окрема сесія Claude, PR #150).
+while IFS= read -r h; do
+  [[ -z "$h" ]] && continue
+  [[ "$h" =~ ^[A-Za-z0-9.-]+$ ]] || violations+=("ціль V20 «$h» — не буквальне ім'я хоста: з allowlist її не звірити")
+done <<<"$probe_hosts"$'\n'"$allowed_hosts"
+while IFS= read -r h; do
+  [[ -z "$h" ]] && continue
+  violations+=("a8_egress_probe_host ($h) є в a8_egress_domains — проба V20 має бути поза allowlist, інакше її «REACHED» — норма")
+done < <(comm -12 <(printf '%s\n' "$probe_hosts") <(printf '%s\n' "$allow_domains"))
+while IFS= read -r h; do
+  [[ -z "$h" ]] && continue
+  violations+=("a8_egress_allowed_probe_host ($h) немає в a8_egress_domains — позитивний контроль V20 мусить бути в allowlist")
+done < <(comm -23 <(printf '%s\n' "$allowed_hosts" | { grep -v '^$' || true; }) <(printf '%s\n' "$allow_domains"))
 VERIFY_TASKS="$TASKS/verify.yml"
-v20_block() { # v20_block <префікс назви> — текст задачі від `- name: <префікс>` до наступної
-  awk -v p="- name: $1" '{ t = $0; gsub(/["\047]/, "", t) } index(t, p) == 1 { on = 1; print; next } on && /^- name:/ { exit } on' "$VERIFY_TASKS" 2>/dev/null
+# v20_block <префікс назви> — задача від `- name: <префікс>` до наступної, без рядків-
+# коментарів: пояснення «тут колись був --network host» не мусить задовольняти перевірку.
+v20_block() {
+  awk -v p="- name: $1" '{ t = $0; gsub(/["\047]/, "", t) } index(t, p) == 1 { on = 1; print; next } on && /^- name:/ { exit } on && !/^[ \t]*#/' "$VERIFY_TASKS" 2>/dev/null
 }
-v20a="$(v20_block 'V20a')"
-v20b="$(v20_block 'V20b')"
-v20c="$(v20_block 'V20c')"
-if [[ -z "$v20a" || -z "$v20b" || -z "$v20c" ]]; then
-  violations+=("у verify.yml немає V20a, V20b і V20c — живого виміру egress-фільтра з контролем немає")
+v20a="$(v20_block 'V20a')"; v20b="$(v20_block 'V20b')"; v20c="$(v20_block 'V20c')"
+v20d="$(v20_block 'V20d')"; v20e="$(v20_block 'V20e')"
+if [[ -z "$v20a" || -z "$v20b" || -z "$v20c" || -z "$v20d" || -z "$v20e" ]]; then
+  violations+=("у verify.yml немає V20a–V20e — живого виміру egress-фільтра з контролем і перевірками немає")
 else
   [[ "$v20a" == *a8-run-agent* ]] || violations+=("V20a не йде через a8-run-agent — міряє не той контейнер, у якому працює агент")
-  [[ "$v20a" == *'getent ahostsv4'* ]] || violations+=("V20a не бере адресу через getent ahostsv4 — фільтр лише IPv4, проба мусить іти по IPv4")
-  for m in '@@PROBE_START@@' '@@DNS4_OK@@' '@@IP=' '@@EGRESS_REACHED@@' '@@EGRESS_BLOCKED@@' '@@NO_GLOBAL_IPV6@@'; do
+  # Для КОЖНОЇ з двох цілей окремо: інакше `getent hosts` для однієї ховався б за
+  # `ahostsv4` другої (спіймано мутацією 30, щойно з'явилась друга ціль).
+  for tgt in a8_egress_probe_host a8_egress_allowed_probe_host; do
+    [[ "$v20a" == *"getent ahostsv4 {{ $tgt }}"* ]] ||
+      violations+=("V20a не бере адресу $tgt через getent ahostsv4 — фільтр лише IPv4, проба мусить іти по IPv4")
+  done
+  for m in '@@PROBE_START@@' '@@DNS4_OK@@' '@@IP=' '@@EGRESS_REACHED@@' '@@EGRESS_BLOCKED@@' '@@ALLOWED_REACHED@@' '@@NO_GLOBAL_IPV6@@'; do
     [[ "$v20a" == *"$m"* ]] || violations+=("V20a не друкує маркер $m — перевірку зламає склейка stdout і stderr")
   done
-  [[ "$v20a" == *'a8_egress_probe_host'* ]] || violations+=("V20a не використовує a8_egress_probe_host — ціль не звірена з allowlist")
+  [[ "$v20a" == *'a8_egress_probe_host'* && "$v20a" == *'a8_egress_allowed_probe_host'* ]] ||
+    violations+=("V20a не використовує a8_egress_probe_host і a8_egress_allowed_probe_host — цілі не звірені з allowlist")
   [[ "$v20a" == *'&a8_egress_probe'* ]] || violations+=("зонд V20a не позначено якорем &a8_egress_probe — контроль не може взяти той самий текст")
   [[ "$v20b" =~ --network[[:space:]=]+host|-[[:space:]]+--network[[:space:]]+-[[:space:]]+host ]] ||
     violations+=("V20b — контроль без --network host: без проби повз фільтр BLOCKED агента нічого не доводить")
   [[ "$v20b" == *'*a8_egress_probe'* ]] || violations+=("V20b бере не той самий зонд (немає посилання *a8_egress_probe) — контроль можна підмінити")
+  v20b_re='a8_egress_probe_host:[[:space:]]*["'"'"']?[{][{][[:space:]]*a8_v_egress_probe_ip'
+  [[ "$v20b" =~ $v20b_re ]] ||
+    violations+=("V20b іде не на адресу, яку пробував агент (a8_egress_probe_host: {{ a8_v_egress_probe_ip }}) — REACHED контролю нічого не каже про адресу агента")
   [[ "$v20c" == *ipset* && "$v20c" == *test* ]] || violations+=("V20c не перевіряє адресу цілі ipset test — ціль на спільній адресі CDN дала б хибне «фільтр зламано»")
+  # Самі перевірки теж під охороною: зняти умову чи вимкнути задачу — порушення.
+  for c in "'@@EGRESS_REACHED@@' in a8_v_egress_ctl.stdout" 'a8_v_egress_inset.rc != 0'; do
+    [[ "$v20d" == *"$c"* ]] || violations+=("V20d не перевіряє «$c» — вимір можна визнати дійсним без контролю")
+  done
+  for c in "'@@PROBE_START@@' in" "'@@DNS4_OK@@' in" "'@@EGRESS_BLOCKED@@' in" "'@@EGRESS_REACHED@@' not in" "'@@ALLOWED_REACHED@@' in" "'@@NO_GLOBAL_IPV6@@' in"; do
+    [[ "$v20e" == *"$c a8_v_egress_agent.stdout"* ]] || violations+=("V20e не перевіряє «$c a8_v_egress_agent.stdout» — агент поза фільтром пройшов би")
+  done
+  for b in "$v20a" "$v20b" "$v20c" "$v20d" "$v20e"; do
+    w="$(grep -E '^[[:space:]]*when:' <<<"$b" | sed -E 's/^[[:space:]]*when:[[:space:]]*//; s/[[:space:]]+/ /g')"
+    [[ "$w" == '(a8_egress_enabled | bool) and (a8_egress_enforce | bool)' ]] ||
+      violations+=("задача V20 має умову «${w:-немає}» замість «(a8_egress_enabled | bool) and (a8_egress_enforce | bool)» — її можна тихо вимкнути: $(head -1 <<<"$b" | sed -E 's/^- name: //')")
+  done
 fi
 
 if [[ ${#violations[@]} -gt 0 ]]; then

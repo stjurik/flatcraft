@@ -828,7 +828,16 @@
 # складає `sed 's/.*/…&…/'`. Адресу обирає `sort | tail`, а не `head`: head закривав
 # би трубу раніше, getent ловив би SIGPIPE, і під pipefail це читалось би як збій DNS.
 # Ціль — a8_egress_probe_host, яку інваріант 13 тримає поза allowlist.
-- name: V20a — agent container on the filtered bridge tries an IPv4 address outside the allowlist
+- name: V20a — agent container on the filtered bridge tries an address outside the allowlist and one inside it
+  # Зонд — три цілі, кожна з маркерами:
+  #   - `a8_egress_probe_host` поза allowlist — мусить бути BLOCKED;
+  #   - `a8_egress_allowed_probe_host` з allowlist — мусить бути REACHED. Це позитивний
+  #     контроль шляху через docker0, NAT і DOCKER-USER: без нього BLOCKED міг би
+  #     дати будь-який інший злам (ufw route, NAT, порожній набір), а не фільтр
+  #     (контрприклад окремої сесії Claude, PR #150);
+  #   - глобальна IPv6 — мусить бути відсутня.
+  # Кожне з'єднання — до трьох спроб по 5 с: одиничний втрачений SYN не мусить
+  # давати «вимір недійсний».
   ansible.builtin.command:
     argv:
       - /usr/local/bin/a8-run-agent
@@ -839,7 +848,8 @@
         set -o pipefail
         echo @@PROBE_START@@
         getent ahostsv4 {{ a8_egress_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 > /tmp/a8-probe-ip && grep -q . /tmp/a8-probe-ip && echo @@DNS4_OK@@ && sed 's/.*/@@IP=&@@/' /tmp/a8-probe-ip || echo @@DNS4_FAIL@@
-        grep -q . /tmp/a8-probe-ip && xargs -I{} timeout 5 bash -c '</dev/tcp/{}/80' < /tmp/a8-probe-ip && echo @@EGRESS_REACHED@@ || echo @@EGRESS_BLOCKED@@
+        grep -q . /tmp/a8-probe-ip && xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/80" && exit 0; done; exit 1' < /tmp/a8-probe-ip && echo @@EGRESS_REACHED@@ || echo @@EGRESS_BLOCKED@@
+        getent ahostsv4 {{ a8_egress_allowed_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 | xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/443" && exit 0; done; exit 1' && echo @@ALLOWED_REACHED@@ || echo @@ALLOWED_BLOCKED@@
         grep -qE '^[0-9a-f]+ [0-9a-f]+ [0-9a-f]+ 00 ' /proc/net/if_inet6 2>/dev/null && echo @@GLOBAL_IPV6@@ || echo @@NO_GLOBAL_IPV6@@
   register: a8_v_egress_agent
   changed_when: false
@@ -848,7 +858,21 @@
   become_user: "{{ a8_agent_user }}"
   when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
-- name: V20b — control, the same probe from the same image with host network
+- name: V20-ip — the address the agent tried
+  # Без груп регексу й зворотних косих: Jinja розбирає `\1` у рядковому літералі як
+  # символ \x01, а не посилання на групу. Тож береться весь збіг маркера й обрізається.
+  # Немає маркера — 0.0.0.0: контроль до нього не дійде, і V20d скаже «вимір недійсний».
+  ansible.builtin.set_fact:
+    a8_v_egress_probe_ip: >-
+      {{ (a8_v_egress_agent.stdout | regex_search('@@IP=[0-9.]+@@') | default('', true))
+      | replace('@@IP=', '') | replace('@@', '') | default('0.0.0.0', true) }}
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20b — control, the same probe from the same image with host network, to the same address the agent tried
+  # Ціль контролю — АДРЕСА, яку пробував агент, а не власний DNS-запит хоста:
+  # `getent ahostsv4` на IP-літералі повертає саме його. Інакше агент і хост могли
+  # отримати різні відповіді (сінкхол, split-horizon), і REACHED контролю нічого б
+  # не казав про адресу агента (контрприклад окремої сесії Claude, PR #150).
   ansible.builtin.command:
     argv:
       - docker
@@ -863,12 +887,13 @@
   register: a8_v_egress_ctl
   changed_when: false
   failed_when: false
+  vars:
+    a8_egress_probe_host: "{{ a8_v_egress_probe_ip }}"
   when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
 - name: V20c — is the address the agent tried in the allowlist set
   # rc=0 — адреса в наборі (спільна адреса CDN чи a8_egress_extra_cidrs): тоді її
-  # досяжність — норма фільтра, і вимір недійсний. Немає адреси в маркері — test
-  # поверне помилку; тоді V20e однаково зупиниться на DNS4_OK.
+  # досяжність — норма фільтра, і вимір недійсний.
   ansible.builtin.command:
     argv:
       - ipset
@@ -878,12 +903,6 @@
   register: a8_v_egress_inset
   changed_when: false
   failed_when: false
-  vars: &a8_v_egress_ip_vars
-    # Без груп регексу й зворотних косих: Jinja розбирає `\1` у рядковому літералі як
-    # символ \x01, а не посилання на групу. Тож береться весь збіг і обрізається.
-    a8_v_egress_probe_ip: >-
-      {{ (a8_v_egress_agent.stdout | regex_search('@@IP=[0-9.]+@@') | default('', true))
-      | replace('@@IP=', '') | replace('@@', '') | default('0.0.0.0', true) }}
   when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
 - name: V20d — the measurement is valid, the control got through and the target is outside the set
@@ -897,19 +916,19 @@
       {{ 'адреса цілі ' + a8_v_egress_probe_ip
       + ' є в наборі ' + a8_egress_ipset + ' (спільна адреса CDN чи a8_egress_extra_cidrs) — виберіть іншу a8_egress_probe_host'
       if a8_v_egress_inset.rc == 0 else
-      'той самий зонд із мережею хоста не дістав ' + a8_egress_probe_host + ' по IPv4 — ціль не відповідає або в хоста немає мережі' }}.
+      'той самий зонд із мережею хоста не дістав адресу ' + a8_v_egress_probe_ip + ' за три спроби — ціль не відповідає або в хоста немає мережі' }}.
       Контроль: stdout={{ a8_v_egress_ctl.stdout | replace('\n', ' ') }}, rc={{ a8_v_egress_ctl.rc }}
     quiet: true
-  vars: *a8_v_egress_ip_vars
   when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
-- name: V20e — agent is cut off outside the allowlist and has no global IPv6
+- name: V20e — agent is cut off outside the allowlist, reaches inside it, and has no global IPv6
   ansible.builtin.assert:
     that:
       - "'@@PROBE_START@@' in a8_v_egress_agent.stdout"
       - "'@@DNS4_OK@@' in a8_v_egress_agent.stdout"
       - "'@@EGRESS_BLOCKED@@' in a8_v_egress_agent.stdout"
       - "'@@EGRESS_REACHED@@' not in a8_v_egress_agent.stdout"
+      - "'@@ALLOWED_REACHED@@' in a8_v_egress_agent.stdout"
       - "'@@NO_GLOBAL_IPV6@@' in a8_v_egress_agent.stdout"
     fail_msg: >-
       {{ 'Зонд у контейнері агента не запустився — обгортка відмовила до docker run (kill switch? a8-guard?): stderr=' + a8_v_egress_agent.stderr | default('')
@@ -918,7 +937,9 @@
       if '@@EGRESS_REACHED@@' in a8_v_egress_agent.stdout else
       ('Агент має глобальну IPv6-адресу — фільтр лише IPv4, її ніщо не фільтрує'
       if '@@GLOBAL_IPV6@@' in a8_v_egress_agent.stdout else
-      'Агент не отримав IPv4-адреси цілі від DNS — вимір недійсний (DNS контейнера мусить бути в наборі, V9b)')) }}.
+      ('Агент не дістав навіть дозволену ' + a8_egress_allowed_probe_host + ' — шлях через docker0 чи NAT зламано, тож BLOCKED не доводить фільтра: вимір недійсний'
+      if '@@ALLOWED_REACHED@@' not in a8_v_egress_agent.stdout else
+      'Агент не отримав IPv4-адреси цілі від DNS — вимір недійсний (DNS контейнера мусить бути в наборі, V9b)'))) }}.
       stdout={{ a8_v_egress_agent.stdout | replace('\n', ' ') }}, rc={{ a8_v_egress_agent.rc }}
     quiet: true
   when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)

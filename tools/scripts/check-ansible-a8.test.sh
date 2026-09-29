@@ -36,7 +36,7 @@ make_tree() {
   printf '%s\n' "$BUILD_OK" >"$dir/infra/ansible/roles/a8/tasks/image.yml"
   printf '%s\n' "$RUNNER_TASK_OK" >"$dir/infra/ansible/roles/a8/tasks/runner.yml"
   printf '%s\n' "$RUNNER_OK" >"$dir/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
-  printf '%s\n' 'a8_egress_bridge: docker0' 'a8_egress_probe_host: deb.debian.org' 'a8_egress_domains:' \
+  printf '%s\n' 'a8_egress_bridge: docker0' 'a8_egress_probe_host: deb.debian.org' 'a8_egress_allowed_probe_host: github.com' 'a8_egress_domains:' \
     '  - github.com # git' >"$dir/infra/ansible/roles/a8/defaults/main.yml"
   # Мінімальний живий вимір фільтра для інваріанта 13: без нього він червоніє.
   printf '%s\n' "$VERIFY_OK" >"$dir/infra/ansible/roles/a8/tasks/verify.yml"
@@ -55,7 +55,9 @@ CI_OK='jobs:
       - name: Test
         run: uv run pytest'
 
-VERIFY_OK='---
+# Фікстура — heredoc, а не рядок в одинарних лапках: умови V20d/V20e самі мають '…'.
+VERIFY_OK="$(cat <<'YAML'
+---
 - name: V20a — agent probe
   ansible.builtin.command:
     argv:
@@ -67,8 +69,10 @@ VERIFY_OK='---
         echo @@PROBE_START@@
         getent ahostsv4 {{ a8_egress_probe_host }} && echo @@DNS4_OK@@ @@IP=1@@ || echo @@DNS4_FAIL@@
         echo @@EGRESS_REACHED@@ @@EGRESS_BLOCKED@@
+        getent ahostsv4 {{ a8_egress_allowed_probe_host }} && echo @@ALLOWED_REACHED@@
         echo @@NO_GLOBAL_IPV6@@
   register: a8_v_egress_agent
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
 - name: V20b — control
   ansible.builtin.command:
@@ -82,11 +86,35 @@ VERIFY_OK='---
       - -c
       - *a8_egress_probe
   register: a8_v_egress_ctl
+  vars:
+    a8_egress_probe_host: "{{ a8_v_egress_probe_ip }}"
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
 - name: V20c — ipset
   ansible.builtin.command:
     argv: [ipset, test, a8_egress, 1.1.1.1]
-  register: a8_v_egress_inset'
+  register: a8_v_egress_inset
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20d — valid
+  ansible.builtin.assert:
+    that:
+      - "'@@EGRESS_REACHED@@' in a8_v_egress_ctl.stdout"
+      - a8_v_egress_inset.rc != 0
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20e — agent
+  ansible.builtin.assert:
+    that:
+      - "'@@PROBE_START@@' in a8_v_egress_agent.stdout"
+      - "'@@DNS4_OK@@' in a8_v_egress_agent.stdout"
+      - "'@@EGRESS_BLOCKED@@' in a8_v_egress_agent.stdout"
+      - "'@@EGRESS_REACHED@@' not in a8_v_egress_agent.stdout"
+      - "'@@ALLOWED_REACHED@@' in a8_v_egress_agent.stdout"
+      - "'@@NO_GLOBAL_IPV6@@' in a8_v_egress_agent.stdout"
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+YAML
+)"
 
 DOCKER_TASK_OK='---
 - name: Configure docker daemon options
@@ -775,7 +803,7 @@ make_tree "$tmproot/h2" "$PLAY_OK" "$TASKS_OK"
 sed -i '/^a8_egress_probe_host:/d' "$tmproot/h2/$DEF"
 assert_exit "13: немає a8_egress_probe_host → 1" 1 "$tmproot/h2" "немає a8_egress_probe_host"
 make_tree "$tmproot/h3" "$PLAY_OK" "$TASKS_OK"
-sed -i 's/getent ahostsv4/getent hosts/' "$tmproot/h3/$VER"
+sed -i 's/getent ahostsv4 {{ a8_egress_probe_host }}/getent hosts {{ a8_egress_probe_host }}/' "$tmproot/h3/$VER"
 assert_exit "13: V20a — getent hosts замість ahostsv4 → 1" 1 "$tmproot/h3" "getent ahostsv4"
 make_tree "$tmproot/h4" "$PLAY_OK" "$TASKS_OK"
 sed -i 's/ *echo @@NO_GLOBAL_IPV6@@//' "$tmproot/h4/$VER"
@@ -785,7 +813,7 @@ sed -i '/^      - --network$/d; /^      - host$/d' "$tmproot/h5/$VER"
 assert_exit "13: V20b без --network host → 1" 1 "$tmproot/h5" "контроль без --network host"
 make_tree "$tmproot/h6" "$PLAY_OK" "$TASKS_OK"
 printf '%s\n' '---' '- name: V1 — something' '  ansible.builtin.debug:' '    msg: ok' >"$tmproot/h6/$VER"
-assert_exit "13: у verify.yml немає V20 → 1" 1 "$tmproot/h6" "немає V20a, V20b і V20c"
+assert_exit "13: у verify.yml немає V20 → 1" 1 "$tmproot/h6" "немає V20a–V20e"
 make_tree "$tmproot/h7" "$PLAY_OK" "$TASKS_OK"
 sed -i 's|/usr/local/bin/a8-run-agent|docker|; s|      - /home/agent/hart|      - run|' "$tmproot/h7/$VER"
 assert_exit "13: V20a не через a8-run-agent → 1" 1 "$tmproot/h7" "не йде через a8-run-agent"
@@ -835,7 +863,7 @@ make_tree "$tmproot/h11" "$PLAY_OK" "$TASKS_OK"
 sed -i 's/      - \*a8_egress_probe/      - echo @@DNS4_OK@@ @@EGRESS_REACHED@@/' "$tmproot/h11/$VER"
 assert_exit "13: контроль V20b з фальшивим echo замість зонда → 1" 1 "$tmproot/h11" "бере не той самий зонд"
 make_tree "$tmproot/h12" "$PLAY_OK" "$TASKS_OK"
-sed -i 's/^- name: \(V20[abc]\) \(.*\)$/- name: "\1 \2"/' "$tmproot/h12/$VER"
+sed -i 's/^- name: \(V20[a-e]\) \(.*\)$/- name: "\1 \2"/' "$tmproot/h12/$VER"
 assert_exit "13: назви V20 у лапках → 0" 0 "$tmproot/h12"
 make_tree "$tmproot/h13" "$PLAY_OK" "$TASKS_OK"
 python3 - "$tmproot/h13/$VER" <<'PY2'
@@ -844,7 +872,72 @@ p = sys.argv[1]; s = open(p).read()
 s = s[:s.index("\n- name: V20c")] + "\n"
 open(p, "w").write(s)
 PY2
-assert_exit "13: немає V20c (ipset test) → 1" 1 "$tmproot/h13" "немає V20a, V20b і V20c"
+assert_exit "13: немає V20c (ipset test) → 1" 1 "$tmproot/h13" "немає V20a–V20e"
+
+# Контрприклади окремої сесії Claude (PR #150, claude-sonnet-5-5).
+# K1: контроль іде на адресу агента.
+make_tree "$tmproot/k1" "$PLAY_OK" "$TASKS_OK"
+sed -i '/a8_egress_probe_host: "{{ a8_v_egress_probe_ip }}"/d; /^  vars:$/d' "$tmproot/k1/$VER"
+assert_exit "13: V20b іде на власну адресу, не агента → 1" 1 "$tmproot/k1" "іде не на адресу, яку пробував агент"
+# K2: позитивний контроль шляху через docker0.
+make_tree "$tmproot/k2" "$PLAY_OK" "$TASKS_OK"
+sed -i '/^a8_egress_allowed_probe_host:/d' "$tmproot/k2/$DEF"
+assert_exit "13: немає a8_egress_allowed_probe_host → 1" 1 "$tmproot/k2" "позитивного контролю"
+make_tree "$tmproot/k3" "$PLAY_OK" "$TASKS_OK"
+sed -i 's/^a8_egress_allowed_probe_host: github.com$/a8_egress_allowed_probe_host: example.org/' "$tmproot/k3/$DEF"
+assert_exit "13: дозволена ціль поза allowlist → 1" 1 "$tmproot/k3" "немає в a8_egress_domains"
+make_tree "$tmproot/k4" "$PLAY_OK" "$TASKS_OK"
+sed -i 's/ && echo @@ALLOWED_REACHED@@//' "$tmproot/k4/$VER"
+assert_exit "13: V20a без маркера @@ALLOWED_REACHED@@ → 1" 1 "$tmproot/k4" "@@ALLOWED_REACHED@@"
+# K3: самі перевірки під охороною.
+make_tree "$tmproot/k5" "$PLAY_OK" "$TASKS_OK"
+sed -i "/'@@EGRESS_REACHED@@' not in a8_v_egress_agent.stdout/d" "$tmproot/k5/$VER"
+assert_exit "13: V20e без умови «REACHED not in» → 1" 1 "$tmproot/k5" "агент поза фільтром пройшов би"
+make_tree "$tmproot/k6" "$PLAY_OK" "$TASKS_OK"
+sed -i '/a8_v_egress_inset.rc != 0/d' "$tmproot/k6/$VER"
+assert_exit "13: V20d без умови про набір → 1" 1 "$tmproot/k6" "вимір можна визнати дійсним без контролю"
+make_tree "$tmproot/k7" "$PLAY_OK" "$TASKS_OK"
+python3 - "$tmproot/k7/$VER" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+i = s.index("- name: V20e")
+s = s[:i] + s[i:].replace("  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)", "  when: false", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "13: V20e вимкнено when: false → 1" 1 "$tmproot/k7" "її можна тихо вимкнути"
+make_tree "$tmproot/k8" "$PLAY_OK" "$TASKS_OK"
+python3 - "$tmproot/k8/$VER" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace("      - --network\n      - host\n", "      # --network host тут був\n      - --network\n      - bridge\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "13: --network host лише в коментарі V20b → 1" 1 "$tmproot/k8" "контроль без --network host"
+# K4: інваріант 12 — задачі, коментарі, лапки.
+make_tree "$tmproot/k9" "$PLAY_OK" "$TASKS_OK"
+printf '%s\n' '' '- name: Enable IPv6 later' '  ansible.builtin.copy:' "    content: '{\"live-restore\": true}'" \
+  '    dest: /etc/docker/daemon.json' >>"$tmproot/k9/infra/ansible/roles/a8/tasks/docker.yml"
+assert_exit "12: друга задача пише daemon.json через content → 1" 1 "$tmproot/k9" "ставить не шаблон daemon.json.j2"
+make_tree "$tmproot/k10" "$PLAY_OK" "$TASKS_OK"
+printf '%s\n' '' '- name: Patch daemon.json' '  ansible.builtin.command: jq ".ipv6=true" /etc/docker/daemon.json' \
+  >>"$tmproot/k10/infra/ansible/roles/a8/tasks/docker.yml"
+assert_exit "12: jq '.ipv6=true' у задачі → 1" 1 "$tmproot/k10" "задача ролі вмикає IPv6"
+g_daemon "$tmproot/k11" '{
+  {# не вмикати "ipv6": true, див. #150 #}
+  "live-restore": true
+}'
+assert_exit "12: \"ipv6\": true лише в Jinja-коментарі з # усередині → 0" 0 "$tmproot/k11"
+make_tree "$tmproot/k12" "$PLAY_OK" "$TASKS_OK"
+sed -i 's|    src: daemon.json.j2|    src: "daemon.json.j2"|; s|    dest: /etc/docker/daemon.json|    dest: "/etc/docker/daemon.json"|' "$tmproot/k12/infra/ansible/roles/a8/tasks/docker.yml"
+assert_exit "12: src і dest у лапках → 0" 0 "$tmproot/k12"
+# K5: allowlist у рядок і ціль через Jinja.
+make_tree "$tmproot/k13" "$PLAY_OK" "$TASKS_OK"
+mkdir -p "$tmproot/k13/infra/ansible/group_vars"
+printf '%s\n' 'a8_egress_domains: [github.com, deb.debian.org]' >"$tmproot/k13/infra/ansible/group_vars/a8.yml"
+assert_exit "13: ціль у списку доменів у рядок [..] → 1" 1 "$tmproot/k13" "є в a8_egress_domains"
+make_tree "$tmproot/k14" "$PLAY_OK" "$TASKS_OK"
+sed -i 's/^a8_egress_probe_host: deb.debian.org$/a8_egress_probe_host: "{{ a8_egress_domains | last }}"/' "$tmproot/k14/$DEF"
+assert_exit "13: ціль проби через Jinja → 1" 1 "$tmproot/k14" "не буквальне ім'я хоста"
 
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
@@ -1231,7 +1324,7 @@ for where in a8-tick.sh.j2 verify.yml autorun.sh; do
 done
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 
-# Мутації 28–32 — інваріанти 12–13, docker без IPv6 і живий вимір фільтра.
+# Мутації 28–34 — інваріанти 12–13, docker без IPv6 і живий вимір фільтра.
 DAEMON_T="infra/ansible/roles/a8/templates/daemon.json.j2"
 DEFAULTS="infra/ansible/roles/a8/defaults/main.yml"
 VERIFY_Y="infra/ansible/roles/a8/tasks/verify.yml"
@@ -1294,6 +1387,30 @@ s = s.replace(anchor, "      - echo @@DNS4_OK@@ @@EGRESS_REACHED@@\n", 1)
 open(p, "w").write(s)
 PY2
 assert_exit "мутація 32: V20b друкує маркери замість зонда → 1" 1 "$mut" "бере не той самий зонд"
+cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
+
+# 33: перевірку «агент НЕ дістав» знято — зелено навіть при дірі у фільтрі.
+python3 - "$mut/$VERIFY_Y" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "      - \"'@@EGRESS_REACHED@@' not in a8_v_egress_agent.stdout\"\n"
+assert s.count(anchor) == 1, "фікстура застаріла: V20e виглядає інакше"
+s = s.replace(anchor, "", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 33: з V20e знято «REACHED not in» → 1" 1 "$mut" "агент поза фільтром пройшов би"
+cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
+
+# 34: контроль знову резолвить сам — може піти не на ту адресу, що агент.
+python3 - "$mut/$VERIFY_Y" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "  vars:\n    a8_egress_probe_host: \"{{ a8_v_egress_probe_ip }}\"\n"
+assert s.count(anchor) == 1, "фікстура застаріла: V20b виглядає інакше"
+s = s.replace(anchor, "", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 34: V20b резолвить ціль сам → 1" 1 "$mut" "іде не на адресу, яку пробував агент"
 cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
 
 if [[ "$fail" -eq 0 ]]; then
