@@ -15,33 +15,47 @@
 # цей бік дає зайву окрему сесію Claude, в інший — рецензію без контрприкладів.
 # Новий скріншот — новий розрахунок і правка BUDGET тим самим PR.
 #
-# ЧОМУ 7 ДНІВ ПОСПІЛЬ, а не тижневе вікно agy: коли воно починається, невідомо.
-# Останні 7 днів завжди містять усе поточне вікно, тож лічильник може лише завищити
-# витрату — перемкнути на окрему сесію раніше, ніж треба, але не пізніше.
+# ПОКАЗ ЕКРАНА ВАЖИТЬ БІЛЬШЕ ЗА ОЦІНКУ — в обидва боки (рішення yurii 2026-09-29: «поки є
+# квоти, користуватись Opus 4.6»). Покази, які yurii надсилає скріншотом, пишуться в
+# agy-quota.md поруч із журналом. Від останнього показу групи «Claude and GPT»:
+#   - до скидання — з його залишку: скільки ще викликів до 20% (≈ 80% / BUDGET за виклик);
+#   - після скидання — нове тижневе вікно: рахуються виклики з дня скидання, бюджет повний.
+#     Без цього лічильник «7 днів поспіль» ще до тижня після скидання слав би на окрему
+#     сесію, хоча Opus уже доступний;
+#   - через 7 днів після скидання показ застарів (наступного скидання не знаємо) — оцінка.
+# Виклик рахується за датою (часу в журналі немає), тож виклики в день показу чи скидання
+# рахуються завжди: сумнів іде проти ліміту.
+#
+# ОЦІНКА БЕЗ ПОКАЗУ — 7 днів поспіль, а не тижневе вікно agy: коли воно починається,
+# невідомо. Останні 7 днів завжди містять усе поточне вікно, тож лічильник може лише
+# завищити витрату — перемкнути на окрему сесію раніше, ніж треба, але не пізніше.
 #
 # Рахує всю групу «Claude and GPT» (Opus, Sonnet, GPT-OSS) — у agy в них один ліміт.
 # «невідомо → Claude …» теж рахується: сумнів іде проти ліміту, а не на його користь.
 # Рядки окремої сесії Claude («… (окрема сесія)», рішення yurii 2026-09-29) — НЕ
 # рахуються: вони йдуть з ліміту підписки Claude, а не з ліміту agy.
 #
-# Використання: tools/scripts/agy-opus-budget.sh [--today РРРР-ММ-ДД] [журнал]
-# exit 0 — рішення надруковано; exit 2 — журнал не читається або поганий аргумент.
+# Використання: tools/scripts/agy-opus-budget.sh [--now 'РРРР-ММ-ДД ГГ:ХХ' | --today РРРР-ММ-ДД] [журнал]
+# Час — UTC; --today Д означає «Д 23:59». Покази — agy-quota.md у теці журналу
+# (або AGY_QUOTA_FILE); немає файла — лише оцінка.
+# exit 0 — рішення надруковано; exit 2 — журнал чи покази не читаються або поганий аргумент.
 set -euo pipefail
 
 BUDGET="${AGY_OPUS_BUDGET:-13}"
-TODAY="$(date -u +%F)"
+NOW="$(date -u '+%F %H:%M')"
 FILE=""
+usage() {
+  echo "використання: $(basename "$0") [--now 'РРРР-ММ-ДД ГГ:ХХ' | --today РРРР-ММ-ДД] [журнал]" >&2
+  exit 2
+}
 while (($#)); do
   case "$1" in
-  --today)
-    TODAY="${2:-}"
-    shift
-    [[ $# -gt 0 ]] && shift || true
+  --today | --now)
+    [[ $# -ge 2 ]] || usage
+    if [[ "$1" == --today ]]; then NOW="$2 23:59"; else NOW="$2"; fi
+    shift 2
     ;;
-  -*)
-    echo "використання: $(basename "$0") [--today РРРР-ММ-ДД] [журнал]" >&2
-    exit 2
-    ;;
+  -*) usage ;;
   *)
     FILE="$1"
     shift
@@ -49,10 +63,14 @@ while (($#)); do
   esac
 done
 FILE="${FILE:-$(git rev-parse --show-toplevel)/docs/promts/inputs/agy-stats.md}"
-if ! [[ "$TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || ! FROM="$(date -u -d "$TODAY -6 days" +%F 2>/dev/null)"; then
-  echo "відмова: --today має бути датою РРРР-ММ-ДД, отримано «$TODAY»" >&2
+QUOTA="${AGY_QUOTA_FILE:-$(dirname "$FILE")/agy-quota.md}"
+TIME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+epoch() { [[ "$1" =~ $TIME_RE ]] && date -u -d "$1" +%s 2>/dev/null; }
+if ! NOW_S="$(epoch "$NOW")"; then
+  echo "відмова: час має бути «РРРР-ММ-ДД ГГ:ХХ» (UTC) або --today РРРР-ММ-ДД, отримано «$NOW»" >&2
   exit 2
 fi
+TODAY="${NOW%% *}"
 [[ "$BUDGET" =~ ^[1-9][0-9]*$ ]] || {
   echo "відмова: AGY_OPUS_BUDGET — додатне ціле, отримано «$BUDGET»" >&2
   exit 2
@@ -62,26 +80,73 @@ fi
   exit 2
 }
 
+# Виклики групи «Claude and GPT» в agy з дати $1 по $TODAY включно.
 # `\|` — символ усередині клітинки, не межа колонки (так само, як agy-stats-summary.sh).
 # Рядок із неекранованим «|» зсуває колонки — модель читалась би з чужого місця,
 # тож такий рядок — відмова, а не число.
-n="$(sed 's/\\|/\x1f/g' "$FILE" | awk -F'|' -v from="$FROM" -v to="$TODAY" '
-  function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-  /^\| Дата / { cells = NF; next }
-  /^\| [0-9]{4}-[0-9]{2}-[0-9]{2} / {
-    if (cells && NF != cells) {
-      printf "відмова: %s — у рядку %d клітинок замість %d (неекранований «|»?)\n", trim($2), NF - 2, cells - 2 > "/dev/stderr"
-      bad = 1
-      next
+calls_since() {
+  sed 's/\\|/\x1f/g' "$FILE" | awk -F'|' -v from="$1" -v to="$TODAY" '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^\| Дата / { cells = NF; next }
+    /^\| [0-9]{4}-[0-9]{2}-[0-9]{2} / {
+      if (cells && NF != cells) {
+        printf "відмова: %s — у рядку %d клітинок замість %d (неекранований «|»?)\n", trim($2), NF - 2, cells - 2 > "/dev/stderr"
+        bad = 1
+        next
+      }
+      d = trim($2); m = trim($4)
+      if (d >= from && d <= to && m ~ /Claude|GPT/ && m !~ /окрема сесія/) c++
     }
-    d = trim($2); m = trim($4)
-    if (d >= from && d <= to && m ~ /Claude|GPT/ && m !~ /окрема сесія/) c++
-  }
-  END { if (bad) exit 3; print c + 0 }
-')" || exit 2
+    END { if (bad) exit 3; print c + 0 }'
+}
 
-echo "Група «Claude and GPT» в agy: викликів за 7 днів ($FROM … $TODAY): $n, бюджет $BUDGET"
-if ((n >= BUDGET)); then
+# Останній показ групи «Claude and GPT», не пізніший за NOW: «показ|залишок|скидання».
+reading=""
+if [[ -f "$QUOTA" ]]; then
+  reading="$(awk -F'|' -v now="$NOW" '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    /^\| [0-9]{4}-/ {
+      t = trim($2); g = trim($3); r = trim($4); z = trim($5)
+      if (t !~ /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$/ || z !~ /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$/ ||
+          r !~ /^[0-9]+(\.[0-9]+)?$/ || r + 0 > 100) {
+        printf "відмова: agy-quota.md — рядок «%s» не розібрано (показ і скидання — «РРРР-ММ-ДД ГГ:ХХ», залишок — 0…100)\n", t > "/dev/stderr"
+        bad = 1
+        next
+      }
+      if (g == "Claude and GPT" && t <= now && t >= best) { best = t; out = t "|" r "|" z }
+    }
+    END { if (bad) exit 3; print out }' "$QUOTA")" || exit 2
+fi
+
+limit="$BUDGET"
+from="$(date -u -d "$TODAY -6 days" +%F)"
+if [[ -n "$reading" ]]; then
+  IFS='|' read -r shown left reset <<<"$reading"
+  reset_s="$(epoch "$reset")" || {
+    echo "відмова: agy-quota.md — скидання «$reset» не є датою" >&2
+    exit 2
+  }
+  if ((NOW_S < reset_s)); then
+    # До скидання: скільки викликів лишилось до 20% з показаного залишку.
+    limit="$(awk -v r="$left" -v b="$BUDGET" 'BEGIN { a = int((r - 20) * b / 80); print (a > 0 ? a : 0) }')"
+    n="$(calls_since "${shown%% *}")" || exit 2
+    echo "Показ екрана yurii $shown UTC: «Claude and GPT» $left%, скидання $reset UTC"
+    echo "Викликів із дня показу (${shown%% *} … $TODAY): $n, можна ще до залишку 20%: $limit"
+  elif ((NOW_S < reset_s + 7 * 86400)); then
+    n="$(calls_since "${reset%% *}")" || exit 2
+    echo "Скидання $reset UTC (показ yurii $shown UTC) минуло — нове тижневе вікно"
+    echo "Викликів із дня скидання (${reset%% *} … $TODAY): $n, бюджет $BUDGET"
+  else
+    echo "Показ екрана yurii $shown UTC застарів: скидання $reset UTC минуло понад 7 днів тому, наступного не знаємо — попросіть yurii глянути екран"
+    reading=""
+  fi
+fi
+if [[ -z "$reading" ]]; then
+  n="$(calls_since "$from")" || exit 2
+  echo "Група «Claude and GPT» в agy: викликів за 7 днів ($from … $TODAY): $n, бюджет $BUDGET"
+fi
+
+if ((n >= limit)); then
   echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"
 else
   echo "→ контрприклади ризикового PR: agy, Claude Opus 4.6 (--model claude-opus-4-6-thinking)"
