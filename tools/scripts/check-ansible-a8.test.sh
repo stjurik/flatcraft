@@ -30,13 +30,57 @@ make_tree() {
   printf '%s\n' 'FROM node:22' 'RUN apt-get update \' \
     ' && apt-get install -y --no-install-recommends libgl1 \' \
     ' && rm -rf /var/lib/apt/lists/*' >"$dir/infra/ansible/roles/a8/files/agent.Dockerfile"
+  # Мінімальна пара для інваріанта 10: збірка з мережею хоста й обгортка без
+  # --network. Без них він червоніє (fail closed), як і інваріант 9.
+  mkdir -p "$dir/infra/ansible/roles/a8/templates" "$dir/infra/ansible/roles/a8/defaults"
+  printf '%s\n' "$BUILD_OK" >"$dir/infra/ansible/roles/a8/tasks/image.yml"
+  printf '%s\n' "$RUNNER_TASK_OK" >"$dir/infra/ansible/roles/a8/tasks/runner.yml"
+  printf '%s\n' "$RUNNER_OK" >"$dir/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+  printf '%s\n' 'a8_egress_bridge: docker0' >"$dir/infra/ansible/roles/a8/defaults/main.yml"
 }
 
+BUILD_OK='---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --network host
+    -t hart-agent:test /etc/a8/image'
+
+RUNNER_TASK_OK='---
+- name: Install agent container runner
+  ansible.builtin.template:
+    src: a8-run-agent.sh.j2
+    dest: /usr/local/bin/a8-run-agent'
+
+RUNNER_OK='#!/usr/bin/env bash
+/usr/local/bin/a8-guard check-run >&2
+exec docker run --rm \
+  -w "$1" \
+  hart-agent:test "$@"'
+
+# Дерево для інваріанта 10: здорова роль, у якій замінено збірку ($2), обгортку
+# ($3) і/або daemon.json.j2 ($4). Порожній аргумент — лишити здорову.
+make_net_tree() {
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  [[ -n "${2:-}" ]] && printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/tasks/image.yml"
+  [[ -n "${3:-}" ]] && printf '%s\n' "$3" >"$1/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+  [[ -n "${4:-}" ]] && printf '%s\n' "$4" >"$1/infra/ansible/roles/a8/templates/daemon.json.j2"
+  return 0
+}
+
+# $4 (необов'язковий) — підрядок очікуваного порушення. З ним тест вимагає, щоб
+# порушення було рівно одне і саме це: код 1 з будь-якої іншої причини (синтаксис,
+# сусідній інваріант) інакше зараховувався б як успіх (знайшов рецензент agy,
+# Gemini 3.8 Flash, PR #147).
 assert_exit() {
-  local name="$1" expected="$2" dir="$3"
+  local name="$1" expected="$2" dir="$3" want="${4:-}"
   local actual=0
   ROOT="$dir" "$SCRIPT" >"$tmproot/out" 2>&1 || actual=$?
-  if [[ "$actual" -eq "$expected" ]]; then
+  if [[ -n "$want" ]] && ! { grep -qF -- "порушено (1):" "$tmproot/out" && grep -qF -- "$want" "$tmproot/out"; }; then
+    echo "✗ $name — очікував рівно одне порушення «$want»"
+    sed 's/^/    /' "$tmproot/out"
+    fail=1
+  elif [[ "$actual" -eq "$expected" ]]; then
     echo "✓ $name"
   else
     echo "✗ $name — очікував exit $expected, отримав $actual"
@@ -213,6 +257,259 @@ make_tree "$tmproot/cmt" "$PLAY_OK" '---
       - /usr/local/bin/a8-run-agent
       - /home/agent/hart'
 assert_exit "a8-run-agent у коментарі → 0" 0 "$tmproot/cmt"
+
+# ─── Інваріант 10: мережа збірки й мережа агента ───────────────────────────
+# Збірка: реальна вада 2026-09-28 — без --network host примус egress різав
+# apt-get у RUN-кроці, образу не ставало.
+make_net_tree "$tmproot/n1" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: docker build без --network → 1" 1 "$tmproot/n1" "docker build без --network host"
+
+make_net_tree "$tmproot/n2" '---
+- name: Build the agent image
+  ansible.builtin.command: docker build --network=host -t hart-agent:test /etc/a8/image'
+assert_exit "10: --network=host одним словом → 0" 0 "$tmproot/n2"
+
+make_net_tree "$tmproot/n3" '---
+- name: Build the agent image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - --network
+      - host
+      - -t
+      - hart-agent:test
+      - /etc/a8/image'
+assert_exit "10: argv-форма з --network host → 0" 0 "$tmproot/n3"
+
+make_net_tree "$tmproot/n4" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --network bridge
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: збірка з --network bridge → 1" 1 "$tmproot/n4" "docker build без --network host"
+
+# Коментар і назва задачі — не прапорець.
+make_net_tree "$tmproot/n5" '---
+- name: Build the agent image with --network host
+  # --network host тут потрібен, див. інваріант 10
+  ansible.builtin.command: >-
+    docker build
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: --network host лише в назві й коментарі → 1" 1 "$tmproot/n5" "docker build без --network host"
+
+# Прапорець у сусідній команді того самого shell — не прапорець збірки.
+make_net_tree "$tmproot/n6" '---
+- name: Build the agent image
+  ansible.builtin.shell: >-
+    docker build -t hart-agent:test /etc/a8/image
+    && docker image ls --network host'
+assert_exit "10: --network host після && в іншій команді → 1" 1 "$tmproot/n6" "docker build без --network host"
+
+make_net_tree "$tmproot/n7" '---
+- name: Build the agent image
+  ansible.builtin.command: docker buildx build -t hart-agent:test /etc/a8/image'
+assert_exit "10: docker buildx build без --network → 1" 1 "$tmproot/n7" "docker build без --network host"
+
+# Збірки немає зовсім — перевіряти нічого, і це червоне, а не зелене.
+make_net_tree "$tmproot/n8" '---
+- name: Nothing to build
+  ansible.builtin.debug:
+    msg: ok'
+assert_exit "10: жодного docker build у задачах → 1" 1 "$tmproot/n8" "немає жодного 'docker build'"
+
+# Обгортка: будь-яка мережа, не лише host. Мережа з `docker network create`
+# має власний міст br-…, а правила примусу стоять на -i docker0.
+make_net_tree "$tmproot/n9" '' '#!/usr/bin/env bash
+exec docker run --rm \
+  --network host \
+  hart-agent:test "$@"'
+assert_exit "10: обгортка з --network host → 1" 1 "$tmproot/n9" "шаблон чи файл ролі задає мережу контейнера"
+
+make_net_tree "$tmproot/n10" '' '#!/usr/bin/env bash
+exec docker run --rm --net=a8net hart-agent:test "$@"'
+assert_exit "10: обгортка з --net=a8net → 1" 1 "$tmproot/n10" "шаблон чи файл ролі задає мережу контейнера"
+
+make_net_tree "$tmproot/n11" '' '#!/usr/bin/env bash
+OPT_ARGS=()
+OPT_ARGS+=(--network a8net)
+exec docker run --rm "${OPT_ARGS[@]}" hart-agent:test "$@"'
+assert_exit "10: --network через масив прапорців → 1" 1 "$tmproot/n11" "шаблон чи файл ролі задає мережу контейнера"
+
+# Пояснення в обох видах коментарів — не порушення; схожий прапорець — теж.
+make_net_tree "$tmproot/n12" '' '#!/usr/bin/env bash
+# --network тут НЕ ставимо: агент мусить іти через docker0
+exec docker run --rm \
+  `# без --network host — інакше агент поза egress-фільтром` \
+  -e CURL_OPTS=--netrc \
+  hart-agent:test "$@"'
+assert_exit "10: --network у коментарях, --netrc у значенні → 0" 0 "$tmproot/n12"
+
+make_net_tree "$tmproot/n13"
+rm "$tmproot/n13/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+assert_exit "10: обгортки немає → 1" 1 "$tmproot/n13" "немає обгортки"
+
+make_net_tree "$tmproot/n14" '' '#!/usr/bin/env bash
+# exec docker run — колись тут був
+exec podman run --rm hart-agent:test "$@"'
+assert_exit "10: в обгортці немає docker run → 1" 1 "$tmproot/n14" "не знайдено 'docker run'"
+
+# Інший шаблон ролі (напр. тік) теж не задає мережу контейнера.
+make_net_tree "$tmproot/n15"
+printf '%s\n' '#!/usr/bin/env bash' 'docker run --rm --network host alpine true' \
+  >"$tmproot/n15/infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+assert_exit "10: --network в іншому шаблоні ролі → 1" 1 "$tmproot/n15" "шаблон чи файл ролі задає мережу контейнера"
+
+# Знахідки рецензії PR #147 (agy, Gemini 3.8 Flash) і звірки оркестратора.
+# Повторений прапорець бере останнє значення.
+make_net_tree "$tmproot/n16" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --network host
+    --network bridge
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: --network host, потім --network bridge → 1" 1 "$tmproot/n16" "docker build без --network host"
+
+make_net_tree "$tmproot/n17" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --network bridge
+    --network host
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: останнім стоїть --network host → 0" 0 "$tmproot/n17"
+
+# Задачі в підтеці tasks/ теж задачі ролі.
+make_net_tree "$tmproot/n18"
+mkdir -p "$tmproot/n18/infra/ansible/roles/a8/tasks/image"
+printf '%s\n' '---' '- name: b' '  ansible.builtin.command: docker build -t x /y' \
+  >"$tmproot/n18/infra/ansible/roles/a8/tasks/image/build.yml"
+assert_exit "10: збірка без мережі в tasks/image/ → 1" 1 "$tmproot/n18" "docker build без --network host"
+
+# `docker compose build` прапорця --network не має — описувати заново.
+make_net_tree "$tmproot/n19" '---
+- name: Build the agent image
+  ansible.builtin.command: docker compose -f build.yml build'
+assert_exit "10: docker compose build → 1" 1 "$tmproot/n19" "docker build без --network host"
+
+# `;` без пробілу — частина значення, а не межа команди.
+make_net_tree "$tmproot/n20" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --label d=a;b
+    --network host
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: ; усередині значення перед --network host → 0" 0 "$tmproot/n20"
+
+# Прапорець у значенні іншого прапорця — не прапорець збірки.
+make_net_tree "$tmproot/n21" '---
+- name: Build the agent image
+  ansible.builtin.command: >-
+    docker build
+    --build-arg DUMMY=--network host
+    -t hart-agent:test /etc/a8/image'
+assert_exit "10: --network host як значення --build-arg → 1" 1 "$tmproot/n21" "docker build без --network host"
+
+# bash склеює лапки й \ в одне слово.
+make_net_tree "$tmproot/n22" '' '#!/usr/bin/env bash
+exec docker run --rm --net""work=host hart-agent:test "$@"'
+assert_exit "10: обгортка з --net\"\"work=host → 1" 1 "$tmproot/n22" "шаблон чи файл ролі задає мережу контейнера"
+
+make_net_tree "$tmproot/n23" '' '#!/usr/bin/env bash
+exec docker run --rm --net\work=host hart-agent:test "$@"'
+assert_exit "10: обгортка з --net\\work=host → 1" 1 "$tmproot/n23" "шаблон чи файл ролі задає мережу контейнера"
+
+# Jinja-коментар — пояснення, до docker не доходить.
+make_net_tree "$tmproot/n24" '' '#!/usr/bin/env bash
+{# без --network: агент мусить іти через docker0 #}
+exec docker run --rm hart-agent:test "$@"'
+assert_exit "10: --network у Jinja-коментарі → 0" 0 "$tmproot/n24"
+
+# ` #` у лапках — не коментар; прапорець після нього діє.
+make_net_tree "$tmproot/n25" '' '#!/usr/bin/env bash
+exec docker run --rm \
+  --label " #" --network host \
+  hart-agent:test "$@"'
+assert_exit "10: --network після \" #\" у лапках → 1" 1 "$tmproot/n25" "шаблон чи файл ролі задає мережу контейнера"
+
+# Міст фільтра й міст docker.
+DAEMON_BR0='{
+  "bridge": "br0",
+  "live-restore": true
+}'
+make_net_tree "$tmproot/n26" '' '' "$DAEMON_BR0"
+assert_exit "10: daemon.json кладе контейнери на br0, фільтр на docker0 → 1" 1 "$tmproot/n26" "міст egress-фільтра"
+
+make_net_tree "$tmproot/n27" '' '' "$DAEMON_BR0"
+printf '%s\n' 'a8_egress_bridge: br0' >"$tmproot/n27/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "10: daemon.json і фільтр — обидва br0 → 0" 0 "$tmproot/n27"
+
+make_net_tree "$tmproot/n28"
+mkdir -p "$tmproot/n28/infra/ansible/group_vars"
+printf '%s\n' 'a8_egress_bridge: br0' >"$tmproot/n28/infra/ansible/group_vars/a8.yml"
+assert_exit "10: group_vars переносить фільтр з docker0 → 1" 1 "$tmproot/n28" "міст egress-фільтра"
+
+make_net_tree "$tmproot/n29"
+: >"$tmproot/n29/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "10: a8_egress_bridge ніде не задано → 1" 1 "$tmproot/n29" "a8_egress_bridge не знайдено"
+
+# Обгортку ставить не шаблон — перевірка шаблону нічого б не доводила.
+make_net_tree "$tmproot/n30"
+printf '%s\n' '---' '- name: Install agent container runner' '  ansible.builtin.copy:' \
+  '    src: a8-run-agent.sh' '    dest: /usr/local/bin/a8-run-agent' \
+  >"$tmproot/n30/infra/ansible/roles/a8/tasks/runner.yml"
+assert_exit "10: обгортку ставить copy з files/ → 1" 1 "$tmproot/n30" "обгортку ставить не шаблон"
+
+make_net_tree "$tmproot/n31"
+rm "$tmproot/n31/infra/ansible/roles/a8/tasks/runner.yml"
+assert_exit "10: немає задачі, що ставить обгортку → 1" 1 "$tmproot/n31" "не видно, звідки береться обгортка"
+
+# Контрприклади окремої сесії Claude (PR #147, ліміт Opus в agy вичерпано).
+# Блок `|`: кожен рядок — окрема команда; перевіряється кожна збірка, не остання.
+make_net_tree "$tmproot/n32"
+printf '%s\n' '---' '- name: Build all images' '  ansible.builtin.shell: |' \
+  '    docker build -t pre-img:latest /etc/a8/pre' \
+  '    docker build --network host -t hart-agent:test /etc/a8/image' \
+  >"$tmproot/n32/infra/ansible/roles/a8/tasks/extra.yml"
+assert_exit "10: дві збірки в shell: |, перша без мережі → 1" 1 "$tmproot/n32" "docker build без --network host"
+
+# Той самий блок, обидві з мережею хоста — зелено.
+make_net_tree "$tmproot/n33"
+printf '%s\n' '---' '- name: Build all images' '  ansible.builtin.shell: |' \
+  '    docker build --network host -t pre-img:latest /etc/a8/pre' \
+  '    docker build --network host -t hart-agent:test /etc/a8/image' \
+  >"$tmproot/n33/infra/ansible/roles/a8/tasks/extra.yml"
+assert_exit "10: дві збірки в shell: |, обидві з мережею хоста → 0" 0 "$tmproot/n33"
+
+# Шаблони в підтеках і файли ролі теж ідуть на хост.
+make_net_tree "$tmproot/n34"
+mkdir -p "$tmproot/n34/infra/ansible/roles/a8/templates/helpers"
+printf '%s\n' '#!/usr/bin/env bash' 'exec docker run --rm --network host alpine true' \
+  >"$tmproot/n34/infra/ansible/roles/a8/templates/helpers/diag.sh.j2"
+assert_exit "10: --network у templates/helpers/ → 1" 1 "$tmproot/n34" "шаблон чи файл ролі задає мережу контейнера"
+
+make_net_tree "$tmproot/n35"
+printf '%s\n' '#!/usr/bin/env bash' 'exec docker run --rm --net=host alpine true' \
+  >"$tmproot/n35/infra/ansible/roles/a8/files/diag.sh"
+assert_exit "10: --net=host у files/ → 1" 1 "$tmproot/n35" "шаблон чи файл ролі задає мережу контейнера"
+
+# Лапки YAML навколо значення — те саме значення.
+make_net_tree "$tmproot/n36"
+printf '%s\n' "a8_egress_bridge: 'docker0'" >"$tmproot/n36/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "10: a8_egress_bridge: 'docker0' в одинарних лапках → 0" 0 "$tmproot/n36"
+
+# host_vars перекриває defaults і group_vars.
+make_net_tree "$tmproot/n37"
+mkdir -p "$tmproot/n37/infra/ansible/host_vars"
+printf '%s\n' 'a8_egress_bridge: br-custom' >"$tmproot/n37/infra/ansible/host_vars/a8.yml"
+assert_exit "10: host_vars переносить фільтр на br-custom → 1" 1 "$tmproot/n37" "міст egress-фільтра (br-custom)"
 
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
@@ -449,6 +746,90 @@ open(p, 'w').write(s)
 PY
 assert_exit "мутація 17: у воркера пакет із :amd64, в агента немає → 1" 1 "$mut"
 cp "$REPO/$CAD_DF" "$mut/$CAD_DF"
+
+# Мутації 18–23 — інваріант 10, мережа збірки й мережа агента.
+TASKS_MAIN="infra/ansible/roles/a8/tasks/main.yml"
+RUNNER="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+
+# 18: збірка знову без мережі хоста — рівно стан, у якому 2026-09-28 впало
+# застосування (apt-get → deb.debian.org, connection timed out).
+python3 - "$mut/$TASKS_MAIN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    docker build\n    --network host\n"
+assert anchor in s, "фікстура застаріла: задача збірки образу виглядає інакше"
+s = s.replace(anchor, "    docker build\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 18: зі збірки прибрано --network host → 1" 1 "$mut" "docker build без --network host"
+cp "$REPO/$TASKS_MAIN" "$mut/$TASKS_MAIN"
+
+# 19: агент у мережі хоста — поза DOCKER-USER, тобто без allowlist'а.
+python3 - "$mut/$RUNNER" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "exec docker run --rm \\\n"
+assert anchor in s, "фікстура застаріла: обгортка більше не запускає контейнер так"
+s = s.replace(anchor, anchor + "  --network host \\\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 19: обгортка запускає агента з --network host → 1" 1 "$mut" "шаблон чи файл ролі задає мережу контейнера"
+cp "$REPO/$RUNNER" "$mut/$RUNNER"
+
+# 20: агент у власній мережі — свій міст br-…, правило на docker0 його не бачить.
+python3 - "$mut/$RUNNER" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "[[ -n \"${A8_CONTAINER_NAME:-}\" ]] && OPT_ARGS+=(--name \"$A8_CONTAINER_NAME\")\n"
+assert anchor in s, "фікстура застаріла: необов'язкові прапорці обгортки виглядають інакше"
+s = s.replace(anchor, anchor + "OPT_ARGS+=(--net=a8-agents)\n", 1)
+open(p, 'w').write(s)
+PY
+assert_exit "мутація 20: обгортка додає --net=a8-agents → 1" 1 "$mut" "шаблон чи файл ролі задає мережу контейнера"
+cp "$REPO/$RUNNER" "$mut/$RUNNER"
+
+# 21: повтор прапорця у збірці — останнє значення bridge.
+python3 - "$mut/$TASKS_MAIN" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    docker build\n    --network host\n"
+assert anchor in s, "фікстура застаріла: задача збірки образу виглядає інакше"
+s = s.replace(anchor, anchor + "    --network bridge\n", 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 21: після --network host додано --network bridge → 1" 1 "$mut" "docker build без --network host"
+cp "$REPO/$TASKS_MAIN" "$mut/$TASKS_MAIN"
+
+# 22: docker кладе контейнери на інший міст, фільтр лишився на docker0.
+DAEMON="infra/ansible/roles/a8/templates/daemon.json.j2"
+python3 - "$mut/$DAEMON" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = '  "live-restore": true,\n'
+assert anchor in s, "фікстура застаріла: daemon.json.j2 виглядає інакше"
+s = s.replace(anchor, '  "bridge": "br-a8",\n' + anchor, 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 22: daemon.json задає \"bridge\": \"br-a8\" → 1" 1 "$mut" "міст egress-фільтра"
+cp "$REPO/$DAEMON" "$mut/$DAEMON"
+
+# 23: обгортку ставить інший шаблон, а перевіряється старий.
+python3 - "$mut/$TASKS_MAIN" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    src: a8-run-agent.sh.j2\n    dest: /usr/local/bin/a8-run-agent\n"
+assert anchor in s, "фікстура застаріла: задача встановлення обгортки виглядає інакше"
+s = s.replace(anchor, "    src: a8-run-agent-host.sh.j2\n    dest: /usr/local/bin/a8-run-agent\n", 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 23: обгортку ставить інший шаблон → 1" 1 "$mut" "обгортку ставить не шаблон"
+cp "$REPO/$TASKS_MAIN" "$mut/$TASKS_MAIN"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
