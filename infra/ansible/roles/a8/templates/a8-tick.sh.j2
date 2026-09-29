@@ -273,8 +273,13 @@ base="$(git -C "$wt" rev-parse HEAD)"
 # ставились залежності чи йшов хук. Це зупинка, а не `failed deps`.
 drc=0
 "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
+#
+# `--extra dev` — як у CI (ci.yml): pytest, mypy і ruff живуть саме там. Без нього
+# в контейнері немає pytest для оракула й ruff/mypy для pre-commit (V18e на A8
+# 2026-09-29: «Failed to spawn: `pytest`»). Паритет із CI тримає інваріант 11
+# у tools/scripts/check-ansible-a8.sh.
 if ((drc == 0)); then
-  "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync' >>"$log" 2>&1 || drc=$?
+  "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync --extra dev' >>"$log" 2>&1 || drc=$?
 fi
 if ((drc != 0)); then
   # Зупинка — ДО лічильника: агент не запускався, денний ліміт не витрачено.

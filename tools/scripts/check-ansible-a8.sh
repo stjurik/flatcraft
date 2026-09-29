@@ -484,6 +484,170 @@ while IFS= read -r hit; do
   fi
 done <<<"$egress_bridges"
 
+# Інваріант 11 — `uv sync` для агента ставить те саме, що CI.
+#
+# ЧОМУ. CI ставить `uv sync --extra dev` (.github/workflows/ci.yml): pytest, mypy
+# і ruff живуть в extra `dev` (workers/cad/pyproject.toml). Тік, V18c і
+# autorun.sh робили голий `uv sync`, тож у контейнері агента pytest не було.
+# Застосування 2026-09-29: V18e — rc=2, «Failed to spawn: `pytest` … No such
+# file or directory». З тієї самої причини впав би оракул кожної задачі в
+# workers/cad і pre-commit на кожному Python-коміті (lefthook: `uv run ruff`,
+# `uv run mypy`).
+#
+# Еталон — рядок `uv sync` у CI, а не список, переписаний сюди: нове extra в CI
+# без правки ролі червонить інваріант. Немає еталона або жодного `uv sync` у
+# ролі — теж порушення (той самий клас, що в інваріантах 8–10).
+#
+# Дірки першої редакції знайшов рецензент (agy, Gemini 3.8 Flash, PR #148):
+# `--no-dev` поруч з `--extra dev`, `# --extra dev` у коментарі в кінці рядка,
+# `--group` у CI, `\` і `run: |` у CI, handlers/ і files/, лапки навколо значення,
+# друга згадка `uv sync` у тому самому рядку. Звідси правила нижче.
+#
+# Де шукаємо: усі файли ролі, крім .md (задачі, handlers, шаблони, files), і
+# tools/scripts/autorun.sh — той самий крок для локального автономного прогону.
+# У CI — будь-який рядок ci.yml, після склеювання продовжень `\`: і `run: uv sync`,
+# і `cd … && uv sync` у блоці `run: |`.
+#
+# Що таке команда: кожне входження `uv sync` (і `uv --directory X sync`) у рядку
+# окремо, якщо за ним іде прапорець, кінець рядка чи межа команди (`)`, лапка,
+# `;`, `&`, `|`). Проза на кшталт «uv sync падає» чи «uv sync: пройшов» командою
+# не є. Аргументи команди — до межі команди або ` #` (коментар у кінці рядка).
+# Лапки навколо значення (`--extra "dev"`) знімаються. Цілі рядки-коментарі й
+# `` `# …` `` посеред команди не рахуються.
+#
+# Що вимагаємо: кожне `--extra X` / `--group X` з CI — у кожній команді агента
+# (або `--all-extras` / `--all-groups`); `--all-*` з CI — дослівно. І жодного
+# прапорця, що звужує набір (`--no-dev`, `--only-dev`, `--no-default-groups`,
+# `--no-group`, `--only-group`, `--no-extra`), якого немає в CI.
+CI_WF="$ROOT/.github/workflows/ci.yml"
+UV_CMD_RE='^([[:space:]]+-|[[:space:]]*$|[[:space:]]*[)'"'"'";&|])'
+# uv_tails — stdin: рядки «N<TAB>текст»; stdout: «N<TAB>аргументи» кожної команди uv sync.
+uv_tails() {
+  local n l rest
+  while IFS=$'\t' read -r n l; do
+    l="$(sed -E -e "s/(--(extra|group)[= ])[\"']([^\"']+)[\"']/\\1\\3/g" \
+      -e 's/uv[[:space:]]+--(directory|project)[= ][^[:space:]]+[[:space:]]+sync/uv sync/g' <<<"$l")"
+    rest="$l"
+    while [[ "$rest" == *"uv sync"* ]]; do
+      rest="${rest#*uv sync}"
+      [[ "$rest" =~ $UV_CMD_RE ]] || continue
+      printf '%s\t%s\n' "$n" "$(sed -E "s/([[:space:]]#|[)'\";&|]).*//" <<<"$rest")"
+    done
+  done
+}
+# strip_comments <файл> — рядки «N<TAB>текст» без коментарів, зі склеєними
+# продовженнями `\` (N — перший рядок команди). Коментарі: `` `# …` `` посеред
+# команди, Jinja `{# … #}` в одному рядку і `#` після пробілу поза лапками —
+# рядок-коментар, YAML- чи bash-коментар у кінці рядка. ` #` усередині лапок —
+# не коментар: зрізання за ним ховало б команду. Продовження `\` у файлах ролі
+# склеюються так само, як у CI (контрприклад окремої сесії Claude, PR #148:
+# `uv sync \` + `--quiet` на наступному рядку інакше був невидимий).
+strip_comments() {
+  awk '
+    function strip_eol(s,   i, c, dq, sq) {
+      dq = 0; sq = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\"" && !sq) dq = !dq
+        else if (c == "\047" && !dq) sq = !sq
+        else if (c == "#" && !dq && !sq && (i == 1 || substr(s, i - 1, 1) ~ /[ \t]/)) return substr(s, 1, i - 1)
+      }
+      return s
+    }
+    {
+      line = $0
+      gsub(/`#[^`]*`/, "", line)
+      gsub(/\{#.*#\}/, "", line)
+      line = strip_eol(line)
+      if (cont) buf = buf " " line; else { buf = line; first = NR }
+      if (buf ~ /\\[ \t]*$/) { sub(/\\[ \t]*$/, "", buf); cont = 1; next }
+      cont = 0
+      printf "%d\t%s\n", first, buf
+    }
+    END { if (cont) printf "%d\t%s\n", first, buf }
+  ' "$1"
+}
+# has_tok <команда> <слово> / has_flag <команда> <прапорець> <значення> — порівняння
+# словами, не регексом: `--extra dev.test` у регексі збігався б і з `devXtest`
+# (контрприклад окремої сесії Claude, PR #148).
+has_tok() {
+  local -a t
+  local x
+  read -ra t <<<"$1"
+  for x in "${t[@]}"; do [[ "$x" == "$2" ]] && return 0; done
+  return 1
+}
+has_flag() {
+  local -a t
+  local i
+  read -ra t <<<"$1"
+  for ((i = 0; i < ${#t[@]}; i++)); do
+    [[ "${t[i]}" == "$2=$3" ]] && return 0
+    [[ "${t[i]}" == "$2" && "${t[i + 1]:-}" == "$3" ]] && return 0
+  done
+  return 1
+}
+UV_NARROW_RE='--no-dev|--only-dev|--no-default-groups|--no-group[= ][^[:space:]]+|--only-group[= ][^[:space:]]+|--no-extra[= ][^[:space:]]+'
+# Еталон — лише job `python` у ci.yml: саме вона ганяє ruff, mypy і pytest воркера.
+# `uv sync` інших job (напр. документації з власним extra) агентові не потрібен —
+# об'єднання з усіх job давало хибне порушення (окрема сесія Claude, PR #148).
+# Job `python` немає — порушення, а не пропуск.
+ci_raw=""
+if [[ -f "$CI_WF" ]]; then
+  ci_py="$(mktemp)"
+  awk '/^jobs:/ { j = 1; next } j && /^  [A-Za-z0-9_-]+:/ { injob = ($0 ~ /^  python:/) } j && injob' "$CI_WF" >"$ci_py"
+  ci_raw="$(strip_comments "$ci_py" | { grep -E 'uv[[:space:]]' || true; } | uv_tails)"
+  rm -f "$ci_py"
+  # `|| true` — не косметика: без збігів grep повертає 1, і під pipefail + set -e
+  # скрипт помирав би мовчки з кодом 1, без жодного повідомлення. Спіймано тестом
+  # u7, щойно він почав звіряти текст порушення, а не лише код.
+fi
+if [[ -z "$ci_raw" ]]; then
+  violations+=("у job 'python' файла $CI_WF немає команди 'uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
+else
+  ci_tails="$(cut -f2 <<<"$ci_raw")"
+  ci_reqs="$(grep -oE -- '--(extra|group)[= ][^[:space:]]+|--all-(extras|groups)' <<<"$ci_tails" | sed -E 's/^--(extra|group)=/--\1 /' | sort -u || true)"
+  ci_narrow="$(grep -oE -- "$UV_NARROW_RE" <<<"$ci_tails" | sort -u || true)"
+  uv_files=()
+  while IFS= read -r f; do uv_files+=("$f"); done < <(
+    {
+      find "$ROLE" -type f ! -name '*.md' 2>/dev/null
+      [[ -f "$ROOT/tools/scripts/autorun.sh" ]] && echo "$ROOT/tools/scripts/autorun.sh"
+    } | sort
+  )
+  uv_hits=0
+  for f in "${uv_files[@]}"; do
+    while IFS=$'\t' read -r n cmd; do
+      [[ -z "$n" ]] && continue
+      uv_hits=$((uv_hits + 1))
+      while IFS= read -r req; do
+        [[ -z "$req" ]] && continue
+        case "$req" in
+          --all-extras | --all-groups)
+            has_tok "$cmd" "$req" && continue ;;
+          --extra\ *)
+            has_tok "$cmd" --all-extras && continue
+            has_flag "$cmd" --extra "${req#--extra }" && continue ;;
+          --group\ *)
+            has_tok "$cmd" --all-groups && continue
+            has_flag "$cmd" --group "${req#--group }" && continue ;;
+        esac
+        violations+=("uv sync без '$req', який ставить CI (без нього в контейнері немає pytest/mypy/ruff — оракул і pre-commit Python падають): $f:$n")
+      done <<<"$ci_reqs"
+      while IFS= read -r narrow; do
+        [[ -z "$narrow" ]] && continue
+        grep -qxF -- "$narrow" <<<"$ci_narrow" && continue
+        violations+=("uv sync звужує набір прапорцем '$narrow', якого в CI немає (агентові бракуватиме того, що є в CI): $f:$n")
+      done < <(grep -oE -- "$UV_NARROW_RE" <<<"$cmd" | sort -u || true)
+    # Попередній фільтр: розбір іде по рядку з `sed` на кожен, тож без нього
+    # один прогін на всій ролі тривав ~15 с.
+    done < <(strip_comments "$f" | grep -E 'uv[[:space:]]' | uv_tails)
+  done
+  if ((uv_hits == 0)); then
+    violations+=("у ролі A8 і autorun.sh не знайдено жодного 'uv sync' — паритет із CI не перевірено")
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -494,4 +658,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI"

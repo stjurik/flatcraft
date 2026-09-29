@@ -37,6 +37,39 @@ make_tree() {
   printf '%s\n' "$RUNNER_TASK_OK" >"$dir/infra/ansible/roles/a8/tasks/runner.yml"
   printf '%s\n' "$RUNNER_OK" >"$dir/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
   printf '%s\n' 'a8_egress_bridge: docker0' >"$dir/infra/ansible/roles/a8/defaults/main.yml"
+  # Мінімальна пара для інваріанта 11: крок CI з extras і `uv sync` агента.
+  mkdir -p "$dir/.github/workflows"
+  printf '%s\n' "$CI_OK" >"$dir/.github/workflows/ci.yml"
+  printf '%s\n' "$DEPS_OK" >"$dir/infra/ansible/roles/a8/tasks/deps.yml"
+}
+
+CI_OK='jobs:
+  python:
+    steps:
+      - name: Install deps
+        run: uv sync --extra dev
+      - name: Test
+        run: uv run pytest'
+
+DEPS_OK='---
+- name: Install worker deps
+  ansible.builtin.command:
+    argv:
+      - bash
+      - -c
+      - cd workers/cad && uv sync --extra dev'
+
+# Дерево для інваріанта 11: здорова роль, у якій замінено задачу залежностей
+# ($2) і/або ci.yml ($3). Порожній аргумент — лишити здоровим.
+make_uv_tree() {
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  [[ -n "${2:-}" ]] && printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/tasks/deps.yml"
+  [[ -n "${3:-}" ]] && printf '%s\n' "$3" >"$1/.github/workflows/ci.yml"
+  return 0
+}
+deps_with() { # deps_with <команда uv> — задача залежностей із цією командою
+  printf '%s\n' '---' '- name: Install worker deps' '  ansible.builtin.command:' '    argv:' \
+    '      - bash' '      - -c' "      - cd workers/cad && $1"
 }
 
 BUILD_OK='---
@@ -511,6 +544,167 @@ mkdir -p "$tmproot/n37/infra/ansible/host_vars"
 printf '%s\n' 'a8_egress_bridge: br-custom' >"$tmproot/n37/infra/ansible/host_vars/a8.yml"
 assert_exit "10: host_vars переносить фільтр на br-custom → 1" 1 "$tmproot/n37" "міст egress-фільтра (br-custom)"
 
+# ─── Інваріант 11: uv sync агента = uv sync CI ──────────────────────────────
+# Реальна вада 2026-09-29: голий `uv sync` у тіку й V18c — у контейнері немає
+# pytest, V18e rc=2 «Failed to spawn: `pytest`».
+make_uv_tree "$tmproot/u1" "$(deps_with 'uv sync')"
+assert_exit "11: голий uv sync → 1" 1 "$tmproot/u1" "uv sync без '--extra dev'"
+
+make_uv_tree "$tmproot/u2" "$(deps_with 'uv sync --quiet')"
+assert_exit "11: uv sync --quiet без extra → 1" 1 "$tmproot/u2" "uv sync без '--extra dev'"
+
+make_uv_tree "$tmproot/u3" "$(deps_with 'uv sync --extra=dev --quiet')"
+assert_exit "11: --extra=dev одним словом → 0" 0 "$tmproot/u3"
+
+make_uv_tree "$tmproot/u4" "$(deps_with 'uv sync --all-extras')"
+assert_exit "11: --all-extras покриває dev → 0" 0 "$tmproot/u4"
+
+make_uv_tree "$tmproot/u5" "$(deps_with 'uv sync --extra development')"
+assert_exit "11: --extra development — не dev → 1" 1 "$tmproot/u5" "uv sync без '--extra dev'"
+
+# Еталон — CI: нове extra в CI без правки ролі червонить.
+make_uv_tree "$tmproot/u6" '' 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev --extra docs'
+assert_exit "11: у CI нове extra docs, в агента немає → 1" 1 "$tmproot/u6" "uv sync без '--extra docs'"
+
+make_uv_tree "$tmproot/u7" '' 'jobs:
+  python:
+    steps:
+      - run: pip install -e .'
+assert_exit "11: у CI немає команди uv sync → 1" 1 "$tmproot/u7" "немає команди 'uv sync"
+
+make_uv_tree "$tmproot/u8" '---
+- name: Nothing to install
+  ansible.builtin.debug:
+    msg: ok'
+assert_exit "11: жодного uv sync у ролі → 1" 1 "$tmproot/u8" "не знайдено жодного 'uv sync'"
+
+# Проза й коментарі командою не є.
+make_uv_tree "$tmproot/u9"
+printf '%s\n' '---' '- name: V18c — uv sync, then the registry test' '  # `uv sync` без dev колись падав' \
+  '  ansible.builtin.assert:' '    that: [true]' '    fail_msg: "на 3.14 uv sync падає; uv sync: пройшов"' \
+  >"$tmproot/u9/infra/ansible/roles/a8/tasks/prose.yml"
+assert_exit "11: uv sync у назві, коментарі й тексті повідомлення → 0" 0 "$tmproot/u9"
+
+# Обгортка з `` `# … uv sync …` `` посеред команди — коментар.
+make_uv_tree "$tmproot/u10"
+printf '%s\n' '#!/usr/bin/env bash' 'exec docker run --rm \' '  `# uv sync на 3.14 падає` \' '  hart-agent:test "$@"' \
+  >"$tmproot/u10/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+assert_exit "11: uv sync у backtick-коментарі обгортки → 0" 0 "$tmproot/u10"
+
+# autorun.sh — той самий крок для локального автономного прогону.
+make_uv_tree "$tmproot/u11"
+mkdir -p "$tmproot/u11/tools/scripts"
+printf '%s\n' '#!/usr/bin/env bash' '(cd "$WT_DIR/workers/cad" && uv sync)' >"$tmproot/u11/tools/scripts/autorun.sh"
+assert_exit "11: голий uv sync в autorun.sh → 1" 1 "$tmproot/u11" "autorun.sh"
+
+# Знахідки рецензії PR #148 (agy, Gemini 3.8 Flash).
+make_uv_tree "$tmproot/u12" "$(deps_with 'uv sync --extra dev --no-dev')"
+assert_exit "11: --extra dev разом із --no-dev → 1" 1 "$tmproot/u12" "звужує набір прапорцем '--no-dev'"
+
+make_uv_tree "$tmproot/u13" "$(deps_with 'uv sync -q # --extra dev')"
+assert_exit "11: --extra dev лише в коментарі в кінці рядка → 1" 1 "$tmproot/u13" "uv sync без '--extra dev'"
+
+make_uv_tree "$tmproot/u14" '' 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev --group integration'
+assert_exit "11: у CI --group integration, в агента немає → 1" 1 "$tmproot/u14" "uv sync без '--group integration'"
+
+# Еталон у CI через продовження `\`: вимога не губиться.
+CI_CONT='jobs:
+  python:
+    steps:
+      - run: uv sync \
+          --extra dev'
+make_uv_tree "$tmproot/u15" "$(deps_with 'uv sync')" "$CI_CONT"
+assert_exit "11: CI з \\, голий uv sync агента → 1" 1 "$tmproot/u15" "uv sync без '--extra dev'"
+make_uv_tree "$tmproot/u16" '' "$CI_CONT"
+assert_exit "11: CI з \\, агент з --extra dev → 0" 0 "$tmproot/u16"
+
+# handlers/ — теж файли ролі.
+make_uv_tree "$tmproot/u17"
+mkdir -p "$tmproot/u17/infra/ansible/roles/a8/handlers"
+printf '%s\n' '---' '- name: deps' '  ansible.builtin.command: bash -c "cd w && uv sync"' \
+  >"$tmproot/u17/infra/ansible/roles/a8/handlers/main.yml"
+assert_exit "11: голий uv sync у handlers/ → 1" 1 "$tmproot/u17" "handlers/main.yml"
+
+make_uv_tree "$tmproot/u18" "$(deps_with 'uv sync --extra "dev"')"
+assert_exit "11: --extra \"dev\" у лапках → 0" 0 "$tmproot/u18"
+
+make_uv_tree "$tmproot/u19" '' 'jobs:
+  python:
+    steps:
+      - run: |
+          cd workers/cad
+          uv sync --extra dev'
+assert_exit "11: CI — блок run: | → 0" 0 "$tmproot/u19"
+
+make_uv_tree "$tmproot/u20" '' 'jobs:
+  python:
+    steps:
+      - run: uv --directory workers/cad sync --extra dev'
+assert_exit "11: CI — uv --directory X sync → 0" 0 "$tmproot/u20"
+
+make_uv_tree "$tmproot/u21" "$(deps_with 'uv sync --extra dev && echo "uv sync ok"')"
+assert_exit "11: друга згадка uv sync у рядку — проза → 0" 0 "$tmproot/u21"
+
+make_uv_tree "$tmproot/u22" "$(deps_with 'uv sync --extra dev && uv sync')"
+assert_exit "11: друга команда в рядку — голий uv sync → 1" 1 "$tmproot/u22" "uv sync без '--extra dev'"
+
+# Контрприклади окремої сесії Claude (PR #148, ліміт Opus в agy вичерпано).
+# Продовження `\` у шаблоні ролі склеюється, як у CI.
+make_uv_tree "$tmproot/u23"
+printf '%s\n' '#!/usr/bin/env bash' "\"\$RUNNER\" \"\$wt\" bash -c 'cd workers/cad && uv sync \\" \
+  "  --quiet' >>\"\$log\" 2>&1" >"$tmproot/u23/infra/ansible/roles/a8/templates/tick.sh.j2"
+assert_exit "11: uv sync \\ + --quiet на наступному рядку → 1" 1 "$tmproot/u23" "tick.sh.j2"
+
+make_uv_tree "$tmproot/u24"
+printf '%s\n' '#!/usr/bin/env bash' "\"\$RUNNER\" \"\$wt\" bash -c 'cd workers/cad && uv sync \\" \
+  "  --extra dev' >>\"\$log\" 2>&1" >"$tmproot/u24/infra/ansible/roles/a8/templates/tick.sh.j2"
+assert_exit "11: uv sync \\ + --extra dev на наступному рядку → 0" 0 "$tmproot/u24"
+
+# Еталон — лише job python: extra іншої job агентові не потрібне.
+make_uv_tree "$tmproot/u25" '' 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev
+  docs:
+    steps:
+      - run: uv sync --extra docs'
+assert_exit "11: інша job ставить --extra docs → 0" 0 "$tmproot/u25"
+
+make_uv_tree "$tmproot/u26" '' 'jobs:
+  pyworker:
+    steps:
+      - run: uv sync --extra dev'
+assert_exit "11: job python перейменовано → 1" 1 "$tmproot/u26" "у job 'python'"
+
+# Коментарі в кінці рядка: Jinja і YAML — не команди.
+make_uv_tree "$tmproot/u27"
+printf '%s\n' '#!/usr/bin/env bash' '{# old: uv sync --no-dev #}' 'true' \
+  >"$tmproot/u27/infra/ansible/roles/a8/templates/note.sh.j2"
+assert_exit "11: uv sync --no-dev у Jinja-коментарі → 0" 0 "$tmproot/u27"
+
+make_uv_tree "$tmproot/u28"
+printf '%s\n' '---' '- name: x' '  ansible.builtin.debug:' '    msg: ok  # old approach: uv sync --quiet' \
+  >"$tmproot/u28/infra/ansible/roles/a8/tasks/note.yml"
+assert_exit "11: uv sync --quiet у YAML-коментарі в кінці рядка → 0" 0 "$tmproot/u28"
+
+# ` #` у лапках — не коментар: голий uv sync за ним видно.
+make_uv_tree "$tmproot/u29"
+printf '%s\n' '#!/usr/bin/env bash' 'echo " #"; uv sync' >"$tmproot/u29/infra/ansible/roles/a8/templates/q.sh.j2"
+assert_exit "11: голий uv sync після \" #\" у лапках → 1" 1 "$tmproot/u29" "q.sh.j2"
+
+# Назва extra — слово, не регекс: `.` не збігається з будь-яким символом.
+make_uv_tree "$tmproot/u30" "$(deps_with 'uv sync --extra devXtest')" 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev.test'
+assert_exit "11: у CI --extra dev.test, в агента devXtest → 1" 1 "$tmproot/u30" "uv sync без '--extra dev.test'"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -520,6 +714,10 @@ mkdir -p "$mut/infra"
 cp -r "$REPO/infra/ansible" "$mut/infra/ansible"
 # Еталон системних бібліотек образу агента (інваріант 9).
 cp -r "$REPO/infra/docker" "$mut/infra/docker"
+# Еталон uv sync (інваріант 11) і локальний автономний прогін.
+mkdir -p "$mut/.github/workflows" "$mut/tools/scripts"
+cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
+cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -830,6 +1028,67 @@ open(p, 'w').write(s)
 PY2
 assert_exit "мутація 23: обгортку ставить інший шаблон → 1" 1 "$mut" "обгортку ставить не шаблон"
 cp "$REPO/$TASKS_MAIN" "$mut/$TASKS_MAIN"
+
+# Мутації 24–27 — інваріант 11, uv sync агента = uv sync CI.
+TICK="infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+VERIFY="infra/ansible/roles/a8/tasks/verify.yml"
+AUTORUN="tools/scripts/autorun.sh"
+
+# 24: тік знову ставить без dev — рівно стан до 2026-09-29.
+python3 - "$mut/$TICK" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "bash -c 'cd workers/cad && uv sync --extra dev'"
+assert anchor in s, "фікстура застаріла: крок uv sync у тіку виглядає інакше"
+s = s.replace(anchor, "bash -c 'cd workers/cad && uv sync'", 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 24: тік — голий uv sync → 1" 1 "$mut" "a8-tick.sh.j2"
+cp "$REPO/$TICK" "$mut/$TICK"
+
+# 25: V18c без dev — V18e падає на «Failed to spawn: pytest».
+python3 - "$mut/$VERIFY" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "(cd workers/cad && uv sync --extra dev --quiet)"
+assert anchor in s, "фікстура застаріла: V18c виглядає інакше"
+s = s.replace(anchor, "(cd workers/cad && uv sync --quiet)", 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 25: V18c — uv sync --quiet без dev → 1" 1 "$mut" "verify.yml"
+cp "$REPO/$VERIFY" "$mut/$VERIFY"
+
+# 26: локальний автономний прогін без dev.
+python3 - "$mut/$AUTORUN" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = '(cd "$WT_DIR/workers/cad" && uv sync --extra dev)'
+assert anchor in s, "фікстура застаріла: крок uv sync в autorun.sh виглядає інакше"
+s = s.replace(anchor, '(cd "$WT_DIR/workers/cad" && uv sync)', 1)
+open(p, 'w').write(s)
+PY2
+assert_exit "мутація 26: autorun.sh — голий uv sync → 1" 1 "$mut" "autorun.sh"
+cp "$REPO/$AUTORUN" "$mut/$AUTORUN"
+
+# 27: CI додав extra, роль — ні. Порушень три (тік, V18c, autorun.sh), тож
+# перевіряємо код і текст, без вимоги «рівно одне».
+sed -i 's/run: uv sync --extra dev$/run: uv sync --extra dev --extra docs/' "$mut/.github/workflows/ci.yml"
+grep -q 'uv sync --extra dev --extra docs' "$mut/.github/workflows/ci.yml" ||
+  { echo "✗ фікстура застаріла: у ci.yml немає 'run: uv sync --extra dev'"; fail=1; }
+assert_exit "мутація 27: у CI нове extra, в агента немає → 1" 1 "$mut"
+# Рівно три порушення, і кожне — в іншому місці (знайшов рецензент agy,
+# Gemini 3.8 Flash, PR #148: без цього мовчазний пропуск двох файлів лишав би
+# мутацію зеленою).
+grep -qF "порушено (3):" "$tmproot/out" ||
+  { echo "✗ мутація 27: очікував рівно три порушення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+for where in a8-tick.sh.j2 verify.yml autorun.sh; do
+  grep -F "uv sync без '--extra docs'" "$tmproot/out" | grep -qF "$where" ||
+    { echo "✗ мутація 27: немає порушення про --extra docs у $where"; fail=1; }
+done
+cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"

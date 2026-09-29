@@ -50,7 +50,8 @@ esac
 
 echo "── залежності (node_modules/venv не шаруться між worktree)"
 (cd "$WT_DIR" && pnpm install --frozen-lockfile)
-(cd "$WT_DIR/workers/cad" && uv sync)
+# `--extra dev` — як у CI: pytest, mypy і ruff живуть саме там.
+(cd "$WT_DIR/workers/cad" && uv sync --extra dev)
 
 echo "── headless-прогін: model=$MODEL, лог: $LOG_FILE"
 cd "$WT_DIR"
