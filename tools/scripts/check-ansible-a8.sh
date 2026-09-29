@@ -498,47 +498,97 @@ done <<<"$egress_bridges"
 # без правки ролі червонить інваріант. Немає еталона або жодного `uv sync` у
 # ролі — теж порушення (той самий клас, що в інваріантах 8–10).
 #
-# Шукаємо в задачах і шаблонах ролі та в tools/scripts/autorun.sh (той самий
-# крок для локального автономного прогону). Командою вважаємо `uv sync`, за
-# яким іде прапорець, кінець рядка чи межа команди (`)`, лапка, `;`, `&`, `|`);
-# проза на кшталт «uv sync падає» чи «uv sync: пройшов» командою не є.
-# Коментарі (рядок з `#` і `` `# …` `` посеред команди) не рахуються.
+# Дірки першої редакції знайшов рецензент (agy, Gemini 3.8 Flash, PR #148):
+# `--no-dev` поруч з `--extra dev`, `# --extra dev` у коментарі в кінці рядка,
+# `--group` у CI, `\` і `run: |` у CI, handlers/ і files/, лапки навколо значення,
+# друга згадка `uv sync` у тому самому рядку. Звідси правила нижче.
+#
+# Де шукаємо: усі файли ролі, крім .md (задачі, handlers, шаблони, files), і
+# tools/scripts/autorun.sh — той самий крок для локального автономного прогону.
+# У CI — будь-який рядок ci.yml, після склеювання продовжень `\`: і `run: uv sync`,
+# і `cd … && uv sync` у блоці `run: |`.
+#
+# Що таке команда: кожне входження `uv sync` (і `uv --directory X sync`) у рядку
+# окремо, якщо за ним іде прапорець, кінець рядка чи межа команди (`)`, лапка,
+# `;`, `&`, `|`). Проза на кшталт «uv sync падає» чи «uv sync: пройшов» командою
+# не є. Аргументи команди — до межі команди або ` #` (коментар у кінці рядка).
+# Лапки навколо значення (`--extra "dev"`) знімаються. Цілі рядки-коментарі й
+# `` `# …` `` посеред команди не рахуються.
+#
+# Що вимагаємо: кожне `--extra X` / `--group X` з CI — у кожній команді агента
+# (або `--all-extras` / `--all-groups`); `--all-*` з CI — дослівно. І жодного
+# прапорця, що звужує набір (`--no-dev`, `--only-dev`, `--no-default-groups`,
+# `--no-group`, `--only-group`, `--no-extra`), якого немає в CI.
 CI_WF="$ROOT/.github/workflows/ci.yml"
-ci_line=""
-[[ -f "$CI_WF" ]] && ci_line="$(grep -E '^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*uv sync' "$CI_WF" | head -1 || true)"
-if [[ -z "$ci_line" ]]; then
-  violations+=("у $CI_WF немає кроку 'run: uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
+UV_CMD_RE='^([[:space:]]+-|[[:space:]]*$|[[:space:]]*[)'"'"'";&|])'
+# uv_tails — stdin: рядки «N<TAB>текст»; stdout: «N<TAB>аргументи» кожної команди uv sync.
+uv_tails() {
+  local n l rest
+  while IFS=$'\t' read -r n l; do
+    l="$(sed -E -e "s/(--(extra|group)[= ])[\"']([^\"']+)[\"']/\\1\\3/g" \
+      -e 's/uv[[:space:]]+--(directory|project)[= ][^[:space:]]+[[:space:]]+sync/uv sync/g' <<<"$l")"
+    rest="$l"
+    while [[ "$rest" == *"uv sync"* ]]; do
+      rest="${rest#*uv sync}"
+      [[ "$rest" =~ $UV_CMD_RE ]] || continue
+      printf '%s\t%s\n' "$n" "$(sed -E "s/([[:space:]]#|[)'\";&|]).*//" <<<"$rest")"
+    done
+  done
+}
+# strip_comments <файл> — рядки «N<TAB>текст» без рядків-коментарів і `` `# …` ``.
+strip_comments() {
+  sed -E -e 's/^[[:space:]]*#.*$//' -e 's/`#[^`]*`//g' "$1" | awk '{ printf "%d\t%s\n", NR, $0 }'
+}
+UV_NARROW_RE='--no-dev|--only-dev|--no-default-groups|--no-group[= ][^[:space:]]+|--only-group[= ][^[:space:]]+|--no-extra[= ][^[:space:]]+'
+ci_raw=""
+if [[ -f "$CI_WF" ]]; then
+  ci_raw="$(sed -e ':a' -e '/\\$/N; s/\\\n[[:space:]]*/ /; ta' "$CI_WF" | sed -E 's/^[[:space:]]*#.*$//' |
+    awk '{ printf "%d\t%s\n", NR, $0 }' | { grep -E 'uv[[:space:]]' || true; } | uv_tails)"
+  # `|| true` — не косметика: без збігів grep повертає 1, і під pipefail + set -e
+  # скрипт помирав би мовчки з кодом 1, без жодного повідомлення. Спіймано тестом
+  # u7, щойно він почав звіряти текст порушення, а не лише код.
+fi
+if [[ -z "$ci_raw" ]]; then
+  violations+=("у $CI_WF немає команди 'uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
 else
-  ci_extras="$(grep -oE -- '--extra[= ][^ ]+|--all-extras' <<<"$ci_line" | sed -E 's/^--extra=/--extra /' | sort -u || true)"
+  ci_tails="$(cut -f2 <<<"$ci_raw")"
+  ci_reqs="$(grep -oE -- '--(extra|group)[= ][^[:space:]]+|--all-(extras|groups)' <<<"$ci_tails" | sed -E 's/^--(extra|group)=/--\1 /' | sort -u || true)"
+  ci_narrow="$(grep -oE -- "$UV_NARROW_RE" <<<"$ci_tails" | sort -u || true)"
   uv_files=()
   while IFS= read -r f; do uv_files+=("$f"); done < <(
     {
-      find "$ROLE/tasks" "$ROLE/templates" -type f 2>/dev/null
+      find "$ROLE" -type f ! -name '*.md' 2>/dev/null
       [[ -f "$ROOT/tools/scripts/autorun.sh" ]] && echo "$ROOT/tools/scripts/autorun.sh"
     } | sort
   )
   uv_hits=0
-  while IFS= read -r hit; do
-    [[ -z "$hit" ]] && continue
-    uv_hits=$((uv_hits + 1))
-    cmd="$(sed -E "s/.*uv sync//; s/[)'\";&|].*//" <<<"$hit")"
-    while IFS= read -r req; do
-      [[ -z "$req" ]] && continue
-      if [[ "$req" == --all-extras ]]; then
-        [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
-      else
-        name="${req#--extra }"
-        [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
-        [[ "$cmd" =~ (^|[[:space:]])--extra[[:space:]=]$name([[:space:]]|$) ]] && continue
-      fi
-      violations+=("uv sync без '$req', який ставить CI (без нього в контейнері немає pytest/mypy/ruff — оракул і pre-commit Python падають): ${hit%%:*}:$(cut -d: -f2 <<<"$hit")")
-    done <<<"$ci_extras"
-  done < <(
-    for f in "${uv_files[@]}"; do
-      sed -E -e 's/^[[:space:]]*#.*$//' -e 's/`#[^`]*`//g' "$f" |
-        grep -nE "uv sync([[:space:]]+-|[[:space:]]*(\$|[)'\";&|]))" | sed "s|^|$f:|" || true
-    done
-  )
+  for f in "${uv_files[@]}"; do
+    while IFS=$'\t' read -r n cmd; do
+      [[ -z "$n" ]] && continue
+      uv_hits=$((uv_hits + 1))
+      while IFS= read -r req; do
+        [[ -z "$req" ]] && continue
+        case "$req" in
+          --all-extras | --all-groups)
+            [[ "$cmd" =~ (^|[[:space:]])$req([[:space:]]|$) ]] && continue ;;
+          --extra\ *)
+            [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
+            [[ "$cmd" =~ (^|[[:space:]])--extra[[:space:]=]${req#--extra }([[:space:]]|$) ]] && continue ;;
+          --group\ *)
+            [[ "$cmd" =~ (^|[[:space:]])--all-groups([[:space:]]|$) ]] && continue
+            [[ "$cmd" =~ (^|[[:space:]])--group[[:space:]=]${req#--group }([[:space:]]|$) ]] && continue ;;
+        esac
+        violations+=("uv sync без '$req', який ставить CI (без нього в контейнері немає pytest/mypy/ruff — оракул і pre-commit Python падають): $f:$n")
+      done <<<"$ci_reqs"
+      while IFS= read -r narrow; do
+        [[ -z "$narrow" ]] && continue
+        grep -qxF -- "$narrow" <<<"$ci_narrow" && continue
+        violations+=("uv sync звужує набір прапорцем '$narrow', якого в CI немає (агентові бракуватиме того, що є в CI): $f:$n")
+      done < <(grep -oE -- "$UV_NARROW_RE" <<<"$cmd" | sort -u || true)
+    # Попередній фільтр: розбір іде по рядку з `sed` на кожен, тож без нього
+    # один прогін на всій ролі тривав ~15 с.
+    done < <(strip_comments "$f" | grep -E 'uv[[:space:]]' | uv_tails)
+  done
   if ((uv_hits == 0)); then
     violations+=("у ролі A8 і autorun.sh не знайдено жодного 'uv sync' — паритет із CI не перевірено")
   fi

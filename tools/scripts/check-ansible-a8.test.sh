@@ -573,7 +573,7 @@ make_uv_tree "$tmproot/u7" '' 'jobs:
   python:
     steps:
       - run: pip install -e .'
-assert_exit "11: у CI немає кроку uv sync → 1" 1 "$tmproot/u7" "немає кроку 'run: uv sync"
+assert_exit "11: у CI немає команди uv sync → 1" 1 "$tmproot/u7" "немає команди 'uv sync"
 
 make_uv_tree "$tmproot/u8" '---
 - name: Nothing to install
@@ -599,6 +599,60 @@ make_uv_tree "$tmproot/u11"
 mkdir -p "$tmproot/u11/tools/scripts"
 printf '%s\n' '#!/usr/bin/env bash' '(cd "$WT_DIR/workers/cad" && uv sync)' >"$tmproot/u11/tools/scripts/autorun.sh"
 assert_exit "11: голий uv sync в autorun.sh → 1" 1 "$tmproot/u11" "autorun.sh"
+
+# Знахідки рецензії PR #148 (agy, Gemini 3.8 Flash).
+make_uv_tree "$tmproot/u12" "$(deps_with 'uv sync --extra dev --no-dev')"
+assert_exit "11: --extra dev разом із --no-dev → 1" 1 "$tmproot/u12" "звужує набір прапорцем '--no-dev'"
+
+make_uv_tree "$tmproot/u13" "$(deps_with 'uv sync -q # --extra dev')"
+assert_exit "11: --extra dev лише в коментарі в кінці рядка → 1" 1 "$tmproot/u13" "uv sync без '--extra dev'"
+
+make_uv_tree "$tmproot/u14" '' 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev --group integration'
+assert_exit "11: у CI --group integration, в агента немає → 1" 1 "$tmproot/u14" "uv sync без '--group integration'"
+
+# Еталон у CI через продовження `\`: вимога не губиться.
+CI_CONT='jobs:
+  python:
+    steps:
+      - run: uv sync \
+          --extra dev'
+make_uv_tree "$tmproot/u15" "$(deps_with 'uv sync')" "$CI_CONT"
+assert_exit "11: CI з \\, голий uv sync агента → 1" 1 "$tmproot/u15" "uv sync без '--extra dev'"
+make_uv_tree "$tmproot/u16" '' "$CI_CONT"
+assert_exit "11: CI з \\, агент з --extra dev → 0" 0 "$tmproot/u16"
+
+# handlers/ — теж файли ролі.
+make_uv_tree "$tmproot/u17"
+mkdir -p "$tmproot/u17/infra/ansible/roles/a8/handlers"
+printf '%s\n' '---' '- name: deps' '  ansible.builtin.command: bash -c "cd w && uv sync"' \
+  >"$tmproot/u17/infra/ansible/roles/a8/handlers/main.yml"
+assert_exit "11: голий uv sync у handlers/ → 1" 1 "$tmproot/u17" "handlers/main.yml"
+
+make_uv_tree "$tmproot/u18" "$(deps_with 'uv sync --extra "dev"')"
+assert_exit "11: --extra \"dev\" у лапках → 0" 0 "$tmproot/u18"
+
+make_uv_tree "$tmproot/u19" '' 'jobs:
+  python:
+    steps:
+      - run: |
+          cd workers/cad
+          uv sync --extra dev'
+assert_exit "11: CI — блок run: | → 0" 0 "$tmproot/u19"
+
+make_uv_tree "$tmproot/u20" '' 'jobs:
+  python:
+    steps:
+      - run: uv --directory workers/cad sync --extra dev'
+assert_exit "11: CI — uv --directory X sync → 0" 0 "$tmproot/u20"
+
+make_uv_tree "$tmproot/u21" "$(deps_with 'uv sync --extra dev && echo "uv sync ok"')"
+assert_exit "11: друга згадка uv sync у рядку — проза → 0" 0 "$tmproot/u21"
+
+make_uv_tree "$tmproot/u22" "$(deps_with 'uv sync --extra dev && uv sync')"
+assert_exit "11: друга команда в рядку — голий uv sync → 1" 1 "$tmproot/u22" "uv sync без '--extra dev'"
 
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
@@ -974,8 +1028,15 @@ sed -i 's/run: uv sync --extra dev$/run: uv sync --extra dev --extra docs/' "$mu
 grep -q 'uv sync --extra dev --extra docs' "$mut/.github/workflows/ci.yml" ||
   { echo "✗ фікстура застаріла: у ci.yml немає 'run: uv sync --extra dev'"; fail=1; }
 assert_exit "мутація 27: у CI нове extra, в агента немає → 1" 1 "$mut"
-grep -qF "uv sync без '--extra docs'" "$tmproot/out" ||
-  { echo "✗ мутація 27: немає порушення про --extra docs"; fail=1; }
+# Рівно три порушення, і кожне — в іншому місці (знайшов рецензент agy,
+# Gemini 3.8 Flash, PR #148: без цього мовчазний пропуск двох файлів лишав би
+# мутацію зеленою).
+grep -qF "порушено (3):" "$tmproot/out" ||
+  { echo "✗ мутація 27: очікував рівно три порушення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+for where in a8-tick.sh.j2 verify.yml autorun.sh; do
+  grep -F "uv sync без '--extra docs'" "$tmproot/out" | grep -qF "$where" ||
+    { echo "✗ мутація 27: немає порушення про --extra docs у $where"; fail=1; }
+done
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 
 if [[ "$fail" -eq 0 ]]; then
