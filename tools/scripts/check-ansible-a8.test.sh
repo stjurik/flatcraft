@@ -36,7 +36,10 @@ make_tree() {
   printf '%s\n' "$BUILD_OK" >"$dir/infra/ansible/roles/a8/tasks/image.yml"
   printf '%s\n' "$RUNNER_TASK_OK" >"$dir/infra/ansible/roles/a8/tasks/runner.yml"
   printf '%s\n' "$RUNNER_OK" >"$dir/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
-  printf '%s\n' 'a8_egress_bridge: docker0' >"$dir/infra/ansible/roles/a8/defaults/main.yml"
+  printf '%s\n' 'a8_egress_bridge: docker0' 'a8_egress_probe_host: deb.debian.org' 'a8_egress_domains:' \
+    '  - github.com # git' >"$dir/infra/ansible/roles/a8/defaults/main.yml"
+  # Мінімальний живий вимір фільтра для інваріанта 13: без нього він червоніє.
+  printf '%s\n' "$VERIFY_OK" >"$dir/infra/ansible/roles/a8/tasks/verify.yml"
   # Мінімальна пара для інваріанта 11: крок CI з extras і `uv sync` агента.
   mkdir -p "$dir/.github/workflows"
   printf '%s\n' "$CI_OK" >"$dir/.github/workflows/ci.yml"
@@ -50,6 +53,30 @@ CI_OK='jobs:
         run: uv sync --extra dev
       - name: Test
         run: uv run pytest'
+
+VERIFY_OK='---
+- name: V20a — agent probe
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - /home/agent/hart
+      - bash
+      - -c
+      - |
+        getent ahostsv4 {{ a8_egress_probe_host }} && echo @@DNS4_OK@@ || echo @@DNS4_FAIL@@
+        echo @@EGRESS_REACHED@@ @@EGRESS_BLOCKED@@
+        echo @@NO_IPV6@@
+  register: a8_v_egress_agent
+
+- name: V20b — control
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --network
+      - host
+      - hart-agent:test
+  register: a8_v_egress_ctl'
 
 DEPS_OK='---
 - name: Install worker deps
@@ -481,7 +508,7 @@ make_net_tree "$tmproot/n26" '' '' "$DAEMON_BR0"
 assert_exit "10: daemon.json кладе контейнери на br0, фільтр на docker0 → 1" 1 "$tmproot/n26" "міст egress-фільтра"
 
 make_net_tree "$tmproot/n27" '' '' "$DAEMON_BR0"
-printf '%s\n' 'a8_egress_bridge: br0' >"$tmproot/n27/infra/ansible/roles/a8/defaults/main.yml"
+sed -i 's/^a8_egress_bridge: docker0$/a8_egress_bridge: br0/' "$tmproot/n27/infra/ansible/roles/a8/defaults/main.yml"
 assert_exit "10: daemon.json і фільтр — обидва br0 → 0" 0 "$tmproot/n27"
 
 make_net_tree "$tmproot/n28"
@@ -490,7 +517,7 @@ printf '%s\n' 'a8_egress_bridge: br0' >"$tmproot/n28/infra/ansible/group_vars/a8
 assert_exit "10: group_vars переносить фільтр з docker0 → 1" 1 "$tmproot/n28" "міст egress-фільтра"
 
 make_net_tree "$tmproot/n29"
-: >"$tmproot/n29/infra/ansible/roles/a8/defaults/main.yml"
+sed -i '/^a8_egress_bridge:/d' "$tmproot/n29/infra/ansible/roles/a8/defaults/main.yml"
 assert_exit "10: a8_egress_bridge ніде не задано → 1" 1 "$tmproot/n29" "a8_egress_bridge не знайдено"
 
 # Обгортку ставить не шаблон — перевірка шаблону нічого б не доводила.
@@ -535,7 +562,7 @@ assert_exit "10: --net=host у files/ → 1" 1 "$tmproot/n35" "шаблон чи
 
 # Лапки YAML навколо значення — те саме значення.
 make_net_tree "$tmproot/n36"
-printf '%s\n' "a8_egress_bridge: 'docker0'" >"$tmproot/n36/infra/ansible/roles/a8/defaults/main.yml"
+sed -i "s/^a8_egress_bridge: docker0$/a8_egress_bridge: 'docker0'/" "$tmproot/n36/infra/ansible/roles/a8/defaults/main.yml"
 assert_exit "10: a8_egress_bridge: 'docker0' в одинарних лапках → 0" 0 "$tmproot/n36"
 
 # host_vars перекриває defaults і group_vars.
@@ -704,6 +731,56 @@ make_uv_tree "$tmproot/u30" "$(deps_with 'uv sync --extra devXtest')" 'jobs:
     steps:
       - run: uv sync --extra dev.test'
 assert_exit "11: у CI --extra dev.test, в агента devXtest → 1" 1 "$tmproot/u30" "uv sync без '--extra dev.test'"
+
+# ─── Інваріанти 12–13: docker без IPv6, живий вимір фільтра V20 ──────────────
+DTPL="infra/ansible/roles/a8/templates/daemon.json.j2"
+g_daemon() { make_tree "$1" "$PLAY_OK" "$TASKS_OK"; printf '%s\n' "$2" >"$1/$DTPL"; }
+g_daemon "$tmproot/g1" '{ "live-restore": true, "ipv6": true }'
+assert_exit "12: daemon.json з \"ipv6\": true → 1" 1 "$tmproot/g1" "daemon.json вмикає IPv6"
+g_daemon "$tmproot/g2" '{
+  "ipv6": false,
+  "live-restore": true
+}'
+assert_exit "12: \"ipv6\": false → 0" 0 "$tmproot/g2"
+g_daemon "$tmproot/g3" '{ "fixed-cidr-v6": "fd00::/80" }'
+assert_exit "12: fixed-cidr-v6 → 1" 1 "$tmproot/g3" "daemon.json вмикає IPv6"
+g_daemon "$tmproot/g4" '{
+  "ipv6": {{ a8_docker_ipv6 | to_json }},
+  "live-restore": true
+}'
+assert_exit "12: \"ipv6\" з Jinja — не буквальне false → 1" 1 "$tmproot/g4" "daemon.json вмикає IPv6"
+
+DEF="infra/ansible/roles/a8/defaults/main.yml"
+VER="infra/ansible/roles/a8/tasks/verify.yml"
+make_tree "$tmproot/h1" "$PLAY_OK" "$TASKS_OK"
+printf '%s\n' '  - deb.debian.org # раптом дописали' >>"$tmproot/h1/$DEF"
+assert_exit "13: ціль проби в allowlist → 1" 1 "$tmproot/h1" "є в a8_egress_domains"
+make_tree "$tmproot/h2" "$PLAY_OK" "$TASKS_OK"
+sed -i '/^a8_egress_probe_host:/d' "$tmproot/h2/$DEF"
+assert_exit "13: немає a8_egress_probe_host → 1" 1 "$tmproot/h2" "немає a8_egress_probe_host"
+make_tree "$tmproot/h3" "$PLAY_OK" "$TASKS_OK"
+sed -i 's/getent ahostsv4/getent hosts/' "$tmproot/h3/$VER"
+assert_exit "13: V20a — getent hosts замість ahostsv4 → 1" 1 "$tmproot/h3" "getent ahostsv4"
+make_tree "$tmproot/h4" "$PLAY_OK" "$TASKS_OK"
+sed -i 's/ *echo @@NO_IPV6@@//' "$tmproot/h4/$VER"
+assert_exit "13: V20a без маркера @@NO_IPV6@@ → 1" 1 "$tmproot/h4" "@@NO_IPV6@@"
+make_tree "$tmproot/h5" "$PLAY_OK" "$TASKS_OK"
+sed -i '/^      - --network$/d; /^      - host$/d' "$tmproot/h5/$VER"
+assert_exit "13: V20b без --network host → 1" 1 "$tmproot/h5" "контроль без --network host"
+make_tree "$tmproot/h6" "$PLAY_OK" "$TASKS_OK"
+printf '%s\n' '---' '- name: V1 — something' '  ansible.builtin.debug:' '    msg: ok' >"$tmproot/h6/$VER"
+assert_exit "13: у verify.yml немає V20 → 1" 1 "$tmproot/h6" "немає V20a і V20b"
+make_tree "$tmproot/h7" "$PLAY_OK" "$TASKS_OK"
+sed -i 's|/usr/local/bin/a8-run-agent|docker|; s|      - /home/agent/hart|      - run|' "$tmproot/h7/$VER"
+assert_exit "13: V20a не через a8-run-agent → 1" 1 "$tmproot/h7" "не йде через a8-run-agent"
+make_tree "$tmproot/h8" "$PLAY_OK" "$TASKS_OK"
+python3 - "$tmproot/h8/$VER" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace("      - --network\n      - host\n", "      - --network=host\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "13: V20b з --network=host одним словом → 0" 0 "$tmproot/h8"
 
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
@@ -1089,6 +1166,59 @@ for where in a8-tick.sh.j2 verify.yml autorun.sh; do
     { echo "✗ мутація 27: немає порушення про --extra docs у $where"; fail=1; }
 done
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
+
+# Мутації 28–31 — інваріанти 12–13, docker без IPv6 і живий вимір фільтра.
+DAEMON_T="infra/ansible/roles/a8/templates/daemon.json.j2"
+DEFAULTS="infra/ansible/roles/a8/defaults/main.yml"
+VERIFY_Y="infra/ansible/roles/a8/tasks/verify.yml"
+
+# 28: docker вмикає IPv6 — агент обходить IPv4-фільтр.
+python3 - "$mut/$DAEMON_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = '  "live-restore": true,\n'
+assert anchor in s, "фікстура застаріла: daemon.json.j2 виглядає інакше"
+s = s.replace(anchor, '  "ipv6": true,\n' + anchor, 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 28: daemon.json вмикає IPv6 → 1" 1 "$mut" "daemon.json вмикає IPv6"
+cp "$REPO/$DAEMON_T" "$mut/$DAEMON_T"
+
+# 29: ціль проби потрапила в allowlist — REACHED агента стає нормою.
+python3 - "$mut/$DEFAULTS" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "  - pypi.org # uv\n"
+assert anchor in s, "фікстура застаріла: a8_egress_domains виглядає інакше"
+s = s.replace(anchor, anchor + "  - deb.debian.org # apt\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 29: ціль проби дописано в allowlist → 1" 1 "$mut" "є в a8_egress_domains"
+cp "$REPO/$DEFAULTS" "$mut/$DEFAULTS"
+
+# 30: проба знову без явного IPv4.
+python3 - "$mut/$VERIFY_Y" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "getent ahostsv4 {{ a8_egress_probe_host }}"
+assert s.count(anchor) == 2, "фікстура застаріла: зонд V20a виглядає інакше"
+s = s.replace(anchor, "getent hosts {{ a8_egress_probe_host }}")
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 30: V20a — getent hosts замість ahostsv4 → 1" 1 "$mut" "getent ahostsv4"
+cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
+
+# 31: контроль без мережі хоста — BLOCKED агента нічого не доводить.
+python3 - "$mut/$VERIFY_Y" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "      - --rm\n      - --network\n      - host\n"
+assert anchor in s, "фікстура застаріла: V20b виглядає інакше"
+s = s.replace(anchor, "      - --rm\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 31: V20b без --network host → 1" 1 "$mut" "контроль без --network host"
+cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"

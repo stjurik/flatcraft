@@ -648,6 +648,66 @@ else
   fi
 fi
 
+# Інваріант 12 — docker не вмикає IPv6 для контейнерів.
+#
+# ЧОМУ. Egress-фільтр — лише IPv4: набір `hash:net` без `family inet6`, IPv6-діапазони
+# GitHub a8-egress-refresh пропускає, правила примусу ставить `iptables`, не
+# `ip6tables`. Отже, IPv6 контейнера не бачить жодне правило: увімкни docker IPv6 на
+# мості — і агент дістане будь-яку IPv6-адресу повз allowlist (вимога yurii
+# 2026-09-29 до постійної перевірки фільтра). Шаблон daemon.json у ролі — повний
+# вміст файла на A8, тож досить дивитись у нього. Ключ `"ipv6"` зі значенням, що не
+# є буквальним `false` (зокрема Jinja), і `"fixed-cidr-v6"` — порушення. Живий бік
+# — маркер @@NO_IPV6@@ у V20.
+DAEMON_TPL="$ROLE/templates/daemon.json.j2"
+if [[ -f "$DAEMON_TPL" ]]; then
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    violations+=("daemon.json вмикає IPv6 для контейнерів — egress-фільтр лише IPv4, агент обійде allowlist по IPv6: $hit")
+  done < <(
+    grep -nE '"ipv6"[[:space:]]*:' "$DAEMON_TPL" | grep -vE '"ipv6"[[:space:]]*:[[:space:]]*false[[:space:]]*,?[[:space:]]*$' | sed "s|^|$DAEMON_TPL:|" || true
+    grep -nE '"fixed-cidr-v6"' "$DAEMON_TPL" | sed "s|^|$DAEMON_TPL:|" || true
+  )
+fi
+
+# Інваріант 13 — живий вимір фільтра (V20) міряє те, що треба.
+#
+# ЧОМУ. До V20 живий доказ «зайве відрізається» давала лише ручна проба, і двічі
+# поспіль її вивід з'їла склейка stdout і stderr в Ansible: «BLOCKEDOK: kill switch
+# відсутній», а grep шукав ^BLOCKED$ (2026-09-29). Вимоги yurii до V20:
+#   а) ціль проби (`a8_egress_probe_host`) — поза allowlist, інакше «REACHED» агента
+#      був би нормою, а не дірою, і перевірка нічого не доводила б;
+#   б) адреса — явно IPv4 (`getent ahostsv4`): фільтр лише IPv4, і проба по IPv6
+#      довела б не те;
+#   в) маркери `@@…@@`, які шукаються підрядком: склейка їх не ламає;
+#   г) контроль — та сама проба з мережею хоста (V20b).
+# Немає змінної чи задачі V20a/V20b — теж порушення: інакше інваріант «проходив» би,
+# не виконавшись.
+PROBE_HOST="$(sed -nE 's/^a8_egress_probe_host:[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/p' "$ROLE/defaults/main.yml" 2>/dev/null | tail -1)"
+if [[ -z "$PROBE_HOST" ]]; then
+  violations+=("немає a8_egress_probe_host у defaults — живий вимір фільтра (V20) не має цілі")
+elif awk '/^a8_egress_domains:/ { d = 1; next } d && /^[^ #-]/ { d = 0 } d' "$ROLE/defaults/main.yml" |
+  sed -E 's/#.*//; s/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]+$//' | grep -qxF -- "$PROBE_HOST"; then
+  violations+=("a8_egress_probe_host ($PROBE_HOST) є в a8_egress_domains — проба V20 має бути поза allowlist, інакше її «REACHED» — норма")
+fi
+VERIFY_TASKS="$TASKS/verify.yml"
+v20_block() { # v20_block <префікс назви> — текст задачі від `- name: <префікс>` до наступної
+  awk -v p="- name: $1" 'index($0, p) == 1 { on = 1; print; next } on && /^- name:/ { exit } on' "$VERIFY_TASKS" 2>/dev/null
+}
+v20a="$(v20_block 'V20a')"
+v20b="$(v20_block 'V20b')"
+if [[ -z "$v20a" || -z "$v20b" ]]; then
+  violations+=("у verify.yml немає V20a і V20b — живого виміру egress-фільтра з контролем немає")
+else
+  [[ "$v20a" == *a8-run-agent* ]] || violations+=("V20a не йде через a8-run-agent — міряє не той контейнер, у якому працює агент")
+  [[ "$v20a" == *'getent ahostsv4'* ]] || violations+=("V20a не бере адресу через getent ahostsv4 — фільтр лише IPv4, проба мусить іти по IPv4")
+  for m in '@@DNS4_OK@@' '@@EGRESS_REACHED@@' '@@EGRESS_BLOCKED@@' '@@NO_IPV6@@'; do
+    [[ "$v20a" == *"$m"* ]] || violations+=("V20a не друкує маркер $m — перевірку зламає склейка stdout і stderr")
+  done
+  [[ "$v20a" == *'a8_egress_probe_host'* ]] || violations+=("V20a не використовує a8_egress_probe_host — ціль не звірена з allowlist")
+  [[ "$v20b" =~ --network[[:space:]=]+host|-[[:space:]]+--network[[:space:]]+-[[:space:]]+host ]] ||
+    violations+=("V20b — контроль без --network host: без проби повз фільтр BLOCKED агента нічого не доводить")
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -658,4 +718,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем"
