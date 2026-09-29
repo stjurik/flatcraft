@@ -8,7 +8,7 @@
 
 ## A8 preflight — мануальний чеклист автономного середовища (2026-08-09)
 
-- **Завершено** (2026-08-09, **PR #103**, коміт `da45223`): `docs/19_A8_PREFLIGHT.md` (589 рядків) — рішення Q1–Q13, треки A (Ubuntu 24.04 + BIOS «Restore on AC Power Loss»), B (три користувачі без sudo, SSH key-only, UFW, swap 8 GB), C (Docker, Node 22, uv, Playwright), D (deploy key → private → runner → `claude setup-token` → тунель → Discord-бот), чекпоінти для кожного. Інваріант §7: на A8 немає vault-пароля, SSH-ключа до Mirohost і GHCR-токена на запис.
+- **Завершено** (2026-08-09, **PR #103**, коміт `da45223`): `docs/19_A8_PREFLIGHT.md` (589 рядків) — рішення Q1–Q13, треки A (Ubuntu 24.04 + BIOS «Restore on AC Power Loss»), B (три користувачі (`yurii` — адмін, `runner` і `agent` — без sudo), SSH key-only, UFW, swap 8 GB), C (Docker, Node 22, uv, Playwright), D (deploy key → private → runner → `claude setup-token` → тунель → Discord-бот), чекпоінти для кожного. Інваріант §7: на A8 немає vault-пароля, SSH-ключа до Mirohost і GHCR-токена на запис.
 
 ---
 
