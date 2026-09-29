@@ -24,12 +24,24 @@
 # Використання (з кореня worktree гілки PR):
 #   bash tools/scripts/claude-review-session.sh <абсолютний шлях до файла контексту> [модель]
 # Файл контексту — як для agy (orchestrator-autonomy.md §3.3 п.2): що рецензувати, які
-# файли, питання; лежить у робочому дереві. Модель — за замовчуванням opus.
-# Рецензія — у stdout; exit — як у claude; exit 2 — відмова до запуску.
+# файли, питання; лежить у робочому дереві.
+#
+# МОДЕЛЬ за замовчуванням — claude-sonnet-5-5 (рішення yurii 2026-09-29, пробно: Opus в
+# agy вичерпано на тиждень, а Opus із підписки витрачає її швидше; складає свій іспит).
+# Саме повний ідентифікатор, а не псевдонім `sonnet`: псевдонім іде за найновішою
+# моделлю, і рецензент мінявся б мовчки посеред іспиту. Інша модель — другим аргументом.
+#
+# ЯКА МОДЕЛЬ НАСПРАВДІ ВІДПОВІЛА — з поля `modelUsage` JSON-виводу, а не з прапорця
+# (перевірено 2026-09-29, Claude Code 2.1.283). Там же завжди є claude-haiku-4-5: Claude
+# Code кличе її для службових дрібниць, тож рецензентом вона не вважається.
+#
+# Вивід: текст рецензії, порожній рядок, рядок «Модель рецензента …» — його рецензію й
+# рядок журналу підписують цією моделлю. exit — як у claude (is_error → 1); 2 — відмова
+# до запуску; 3 — claude не повернув JSON-результату.
 set -euo pipefail
 
 CTX="${1:-}"
-MODEL="${2:-opus}"
+MODEL="${2:-claude-sonnet-5-5}"
 refuse() {
   echo "відмова: $1 — сесію не запущено" >&2
   exit 2
@@ -51,11 +63,42 @@ done
 PROMPT="Ти — незалежний рецензент чужого PR; автор — інша сесія. Твоя роль — лише контрприклади: вхід чи сценарій, на якому код поводиться не так, як заявлено. Прочитай файл $CTX інструментом Read і виконай завдання з нього. Інструментів для команд і запису в тебе немає — не намагайся. Кожне твердження — з посиланням файл:рядок; чого не перевірив — пиши «НЕ ПЕРЕВІРЕНО». Відповідь — лише текст рецензії."
 
 cd "$ROOT"
-exec claude -p "$PROMPT" \
+OUT="$(mktemp)"
+trap 'rm -f "$OUT"' EXIT
+rc=0
+claude -p "$PROMPT" \
   --model "$MODEL" \
   --tools Read,Grep,Glob \
   --permission-mode dontAsk \
   --restricted \
   --no-session-persistence \
   --settings '{"permissions":{"deny":["Read(**/.env*)"]}}' \
-  --output-format text </dev/null
+  --output-format json </dev/null >"$OUT" 2>&1 || rc=$?
+
+# Результат — останній JSON-об'єкт із полем result; поруч бувають рядки stderr.
+res="$(jq -cR 'fromjson? | select(type == "object" and has("result"))' "$OUT" | tail -n 1)"
+if [[ -z "$res" ]]; then
+  echo "НЕ ВИЗНАЧЕНО: claude не повернув JSON-результату (rc=$rc); сирий вивід:" >&2
+  cat "$OUT" >&2
+  exit $((rc ? rc : 3))
+fi
+[[ "$(jq -r '.is_error' <<<"$res")" == true ]] && ((rc == 0)) && rc=1
+jq -r '.result // ""' <<<"$res"
+
+# Рецензент — усі моделі з modelUsage, крім службової haiku (якщо запитано не її).
+read -r main svc < <(jq -r --arg want "$MODEL" '
+  (.modelUsage // {} | keys) as $k
+  | ($k | map(select(test("haiku") | not))) as $m
+  | (if ($want | test("haiku")) or ($m | length) == 0 then [$k, []] else [$m, ($k - $m)] end)
+  | map(if length == 0 then "-" else join(",") end) | join(" ")' <<<"$res")
+shown="$main"
+[[ "$main" == - || -z "$main" ]] && shown="НЕ ВИЗНАЧЕНО"
+line="Модель рецензента (з modelUsage, не з прапорця): $shown"
+[[ -n "$svc" && "$svc" != - ]] && line+="; службові: $svc"
+echo
+echo "$line"
+# Запитано конкретну модель, а відповіла інша — рецензію й іспит підписують тією, що відповіла.
+if [[ "$MODEL" == claude-* && ",$main," != *",$MODEL,"* ]]; then
+  echo "⚠ запитано $MODEL, відповіла $shown — у журнал і PR іде та, що відповіла"
+fi
+exit "$rc"

@@ -18,7 +18,10 @@ bad() {
   [[ -z "${REVIEW_SESSION_UNDER_TEST:-}" ]] || exit 1
 }
 
-# Стаб: на --help друкує STUB_HELP; інакше пише аргументи (по рядку) і теку запуску.
+# Стаб: на --help друкує STUB_HELP; інакше пише аргументи (по рядку) і теку запуску й
+# відповідає JSON-результатом, як `claude -p --output-format json`: у modelUsage — модель
+# з --model (або STUB_ACTUAL) і службова haiku. STUB_RAW=1 — відповідь не JSON;
+# STUB_ERROR=1 — is_error: true.
 mkdir -p "$T/bin"
 cat >"$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -29,7 +32,15 @@ fi
 printf '%s\n' "$@" >"$STUB_ARGS"
 pwd >"$STUB_ARGS.cwd"
 readlink "/proc/$$/fd/0" >"$STUB_ARGS.stdin"
-echo "stub-review"
+model=""
+prev=""
+for a in "$@"; do [[ "$prev" == --model ]] && model="$a"; prev="$a"; done
+if [[ -n "${STUB_RAW:-}" ]]; then
+  echo "stub: щось пішло не так, JSON немає"
+else
+  printf '{"type":"result","is_error":%s,"result":"stub-review","modelUsage":{"%s":{},"claude-haiku-4-5-20251001":{}}}\n' \
+    "$([[ -n "${STUB_ERROR:-}" ]] && echo true || echo false)" "${STUB_ACTUAL:-$model}"
+fi
 exit "${STUB_RC:-0}"
 STUB
 chmod +x "$T/bin/claude"
@@ -54,11 +65,12 @@ after() { grep -A1 -xF -- "$1" "$ARGS" | tail -1; } # значення прап�
 # ─── 1. Звичайний запуск: рівно обмежена сесія ─────────────────────────────
 out="$(run "$CTX")"
 rc=$?
-if [[ $rc == 0 && "$out" == "stub-review" ]] && has_arg -p && has_arg --restricted &&
+MODEL_LINE="Модель рецензента (з modelUsage, не з прапорця): claude-sonnet-5-5; службові: claude-haiku-4-5-20251001"
+if [[ $rc == 0 && "$out" == "stub-review"$'\n\n'"$MODEL_LINE" ]] && has_arg -p && has_arg --restricted &&
   has_arg --no-session-persistence && [[ "$(after --tools)" == "Read,Grep,Glob" &&
-  "$(after --permission-mode)" == dontAsk && "$(after --model)" == opus &&
-  "$(after --settings)" == *'"deny":["Read(**/.env*)"]'* && "$(after --output-format)" == text ]]; then
-  ok "запуск: -p, лише Read/Grep/Glob, dontAsk, --restricted, без збереження сесії, deny .env, opus"
+  "$(after --permission-mode)" == dontAsk && "$(after --model)" == claude-sonnet-5-5 &&
+  "$(after --settings)" == *'"deny":["Read(**/.env*)"]'* && "$(after --output-format)" == json ]]; then
+  ok "запуск: -p, лише Read/Grep/Glob, dontAsk, --restricted, без збереження сесії, deny .env, Sonnet 5.5; вивід — рецензія і модель із modelUsage"
 else
   bad "запуск не з тими прапорцями (rc=$rc, out=$out): $(tr '\n' ' ' <"$ARGS" 2>/dev/null)"
 fi
@@ -108,6 +120,23 @@ for missing in --restricted --tools --permission-mode; do
     ok "CLI без $missing — відмова, а не сесія без обмежень" || bad "CLI без $missing — запущено: $out"
 done
 
+# ─── 4b. Модель — з відповіді, а не з прапорця ─────────────────────────────
+out="$(STUB_ACTUAL=claude-sonnet-5 run "$CTX")"
+[[ $? == 0 && "$out" == *"з прапорця): claude-sonnet-5;"* && "$out" == *"⚠ запитано claude-sonnet-5-5, відповіла claude-sonnet-5"* ]] &&
+  ok "відповіла інша модель — у виводі вона, і попередження «запитано …, відповіла …»" ||
+  bad "підміну моделі не показано: $out"
+out="$(run "$CTX" claude-opus-4-6)"
+[[ "$out" == *"з прапорця): claude-opus-4-6;"* && "$out" != *"⚠"* ]] &&
+  ok "друга позиція claude-opus-4-6 — рецензент Opus, без попередження" || bad "Opus другою позицією: $out"
+out="$(run "$CTX" claude-haiku-4-5-20251001)"
+[[ "$out" == *"з прапорця): claude-haiku-4-5-20251001"* && "$out" != *"⚠"* ]] &&
+  ok "запитано саму haiku — вона й рецензент, а не «службова»" || bad "haiku як рецензент: $out"
+out="$(STUB_RAW=1 run "$CTX")"
+[[ $? == 3 && "$out" == *"НЕ ВИЗНАЧЕНО"* && "$out" == *"JSON немає"* ]] &&
+  ok "claude відповів не JSON — exit 3, «НЕ ВИЗНАЧЕНО» і сирий вивід" || bad "не-JSON відповідь: $out"
+out="$(STUB_ERROR=1 run "$CTX")"
+[[ $? == 1 ]] && ok "is_error: true — exit 1, а не 0" || bad "is_error загублено"
+
 # ─── 5. Код виходу claude передається ──────────────────────────────────────
 out="$(STUB_RC=1 run "$CTX")"
 [[ $? == 1 ]] && ok "claude впав (1) — скрипт повертає 1, а не 0" || bad "код виходу claude загублено"
@@ -139,7 +168,12 @@ if [[ -z "${REVIEW_SESSION_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "без перевірки «поза деревом»" '[[ "$CTX" == "$ROOT"/* ]] ||' 'true ||'
     mutate "модель без перевірки" '[[ "$MODEL" =~ ^[a-z0-9.-]+$ ]] ||' 'true ||'
     mutate "без deny .env" '"deny":["Read(**/.env*)"]' '"deny":[]'
-    mutate "stdin не закрито" '--output-format text </dev/null' '--output-format text'
+    mutate "stdin не закрито" '--output-format json </dev/null >"$OUT"' '--output-format json >"$OUT"'
+    mutate "модель з прапорця, а не з відповіді" 'shown="$main"' 'shown="$MODEL"'
+    mutate "haiku рахується рецензентом" 'map(select(test("haiku") | not))' 'map(.)'
+    mutate "без попередження про підміну" 'if [[ "$MODEL" == claude-* && ",$main," != *",$MODEL,"* ]]; then' 'if false; then'
+    mutate "is_error ігнорується" '[[ "$(jq -r '"'"'.is_error'"'"' <<<"$res")" == true ]] && ((rc == 0)) && rc=1' ':'
+    mutate "псевдонім замість повного id" 'MODEL="${2:-claude-sonnet-5-5}"' 'MODEL="${2:-sonnet}"'
   }
 fi
 
