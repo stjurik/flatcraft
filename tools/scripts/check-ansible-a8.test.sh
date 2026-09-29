@@ -654,6 +654,57 @@ assert_exit "11: друга згадка uv sync у рядку — проза �
 make_uv_tree "$tmproot/u22" "$(deps_with 'uv sync --extra dev && uv sync')"
 assert_exit "11: друга команда в рядку — голий uv sync → 1" 1 "$tmproot/u22" "uv sync без '--extra dev'"
 
+# Контрприклади окремої сесії Claude (PR #148, ліміт Opus в agy вичерпано).
+# Продовження `\` у шаблоні ролі склеюється, як у CI.
+make_uv_tree "$tmproot/u23"
+printf '%s\n' '#!/usr/bin/env bash' "\"\$RUNNER\" \"\$wt\" bash -c 'cd workers/cad && uv sync \\" \
+  "  --quiet' >>\"\$log\" 2>&1" >"$tmproot/u23/infra/ansible/roles/a8/templates/tick.sh.j2"
+assert_exit "11: uv sync \\ + --quiet на наступному рядку → 1" 1 "$tmproot/u23" "tick.sh.j2"
+
+make_uv_tree "$tmproot/u24"
+printf '%s\n' '#!/usr/bin/env bash' "\"\$RUNNER\" \"\$wt\" bash -c 'cd workers/cad && uv sync \\" \
+  "  --extra dev' >>\"\$log\" 2>&1" >"$tmproot/u24/infra/ansible/roles/a8/templates/tick.sh.j2"
+assert_exit "11: uv sync \\ + --extra dev на наступному рядку → 0" 0 "$tmproot/u24"
+
+# Еталон — лише job python: extra іншої job агентові не потрібне.
+make_uv_tree "$tmproot/u25" '' 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev
+  docs:
+    steps:
+      - run: uv sync --extra docs'
+assert_exit "11: інша job ставить --extra docs → 0" 0 "$tmproot/u25"
+
+make_uv_tree "$tmproot/u26" '' 'jobs:
+  pyworker:
+    steps:
+      - run: uv sync --extra dev'
+assert_exit "11: job python перейменовано → 1" 1 "$tmproot/u26" "у job 'python'"
+
+# Коментарі в кінці рядка: Jinja і YAML — не команди.
+make_uv_tree "$tmproot/u27"
+printf '%s\n' '#!/usr/bin/env bash' '{# old: uv sync --no-dev #}' 'true' \
+  >"$tmproot/u27/infra/ansible/roles/a8/templates/note.sh.j2"
+assert_exit "11: uv sync --no-dev у Jinja-коментарі → 0" 0 "$tmproot/u27"
+
+make_uv_tree "$tmproot/u28"
+printf '%s\n' '---' '- name: x' '  ansible.builtin.debug:' '    msg: ok  # old approach: uv sync --quiet' \
+  >"$tmproot/u28/infra/ansible/roles/a8/tasks/note.yml"
+assert_exit "11: uv sync --quiet у YAML-коментарі в кінці рядка → 0" 0 "$tmproot/u28"
+
+# ` #` у лапках — не коментар: голий uv sync за ним видно.
+make_uv_tree "$tmproot/u29"
+printf '%s\n' '#!/usr/bin/env bash' 'echo " #"; uv sync' >"$tmproot/u29/infra/ansible/roles/a8/templates/q.sh.j2"
+assert_exit "11: голий uv sync після \" #\" у лапках → 1" 1 "$tmproot/u29" "q.sh.j2"
+
+# Назва extra — слово, не регекс: `.` не збігається з будь-яким символом.
+make_uv_tree "$tmproot/u30" "$(deps_with 'uv sync --extra devXtest')" 'jobs:
+  python:
+    steps:
+      - run: uv sync --extra dev.test'
+assert_exit "11: у CI --extra dev.test, в агента devXtest → 1" 1 "$tmproot/u30" "uv sync без '--extra dev.test'"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести

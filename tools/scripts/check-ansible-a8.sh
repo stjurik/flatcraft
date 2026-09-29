@@ -535,21 +535,75 @@ uv_tails() {
     done
   done
 }
-# strip_comments <файл> — рядки «N<TAB>текст» без рядків-коментарів і `` `# …` ``.
+# strip_comments <файл> — рядки «N<TAB>текст» без коментарів, зі склеєними
+# продовженнями `\` (N — перший рядок команди). Коментарі: `` `# …` `` посеред
+# команди, Jinja `{# … #}` в одному рядку і `#` після пробілу поза лапками —
+# рядок-коментар, YAML- чи bash-коментар у кінці рядка. ` #` усередині лапок —
+# не коментар: зрізання за ним ховало б команду. Продовження `\` у файлах ролі
+# склеюються так само, як у CI (контрприклад окремої сесії Claude, PR #148:
+# `uv sync \` + `--quiet` на наступному рядку інакше був невидимий).
 strip_comments() {
-  sed -E -e 's/^[[:space:]]*#.*$//' -e 's/`#[^`]*`//g' "$1" | awk '{ printf "%d\t%s\n", NR, $0 }'
+  awk '
+    function strip_eol(s,   i, c, dq, sq) {
+      dq = 0; sq = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\"" && !sq) dq = !dq
+        else if (c == "\047" && !dq) sq = !sq
+        else if (c == "#" && !dq && !sq && (i == 1 || substr(s, i - 1, 1) ~ /[ \t]/)) return substr(s, 1, i - 1)
+      }
+      return s
+    }
+    {
+      line = $0
+      gsub(/`#[^`]*`/, "", line)
+      gsub(/\{#.*#\}/, "", line)
+      line = strip_eol(line)
+      if (cont) buf = buf " " line; else { buf = line; first = NR }
+      if (buf ~ /\\[ \t]*$/) { sub(/\\[ \t]*$/, "", buf); cont = 1; next }
+      cont = 0
+      printf "%d\t%s\n", first, buf
+    }
+    END { if (cont) printf "%d\t%s\n", first, buf }
+  ' "$1"
+}
+# has_tok <команда> <слово> / has_flag <команда> <прапорець> <значення> — порівняння
+# словами, не регексом: `--extra dev.test` у регексі збігався б і з `devXtest`
+# (контрприклад окремої сесії Claude, PR #148).
+has_tok() {
+  local -a t
+  local x
+  read -ra t <<<"$1"
+  for x in "${t[@]}"; do [[ "$x" == "$2" ]] && return 0; done
+  return 1
+}
+has_flag() {
+  local -a t
+  local i
+  read -ra t <<<"$1"
+  for ((i = 0; i < ${#t[@]}; i++)); do
+    [[ "${t[i]}" == "$2=$3" ]] && return 0
+    [[ "${t[i]}" == "$2" && "${t[i + 1]:-}" == "$3" ]] && return 0
+  done
+  return 1
 }
 UV_NARROW_RE='--no-dev|--only-dev|--no-default-groups|--no-group[= ][^[:space:]]+|--only-group[= ][^[:space:]]+|--no-extra[= ][^[:space:]]+'
+# Еталон — лише job `python` у ci.yml: саме вона ганяє ruff, mypy і pytest воркера.
+# `uv sync` інших job (напр. документації з власним extra) агентові не потрібен —
+# об'єднання з усіх job давало хибне порушення (окрема сесія Claude, PR #148).
+# Job `python` немає — порушення, а не пропуск.
 ci_raw=""
 if [[ -f "$CI_WF" ]]; then
-  ci_raw="$(sed -e ':a' -e '/\\$/N; s/\\\n[[:space:]]*/ /; ta' "$CI_WF" | sed -E 's/^[[:space:]]*#.*$//' |
-    awk '{ printf "%d\t%s\n", NR, $0 }' | { grep -E 'uv[[:space:]]' || true; } | uv_tails)"
+  ci_py="$(mktemp)"
+  awk '/^jobs:/ { j = 1; next } j && /^  [A-Za-z0-9_-]+:/ { injob = ($0 ~ /^  python:/) } j && injob' "$CI_WF" >"$ci_py"
+  ci_raw="$(strip_comments "$ci_py" | { grep -E 'uv[[:space:]]' || true; } | uv_tails)"
+  rm -f "$ci_py"
   # `|| true` — не косметика: без збігів grep повертає 1, і під pipefail + set -e
   # скрипт помирав би мовчки з кодом 1, без жодного повідомлення. Спіймано тестом
   # u7, щойно він почав звіряти текст порушення, а не лише код.
 fi
 if [[ -z "$ci_raw" ]]; then
-  violations+=("у $CI_WF немає команди 'uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
+  violations+=("у job 'python' файла $CI_WF немає команди 'uv sync …' — не видно, що ставить CI, паритет uv sync агента не перевірено")
 else
   ci_tails="$(cut -f2 <<<"$ci_raw")"
   ci_reqs="$(grep -oE -- '--(extra|group)[= ][^[:space:]]+|--all-(extras|groups)' <<<"$ci_tails" | sed -E 's/^--(extra|group)=/--\1 /' | sort -u || true)"
@@ -570,13 +624,13 @@ else
         [[ -z "$req" ]] && continue
         case "$req" in
           --all-extras | --all-groups)
-            [[ "$cmd" =~ (^|[[:space:]])$req([[:space:]]|$) ]] && continue ;;
+            has_tok "$cmd" "$req" && continue ;;
           --extra\ *)
-            [[ "$cmd" =~ (^|[[:space:]])--all-extras([[:space:]]|$) ]] && continue
-            [[ "$cmd" =~ (^|[[:space:]])--extra[[:space:]=]${req#--extra }([[:space:]]|$) ]] && continue ;;
+            has_tok "$cmd" --all-extras && continue
+            has_flag "$cmd" --extra "${req#--extra }" && continue ;;
           --group\ *)
-            [[ "$cmd" =~ (^|[[:space:]])--all-groups([[:space:]]|$) ]] && continue
-            [[ "$cmd" =~ (^|[[:space:]])--group[[:space:]=]${req#--group }([[:space:]]|$) ]] && continue ;;
+            has_tok "$cmd" --all-groups && continue
+            has_flag "$cmd" --group "${req#--group }" && continue ;;
         esac
         violations+=("uv sync без '$req', який ставить CI (без нього в контейнері немає pytest/mypy/ruff — оракул і pre-commit Python падають): $f:$n")
       done <<<"$ci_reqs"
