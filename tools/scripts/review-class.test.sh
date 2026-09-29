@@ -74,6 +74,7 @@ CI|tools/scripts/prove-red-before-green.sh
 правила й контракт|docs/promts/orchestrator-autonomy.md
 правила й контракт|docs/15_LLM_PROMPTS.md
 правила й контракт|docs/promts/ai-review-local.md
+правила й контракт|docs/20_OPEN_DECISIONS.md
 правила й контракт|tools/scripts/agy-stats-summary.sh
 інфраструктура|infra/ansible/roles/base/tasks/main.yml
 інфраструктура|infra/ansible/roles/backups/tasks/main.yml
@@ -147,8 +148,24 @@ branch removed --rm
 # Нове правило не переписує старе, а дописується — старі рядки всі на місці.
 branch add-rule 's/(> Вердикт[^\n]*\n)/$1>\n> Виклики з позначкою «пробний» у вікно не йдуть.\n/'
 branch add-note 's/\z/\nПримітка: рецензію #2 не рахувати.\n/'
+# Контрприклади повторної рецензії #145 (окрема сесія, Flash): іспит — перші 10
+# викликів за порядком у файлі, тож переставлення змінює іспит, хоча жоден рядок не
+# зник; рядок-правило з `|` у шапці і новий рядок над старими — теж.
+branch reorder 's/(\| 2026-09-24 [^\n]*\n)(\| 2026-09-25 [^\n]*\n)/$2$1/'
+branch insert-above 's/(\| 2026-09-24 )/| 2026-09-23 | вставлено над старими | Gemini 3.8 Flash (High) | **0** |\n$1/'
+branch pipe-rule 's/(> Вердикт[^\n]*\n)/$1| Правило: виклики «пробний» у вікно не йдуть |\n/'
+branch pipe-tail 's/\z/| Правило: рецензію #2 не рахувати |\n/'
+branch second-table 's/\z/\n| Модель | Поріг |\n| --- | --- |\n| Flash | 80% |\n/'
 "${GIT[@]}" switch -q --orphan fresh && mkdir -p "$G/docs/promts/inputs" && echo "| 2026-09-29 | x | y | **0** |" >"$G/$J" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm fresh
+# Журнал лише з рядків викликів, без шапки: переставлення тут ловить саме звірка
+# порядку — без неї «дописаним» став би весь файл, а він цілком із рядків викликів.
+"${GIT[@]}" switch -q --orphan rows-only && mkdir -p "$G/docs/promts/inputs" &&
+  printf '%s\n' '| 2026-09-24 | a | Flash | **0** |' '| 2026-09-25 | b | Opus | **1** |' >"$G/$J" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm rows-only
+"${GIT[@]}" switch -q -c rows-swapped rows-only &&
+  printf '%s\n' '| 2026-09-25 | b | Opus | **1** |' '| 2026-09-24 | a | Flash | **0** |' >"$G/$J" &&
+  "${GIT[@]}" commit -qam rows-swapped
 journal_case() { # journal_case <назва> <гілка> <база> <очікуваний клас>
   local out
   out="$(cd "$G" && printf '%s\n' "$J" | REVIEW_CLASS_BASE="$3" REVIEW_CLASS_HEAD="$2" bash "$SCRIPT" 2>&1)"
@@ -162,12 +179,54 @@ journal_case "змінено клітинку з \\| усередині" edit-es
 journal_case "журнал видалено" removed base ризиковий
 journal_case "дописано нове правило в шапку" add-rule base ризиковий
 journal_case "дописано примітку під таблицею" add-note base ризиковий
+journal_case "переставлено два старі рядки" reorder base ризиковий
+journal_case "новий рядок вставлено над старими" insert-above base ризиковий
+journal_case "рядок-правило з | у шапці" pipe-rule base ризиковий
+journal_case "рядок-правило з | у кінці, без дати" pipe-tail base ризиковий
+journal_case "друга таблиця в кінці" second-table base ризиковий
+journal_case "лише рядки викликів, переставлено" rows-swapped rows-only ризиковий
 journal_case "журналу в базі не було" fresh fresh звичайний
 journal_case "базу не знайдено — сумнів проти PR" append немає-такої-гілки ризиковий
 out="$(cd "$G" && printf '%s\n' "$J" | REVIEW_CLASS_BASE=base REVIEW_CLASS_HEAD=edit-row bash "$SCRIPT")"
-[[ "$out" == *"правила й контракт: $J — змінено старий зміст журналу іспиту"* ]] &&
+[[ "$out" == *"правила й контракт: $J — старий зміст змінено, переставлено чи видалено"* ]] &&
   ok "журнал: у виводі — категорія і причина" || bad "журнал: без причини: $out"
 rm -rf "$G"
+
+# ─── 5c. Покази квоти agy-quota.md — те саме правило «лише дописати» ──────
+Q=docs/promts/inputs/agy-quota.md
+G="$(mktemp -d)"
+git -C "$G" init -q
+GIT=(git -C "$G" -c user.name=t -c user.email=t@t)
+mkdir -p "$G/docs/promts/inputs"
+printf '%s\n' '# покази' '' '| Показ, UTC | Група | Залишок, % | Скидання, UTC | Джерело |' '| --- | --- | --- | --- | --- |' \
+  '| 2026-09-29 07:09 | Claude and GPT | 0.00 | 2026-09-30 19:21 | скріншот |' >"$G/$Q"
+"${GIT[@]}" add -A && "${GIT[@]}" commit -qm base && "${GIT[@]}" branch -q base
+qbranch() { # qbranch <назва> <perl-вираз над показами>
+  "${GIT[@]}" switch -q -c "$1" base
+  perl -0pi -e "$2" "$G/$Q"
+  "${GIT[@]}" commit -qam "$1"
+}
+qbranch q-append 's/\z/| 2026-10-01 09:00 | Claude and GPT | 100 | 2026-10-07 19:21 | скріншот |\n/'
+qbranch q-edit 's/\| 0\.00 \|/| 100 |/'
+qbranch q-note 's/\z/\nПокази до 01.10 не рахувати.\n/'
+quota_case() { # quota_case <назва> <гілка> <очікуваний клас>
+  local out
+  out="$(cd "$G" && printf '%s\n' "$Q" | REVIEW_CLASS_BASE=base REVIEW_CLASS_HEAD="$2" bash "$SCRIPT" 2>&1)"
+  [[ "$out" == "клас: $3"* ]] && ok "покази: $1 — $3" || bad "покази: $1 — очікував «$3»: $out"
+}
+quota_case "дописано новий показ" q-append звичайний
+quota_case "змінено старий показ (0% → 100%)" q-edit ризиковий
+quota_case "дописано примітку" q-note ризиковий
+rm -rf "$G"
+
+# ─── 5d. Шлях з кирилицею: git без core.quotePath=false бере його в лапки ───
+# Давня знахідка Flash №8 першої рецензії #145, не закрита до повторної.
+expect "кирилиця в лапках (вісімкові коди) — розкодовано, роль A8" 0 \
+  $'"infra/ansible/roles/a8/\\321\\204\\320\\260\\320\\271\\320\\273.yml"\n' \
+  "роль і демон A8: infra/ansible/roles/a8/файл.yml"
+expect "кирилиця без лапок — як є" 0 $'infra/ansible/roles/a8/файл.yml\n' "роль і демон A8: infra/ansible/roles/a8/файл.yml"
+expect "кирилиця в лапках у docs — звичайний" 0 $'"docs/\\320\\277.md"\n' "клас: звичайний"
+expect "інше екранування в лапках — не розпізнано, ризиковий" 0 $'"docs/a\\"b.md"\n' "шлях не розпізнано"
 
 # ─── 6. Порожній вхід — відмова, а не «звичайний» ──────────────────────────
 expect "порожній вхід — exit 2" 2 "" "порожній список"
@@ -202,13 +261,19 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "шаблон як рядок, а не glob" '[[ "$f" == ${r#*|} ]]' '[[ "$f" == "${r#*|}" ]]'
   mutate "infra/** не ризикова" "  'інфраструктура|infra/*'" ''
   mutate "CLAUDE.md не ризиковий" "  'правила й контракт|CLAUDE.md'" ''
-  mutate "журнал не перевіряється" '    journal_rows_changed &&' '    false &&'
+  mutate "журнал не перевіряється" '    append_only_violated "$f" "$re" &&' '    false &&'
   mutate "без бази — «звичайний»" 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1'
   mutate "вирівнювання — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' ''
-  mutate "дописаний абзац — «звичайний»" "| awk '!/^\\|/')\"" "| awk '0')\""
-  mutate "дописаний рядок таблиці — теж «ризиковий»" "| awk '!/^\\|/')\"" "| cat)\""
+  mutate "дописане поза рядками викликів — «звичайний»" '[[ -z "$(grep -Ev -- "$row_re" <<<"$rest")" ]] && return 1' 'return 1'
+  mutate "порядок не звіряється" \
+    '[[ "$(head -n "$n" <<<"$new")" == "$old" ]] || return 0' \
+    '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0'
+  mutate "рядок виклику — будь-який рядок з |" "JOURNAL_ROW_RE='^\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|'" "JOURNAL_ROW_RE='^\\|'"
+  mutate "покази квоти не перевіряються" '[[ "$f" == "$JOURNAL" || "$f" == "$QUOTA" ]]' '[[ "$f" == "$JOURNAL" ]]'
+  mutate "docs/20 не ризиковий" "  'правила й контракт|docs/20_OPEN_DECISIONS.md'" ''
+  mutate "шлях у лапках не розкодовується" 'if [[ "$f" == \"*\" ]]; then' 'if false; then'
   mutate "agy-stats-summary не ризиковий" "  'правила й контракт|tools/scripts/agy-stats-summary*'" ''
-  mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$JOURNAL" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$JOURNAL" 2>/dev/null)" || return 1'
+  mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 1'
 fi
 
 if [[ $fail == 1 ]]; then
