@@ -21,6 +21,8 @@
 #
 # Рахує всю групу «Claude and GPT» (Opus, Sonnet, GPT-OSS) — у agy в них один ліміт.
 # «невідомо → Claude …» теж рахується: сумнів іде проти ліміту, а не на його користь.
+# Рядки окремої сесії Claude («… (окрема сесія)», рішення yurii 2026-09-29) — НЕ
+# рахуються: вони йдуть з ліміту підписки Claude, а не з ліміту agy.
 #
 # Використання: tools/scripts/agy-opus-budget.sh [--today РРРР-ММ-ДД] [журнал]
 # exit 0 — рішення надруковано; exit 2 — журнал не читається або поганий аргумент.
@@ -73,7 +75,7 @@ n="$(sed 's/\\|/\x1f/g' "$FILE" | awk -F'|' -v from="$FROM" -v to="$TODAY" '
       next
     }
     d = trim($2); m = trim($4)
-    if (d >= from && d <= to && m ~ /Claude|GPT/) c++
+    if (d >= from && d <= to && m ~ /Claude|GPT/ && m !~ /окрема сесія/) c++
   }
   END { if (bad) exit 3; print c + 0 }
 ')" || exit 2

@@ -38,8 +38,9 @@ for a in "$@"; do [[ "$prev" == --model ]] && model="$a"; prev="$a"; done
 if [[ -n "${STUB_RAW:-}" ]]; then
   echo "stub: щось пішло не так, JSON немає"
 else
-  printf '{"type":"result","is_error":%s,"result":"stub-review","modelUsage":{"%s":{},"claude-haiku-4-5-20251001":{}}}\n' \
-    "$([[ -n "${STUB_ERROR:-}" ]] && echo true || echo false)" "${STUB_ACTUAL:-$model}"
+  printf '{"type":"result","is_error":%s,"result":"stub-review","modelUsage":{"%s":{},%s"claude-haiku-4-5-20251001":{}}}\n' \
+    "$([[ -n "${STUB_ERROR:-}" ]] && echo true || echo false)" "${STUB_ACTUAL:-$model}" \
+    "$([[ -n "${STUB_EXTRA:-}" ]] && printf '"%s":{},' "$STUB_EXTRA")"
 fi
 exit "${STUB_RC:-0}"
 STUB
@@ -66,7 +67,8 @@ after() { grep -A1 -xF -- "$1" "$ARGS" | tail -1; } # значення прап�
 out="$(run "$CTX")"
 rc=$?
 MODEL_LINE="Модель рецензента (з modelUsage, не з прапорця): claude-sonnet-5-5; службові: claude-haiku-4-5-20251001"
-if [[ $rc == 0 && "$out" == "stub-review"$'\n\n'"$MODEL_LINE" ]] && has_arg -p && has_arg --restricted &&
+LABEL_LINE="Мітка для agy-stats.md: claude-sonnet-5-5 (окрема сесія)"
+if [[ $rc == 0 && "$out" == "stub-review"$'\n\n'"$MODEL_LINE"$'\n'"$LABEL_LINE" ]] && has_arg -p && has_arg --restricted &&
   has_arg --no-session-persistence && [[ "$(after --tools)" == "Read,Grep,Glob" &&
   "$(after --permission-mode)" == dontAsk && "$(after --model)" == claude-sonnet-5-5 &&
   "$(after --settings)" == *'"deny":["Read(**/.env*)"]'* && "$(after --output-format)" == json ]]; then
@@ -131,6 +133,9 @@ out="$(run "$CTX" claude-opus-4-6)"
 out="$(run "$CTX" claude-haiku-4-5-20251001)"
 [[ "$out" == *"з прапорця): claude-haiku-4-5-20251001"* && "$out" != *"⚠"* ]] &&
   ok "запитано саму haiku — вона й рецензент, а не «службова»" || bad "haiku як рецензент: $out"
+out="$(STUB_EXTRA=claude-opus-4-6 run "$CTX")"
+[[ "$out" == *"Мітка для agy-stats.md: невідомо → claude-sonnet-5-5 (окрема сесія)"* ]] &&
+  ok "відповіли дві моделі — мітка «невідомо → запитана», сумнів проти моделі" || bad "мітка при двох моделях: $out"
 out="$(STUB_RAW=1 run "$CTX")"
 [[ $? == 3 && "$out" == *"НЕ ВИЗНАЧЕНО"* && "$out" == *"JSON немає"* ]] &&
   ok "claude відповів не JSON — exit 3, «НЕ ВИЗНАЧЕНО» і сирий вивід" || bad "не-JSON відповідь: $out"
@@ -174,6 +179,8 @@ if [[ -z "${REVIEW_SESSION_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "без попередження про підміну" 'if [[ "$MODEL" == claude-* && ",$main," != *",$MODEL,"* ]]; then' 'if false; then'
     mutate "is_error ігнорується" '[[ "$(jq -r '"'"'.is_error'"'"' <<<"$res")" == true ]] && ((rc == 0)) && rc=1' ':'
     mutate "псевдонім замість повного id" 'MODEL="${2:-claude-sonnet-5-5}"' 'MODEL="${2:-sonnet}"'
+    mutate "мітка без «(окрема сесія)»" 'echo "Мітка для agy-stats.md: $shown (окрема сесія)"' 'echo "Мітка для agy-stats.md: $shown"'
+    mutate "дві моделі — мітка однієї" ' && "$shown" != *,* ]]; then' ' ]]; then'
   }
 fi
 

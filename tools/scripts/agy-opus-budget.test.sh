@@ -50,6 +50,16 @@ out="$(run --today 2026-09-27 "$T/j")"
 [[ "$out" == *": 4, бюджет"* ]] &&
   ok "рахуються Opus, Sonnet, GPT і «невідомо → Claude»; Gemini — ні (4)" || bad "модель рахується не так: $out"
 
+# ─── 2b. Окрема сесія Claude — не з ліміту agy ─────────────────────────────
+journal "$T/j" \
+  "$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')" \
+  "$(row 2026-09-27 'claude-sonnet-5-5 (окрема сесія)')" \
+  "$(row 2026-09-27 'Claude Sonnet 5.5 (окрема сесія)')" \
+  "$(row 2026-09-27 'claude-opus-4-6 (окрема сесія)')"
+out="$(run --today 2026-09-27 "$T/j")"
+[[ "$out" == *": 1, бюджет"* ]] &&
+  ok "рядки «(окрема сесія)» не рахуються в ліміт agy, як би їх не написали (1)" || bad "окрема сесія з'їдає ліміт agy: $out"
+
 # ─── 3. Поріг: бюджет-1 → agy, бюджет → окрема сесія ───────────────────────
 rows=()
 for _ in $(seq 12); do rows+=("$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')"); done
@@ -112,7 +122,8 @@ if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
   # shellcheck disable=SC2016 # дослівний текст скрипта
   {
     mutate "вікно 8 днів" '"$TODAY -6 days"' '"$TODAY -7 days"'
-    mutate "рахується лише Opus" 'm ~ /Claude|GPT/' 'm ~ /^Claude Opus/'
+    mutate "рахується лише Opus" 'm ~ /Claude|GPT/ &&' 'm ~ /^Claude Opus/ &&'
+    mutate "окрема сесія їсть ліміт agy" ' && m !~ /окрема сесія/' ''
     mutate "поріг «більше», а не «не менше»" '((n >= BUDGET))' '((n > BUDGET))'
     mutate "зсунутий рядок рахується" 'END { if (bad) exit 3;' 'END {'
     mutate "\\| не екранується" "sed 's/\\\\|/\\x1f/g'" "sed 's/x/x/'"
