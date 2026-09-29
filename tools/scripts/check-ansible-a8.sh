@@ -652,21 +652,43 @@ fi
 #
 # ЧОМУ. Egress-фільтр — лише IPv4: набір `hash:net` без `family inet6`, IPv6-діапазони
 # GitHub a8-egress-refresh пропускає, правила примусу ставить `iptables`, не
-# `ip6tables`. Отже, IPv6 контейнера не бачить жодне правило: увімкни docker IPv6 на
-# мості — і агент дістане будь-яку IPv6-адресу повз allowlist (вимога yurii
-# 2026-09-29 до постійної перевірки фільтра). Шаблон daemon.json у ролі — повний
-# вміст файла на A8, тож досить дивитись у нього. Ключ `"ipv6"` зі значенням, що не
-# є буквальним `false` (зокрема Jinja), і `"fixed-cidr-v6"` — порушення. Живий бік
-# — маркер @@NO_IPV6@@ у V20.
+# `ip6tables`. Отже, IPv6 контейнера не бачить жодне правило: увімкни docker IPv6 — і
+# агент дістане будь-яку IPv6-адресу повз allowlist (вимога yurii 2026-09-29 до
+# постійної перевірки фільтра). Живий бік — маркер @@NO_GLOBAL_IPV6@@ у V20.
+#
+# Що вважається увімкненням (дірки першої редакції знайшов рецензент PR #150, agy,
+# Gemini 3.8 Flash — звідси склеювання рядків, пули адрес і прапорці dockerd):
+#   - у daemon.json.j2 (після зняття Jinja-коментарів і склеювання рядків) ключ
+#     `"ipv6"` зі значенням, що не є буквальним `false`, зокрема Jinja;
+#   - `fixed-cidr-v6` чи будь-який IPv6-діапазон (`…:…/N`) у daemon.json.j2 —
+#     так вмикають IPv6 через `default-address-pools`;
+#   - `--ipv6` / `--fixed-cidr-v6` у будь-якому шаблоні чи файлі ролі — прапорці
+#     dockerd через systemd drop-in;
+#   - daemon.json ставить не цей шаблон — тоді перевірка шаблону нічого не доводить.
 DAEMON_TPL="$ROLE/templates/daemon.json.j2"
 if [[ -f "$DAEMON_TPL" ]]; then
-  while IFS= read -r hit; do
-    [[ -z "$hit" ]] && continue
-    violations+=("daemon.json вмикає IPv6 для контейнерів — egress-фільтр лише IPv4, агент обійде allowlist по IPv6: $hit")
-  done < <(
-    grep -nE '"ipv6"[[:space:]]*:' "$DAEMON_TPL" | grep -vE '"ipv6"[[:space:]]*:[[:space:]]*false[[:space:]]*,?[[:space:]]*$' | sed "s|^|$DAEMON_TPL:|" || true
-    grep -nE '"fixed-cidr-v6"' "$DAEMON_TPL" | sed "s|^|$DAEMON_TPL:|" || true
-  )
+  daemon_flat="$(tr '\n' ' ' <"$DAEMON_TPL" | sed -E 's/\{#[^#]*#\}//g')"
+  while IFS= read -r val; do
+    [[ -z "$val" ]] && continue
+    [[ "$val" == false ]] && continue
+    violations+=("daemon.json вмикає IPv6 для контейнерів (\"ipv6\": $val) — egress-фільтр лише IPv4, агент обійде allowlist по IPv6: $DAEMON_TPL")
+  done < <(grep -oE '"ipv6"[[:space:]]*:[[:space:]]*[^,}]*' <<<"$daemon_flat" | sed -E 's/^"ipv6"[[:space:]]*:[[:space:]]*//; s/[[:space:]]+$//' || true)
+  if grep -qE '"fixed-cidr-v6"|"[0-9a-fA-F]*:[0-9a-fA-F:]*/[0-9]+"' <<<"$daemon_flat"; then
+    violations+=("daemon.json вмикає IPv6 для контейнерів (fixed-cidr-v6 чи IPv6-діапазон у пулі адрес) — egress-фільтр лише IPv4: $DAEMON_TPL")
+  fi
+fi
+while IFS= read -r hit; do
+  [[ -z "$hit" ]] && continue
+  violations+=("шаблон чи файл ролі передає dockerd прапорець IPv6 — egress-фільтр лише IPv4: $hit")
+done < <(grep -rnE -e '--(ipv6|fixed-cidr-v6)([[:space:]=]|$)' "$ROLE/templates" "$ROLE/files" 2>/dev/null || true)
+daemon_task="$(awk '
+  /^[ \t]*- name:/ { if (blk ~ /dest: \/etc\/docker\/daemon\.json/) print blk; blk = "" }
+  { blk = blk "\n" $0 }
+  END { if (blk ~ /dest: \/etc\/docker\/daemon\.json/) print blk }' "$TASKS"/*.yml 2>/dev/null)"
+if [[ -z "$daemon_task" ]]; then
+  violations+=("у задачах ролі немає 'dest: /etc/docker/daemon.json' — не видно, звідки береться daemon.json, IPv6 не перевірено")
+elif [[ "$daemon_task" != *"src: daemon.json.j2"* ]]; then
+  violations+=("daemon.json ставить не шаблон daemon.json.j2 — перевірка IPv6 у шаблоні нічого не доводить")
 fi
 
 # Інваріант 13 — живий вимір фільтра (V20) міряє те, що треба.
@@ -675,37 +697,61 @@ fi
 # поспіль її вивід з'їла склейка stdout і stderr в Ansible: «BLOCKEDOK: kill switch
 # відсутній», а grep шукав ^BLOCKED$ (2026-09-29). Вимоги yurii до V20:
 #   а) ціль проби (`a8_egress_probe_host`) — поза allowlist, інакше «REACHED» агента
-#      був би нормою, а не дірою, і перевірка нічого не доводила б;
-#   б) адреса — явно IPv4 (`getent ahostsv4`): фільтр лише IPv4, і проба по IPv6
-#      довела б не те;
+#      був би нормою, а не дірою. Дивимось у defaults, group_vars і host_vars — будь-де
+#      можна перевизначити і ціль, і список; лапки в списку знімаються (рецензія
+#      PR #150). Діапазони a8_egress_extra_cidrs і спільні адреси CDN статично не
+#      видно — їх ловить живий `ipset test` (V20c);
+#   б) адреса — явно IPv4 (`getent ahostsv4`);
 #   в) маркери `@@…@@`, які шукаються підрядком: склейка їх не ламає;
-#   г) контроль — та сама проба з мережею хоста (V20b).
-# Немає змінної чи задачі V20a/V20b — теж порушення: інакше інваріант «проходив» би,
-# не виконавшись.
-PROBE_HOST="$(sed -nE 's/^a8_egress_probe_host:[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/p' "$ROLE/defaults/main.yml" 2>/dev/null | tail -1)"
-if [[ -z "$PROBE_HOST" ]]; then
+#   г) контроль — ТОЙ САМИЙ зонд із мережею хоста: V20b бере текст зонда YAML-
+#      посиланням `*a8_egress_probe` на якір у V20a, тож підмінити його `echo`
+#      маркерів не вийде (рецензія PR #150).
+# Немає змінної чи задач V20a/V20b/V20c — теж порушення: інакше інваріант «проходив»
+# би, не виконавшись. Текст зонда мусить лежати саме у V20a (якір), контроль — посилання.
+ANSIBLE_DIR="$ROOT/infra/ansible"
+vars_files=()
+while IFS= read -r f; do vars_files+=("$f"); done < <(
+  {
+    [[ -f "$ROLE/defaults/main.yml" ]] && echo "$ROLE/defaults/main.yml"
+    find "$ANSIBLE_DIR/group_vars" "$ANSIBLE_DIR/host_vars" -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name '*vault*' 2>/dev/null | sort
+  }
+)
+probe_hosts=""
+allow_domains=""
+if [[ ${#vars_files[@]} -gt 0 ]]; then
+  probe_hosts="$(sed -nE "s/^a8_egress_probe_host:[[:space:]]*[\"']?([^\"'#[:space:]]+)[\"']?.*/\\1/p" "${vars_files[@]}" | sort -u)"
+  allow_domains="$(awk '/^a8_egress_domains:/ { d = 1; next } d && /^[^ #-]/ { d = 0 } d' "${vars_files[@]}" |
+    sed -E "s/#.*//; s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g; s/[[:space:]]+\$//" | { grep -v '^$' || true; } | sort -u)"
+fi
+if ! grep -qE '^a8_egress_probe_host:' "$ROLE/defaults/main.yml" 2>/dev/null || [[ -z "$probe_hosts" ]]; then
   violations+=("немає a8_egress_probe_host у defaults — живий вимір фільтра (V20) не має цілі")
-elif awk '/^a8_egress_domains:/ { d = 1; next } d && /^[^ #-]/ { d = 0 } d' "$ROLE/defaults/main.yml" |
-  sed -E 's/#.*//; s/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]+$//' | grep -qxF -- "$PROBE_HOST"; then
-  violations+=("a8_egress_probe_host ($PROBE_HOST) є в a8_egress_domains — проба V20 має бути поза allowlist, інакше її «REACHED» — норма")
+else
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    violations+=("a8_egress_probe_host ($h) є в a8_egress_domains — проба V20 має бути поза allowlist, інакше її «REACHED» — норма")
+  done < <(comm -12 <(printf '%s\n' "$probe_hosts") <(printf '%s\n' "$allow_domains"))
 fi
 VERIFY_TASKS="$TASKS/verify.yml"
 v20_block() { # v20_block <префікс назви> — текст задачі від `- name: <префікс>` до наступної
-  awk -v p="- name: $1" 'index($0, p) == 1 { on = 1; print; next } on && /^- name:/ { exit } on' "$VERIFY_TASKS" 2>/dev/null
+  awk -v p="- name: $1" '{ t = $0; gsub(/["\047]/, "", t) } index(t, p) == 1 { on = 1; print; next } on && /^- name:/ { exit } on' "$VERIFY_TASKS" 2>/dev/null
 }
 v20a="$(v20_block 'V20a')"
 v20b="$(v20_block 'V20b')"
-if [[ -z "$v20a" || -z "$v20b" ]]; then
-  violations+=("у verify.yml немає V20a і V20b — живого виміру egress-фільтра з контролем немає")
+v20c="$(v20_block 'V20c')"
+if [[ -z "$v20a" || -z "$v20b" || -z "$v20c" ]]; then
+  violations+=("у verify.yml немає V20a, V20b і V20c — живого виміру egress-фільтра з контролем немає")
 else
   [[ "$v20a" == *a8-run-agent* ]] || violations+=("V20a не йде через a8-run-agent — міряє не той контейнер, у якому працює агент")
   [[ "$v20a" == *'getent ahostsv4'* ]] || violations+=("V20a не бере адресу через getent ahostsv4 — фільтр лише IPv4, проба мусить іти по IPv4")
-  for m in '@@DNS4_OK@@' '@@EGRESS_REACHED@@' '@@EGRESS_BLOCKED@@' '@@NO_IPV6@@'; do
+  for m in '@@PROBE_START@@' '@@DNS4_OK@@' '@@IP=' '@@EGRESS_REACHED@@' '@@EGRESS_BLOCKED@@' '@@NO_GLOBAL_IPV6@@'; do
     [[ "$v20a" == *"$m"* ]] || violations+=("V20a не друкує маркер $m — перевірку зламає склейка stdout і stderr")
   done
   [[ "$v20a" == *'a8_egress_probe_host'* ]] || violations+=("V20a не використовує a8_egress_probe_host — ціль не звірена з allowlist")
+  [[ "$v20a" == *'&a8_egress_probe'* ]] || violations+=("зонд V20a не позначено якорем &a8_egress_probe — контроль не може взяти той самий текст")
   [[ "$v20b" =~ --network[[:space:]=]+host|-[[:space:]]+--network[[:space:]]+-[[:space:]]+host ]] ||
     violations+=("V20b — контроль без --network host: без проби повз фільтр BLOCKED агента нічого не доводить")
+  [[ "$v20b" == *'*a8_egress_probe'* ]] || violations+=("V20b бере не той самий зонд (немає посилання *a8_egress_probe) — контроль можна підмінити")
+  [[ "$v20c" == *ipset* && "$v20c" == *test* ]] || violations+=("V20c не перевіряє адресу цілі ipset test — ціль на спільній адресі CDN дала б хибне «фільтр зламано»")
 fi
 
 if [[ ${#violations[@]} -gt 0 ]]; then
