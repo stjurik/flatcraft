@@ -22,6 +22,7 @@
 #   <queue>/failed/     — failed; причина — у журналі
 #   <queue>/rejected/   — запис невалідний; які саме поля — у журналі
 # Задача, зупинена запобіжником або 401, повертається в чергу: її не виконали.
+# Якщо агент уже встиг закомітити — лишається у failed/ з позначкою.
 set -uo pipefail
 
 CONFIG="${A8_CONFIG:-{{ a8_config_dir }}/a8.env}"
@@ -46,6 +47,10 @@ GUARD="${A8_GUARD:-/usr/local/bin/a8-guard}"
 RUNNER="${A8_RUNNER:-/usr/local/bin/a8-run-agent}"
 JOURNAL="${A8_JOURNAL:-/usr/local/bin/a8-journal}"
 DOCKER="${A8_DOCKER:-docker}"
+# Backstop заборонених шляхів — копія під root, яку агент змінити не може.
+FORBIDDEN="${A8_FORBIDDEN_CHECK:-/usr/local/lib/a8/check-forbidden-paths.sh}"
+# Як часто спостерігач дивиться на STOP, поки працює контейнер (секунди).
+WATCH_S="${A8_WATCH_INTERVAL_S:-5}"
 
 Q="$A8_QUEUE_DIR"
 mkdir -p "$Q/running" "$Q/done" "$Q/failed" "$Q/rejected" "$A8_LOGS_DIR/tasks"
@@ -69,10 +74,11 @@ now() { date +%s; }
 for orphan in "$Q"/running/*.json; do
   [[ -e "$orphan" ]] || continue
   oid="$(field id "$orphan")"
-  # Тік міг померти, поки агент працював: контейнер живе без нагляду. Ім'я
-  # детерміноване (a8-<id>), тож убити його можна й без пам'яті про запуск.
-  # Знайдено рев'юером (agy, рев'ю №1 демона).
-  [[ -n "$oid" ]] && "$DOCKER" kill "a8-$oid" >/dev/null 2>&1
+  # Тік міг померти, поки агент чи оракул працював: контейнер живе без нагляду.
+  # Імена детерміновані (a8-<id>, a8-<id>-oracle), тож убити їх можна й без
+  # пам'яті про запуск. Знайдено рев'юером (agy, рев'ю №1 демона); контейнер
+  # оракула — рецензією PR #146 (Gemini 3.8 Flash): README обіцяв, код не робив.
+  [[ -n "$oid" ]] && "$DOCKER" kill "a8-$oid" "a8-$oid-oracle" >/dev/null 2>&1
   "$GUARD" count >/dev/null
   "$GUARD" record failed
   "$JOURNAL" append "${oid:-unknown}" "$(field source "$orphan")" failed 0 "-" \
@@ -166,6 +172,74 @@ fail_task() { # fail_task <деталь>
   fi
 }
 
+# ─── Kill switch посеред задачі ────────────────────────────────────────────
+# `a8-guard check` дивиться на STOP перед тим, як узяти задачу, `check-run` —
+# перед стартом контейнера. Між ними STOP ніхто не бачив: створений посеред
+# сесії агента, він чекав її кінця (до A8_TASK_TIMEOUT, 90 хв), а на
+# залежностях чи хуку код 10 від обгортки записувався як `failed deps` /
+# `hooks-decorative` — навчальна зупинка додавала падіння до «трьох поспіль».
+#
+# Мітку пише спостерігач, коли зупиняє контейнер. Код 137 убитого контейнера
+# без неї не відрізнити від OOM, а STOP людина могла вже прибрати, поки тік
+# дочитував код виходу. 137 без STOP і без мітки — падіння, як і було.
+seen="$A8_LOGS_DIR/tasks/$id.stop-seen"
+rm -f "$seen"
+stop_requested() { [[ -e "$A8_KILL_SWITCH" || -e "$seen" ]]; }
+
+# Зупинка — рішення людини, не падіння: без `record failed`, тож «три поспіль»
+# не росте. Задача без комітів повертається в чергу (порожню гілку прибрано),
+# з комітами — лишається у failed/ з позначкою: це чиясь робота.
+stop_task() { # stop_task <коли: «під час агента», «перед push»…>
+  if release_or_keep; then
+    finish stopped stopped "kill switch $1" queue
+  else
+    finish stopped stopped "kill switch $1; гілка має коміти — не повертаю в чергу" failed
+  fi
+  exit 0
+}
+
+# Спостерігач: поки працює контейнер агента чи оракула, раз на $WATCH_S секунд
+# дивиться на STOP. Побачив — пише мітку і подію kill_switch із часом (саме
+# цю мить міряє навчальна зупинка), зупиняє СВІЙ контейнер (ім'я — аргумент,
+# а не змінна, яку тік потім перепише) і виходить. Прибирається:
+#   - після кожного етапу — watch_stop;
+#   - при будь-якому виході з тіку, зокрема TERM від systemd, — trap EXIT;
+#   - якщо тік убито KILL і trap не спрацював — сам, за один інтервал: `$$` у
+#     підоболонці — PID тіку, і `kill -0` бачить, що його вже немає.
+#
+# Помітивши STOP, спостерігач не виходить, а повторює `docker kill` щоінтервалу,
+# доки етап не скінчиться: STOP міг з'явитись, коли обгортка вже пройшла
+# check-run, а контейнера ще немає, — перший kill тоді б'є в порожнечу, і
+# контейнер працював би всю сесію. Подія в журналі — одна, на першу мить.
+watcher=""
+watch_start() { # watch_start <контейнер> <коли>
+  (
+    trap 'kill "$s" 2>/dev/null; exit 0' TERM
+    s="" noticed=0
+    while kill -0 "$$" 2>/dev/null; do
+      if ((noticed)) || [[ -e "$A8_KILL_SWITCH" ]]; then
+        if ((!noticed)); then
+          noticed=1
+          : >"$seen"
+          "$JOURNAL" event kill_switch "STOP помічено $2 — зупиняю контейнер $1"
+        fi
+        "$DOCKER" kill "$1" >/dev/null 2>&1
+      fi
+      sleep "$WATCH_S" &
+      s=$!
+      wait "$s"
+    done
+  ) &
+  watcher=$!
+}
+watch_stop() {
+  [[ -n "$watcher" ]] || return 0
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  watcher=""
+}
+trap watch_stop EXIT
+
 # ─── 3. Свіжий worktree від origin/main ────────────────────────────────────
 if ! git -C "$A8_REPO_DIR" fetch --quiet origin main >>"$log" 2>&1; then
   "$GUARD" count >/dev/null
@@ -185,24 +259,48 @@ if [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$(git -C "$A8_REPO_DIR" r
   fail_task "worktree не на origin/main"
   exit 0
 fi
+# База для backstop'а (крок 6a) — ЗАПИСАНА ТУТ, у пам'яті тіку. Ref origin/main
+# лежить у репозиторії, який агент бачить на запис: `git update-ref` зробив би
+# diff від нього порожнім.
+base="$(git -C "$wt" rev-parse HEAD)"
 
 # ─── 4. Залежності і гучний pre-commit ─────────────────────────────────────
 # Залежності — у worktree, бо node_modules і venv між worktree не шаруються
 # (той самий крок, що в tools/scripts/autorun.sh). Без них хук, навіть знайшовши
 # lefthook, запускав би ESLint/tsc/ruff, яких у worktree немає.
-if ! "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 ||
-  ! "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync' >>"$log" 2>&1; then
+#
+# Код 10 тут дає лише обгортка (`a8-guard check-run`): STOP з'явився, поки
+# ставились залежності чи йшов хук. Це зупинка, а не `failed deps`.
+drc=0
+"$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
+#
+# `--extra dev` — як у CI (ci.yml): pytest, mypy і ruff живуть саме там. Без нього
+# в контейнері немає pytest для оракула й ruff/mypy для pre-commit (V18e на A8
+# 2026-09-29: «Failed to spawn: `pytest`»). Паритет із CI тримає інваріант 11
+# у tools/scripts/check-ansible-a8.sh.
+if ((drc == 0)); then
+  "$RUNNER" "$wt" bash -c 'cd workers/cad && uv sync --extra dev' >>"$log" 2>&1 || drc=$?
+fi
+if ((drc != 0)); then
+  # Зупинка — ДО лічильника: агент не запускався, денний ліміт не витрачено.
+  if ((drc == 10)) || stop_requested; then stop_task "під час залежностей"; fi
   "$GUARD" count >/dev/null
   fail_task "deps"
   exit 0
 fi
 # Інакше лінт і типи в контейнері декоративні: хук друкує попередження і
 # пропускає коміт з кодом 0 (вимір №7; повторено на T470 у PR #116).
-if ! "$RUNNER" "$wt" bash tools/scripts/check-hook-loud.sh >>"$log" 2>&1; then
+hrc=0
+"$RUNNER" "$wt" bash tools/scripts/check-hook-loud.sh >>"$log" 2>&1 || hrc=$?
+if ((hrc != 0)); then
+  if ((hrc == 10)) || stop_requested; then stop_task "під час перевірки хука"; fi
   "$GUARD" count >/dev/null
   fail_task "hooks-decorative"
   exit 0
 fi
+# STOP з'явився, поки йшов хук, а хук устиг скінчитись: агента ще немає —
+# зупинка до старту, без лічильника, з чесною назвою етапу.
+if stop_requested; then stop_task "перед агентом"; fi
 
 # ─── 5. Агент — лише через a8-run-agent ────────────────────────────────────
 # Формулювання пише СУПЕРВІЗОР; текст задачі — дані в ньому (OQ-34 п.3).
@@ -215,6 +313,8 @@ prompt="Працюй за CLAUDE.md §0.
 $(field prompt "$claimed")"
 
 export A8_CONTAINER_NAME="a8-$id"
+# Спостерігач — ДО токена: його підоболонці токен у середовищі ні до чого.
+watch_start "$A8_CONTAINER_NAME" "під час агента"
 # Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
 CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
 export CLAUDE_CODE_OAUTH_TOKEN
@@ -226,6 +326,7 @@ timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
   --dangerously-skip-permissions \
   --max-turns "$A8_MAX_TURNS" \
   --output-format json >"$out" 2>&1 || rc=$?
+watch_stop
 unset CLAUDE_CODE_OAUTH_TOKEN
 
 # `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент
@@ -251,6 +352,13 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 
 # ─── 6. Класифікація ───────────────────────────────────────────────────────
 read -r cls detail < <(logic classify "$rc" "$out")
+# STOP або мітка спостерігача → зупинка, який би код не повернув контейнер:
+# 137 від `docker kill`, 0, якщо агент устиг закінчити, 10 від обгортки.
+# Без них 137 іде в класифікатор і стає падінням (OOM, чуже вбивство).
+# Виняток — 401: його причина (потрібен claude setup-token) мусить потрапити і
+# в журнал, і в сам файл STOP, інакше людина зніме STOP, а наступна задача
+# знову впаде на 401.
+if [[ "$cls" != auth_stop ]] && stop_requested; then stop_task "під час агента"; fi
 case "$cls" in
   auth_stop)
     # STOP усієї черги (ADR-039 §4): потрібен інтерактивний логін. Kill switch —
@@ -287,9 +395,44 @@ case "$cls" in
     ;;
 esac
 
-# ok від моделі ще не означає, що є результат.
-if [[ "$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)" == 0 ]]; then
+# ok від моделі ще не означає, що є результат. Рахуємо від бази до ГІЛКИ, що
+# пушиться: `origin/main..HEAD` зарахував би коміт на відокремленому HEAD, і
+# гілку без змін запушило б як «ok» (знайшов рецензент agy, Gemini 3.8 Flash).
+# SHA вершини закріплюється тут; його ж перевіряє backstop і пушить крок 7.
+tip="$(git --no-replace-objects -C "$wt" rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+if [[ -z "$tip" || "$(git --no-replace-objects -C "$wt" rev-list --count "$base..$tip" 2>/dev/null || echo 0)" == 0 ]]; then
   fail_task "no-commits"
+  exit 0
+fi
+
+# ─── 6a. Backstop заборонених шляхів — до оракула і push ──────────────────
+# CLAUDE.md §6.1 обіцяє для A8 «deny-правила + backstop-скрипт». Deny-правила
+# ловлять Edit/Write, а не Bash: `echo > infra/x` чи `git mv CLAUDE.md …` їх
+# минають. Без цього кроку заборонене доходило б до push (a8-tick.test.sh,
+# сценарії 19).
+#
+# Що саме перевіряється і чому так:
+#   - база — SHA, записаний при створенні worktree, а не origin/main (агент
+#     може пересунути ref);
+#   - вершина — гілка, яка пушиться, а не HEAD: відокремлений HEAD на чистому
+#     коміті ховав би заборонений коміт на гілці. SHA вершини закріплюється тут
+#     і саме він пушиться в кроці 7 — оракул нижче виконує код агента і міг би
+#     зсунути гілку вже після перевірки;
+#   - `--no-renames`: інакше перенесення CLAUDE.md показало б лише нову назву;
+#   - `--no-replace-objects`: `git replace` підміняє вміст для diff, але push
+#     віддає справжні об'єкти;
+#   - `-z`: без нього git бере в лапки шлях із кирилицею чи лапками
+#     ("infra/\321\202…"), і шаблон ^infra/ його не бачить (знайшов рецензент
+#     agy, Gemini 3.8 Flash). NUL → перевод рядка: ім'я з переводом рядка дасть
+#     зайвий рядок, але перший шматок забороненого шляху зберігає префікс.
+bout=""
+if ! changed="$(git --no-replace-objects -C "$wt" diff -z --name-only --no-renames "$base" "$tip" 2>>"$log" | tr '\0' '\n')" ||
+  ! bout="$(printf '%s\n' "$changed" | bash "$FORBIDDEN" 2>&1)"; then
+  printf '%s\n' "$bout" >>"$log"
+  viol="$(sed -n 's/^  ✗ //p' <<<"$bout" | tr '\n' ' ')"
+  # Порожній перелік — це не «заборонене не знайдено», а «перевірку не
+  # виконано»: git diff упав або скрипта немає. Fail closed, але з поясненням.
+  fail_task "forbidden-paths: ${viol:-перевірку не виконано — git diff або скрипт упали, див. лог задачі}"
   exit 0
 fi
 
@@ -317,22 +460,28 @@ oracle_container="a8-$id-oracle"
 A8_CONTAINER_NAME="$oracle_container"
 export A8_CONTAINER_NAME
 orc=0
+watch_start "$oracle_container" "під час оракула"
 timeout "$A8_ORACLE_TIMEOUT" "$RUNNER" "$wt" bash -c "$oracle" >>"$log" 2>&1 || orc=$?
+watch_stop
 [[ "$orc" == 124 ]] && "$DOCKER" kill "$oracle_container" >/dev/null 2>&1
 oracle_rc="$orc"
 
 if ((orc != 0)); then
   # Kill switch, виставлений посеред задачі, теж дає ненульовий код — але його
-  # повертає обгортка (`a8-guard check-run` → 10), а не оракул. Не розрізнивши
-  # ці два випадки, демон записав би «оракул червоний» там, де людина натиснула
-  # стоп, і звинуватив би агента в чужому рішенні.
-  if [[ -e "$A8_KILL_SWITCH" ]]; then
-    finish stopped stopped "kill switch під час оракула; гілка має коміти" failed
-    exit 0
-  fi
+  # повертає обгортка (`a8-guard check-run` → 10) чи `docker kill` спостерігача
+  # (137), а не оракул. Не розрізнивши ці випадки, демон записав би «оракул
+  # червоний» там, де людина натиснула стоп, і звинуватив би агента в чужому
+  # рішенні. Код 10 сам по собі тут не доказ: його може повернути й оракул.
+  if stop_requested; then stop_task "під час оракула"; fi
   fail_task "oracle rc=$orc"
   exit 0
 fi
+
+# ─── 6c. Останній погляд на STOP — перед тим, як віддати назовні ───────────
+# Оракул зелений, але STOP могли створити, поки він ішов чи щойно після. Push —
+# єдиний крок, що виходить за межі A8: після нього «зупинити» вже нічого.
+# Гілка з комітами лишається локально, задача — у failed/ з позначкою.
+if stop_requested; then stop_task "перед push"; fi
 
 # ─── 7. Push — лише якщо креденшал заданий ─────────────────────────────────
 case "$A8_PUSH_CREDENTIAL_KIND" in
@@ -343,7 +492,7 @@ case "$A8_PUSH_CREDENTIAL_KIND" in
     ;;
   deploy_key)
     if GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_push -o IdentitiesOnly=yes -o BatchMode=yes" \
-      git -C "$wt" push "$A8_PUSH_SSH_URL" "$branch:$branch" >>"$log" 2>&1; then
+      git -C "$wt" push "$A8_PUSH_SSH_URL" "$tip:refs/heads/$branch" >>"$log" 2>&1; then
       "$GUARD" record ok
       finish ok ok pushed done
     else
@@ -352,7 +501,7 @@ case "$A8_PUSH_CREDENTIAL_KIND" in
     ;;
   token_file)
     if GIT_ASKPASS=/usr/local/bin/a8-git-askpass GIT_TERMINAL_PROMPT=0 \
-      git -C "$wt" -c credential.helper= push origin "$branch:$branch" >>"$log" 2>&1; then
+      git -C "$wt" -c credential.helper= push origin "$tip:refs/heads/$branch" >>"$log" 2>&1; then
       "$GUARD" record ok
       finish ok ok pushed done
     else

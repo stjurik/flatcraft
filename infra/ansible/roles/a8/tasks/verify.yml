@@ -559,6 +559,38 @@
       tick/timer: {{ a8_v_tick.stdout | replace('\n', ' ') }}; очікувано enabled={{ a8_tick_timer_enabled }}
     quiet: true
 
+# ─── V19. Backstop заборонених шляхів: встановлено те, що доведено в CI ─────
+- name: V19a — checksum of the installed forbidden-paths backstop
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/check-forbidden-paths.sh
+    checksum_algorithm: sha256
+  register: a8_v_forbidden
+
+- name: V19b — checksum of the backstop in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/check-forbidden-paths.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_forbidden_repo
+
+- name: V19c — backstop on A8 is byte-identical to the tested copy and owned by root
+  # Тік кличе саме цей файл (крок 6a). Інша копія або копія, яку може змінити
+  # agent, означала б, що зелений a8-tick.test.sh нічого не каже про A8.
+  ansible.builtin.assert:
+    that:
+      - a8_v_forbidden.stat.exists
+      - a8_v_forbidden.stat.checksum == a8_v_forbidden_repo.stat.checksum
+      - a8_v_forbidden.stat.pw_name == 'root'
+      - not a8_v_forbidden.stat.woth
+      - not a8_v_forbidden.stat.wgrp
+    fail_msg: >-
+      /usr/local/lib/a8/check-forbidden-paths.sh: exists={{ a8_v_forbidden.stat.exists }},
+      sha256 A8={{ a8_v_forbidden.stat.checksum | default('—') }} repo={{ a8_v_forbidden_repo.stat.checksum }},
+      власник={{ a8_v_forbidden.stat.pw_name | default('—') }}
+    success_msg: "backstop заборонених шляхів: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
+    quiet: true
+
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
 - name: V15a — ask the container for claude, uv and pnpm versions
   # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
@@ -590,6 +622,145 @@
       - a8_uv_version in a8_v_image.stdout
       - a8_pnpm_version in a8_v_image.stdout
     fail_msg: "Контейнер {{ a8_container_image }}: rc={{ a8_v_image.rc }}, '{{ a8_v_image.stdout }} {{ a8_v_image.stderr }}'"
+    quiet: true
+
+# ─── V18. Оракул воркера CadQuery проходить у контейнері ───────────────────
+# Поведінка, а не стан: у свіжому worktree, у справжньому контейнері, після
+# `uv sync` — рівно та команда, яка на A8 давала rc=2 без системних бібліотек
+# (handoff 2026-09-23 §2 п.1: libGL.so.1). V15 доводить, що uv є; інваріант 9
+# у check-ansible-a8.sh — що перелік бібліотек не відстає від образу воркера;
+# лише V18 доводить, що агент справді може прогнати тести workers/cad.
+#
+# Worktree одноразовий і прибирається в `always`: verify не має права лишати
+# слідів у дереві, з яким працює демон (README §5). Шлях фіксований, тож
+# залишок перерваного прогону прибирається перед стартом — і реєстрація в git,
+# і сама тека: тека без реєстрації валила б `worktree add` («already exists»)
+# раніше, ніж дійде до тесту (знайшов рецензент, agy Gemini 3.8 Flash).
+- name: V18 — CadQuery registry test in a throwaway worktree inside the container
+  become: true
+  become_user: "{{ a8_agent_user }}"
+  block:
+    - name: V18a — drop a leftover worktree registration from an interrupted run
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"
+      changed_when: false
+      failed_when: false
+
+    - name: V18a — prune stale worktree registrations
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - prune
+      changed_when: false
+
+    - name: V18a — remove a leftover directory without registration
+      ansible.builtin.file:
+        path: "{{ a8_worktrees_dir }}/verify-cad"
+        state: absent
+
+    - name: V18b — fetch origin/main, as the tick does before a task
+      # Без fetch тест ішов би на тому origin/main, що лишився від останнього
+      # тіку. Невдалий fetch не валить перевірку: тест піде на локальному
+      # origin/main, і V18e про це скаже.
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - fetch
+          - --quiet
+          - origin
+          - main
+      register: a8_v_cad_fetch
+      changed_when: false
+      failed_when: false
+
+    - name: V18b — create a throwaway worktree at origin/main
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - add
+          - --quiet
+          - --detach
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - origin/main
+      changed_when: false
+
+    - name: V18b — which commit is under test
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - rev-parse
+          - --short
+          - HEAD
+      register: a8_v_cad_sha
+      changed_when: false
+
+    - name: V18c — uv sync, then the registry test, inside the container
+      # Та сама послідовність, що в тіку (`cd workers/cad && uv sync --extra dev`,
+      # як у CI: без `dev` немає pytest — 2026-09-29 «Failed to spawn: pytest»), і
+      # дослівно оракул із handoff. SYNC_OK розділяє два можливі джерела
+      # ненульового коду: без маркера падіння `uv sync` (мережа, lockfile)
+      # виглядало б як брак бібліотек.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - (cd workers/cad && uv sync --extra dev --quiet) && echo SYNC_OK && uv run --directory workers/cad pytest tests/templates/test_registry.py -q
+      register: a8_v_cad
+      changed_when: false
+      failed_when: false
+  always:
+    - name: V18d — remove the throwaway worktree
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"
+      changed_when: false
+      failed_when: false
+
+    - name: V18d — make sure nothing is left on disk
+      ansible.builtin.file:
+        path: "{{ a8_worktrees_dir }}/verify-cad"
+        state: absent
+
+- name: V18e — the worker's registry test passes inside the agent container
+  ansible.builtin.assert:
+    that:
+      - a8_v_cad.rc == 0
+    fail_msg: >-
+      rc={{ a8_v_cad.rc }} на {{ a8_v_cad_sha.stdout }};
+      uv sync: {{ 'пройшов — rc дав сам тест' if 'SYNC_OK' in a8_v_cad.stdout else 'НЕ пройшов — rc дав uv sync, до тесту не дійшло' }};
+      fetch: {{ 'OK' if a8_v_cad_fetch.rc == 0 else 'не вдався — тест ішов на локальному origin/main' }}.
+      Якщо sync пройшов, а в хвості ImportError libGL.so.1 — в образі бракує бібліотек (до цього PR на A8 було саме так, rc=2).
+      Хвіст stdout: {{ (a8_v_cad.stdout_lines | default([]))[-5:] | join(' | ') }}
+      Хвіст stderr: {{ (a8_v_cad.stderr_lines | default([]))[-5:] | join(' | ') }}
+    success_msg: >-
+      test_registry.py у контейнері агента: rc=0 на {{ a8_v_cad_sha.stdout }}
+      (fetch {{ 'OK' if a8_v_cad_fetch.rc == 0 else 'не вдався, локальний origin/main' }}) —
+      {{ (a8_v_cad.stdout_lines | default([''])) | last }}
     quiet: true
 
 # ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────
@@ -629,6 +800,156 @@
       - a8_v_dropin.stat.exists == ((a8_egress_enabled | bool) and (a8_egress_enforce | bool))
     fail_msg: "drop-in exists={{ a8_v_dropin.stat.exists }}, enforce={{ a8_egress_enforce }}"
     quiet: true
+
+# ─── V20. Фільтр справді відрізає агента — живий вимір із контролем ─────────
+# ЧОМУ. V9 доводить, що набір адрес є і таймер живий, а не що зайве відрізається
+# (README §5 п.3). Живий доказ до цього давала лише ручна проба після #147 і #148
+# (2026-09-29: агент — тайм-аут, контроль — REACHED), і двічі поспіль її вивід з'їла
+# склейка stdout і stderr в Ansible: «BLOCKEDOK: kill switch відсутній», а grep шукав
+# ^BLOCKED$. Вимоги yurii до цієї перевірки (2026-09-29):
+#   - адреса явно IPv4 (`getent ahostsv4`): набір фільтра лише IPv4;
+#   - маркери `@@…@@` звіряються підрядком, а не рядком — склейка їх не ламає;
+#   - контроль — той самий зонд (YAML-якір) і той самий образ із `--network host`,
+#     де фільтра немає. Без REACHED у контролі BLOCKED агента нічого не доводить;
+#   - IPv6: фільтр лише IPv4, тож глобальна IPv6-адреса в контейнері — обхід.
+#     Рахується лише ГЛОБАЛЬНА область (`00` у /proc/net/if_inet6): link-local
+#     fe80:: ядро дає кожному інтерфейсу, і в інтернет вона не веде (статичний
+#     бік — інваріант 12).
+# Будова зонда — за рецензією PR #150 (agy, Gemini 3.8 Flash):
+#   - DNS питається ОДИН раз, адреса лягає у файл; з'єднання йде саме на неї. Два
+#     окремі `getent` могли розійтися: перший дає DNS4_OK, другий збоїть, і BLOCKED
+#     друкувався без жодної спроби з'єднання — «зелений» при зламаному фільтрі;
+#   - адреса друкується маркером @@IP=…@@, і хост перевіряє її `ipset test` (V20c):
+#     ціль на спільній адресі CDN з pypi/npm чи в a8_egress_extra_cidrs законно
+#     досяжна, тоді вимір недійсний, а не «фільтр зламано»;
+#   - @@PROBE_START@@ — щоб відмову обгортки (kill switch, guard) не видати за
+#     «DNS не відповів».
+# Зонд без жодного `$` (інваріант 4): адресу передає xargs із файла, маркер IP
+# складає `sed 's/.*/…&…/'`. Адресу обирає `sort | tail`, а не `head`: head закривав
+# би трубу раніше, getent ловив би SIGPIPE, і під pipefail це читалось би як збій DNS.
+# Ціль — a8_egress_probe_host, яку інваріант 13 тримає поза allowlist.
+- name: V20a — agent container on the filtered bridge tries an address outside the allowlist and one inside it
+  # Зонд — три цілі, кожна з маркерами:
+  #   - `a8_egress_probe_host` поза allowlist — мусить бути BLOCKED;
+  #   - `a8_egress_allowed_probe_host` з allowlist — мусить бути REACHED. Це позитивний
+  #     контроль шляху через docker0, NAT і DOCKER-USER: без нього BLOCKED міг би
+  #     дати будь-який інший злам (ufw route, NAT, порожній набір), а не фільтр
+  #     (контрприклад окремої сесії Claude, PR #150);
+  #   - глобальна IPv6 — мусить бути відсутня.
+  # Кожне з'єднання — до трьох спроб по 5 с: одиничний втрачений SYN не мусить
+  # давати «вимір недійсний».
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - &a8_egress_probe |
+        set -o pipefail
+        echo @@PROBE_START@@
+        getent ahostsv4 {{ a8_egress_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 > /tmp/a8-probe-ip \
+          && grep -q . /tmp/a8-probe-ip && echo @@DNS4_OK@@ && sed 's/.*/@@IP=&@@/' /tmp/a8-probe-ip \
+          || echo @@DNS4_FAIL@@
+        grep -q . /tmp/a8-probe-ip \
+          && xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/80" && exit 0; done; exit 1' < /tmp/a8-probe-ip \
+          && echo @@EGRESS_REACHED@@ || echo @@EGRESS_BLOCKED@@
+        getent ahostsv4 {{ a8_egress_allowed_probe_host }} | cut -d ' ' -f 1 | grep -E '^[0-9]+[.]' | sort | tail -n 1 \
+          | xargs -I{} bash -c 'for i in 1 2 3; do timeout 5 bash -c "</dev/tcp/{}/443" && exit 0; done; exit 1' \
+          && echo @@ALLOWED_REACHED@@ || echo @@ALLOWED_BLOCKED@@
+        grep -qE '^[0-9a-f]+ [0-9a-f]+ [0-9a-f]+ 00 ' /proc/net/if_inet6 2>/dev/null && echo @@GLOBAL_IPV6@@ || echo @@NO_GLOBAL_IPV6@@
+  register: a8_v_egress_agent
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20-ip — the address the agent tried
+  # Без груп регексу й зворотних косих: Jinja розбирає `\1` у рядковому літералі як
+  # символ \x01, а не посилання на групу. Тож береться весь збіг маркера й обрізається.
+  # Немає маркера — 0.0.0.0: контроль до нього не дійде, і V20d скаже «вимір недійсний».
+  ansible.builtin.set_fact:
+    a8_v_egress_probe_ip: >-
+      {{ (a8_v_egress_agent.stdout | regex_search('@@IP=[0-9.]+@@') | default('', true))
+      | replace('@@IP=', '') | replace('@@', '') | default('0.0.0.0', true) }}
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20b — control, the same probe from the same image with host network, to the same address the agent tried
+  # Ціль контролю — АДРЕСА, яку пробував агент, а не власний DNS-запит хоста:
+  # `getent ahostsv4` на IP-літералі повертає саме його. Інакше агент і хост могли
+  # отримати різні відповіді (сінкхол, split-horizon), і REACHED контролю нічого б
+  # не казав про адресу агента (контрприклад окремої сесії Claude, PR #150).
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - host
+      - "{{ a8_container_image }}"
+      - bash
+      - -c
+      - *a8_egress_probe
+  register: a8_v_egress_ctl
+  changed_when: false
+  failed_when: false
+  vars:
+    a8_egress_probe_host: "{{ a8_v_egress_probe_ip }}"
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20c — is the address the agent tried in the allowlist set
+  # rc=0 — адреса в наборі (спільна адреса CDN чи a8_egress_extra_cidrs): тоді її
+  # досяжність — норма фільтра, і вимір недійсний.
+  ansible.builtin.command:
+    argv:
+      - ipset
+      - test
+      - "{{ a8_egress_ipset }}"
+      - "{{ a8_v_egress_probe_ip }}"
+  register: a8_v_egress_inset
+  changed_when: false
+  failed_when: false
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20d — the measurement is valid, the control got through and the target is outside the set
+  ansible.builtin.assert:
+    that:
+      - "'@@DNS4_OK@@' in a8_v_egress_ctl.stdout"
+      - "'@@EGRESS_REACHED@@' in a8_v_egress_ctl.stdout"
+      - a8_v_egress_inset.rc != 0
+    fail_msg: >-
+      Вимір НЕДІЙСНИЙ, а не «фільтр зламано»:
+      {{ 'адреса цілі ' + a8_v_egress_probe_ip
+      + ' є в наборі ' + a8_egress_ipset + ' (спільна адреса CDN чи a8_egress_extra_cidrs) — виберіть іншу a8_egress_probe_host'
+      if a8_v_egress_inset.rc == 0 else
+      'той самий зонд із мережею хоста не дістав адресу ' + a8_v_egress_probe_ip + ' за три спроби — ціль не відповідає або в хоста немає мережі' }}.
+      Контроль: stdout={{ a8_v_egress_ctl.stdout | replace('\n', ' ') }}, rc={{ a8_v_egress_ctl.rc }}
+    quiet: true
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
+
+- name: V20e — agent is cut off outside the allowlist, reaches inside it, and has no global IPv6
+  ansible.builtin.assert:
+    that:
+      - "'@@PROBE_START@@' in a8_v_egress_agent.stdout"
+      - "'@@DNS4_OK@@' in a8_v_egress_agent.stdout"
+      - "'@@EGRESS_BLOCKED@@' in a8_v_egress_agent.stdout"
+      - "'@@EGRESS_REACHED@@' not in a8_v_egress_agent.stdout"
+      - "'@@ALLOWED_REACHED@@' in a8_v_egress_agent.stdout"
+      - "'@@NO_GLOBAL_IPV6@@' in a8_v_egress_agent.stdout"
+    fail_msg: >-
+      {{ 'Зонд у контейнері агента не запустився — обгортка відмовила до docker run (kill switch? a8-guard?): stderr=' + a8_v_egress_agent.stderr | default('')
+      if '@@PROBE_START@@' not in a8_v_egress_agent.stdout else
+      ('Агент ДІСТАВ ' + a8_egress_probe_host + ' повз allowlist'
+      if '@@EGRESS_REACHED@@' in a8_v_egress_agent.stdout else
+      ('Агент має глобальну IPv6-адресу — фільтр лише IPv4, її ніщо не фільтрує'
+      if '@@GLOBAL_IPV6@@' in a8_v_egress_agent.stdout else
+      ('Агент не дістав навіть дозволену ' + a8_egress_allowed_probe_host
+      + ' — шлях через docker0 чи NAT зламано, тож BLOCKED не доводить фільтра: вимір недійсний'
+      if '@@ALLOWED_REACHED@@' not in a8_v_egress_agent.stdout else
+      'Агент не отримав IPv4-адреси цілі від DNS — вимір недійсний (DNS контейнера мусить бути в наборі, V9b)'))) }}.
+      stdout={{ a8_v_egress_agent.stdout | replace('\n', ' ') }}, rc={{ a8_v_egress_agent.rc }}
+    quiet: true
+  when: (a8_egress_enabled | bool) and (a8_egress_enforce | bool)
 
 # ─── V11. Креденшал на push — перевіряється НА ДИСКУ ───────────────────────
 #

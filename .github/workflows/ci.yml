@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `ai/**` — гілки, які пушить демон A8. PR на них створює `a8-pr.yml` під
+    # `GITHUB_TOKEN`, а для такого PR `pull_request`-прогін лише створюється і
+    # висить в `action_required` з нулем job'ів (виміряно на PR #131). Чеки дає
+    # саме цей push-тригер; той прогін НЕ схвалювати — він дублює push-прогін і
+    # коштує ще ~19 білінг-хвилин.
+    branches: [main, "ai/**"]
   pull_request:
     branches: [main]
 

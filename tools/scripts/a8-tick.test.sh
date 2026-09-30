@@ -62,7 +62,10 @@ ENV
   # origin = bare-репо з одним комітом; головний клон — як /home/agent/hart.
   git init -q --bare -b main "$ROOT/origin.git"
   git clone -q "$ROOT/origin.git" "$ROOT/seed" 2>/dev/null
-  git -C "$ROOT/seed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  # CLAUDE.md у базі — щоб було що перейменувати (сценарій 19c).
+  echo contract >"$ROOT/seed/CLAUDE.md"
+  git -C "$ROOT/seed" add CLAUDE.md
+  git -C "$ROOT/seed" -c user.email=t@t -c user.name=t commit -q -m init
   git -C "$ROOT/seed" push -q origin main
   git clone -q "$ROOT/origin.git" "$ROOT/repo"
 
@@ -74,15 +77,36 @@ ENV
 #!/usr/bin/env bash
 CALLS="$LOGS/runner-calls"
 STOPFILE="$ROOT/STOP"
+PIDS="$LOGS"
 STUB
   cat >>"$BIN/a8-run-agent" <<'STUB'
 wt="$1"; shift
+# Лок тіку (fd 9) заглушці ні до чого. «Довга сесія», убита спостерігачем,
+# лишає осиротілий `sleep`, і з успадкованим fd 9 він тримав би лок — наступний
+# тік отримав би busy. У справжньому контейнері процес обгортки вмирає разом
+# із контейнером; тут «контейнер» і його sleep — різні процеси.
+exec 9>&-
 # `check-run`, як і справжня обгортка. Якби тут лишився `check`, тест зеленів
 # би на демоні, який на останній задачі дня валить власний оракул кодом 11.
 "$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
-if [[ "$*" == *check-hook-loud* ]]; then exit "${HOOK_RC:-0}"; fi
-if [[ "$1" == pnpm || "$*" == *"uv sync"* ]]; then exit "${DEPS_RC:-0}"; fi
+# «Контейнер» — цей процес. PID за ім'ям контейнера: заглушка docker на
+# `kill <ім'я>` убиває саме його, як справжній `docker kill` — свій контейнер.
+[[ -n "${A8_CONTAINER_NAME:-}" ]] && echo $$ >"$PIDS/pid-$A8_CONTAINER_NAME"
+# STOP_DURING: людина створює STOP, поки йде цей етап; етап доходить до кінця,
+# а наступний старт контейнера отримує 10 від check-run.
+if [[ "$*" == *check-hook-loud* ]]; then
+  [[ "${STOP_DURING:-}" == hook ]] && touch "$STOPFILE"
+  exit "${HOOK_RC:-0}"
+fi
+if [[ "$1" == pnpm ]]; then
+  [[ "${STOP_DURING:-}" == pnpm ]] && touch "$STOPFILE"
+  exit "${DEPS_RC:-0}"
+fi
+if [[ "$*" == *"uv sync"* ]]; then
+  [[ "${STOP_DURING:-}" == uvsync ]] && touch "$STOPFILE"
+  exit "${DEPS_RC:-0}"
+fi
 # Оракул приходить як `bash -c <текст>` і ВИКОНУЄТЬСЯ по-справжньому, у
 # worktree. Заглушка, що відповідала б за нього кодом зі змінної, доводила б
 # лише «рядок викликано»; нам потрібне «оракул червоніє на неправильній
@@ -105,6 +129,61 @@ case "${AGENT_MODE:-commit}" in
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
     touch "$STOPFILE"
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  forbidden | moveorigin | detach | replace)
+    # Заборонений шлях через Bash — те, чого deny-правила Edit/Write не бачать.
+    mkdir -p "$wt/infra" && echo x >"$wt/infra/x"
+    git -C "$wt" add infra/x
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m forbidden
+    case "$AGENT_MODE" in
+      moveorigin)
+        # Чистий коміт зверху, а origin/main пересунуто на заборонений: diff від
+        # origin/main бачить лише чистий коміт.
+        git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m clean
+        git -C "$wt" update-ref refs/remotes/origin/main HEAD~1 ;;
+      detach)
+        # Гілка лишається на забороненому коміті, HEAD — на чистому поруч.
+        git -C "$wt" checkout -q --detach HEAD~1
+        git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m clean ;;
+      replace)
+        # Для diff заборонений коміт підмінено чистим, push віддасть справжній.
+        f="$(git -C "$wt" rev-parse HEAD)"
+        c="$(git -C "$wt" -c user.email=a@a -c user.name=a commit-tree "HEAD~1^{tree}" -p HEAD~1 -m clean)"
+        git -C "$wt" replace "$f" "$c" ;;
+    esac
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  cyrillic | quote)
+    # Не-ASCII або лапки в імені: `git diff --name-only` бере такий шлях у лапки
+    # з вісімковими кодами ("infra/\321\202…"), і шаблон ^infra/ його не бачить.
+    mkdir -p "$wt/infra"
+    if [[ "$AGENT_MODE" == cyrillic ]]; then echo x >"$wt/infra/тест.sh"; else echo x >"$wt/infra/a\"b"; fi
+    git -C "$wt" add -A infra
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m odd-name
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  detachonly)
+    # Коміт на відокремленому HEAD, гілка лишилась на базі: пушити нічого.
+    git -C "$wt" checkout -q --detach
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m detached
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  rename)
+    git -C "$wt" mv CLAUDE.md notes.md
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m rename
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  sleepstop)
+    # Довга сесія: агент закомітив, людина створила STOP, сесія триває далі.
+    # Без спостерігача тік чекав би кінця сесії (A8_TASK_TIMEOUT).
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
+    touch "$STOPFILE"
+    sleep 30 ;;
+  sleepstop0)
+    # Те саме, але комітів ще немає.
+    touch "$STOPFILE"
+    sleep 30 ;;
+  oom) exit 137 ;;
+  authstop)
+    # 401, а людина саме створила STOP.
+    touch "$STOPFILE"
+    echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'
+    exit 1 ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
@@ -113,14 +192,41 @@ case "${AGENT_MODE:-commit}" in
 esac
 STUB
   chmod +x "$BIN/a8-run-agent"
-  printf '#!/usr/bin/env bash\necho "docker $*" >>"%s/docker-calls"\n' "$LOGS" >"$BIN/docker"
+  # Заглушка docker: журнал викликів; `kill <ім'я>` убиває процес «контейнера»
+  # з цим ім'ям (KILL → 137, як у справжнього). DOCKER_RM_STOP — людина встигла
+  # прибрати STOP, поки тік дочитував код виходу: лишається лише мітка.
+  cat >"$BIN/docker" <<STUB
+#!/usr/bin/env bash
+echo "docker \$*" >>"$LOGS/docker-calls"
+# DOCKER_KILL_FAIL_ONCE: перший kill б'є в порожнечу — контейнера ще немає.
+if [[ "\$1" == kill && -n "\${DOCKER_KILL_FAIL_ONCE:-}" && ! -e "$LOGS/kill-failed-once" ]]; then
+  : >"$LOGS/kill-failed-once"
+  exit 1
+fi
+if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
+  kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
+  [[ -n "\${DOCKER_RM_STOP:-}" ]] && rm -f "$ROOT/STOP"
+fi
+exit 0
+STUB
   chmod +x "$BIN/docker"
 
+  # Спостерігач у тесті дивиться раз на секунду, а не раз на 5 с (A8).
+  export A8_WATCH_INTERVAL_S="${WATCH_S:-1}"
   export A8_CONFIG="$ETC/a8.env" A8_TICK_LOGIC="$HERE/a8-tick-logic.sh"
   export A8_GUARD="$BIN/a8-guard" A8_RUNNER="$BIN/a8-run-agent"
   export A8_JOURNAL="$BIN/a8-journal" A8_DOCKER="$BIN/docker"
+  export A8_FORBIDDEN_CHECK="$HERE/check-forbidden-paths.sh"
 }
-teardown() { rm -rf "$ROOT"; }
+teardown() {
+  # Процеси сценарію, яких тік не дочекався (убитий тік, «довга сесія»):
+  # у їхньому рядку запуску є $ROOT, а в інших сценаріях — ні.
+  pkill -9 -f "$ROOT/" 2>/dev/null
+  rm -rf "$ROOT"
+}
+# Живі процеси тіку — сам тік і його спостерігач (підоболонка має той самий
+# рядок запуску). Після виходу тіку їх бути не повинно.
+tick_procs() { pgrep -f "$BIN/a8-tick" 2>/dev/null | wc -l; }
 
 enqueue() { # enqueue <файл> <json>
   printf '%s\n' "$2" >"$QD/$1.json"
@@ -319,6 +425,8 @@ run_scenarios() {
     ok "сирота записана в last-results як failed (рахується до паузи)" || bad "orphan last-results: $(cat "$LOGS/last-results" 2>/dev/null)"
   grep -q 'docker kill a8-orph' "$LOGS/docker-calls" 2>/dev/null &&
     ok "сирота → контейнер a8-orph убито (міг працювати без нагляду)" || bad "orphan kill: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  grep -q 'docker kill .*a8-orph-oracle' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "сирота → і контейнер оракула a8-orph-oracle убито" || bad "orphan oracle kill: $(cat "$LOGS/docker-calls" 2>/dev/null)"
   teardown
 
   # 9b. Класифікатор упав → failed, НЕ push і НЕ done (fail closed).
@@ -479,17 +587,252 @@ EOF
     ok "ліміт 1: оракул останньої задачі дня проганяється і зеленіє" || bad "оракул на межі ліміту: $(last)"
   teardown
 
-  # 18d. Kill switch посеред задачі теж дає ненульовий код — але через
-  # обгортку. Записати це як «червоний оракул» означало б звинуватити агента
-  # в рішенні людини.
+  # 18d. STOP наприкінці сесії агента: без перевірки після агента його побачила
+  # б лише обгортка оракула (код 10), і демон записав би «червоний оракул» —
+  # звинуватив би агента в рішенні людини.
   PUSH_KIND=token_file setup
   enqueue 001-a "$(valid a)"
   AGENT_MODE=stopafter tick
   [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"kill switch"* ]] &&
-    ok "kill switch під час оракула → stopped, а не failed oracle" || bad "kill switch під час оракула: $(last)"
+    ok "STOP наприкінці сесії агента → stopped, а не failed oracle" || bad "STOP наприкінці сесії: $(last)"
   grep -q failed "$LOGS/last-results" 2>/dev/null &&
     bad "зупинка людиною зарахована в падіння поспіль" || ok "зупинка людиною не зарахована в падіння"
   teardown
+
+  # ─── 19. Backstop заборонених шляхів ─────────────────────────────────────
+  # CLAUDE.md §6.1: «deny-правила + backstop-скрипт». Deny-правила ловлять
+  # Edit/Write, а не Bash — тож кожен сценарій пише заборонене саме через
+  # git/bash. Оракул скрізь ЗЕЛЕНИЙ і креденшал є: зупинити push мусить
+  # backstop, а не щось інше.
+  forbidden_case() { # forbidden_case <режим> <опис>
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(valid a)"
+    AGENT_MODE="$1" tick
+    if [[ "$(jl .result)" == failed && "$(jl .detail)" == forbidden-paths* ]] &&
+      ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+      ok "$2 → failed forbidden-paths, на origin нічого"
+    else
+      bad "$2: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a || echo немає)"
+    fi
+    teardown
+  }
+  # 19a. Базовий випадок.
+  forbidden_case forbidden "агент записав infra/x через bash"
+  # 19b. Контроль: чиста робота backstop проходить.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == ok && "$(jl .detail)" == pushed ]] &&
+    ok "чиста робота → backstop пропускає, push ok" || bad "backstop на чистій роботі: $(last)"
+  teardown
+  # 19c. Перейменування: без --no-renames diff показав би лише notes.md.
+  forbidden_case rename "CLAUDE.md перейменовано в notes.md"
+  # 19d. Diff від SHA бази, а не від origin/main, який агент може пересунути.
+  forbidden_case moveorigin "origin/main пересунуто на заборонений коміт"
+  # 19e. Перевіряється те, що пушиться (гілка), а не HEAD.
+  forbidden_case detach "гілка на забороненому, HEAD — на чистому"
+  # 19f. `git replace` підміняє вміст для diff, але не для push.
+  forbidden_case replace "заборонений коміт підмінено через git replace"
+  # 19h. Кирилиця й лапки в імені — `git diff` без -z бере шлях у лапки.
+  forbidden_case cyrillic "infra/тест.sh (кирилиця в імені)"
+  forbidden_case quote "infra/a\"b (лапки в імені)"
+  # 19i. «Є коміти» рахується від бази до гілки, а не від origin/main до HEAD:
+  # коміт на відокремленому HEAD інакше дав би push гілки без змін як «ok».
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=detachonly tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == no-commits ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "коміт лише на відокремленому HEAD → failed no-commits, нічого не запушено"
+  else
+    bad "коміт на відокремленому HEAD: $(last)"
+  fi
+  teardown
+  # 19j. Скрипта backstop немає (роль не доставила) → fail closed, з поясненням.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  A8_FORBIDDEN_CHECK="$ROOT/немає.sh" AGENT_MODE=work tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == "forbidden-paths: перевірку не виконано"* ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "скрипта backstop немає → failed «перевірку не виконано», нічого не запушено"
+  else
+    bad "backstop без скрипта: $(last)"
+  fi
+  teardown
+  # 19g. Оракул виконує код агента й може зсунути гілку ПІСЛЯ перевірки.
+  # Пушиться рівно той SHA, що пройшов backstop.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt && mkdir -p infra && echo x >infra/x && git add infra/x && git -c user.email=o@o -c user.name=o commit -q -m sneaky')"
+  AGENT_MODE=work tick
+  if [[ "$(jl .result)" == ok ]] && git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    [[ -z "$(git -C "$ROOT/origin.git" ls-tree -r --name-only ai/a -- infra)" ]]; then
+    ok "оракул зсунув гілку після backstop → запушено перевірений SHA, без infra/"
+  else
+    bad "зсув гілки після backstop: $(last); infra на origin: $(git -C "$ROOT/origin.git" ls-tree -r --name-only ai/a -- infra 2>&1)"
+  fi
+  teardown
+
+  # ─── 20. Kill switch посеред задачі ──────────────────────────────────────
+  # Зупинка — рішення людини: ні запису падіння, ні +1 до «трьох поспіль».
+  # Без комітів задача повертається в чергу, з комітами — лишається у failed/.
+  no_failures() { ! grep -q failed "$LOGS/last-results" 2>/dev/null; }
+  requeued() { # requeued <опис>
+    if [[ "$(jl .result)" == stopped && "$(jl .detail)" == "kill switch "* && -e "$QD/001-a.json" ]] && no_failures &&
+      ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/a >/dev/null && [[ ! -e "$ROOT/wt/a" ]]; then
+      ok "$1 → stopped, задача в черзі, падінь 0, порожні гілку й worktree прибрано"
+    else
+      bad "$1: $(last); last-results: $(cat "$LOGS/last-results" 2>/dev/null)"
+    fi
+  }
+  kept() { # kept <опис> — з комітами: failed/ з позначкою, гілка на місці, падінь 0
+    if [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"гілка має коміти"* && -e "$QD/failed/001-a.json" ]] &&
+      no_failures && git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+      ok "$1 → stopped, задача у failed/ з позначкою, гілка з комітами на місці, падінь 0"
+    else
+      bad "$1: $(last); last-results: $(cat "$LOGS/last-results" 2>/dev/null)"
+    fi
+  }
+
+  # 20a–c. STOP на залежностях і хуку: наступний старт контейнера отримує 10.
+  # Агент не запускався — денний ліміт не витрачено; назва етапу — чесна.
+  for case in "pnpm:під час залежностей" "uvsync:під час перевірки хука" "hook:перед агентом"; do
+    stage="${case%%:*}" want="kill switch ${case#*:}"
+    setup
+    enqueue 001-a "$(valid a)"
+    STOP_DURING="$stage" tick
+    requeued "STOP під час $stage"
+    grep -q 'run-agent claude' "$LOGS/runner-calls" 2>/dev/null && bad "STOP під час $stage: агента все одно запущено" ||
+      ok "STOP під час $stage: агента не запущено"
+    [[ "$(jl .detail)" == "$want" && ! -s "$LOGS/counter-$(date -u +%Y-%m-%d)" ]] &&
+      ok "STOP під час $stage: деталь «$want», денний ліміт не витрачено" ||
+      bad "STOP під час $stage: деталь «$(jl .detail)», лічильник «$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null)»"
+    teardown
+  done
+
+  # 20d. Код 10 на залежностях, а STOP уже прибрали: це однаково обгортка.
+  setup
+  enqueue 001-a "$(valid a)"
+  DEPS_RC=10 tick
+  requeued "код 10 на залежностях без STOP"
+  [[ ! -s "$LOGS/counter-$(date -u +%Y-%m-%d)" ]] && ok "код 10 на залежностях: денний ліміт не витрачено" ||
+    bad "код 10 на залежностях: лічильник $(cat "$LOGS/counter-$(date -u +%Y-%m-%d)")"
+  teardown
+
+  # 20e. STOP посеред довгої сесії агента з комітами: спостерігач помічає його
+  # за секунди й зупиняє саме контейнер агента, а не чекає A8_TASK_TIMEOUT (20 с).
+  setup
+  enqueue 001-a "$(valid a)"
+  t0="$(date +%s)"
+  AGENT_MODE=sleepstop tick
+  dt=$(($(date +%s) - t0))
+  kept "STOP посеред сесії агента (коміти є)"
+  ev="$(grep '"event":"kill_switch"' "$LOGS/runs.log" | head -1)"
+  [[ "$(jq -r .detail <<<"$ev")" == *"під час агента"*"a8-a" ]] && grep -qx 'docker kill a8-a' "$LOGS/docker-calls" &&
+    ok "спостерігач: подія kill_switch «STOP помічено під час агента», docker kill a8-a" ||
+    bad "спостерігач агента: подія «$ev»; docker: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  ((dt < 10)) && ok "зупинка за ${dt} с, а не за A8_TASK_TIMEOUT" || bad "зупинка за ${dt} с — спостерігач не спрацював"
+  (($(tick_procs) == 0)) && ok "після зупинки жодного процесу тіку (спостерігача) не лишилось" ||
+    bad "після зупинки лишились процеси тіку: $(tick_procs)"
+  teardown
+
+  # 20f. Те саме без комітів → у чергу.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=sleepstop0 tick
+  requeued "STOP посеред сесії агента (комітів немає)"
+  teardown
+
+  # 20g. 137 без STOP і без мітки — OOM чи чуже вбивство: падіння, як і було.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=oom tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "rc=137" && "$(tail -n 1 "$LOGS/last-results" 2>/dev/null)" == failed ]] &&
+    ok "137 без STOP → failed rc=137, падіння зараховано" || bad "137 без STOP: $(last)"
+  teardown
+
+  # 20h. Спостерігач зупинив контейнер, а людина встигла прибрати STOP: мітка
+  # лишається, це зупинка. І мітка не переживає задачу: повернута в чергу, вона
+  # наступним тіком виконується, а не «зупиняється» вдруге.
+  setup
+  enqueue 001-a "$(valid a)"
+  DOCKER_RM_STOP=1 AGENT_MODE=sleepstop0 tick
+  [[ ! -e "$ROOT/STOP" ]] && requeued "спостерігач зупинив, STOP уже прибрано (лише мітка)" ||
+    bad "20h: STOP не прибрано заглушкою — сценарій нічого не перевіряє"
+  tick
+  [[ "$(jl .result)" == no-credential && "$(jl .task)" == a ]] &&
+    ok "повернута задача наступним тіком виконується — мітку попередньої спроби скинуто" || bad "мітка пережила задачу: $(last)"
+  teardown
+
+  # 20i. STOP посеред оракула → спостерігач зупиняє контейнер ОРАКУЛА.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a "grep -q MARKER result.txt && touch '$ROOT/STOP' && sleep 30")"
+  t0="$(date +%s)"
+  AGENT_MODE=work tick
+  dt=$(($(date +%s) - t0))
+  kept "STOP посеред оракула"
+  [[ "$(jl .detail)" == *"під час оракула"* ]] && grep -qx 'docker kill a8-a-oracle' "$LOGS/docker-calls" && ((dt < 10)) &&
+    ok "спостерігач оракула: docker kill a8-a-oracle за ${dt} с" ||
+    bad "спостерігач оракула: $(last); ${dt} с; docker: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    bad "STOP посеред оракула: гілку все одно запушено" || ok "STOP посеред оракула: на origin нічого"
+  teardown
+
+  # 20j. Оракул зелений, STOP з'явився одразу після — перед push. Push — єдиний
+  # крок назовні; гілка лишається локально.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a "grep -q MARKER result.txt && touch '$ROOT/STOP'")"
+  AGENT_MODE=work tick
+  kept "STOP перед push"
+  [[ "$(jl .detail)" == *"перед push"* && "$(jl .oracle_rc)" == 0 ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    ok "STOP перед push: оракул зелений, на origin нічого, деталь «перед push»" || bad "STOP перед push: $(last)"
+  teardown
+
+  # 20l. 401 разом зі STOP: причина 401 важливіша — auth_stop, і файл STOP
+  # містить «claude setup-token», а не порожній рядок людини.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=authstop tick
+  [[ "$(jl .result)" == auth_stop ]] && grep -q 'setup-token' "$ROOT/STOP" &&
+    ok "401 і STOP одночасно → auth_stop, у STOP — причина 401" || bad "401 і STOP: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
+
+  # 20m. Перший docker kill б'є в порожнечу (контейнера ще немає): спостерігач
+  # не здається, а повторює kill наступного інтервалу.
+  setup
+  enqueue 001-a "$(valid a)"
+  t0="$(date +%s)"
+  DOCKER_KILL_FAIL_ONCE=1 AGENT_MODE=sleepstop tick
+  dt=$(($(date +%s) - t0))
+  kills="$(grep -cx 'docker kill a8-a' "$LOGS/docker-calls" 2>/dev/null)"
+  [[ "$(jl .result)" == stopped ]] && ((dt < 10 && kills >= 2)) &&
+    ok "перший kill не влучив → спостерігач повторив (${kills} спроби), зупинка за ${dt} с" ||
+    bad "повтор kill: $(last); спроб ${kills:-0}; ${dt} с"
+  teardown
+
+  # 20k. Спостерігач не переживає тік: ні звичайну задачу, ні TERM (systemd
+  # stop), ні KILL — тоді trap не спрацьовує, і спостерігач виходить сам.
+  WATCH_S=3 setup
+  enqueue 001-a "$(valid a)"
+  tick
+  (($(tick_procs) == 0)) && ok "після звичайної задачі жодного процесу тіку не лишилось" ||
+    bad "після звичайної задачі лишились процеси тіку: $(tick_procs)"
+  teardown
+  for sig in TERM KILL; do
+    WATCH_S=1 setup
+    enqueue 001-a "$(valid a)"
+    AGENT_MODE=hang bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1 &
+    tp=$!
+    sleep 2
+    kill -"$sig" "$tp" 2>/dev/null
+    wait "$tp" 2>/dev/null
+    # TERM: trap EXIT прибирає одразу. KILL: спостерігач бачить, що тіку немає,
+    # за один інтервал (1 с) — чекаємо з запасом.
+    [[ "$sig" == KILL ]] && sleep 3
+    (($(tick_procs) == 0)) && ok "тік отримав $sig посеред агента → спостерігача не лишилось" ||
+      bad "тік отримав $sig → лишились процеси тіку: $(tick_procs)"
+    teardown
+  done
 }
 
 run_scenarios
@@ -547,10 +890,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  mv "\$f" "\$Q\/rejected\/"\n//'
-  mutate "перевірку хука прибрано" 's/if ! "\$RUNNER" "\$wt" bash tools\/scripts\/check-hook-loud.sh >>"\$log" 2>&1; then/if false; then/'
+  mutate "перевірку хука прибрано" 's/if \(\(hrc != 0\)\); then/if false; then/'
   mutate "case без гілки за замовчуванням" 's/  ok\) ;;\n  \*\)\n(.*?\n)*?    ;;\n(esac)/$2/'
   mutate "сироту не вбито" 's/  \[\[ -n "\$oid" \]\] && "\$DOCKER" kill[^\n]*\n//'
-  mutate "залежності не ставляться" 's/if ! "\$RUNNER" "\$wt" pnpm install --frozen-lockfile >>"\$log" 2>&1 \|\|\n  ! "\$RUNNER" "\$wt" bash -c [^\n]*\n/if false; then\n/'
+  mutate "залежності не ставляться" 's/if \(\(drc != 0\)\); then/if false; then/'
   mutate "режим OQ-34 не експортовано" 's/\nexport A8_SOURCES_ALLOWED\n/\n/'
   mutate "flock прибрано" 's/flock -n 9 \|\| \{/true || {/'
   mutate "merge-base guard прибрано" 's/if \[\[ "\$\(git -C "\$wt" rev-parse HEAD 2>\/dev\/null\)" != [^\n]*\]\]; then/if false; then/'
@@ -564,10 +907,41 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "класифікатор на спільному лозі" 's/logic classify "\$rc" "\$out"/logic classify "\$rc" "\$log"/'
   mutate "оракул не проганяється" 's/timeout "\$A8_ORACLE_TIMEOUT" "\$RUNNER" "\$wt" bash -c "\$oracle" >>"\$log" 2>&1 \|\| orc=\$\?/orc=0/'
   mutate "червоний оракул ігнорується" 's/if \(\(orc != 0\)\); then/if false; then/'
-  mutate "оракул після push" 's/(# ─── 6b\. Оракул(?:.*?\n)*?^fi\n\n)(# ─── 7\.)/$2/m'
+  mutate "оракул після push" 's/(# ─── 6b\. Оракул(?:.*?\n)*?^fi\n\n)(# ─── 6c\.)/$2/m'
   mutate "oracle_rc завжди зелений" 's/oracle_rc="\$orc"/oracle_rc=0/'
-  mutate "kill switch під час оракула як червоний оракул" 's/  if \[\[ -e "\$A8_KILL_SWITCH" \]\]; then\n    finish stopped[^\n]*\n    exit 0\n  fi\n//'
+  mutate "kill switch під час оракула як червоний оракул" 's/  if stop_requested; then stop_task "під час оракула"; fi\n//'
   mutate "стани guard злиті в один" 's/"\$JOURNAL" event "\$gstate"/"\$JOURNAL" event stopped/'
+  # Backstop заборонених шляхів (сценарії 19): кожне рішення кроку 6a — окрема
+  # мутація, бо кожне закриває окремий обхід.
+  mutate "backstop не викликає скрипт" 's/\| bash "\$FORBIDDEN" 2>&1\)/| true 2>\&1)/'
+  mutate "backstop від origin/main, а не від бази" 's/--no-renames "\$base" "\$tip"/--no-renames origin\/main "\$tip"/'
+  mutate "backstop без --no-renames" 's/--name-only --no-renames "/--name-only "/'
+  mutate "backstop перевіряє HEAD, а не гілку" 's/rev-parse --verify --quiet "refs\/heads\/\$branch\^\{commit\}"/rev-parse --verify --quiet HEAD/'
+  mutate "backstop бачить підміну git replace" 's/git --no-replace-objects -C "\$wt" diff/git -C "\$wt" diff/'
+  mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
+  mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
+  mutate "no-commits від origin/main до HEAD" 's/rev-list --count "\$base\.\.\$tip"/rev-list --count origin\/main..HEAD/'
+  # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.
+  mutate "STOP на залежностях як падіння" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n//'
+  mutate "STOP на хуку як падіння" 's/  if \(\(hrc == 10\)\) \|\| stop_requested; then stop_task "під час перевірки хука"; fi\n//'
+  mutate "код 10 без STOP на залежностях як падіння" 's/if \(\(drc == 10\)\) \|\| stop_requested/if stop_requested/'
+  mutate "STOP після агента ігнорується" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested; then stop_task "під час агента"; fi\n//'
+  mutate "спостерігач агента не стартує" 's/watch_start "\$A8_CONTAINER_NAME" "під час агента"\n//'
+  mutate "спостерігач не зупиняє контейнер" 's/        "\$DOCKER" kill "\$1" >\/dev\/null 2>&1\n//'
+  mutate "спостерігач оракула зупиняє контейнер агента" 's/watch_start "\$oracle_container"/watch_start "a8-\$id"/'
+  mutate "137 без STOP як зупинка" 's/stop_requested\(\) \{ \[\[ -e "\$A8_KILL_SWITCH" \|\| -e "\$seen" \]\]; \}/stop_requested() { [[ -e "\$A8_KILL_SWITCH" || -e "\$seen" || "\${rc:-}" == 137 ]]; }/'
+  mutate "мітку спостерігача не враховано" 's/\[\[ -e "\$A8_KILL_SWITCH" \|\| -e "\$seen" \]\]/[[ -e "\$A8_KILL_SWITCH" ]]/'
+  mutate "мітку не скинуто на старті задачі" 's/\nrm -f "\$seen"\n/\n/'
+  mutate "спостерігача не прибрано після агента" 's/\nwatch_stop\nunset CLAUDE_CODE_OAUTH_TOKEN/\nunset CLAUDE_CODE_OAUTH_TOKEN/'
+  mutate "trap EXIT прибрано" 's/\ntrap watch_stop EXIT\n/\n/'
+  mutate "спостерігач не бачить, що тіку вже немає" 's/while kill -0 "\$\$" 2>\/dev\/null; do/while :; do/'
+  mutate "перевірку STOP перед push прибрано" 's/if stop_requested; then stop_task "перед push"; fi\n//'
+  mutate "спостерігач одноразовий" 's/(        "\$DOCKER" kill "\$1" >\/dev\/null 2>&1\n)/$1        exit 0\n/'
+  mutate "зупинка на залежностях спалює денний ліміт" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n  "\$GUARD" count >\/dev\/null\n/  "\$GUARD" count >\/dev\/null\n  if ((drc == 10)) || stop_requested; then stop_task "під час залежностей"; fi\n/'
+  mutate "без перевірки STOP перед агентом" 's/if stop_requested; then stop_task "перед агентом"; fi\n//'
+  mutate "контейнер оракула сироти не вбито" 's/"a8-\$oid" "a8-\$oid-oracle"/"a8-\$oid"/'
+  mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
+  mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"

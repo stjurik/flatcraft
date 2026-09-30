@@ -171,6 +171,87 @@ PATH="$BIN:$PATH" bash "$SCRIPT" --чого-небудь >/dev/null 2>&1
 [[ "$?" == 2 ]] && ok "невідомий аргумент → exit 2" || bad "невідомий аргумент проковтнуто"
 teardown
 
+# ─── 9. Шаблон помилок памʼяті: відкидає банер, ловить справжні рядки ─────
+# Пара обовʼязкова. Без другої половини шаблон `^НІКОЛИ$` пройшов би перший
+# тест і мовчки перестав би ловити будь-що — рівно той клас «зелений результат
+# при недієздатному стані», проти якого весь цей набір.
+# Рядки не вигадані: банер — зі звіту A8 2026-09-22, CE/UE/mce — сигнатури
+# EDAC і MCE з ядра.
+RE="$(sed -nE "s/^MEM_ERROR_RE='(.*)'\$/\1/p" "$SCRIPT")"
+if [[ -z "$RE" ]]; then
+  bad "у скрипті немає MEM_ERROR_RE — тест не перевіряє нічого"
+else
+  if echo 'EDAC MC: Ver: 3.0.0' | grep -iEq "$RE"; then
+    bad "банер версії EDAC читається як помилка памʼяті"
+  else
+    ok "банер 'EDAC MC: Ver' не видається за помилку"
+  fi
+  real_ok=1
+  while IFS= read -r line; do
+    echo "$line" | grep -iEq "$RE" || {
+      real_ok=0
+      bad "шаблон пропускає справжню помилку: $line"
+    }
+  done <<'LINES'
+EDAC MC0: 1 CE memory read error on CPU_SrcID#0_MC#0
+EDAC MC1: 2 UE memory scrubbing error
+mce: [Hardware Error]: Machine check events logged
+LINES
+  ((real_ok)) && ok "справжні сигнатури CE/UE/mce ловляться"
+fi
+
+# ─── 10. Журнал читається разом із ротованими файлами ─────────────────────
+# Без цього ніч, у яку logrotate спрацював опівночі, читається як «тік не
+# працював»: живий runs.log порожній, а записи лежать у .gz.
+setup
+run_report
+grep -q 'zcat' "$CALLS" &&
+  ok "журнал читається включно з ротованими (.gz)" ||
+  bad "звіт бачить лише живий runs.log — ніч після ротації прочитається як порожня"
+teardown
+
+# ─── 11. Осиротілі worktree видно, але скрипт нічого не прибирає ──────────
+setup
+run_report
+grep -q 'worktree prune' "$CALLS" &&
+  ok "звіт питає git про осиротілі реєстрації worktree" ||
+  bad "осиротіла реєстрація лишиться невидимою — du каже «жодного worktree»"
+if grep 'worktree prune' "$CALLS" | grep -qv -- '--dry-run'; then
+  bad "звіт надсилає СПРАВЖНІЙ prune: $(grep 'worktree prune' "$CALLS" | head -1)"
+else
+  ok "prune лише --dry-run — звіт лишається на читання"
+fi
+teardown
+
+# ─── 12. Розмір worktree рахує agent, а не той, хто зайшов по ssh ─────────
+# Структурна половина: глоб має стояти всередині `sudo -u agent bash -c`.
+# Поведінку «yurii не читає /home/agent (750)» тут не відтворити — тести
+# ідуть під root, який читає все, — тому друга половина перевіряє сам
+# внутрішній скрипт: чесний нуль на порожній теці і реальні рядки на повній.
+setup
+run_report
+if grep -qE "sudo -u agent bash -c '[^']*hart-wt/\*" "$CALLS" &&
+  ! grep -qE "sudo -u agent du -sh /home/agent/hart-wt/\*" "$CALLS"; then
+  ok "глоб worktree розкривається від agent, не від користувача ssh"
+else
+  bad "глоб worktree поза bash -c — при правах 750 звіт покаже нуль: $(grep -m1 'hart-wt' "$CALLS")"
+fi
+teardown
+WT_DU="$(sed -nE "s/^WT_DU='(.*)'\$/\1/p" "$SCRIPT")"
+if [[ -z "$WT_DU" ]]; then
+  bad "у скрипті немає WT_DU — поведінку не перевірено"
+else
+  T="$(mktemp -d)"
+  mkdir -p "$T/hart-wt"
+  empty="$(bash -c "${WT_DU//\/home\/agent/$T}")"
+  mkdir -p "$T/hart-wt/log-oracle" "$T/hart-wt/wall-shelf-registry"
+  full="$(bash -c "${WT_DU//\/home\/agent/$T}" | grep -c 'hart-wt/')"
+  rm -rf "$T"
+  [[ "$empty" == "(жодного worktree)" && "$full" == 2 ]] &&
+    ok "порожня тека → «жодного», дві теки → два рядки du" ||
+    bad "внутрішній скрипт бреше: порожня='$empty', рядків на двох=$full"
+fi
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1

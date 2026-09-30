@@ -496,9 +496,19 @@
 
 - name: Build the agent image
   # Будує лише коли образу з цим тегом немає або Dockerfile змінився. Тег несе
-  # версії, тож зміна версії завжди дає нову збірку; старий образ лишається.
+  # версії, тож зміна версії завжди дає нову збірку під новим тегом. Зміна
+  # Dockerfile без зміни версій перезбирає образ під ТИМ САМИМ тегом — старий
+  # лишається без тегу (коментар у files/agent.Dockerfile).
+  #
+  # `--network host` — бо RUN-кроки збірки інакше йдуть через міст docker0, а
+  # там стоїть egress-фільтр агента. 2026-09-28 з увімкненим примусом
+  # `apt-get update` не дістав deb.debian.org і збірка впала (rc=100). Фільтр
+  # охороняє агента під час роботи; збірку робить роль від root з Dockerfile'а
+  # в git. Контейнер агента (a8-run-agent) іде без `--network` — обидві
+  # половини тримає інваріант 10 у tools/scripts/check-ansible-a8.sh.
   ansible.builtin.command: >-
     docker build
+    --network host
     --build-arg CLAUDE_CODE_VERSION={{ a8_claude_code_version }}
     --build-arg UV_VERSION={{ a8_uv_version }}
     --build-arg PNPM_VERSION={{ a8_pnpm_version }}
@@ -523,6 +533,17 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../tools/scripts/a8-tick-logic.sh"
     dest: /usr/local/lib/a8/a8-tick-logic.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install forbidden-paths backstop
+  # Крок 6a тіку: diff задачі проти заборонених шляхів CLAUDE.md §6.1, до
+  # оракула і push. Копія під root — агент не може її змінити; V19 у verify
+  # звіряє контрольну суму з репозиторієм, як V14 для логіки.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/check-forbidden-paths.sh"
+    dest: /usr/local/lib/a8/check-forbidden-paths.sh
     owner: root
     group: root
     mode: "0755"
