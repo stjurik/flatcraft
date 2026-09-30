@@ -6,9 +6,36 @@
 
 ---
 
-## A8 preflight — мануальний чеклист автономного середовища (2026-08-09)
+## Run 7 Етап 2 — z_bracket на Template Registry (2026-08-07)
 
-- **Завершено** (2026-08-09, **PR #103**, коміт `da45223`): `docs/19_A8_PREFLIGHT.md` (589 рядків) — рішення Q1–Q13, треки A (Ubuntu 24.04 + BIOS «Restore on AC Power Loss»), B (три користувачі (`yurii` — адмін, `runner` і `agent` — без sudo), SSH key-only, UFW, swap 8 GB), C (Docker, Node 22, uv, Playwright), D (deploy key → private → runner → `claude setup-token` → тунель → Discord-бот), чекпоінти для кожного. Інваріант §7: на A8 немає vault-пароля, SSH-ключа до Mirohost і GHCR-токена на запис.
+- **Завершено** (2026-08-07, ADR-033, `docs/12` §6 PR 6, трек T2): **PR #101**
+  (коміт злиття `884eef4`) — четвертий із шести шаблонів переїхав на Template
+  Registry; у `TEMPLATE_REGISTRY` тепер 4/6 (`perforated_panel`,
+  `corner_angle`, `l_bracket`, `z_bracket`).
+- **Зміни:** `packages/templates/src/z-bracket/index.ts` — `TemplateDefinition`
+  з `kind:"extrude"` (той самий `SceneBuilderKind`, що ввів `l_bracket`):
+  Z-профіль — чистий 2D-контур із 3 секцій і 2 внутрішніх гибів, тому generic
+  `ExtrudeScene` покриває його без окремої сцени. `buildShapeCommands`
+  перенесено в `packages/cad-engine/src/geometry/z-bracket.ts`, react-free
+  (conformance §3.5). Видалено `z-bracket-{editor,studio,viewport}.tsx` і
+  `packages/ui/src/3d-viewport/z-bracket-scene.tsx` — на відміну від
+  `l_bracket`, чия сцена лишилась через незалежного споживача
+  `hero-loop-demo` (issue #93), у `z-bracket-scene.tsx` споживачів не було, і
+  DoD `docs/12` (`~~<slug>-scene.tsx~~`) виконано повністю. `geometry.ts` —
+  мінус 83 і плюс 10 рядків (`git show --numstat 884eef4`): z-специфічну
+  геометрію прибрано. Реєстри TS і Python оновлено, разом
+  з регенерованим `ts_registry_slugs.json` (паритет 4/4).
+- Напрям гибів `[down, up]` (CLAUDE.md §7, ADR-019) лишається в definition
+  без змін.
+- **Тести** (усі на одному дереві): typecheck ×4 зелені; unit 269
+  (cad-engine 71, templates 30, ui 96, web 72); pytest 344; Playwright e2e
+  129 (у т.ч. `z-bracket.spec.ts`, `registry.spec.ts` smoke, bend-matrix);
+  eslint ×4 + next lint; ruff check/format + mypy --strict (58 файлів);
+  export-registry regen без дифу.
+- **Походження:** джерело роботи — WIP-коміт `0dcc747` у гілці
+  `feat/migrate-z-bracket` (Master Run 13). Гілку перебудовано від свіжого
+  `origin/main`: tree-hash ідентичний верифікованому. Сама WIP-гілка до
+  `main` НЕ влита — міграція пройшла окремим PR, гілка лишається осторонь.
 
 ---
 
