@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>[hidden]{display:none!important} body{margin:0}</style>
+</head>
+<body>
+<title>Пульт розробки flatcraft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Макет: робочий пульт. Угорі — штамп знімка, як на кресленні, і квоти ШІ; далі розділи в порядку, погодженому з yurii:
+   чекає на вас → черга і розклад → A8 → рецензенти й квоти → T5 → продукт і процес → джерела. */
+:root {
+  --paper: #f3f4f5;
+  --sheet: #ffffff;
+  --ink: #12161b;
+  --ink-2: #47505a;
+  --ink-3: #707a85;
+  --rule: #d6dbe1;
+  --rule-strong: #99a2ad;
+  --accent: #1d5bd6;
+  --accent-soft: #e5edfb;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --crit: #d03b3b;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --hatch: rgba(18, 22, 27, 0.06);
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1216; --sheet: #161a1f; --ink: #eef1f4; --ink-2: #b3bac3; --ink-3: #87909b;
+    --rule: #2a3038; --rule-strong: #4b545f; --accent: #6f9dff; --accent-soft: #1a2640;
+    --s1: #3987e5; --s2: #d95926; --hatch: rgba(238, 241, 244, 0.07);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1216; --sheet: #161a1f; --ink: #eef1f4; --ink-2: #b3bac3; --ink-3: #87909b;
+  --rule: #2a3038; --rule-strong: #4b545f; --accent: #6f9dff; --accent-soft: #1a2640;
+  --s1: #3987e5; --s2: #d95926; --hatch: rgba(238, 241, 244, 0.07);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 0 clamp(16px, 3vw, 32px);
+  padding-block: 0 48px;
+}
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+a { color: var(--accent); }
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
+
+/* Смуга «макет» */
+.mock {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  margin: 0 calc(-1 * clamp(16px, 3vw, 32px));
+  padding: 6px clamp(16px, 3vw, 32px);
+  background: repeating-linear-gradient(135deg, var(--warn) 0 10px, var(--sheet) 10px 20px);
+  font-family: var(--font-cond); font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em;
+}
+.mock span { background: var(--sheet); color: var(--ink); padding: 2px 8px; border-radius: 2px; display: inline-block; }
+
+/* Шапка і штамп */
+.top {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px 32px; align-items: end;
+  padding-block: 22px 14px;
+}
+.brand h1 { font-family: var(--font-cond); font-weight: 600; font-size: clamp(24px, 3.2vw, 32px); letter-spacing: -0.01em; }
+.brand p { margin: 4px 0 0; color: var(--ink-2); max-width: 60ch; }
+.stamp { display: grid; grid-template-columns: repeat(5, auto); border: 1.5px solid var(--ink); background: var(--sheet); font-size: 13px; }
+.stamp > div { padding: 5px 12px 6px; border-left: 1px solid var(--rule-strong); min-width: 0; }
+.stamp > div:first-child { border-left: 0; }
+.stamp small {
+  display: block; font-family: var(--font-cond); font-weight: 500; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3);
+}
+.stamp b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn { border: 1px solid var(--ink); background: var(--ink); color: var(--sheet); padding: 7px 14px; border-radius: 3px; cursor: pointer; font-weight: 500; }
+.btn:hover { background: var(--accent); border-color: var(--accent); }
+.btn[disabled] { cursor: progress; opacity: 0.75; }
+.btn-stop { border: 1.5px dashed var(--crit); background: transparent; color: var(--ink-2); padding: 6px 12px; border-radius: 3px; cursor: not-allowed; }
+.btn-stop b { color: var(--crit); }
+.progress { color: var(--ink-2); font-size: 13px; }
+
+/* Квоти ШІ у шапці */
+.quotas-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin: 4px 0 8px; }
+.quotas-h h2 { font-family: var(--font-cond); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.quotas-h span { color: var(--ink-3); font-size: 12.5px; }
+.quotas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.q { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px 12px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.q .who { font-weight: 600; font-size: 13px; }
+.q .who small { display: block; font-weight: 400; color: var(--ink-3); font-size: 12px; }
+.q .big { display: flex; align-items: baseline; gap: 8px; }
+.q .big b { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.q .big span { color: var(--ink-2); font-size: 12.5px; }
+.q .foot-q { color: var(--ink-2); font-size: 12.5px; }
+
+/* Плитки-підсумок */
+.strip { display: grid; grid-template-columns: 1.4fr repeat(2, minmax(0, 1fr)); gap: 12px; margin-block: 0 16px; }
+.tile { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px; min-width: 0; }
+.tile .label { font-family: var(--font-cond); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); }
+.tile .value { font-size: 20px; font-weight: 600; margin-top: 4px; line-height: 1.25; }
+.tile .sub { color: var(--ink-2); margin-top: 4px; font-size: 13px; }
+.tile.hero .value { font-size: 52px; line-height: 1; letter-spacing: -0.02em; }
+.tile.hero .value small { font-size: 16px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-left: 6px; }
+
+/* Стани */
+.st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--ink); }
+.st i { font-style: normal; font-weight: 700; font-size: 11px; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; color: var(--sheet); flex: none; }
+.st-good i { background: var(--good); }
+.st-warn i { background: var(--warn); color: #12161b; }
+.st-serious i { background: var(--serious); color: #12161b; }
+.st-crit i { background: var(--crit); }
+.st-none i { background: transparent; color: var(--ink-3); border: 1.5px dashed var(--ink-3); }
+.st-info i { background: var(--rule-strong); }
+.legend-states { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-bottom: 14px; color: var(--ink-2); font-size: 13px; }
+.legend-states > span:first-child { font-family: var(--font-cond); text-transform: uppercase; letter-spacing: 0.07em; font-size: 12px; color: var(--ink-3); }
+
+/* Розділи в погодженому порядку */
+.flow { display: grid; gap: 16px; }
+.pair { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pair.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; min-width: 0; position: relative; }
+.panel-h { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; justify-content: space-between; padding: 14px 16px 10px; border-bottom: 1px solid var(--rule); }
+.panel-h h2 { font-family: var(--font-cond); font-weight: 600; font-size: 18px; }
+.panel-h h2 .ord { font-family: var(--font-mono); font-weight: 500; font-size: 13px; color: var(--ink-3); margin-right: 8px; }
+.meta { color: var(--ink-3); font-size: 12.5px; margin-top: 2px; }
+.tag { display: inline-block; font-family: var(--font-cond); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 2px; margin-left: 6px; vertical-align: 1px; border: 1px solid var(--rule-strong); color: var(--ink-2); }
+.tag-real { border-color: var(--accent); color: var(--accent); }
+.panel-b { padding: 12px 16px 16px; }
+.panel.is-error .panel-b { background: repeating-linear-gradient(135deg, var(--hatch) 0 6px, transparent 6px 12px); }
+.panel.is-error .panel-b .rows { opacity: 0.55; }
+.error-note { display: none; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--crit); border-radius: 3px; background: var(--sheet); font-size: 13px; }
+.panel.is-error .error-note { display: block; }
+.subh { font-family: var(--font-cond); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); margin: 14px 0 6px; }
+.subh:first-child { margin-top: 0; }
+
+/* Чекає на вас */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chip { border: 1px solid var(--rule-strong); background: transparent; color: var(--ink-2); border-radius: 999px; padding: 3px 11px; font-size: 13px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.chip .num { opacity: 0.75; margin-left: 4px; }
+.sortnote { font-size: 12.5px; color: var(--ink-3); margin-bottom: 10px; }
+.items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.item { border: 1px solid var(--rule); border-left-width: 4px; border-radius: 3px; display: grid; grid-template-columns: 34px minmax(0, 1fr); }
+.item[data-need="decide"] { border-left-color: var(--warn); }
+.item[data-need="ready"] { border-left-color: var(--good); }
+.item[data-need="wait"] { border-left-color: var(--rule-strong); }
+.item[data-need="manual"] { border-left-color: var(--accent); }
+.rank { font-family: var(--font-mono); font-weight: 500; font-size: 15px; color: var(--ink-3); text-align: center; padding-top: 11px; border-right: 1px solid var(--rule); }
+.item[data-top="1"] .rank { color: var(--ink); font-weight: 600; }
+.item details > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; padding: 10px 12px; align-items: start; }
+.item details > summary::-webkit-details-marker { display: none; }
+.item .kind { font-family: var(--font-cond); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.item .t { font-weight: 600; margin-top: 1px; }
+.item .t .mono { font-weight: 500; color: var(--ink-2); margin-right: 6px; }
+.item .why { display: inline-block; margin-top: 4px; font-size: 12.5px; color: var(--ink); background: var(--accent-soft); border-radius: 2px; padding: 1px 7px; }
+.item .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ink-2); font-size: 13px; margin-top: 4px; }
+.item .facts span { min-width: 0; overflow-wrap: anywhere; }
+.item .act { text-align: right; font-size: 13px; max-width: 30ch; }
+.item .act .st { justify-content: flex-end; }
+.item .act div { color: var(--ink-2); margin-top: 3px; }
+.item .more { padding: 0 12px 12px 12px; border-top: 1px dashed var(--rule); }
+.item .more h3 { font-family: var(--font-cond); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); margin: 10px 0 4px; }
+.item .more ol { margin: 0; padding-left: 20px; color: var(--ink-2); }
+.item .more li { margin: 2px 0; }
+.item .caret { display: inline-block; transition: transform 0.15s; color: var(--ink-3); margin-left: 4px; }
+.item details[open] .caret { transform: rotate(90deg); }
+
+/* Рядки «мітка — значення» */
+.rows { display: grid; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+.row:last-child { border-bottom: 0; }
+.row .k { color: var(--ink-2); }
+.row .k small { display: block; color: var(--ink-3); font-size: 12px; }
+.row .v { text-align: right; }
+
+/* Метри, у т. ч. з прогнозом */
+.meter { margin: 10px 0 2px; }
+.meter .mh { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.meter .mh span:first-child { color: var(--ink-2); }
+.meter .track { position: relative; height: 10px; border-radius: 5px; background: var(--accent-soft); margin-top: 5px; overflow: hidden; }
+.meter .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--accent); }
+.meter .proj { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 7px); opacity: 0.75; }
+.meter.crit .track { background: color-mix(in srgb, var(--crit) 16%, transparent); }
+.meter.crit .fill { background: var(--crit); }
+.meter .note { color: var(--ink-3); font-size: 12px; margin-top: 3px; }
+.keyline { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.keyline i { display: inline-block; width: 16px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.k-used { background: var(--accent); }
+.k-proj { background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 7px); border: 1px solid var(--accent); }
+
+/* Таблиці */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-family: var(--font-cond); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule-strong); white-space: nowrap; }
+td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Черга і розклад */
+.counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.count { border: 1px solid var(--rule); border-radius: 3px; padding: 8px 10px; }
+.count b { display: block; font-size: 22px; font-weight: 600; line-height: 1.1; }
+.count span { color: var(--ink-2); font-size: 12.5px; }
+.sched { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sched > .job:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.job { border: 1px solid var(--rule); border-top: 3px solid var(--rule-strong); border-radius: 3px; padding: 9px 11px 10px; display: grid; gap: 4px; min-width: 0; }
+.job[data-s="good"] { border-top-color: var(--good); }
+.job[data-s="warn"] { border-top-color: var(--warn); }
+.job[data-s="crit"] { border-top-color: var(--crit); }
+.job[data-s="none"] { border-top-style: dashed; border-top-color: var(--ink-3); }
+.job .jh { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.job .jn { font-weight: 600; }
+.job .jw { color: var(--ink-3); font-size: 12px; }
+.job .cad { display: inline-block; font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--rule-strong); border-radius: 2px; padding: 0 6px; color: var(--ink-2); width: max-content; max-width: 100%; }
+.job .next { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; border-top: 1px dashed var(--rule); padding-top: 5px; margin-top: 2px; }
+.job .next > div { display: grid; text-align: right; }
+.job .next b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.job .next span { color: var(--ink-3); }
+
+.plist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--rule); border-radius: 3px; }
+.proc { display: grid; grid-template-columns: 108px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 8px 10px; border-bottom: 1px solid var(--rule); border-left: 4px solid var(--rule-strong); }
+.proc:last-child { border-bottom: 0; }
+.proc[data-s="good"] { border-left-color: var(--good); }
+.proc[data-s="crit"] { border-left-color: var(--crit); }
+.proc[data-s="none"] { border-left-style: dashed; border-left-color: var(--ink-3); }
+.proc .freq { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--rule-strong); border-radius: 2px; padding: 1px 6px; color: var(--ink-2); justify-self: start; white-space: nowrap; }
+.proc .pn b { display: block; font-weight: 600; }
+.proc .pn .st { margin-top: 3px; }
+.proc .pn > span:not(.st), .proc .pl > span, .proc .px > span { display: block; color: var(--ink-3); font-size: 12px; }
+.proc .pn > .st { display: inline-flex; }
+.proc .pl, .proc .px { font-size: 13px; font-variant-numeric: tabular-nums; }
+.proc .px b { font-weight: 600; }
+.proc .px b + span { color: var(--ink-2); font-size: 12.5px; }
+
+/* Трек T5 */
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.steps li:last-child { border-bottom: 0; }
+.steps .no { font-family: var(--font-mono); font-weight: 500; color: var(--ink-3); padding-top: 1px; }
+.steps .nm { font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.steps .cr { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.steps li.locked .nm { color: var(--ink-3); }
+
+/* Графік */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart .axis { stroke: var(--rule-strong); stroke-width: 1; }
+.chart .grid-l { stroke: var(--rule); stroke-width: 1; }
+.chart text { fill: var(--ink-3); font-family: var(--font-body); font-size: 11px; }
+.chart .b-prod { fill: var(--s1); }
+.chart .b-proc { fill: var(--s2); }
+.chart .hit { fill: transparent; }
+.chart .hl { fill: var(--accent-soft); opacity: 0; }
+.chart .col-g:hover .hl { opacity: 1; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--sheet); font-size: 12.5px; padding: 6px 9px; border-radius: 3px; white-space: nowrap; transform: translate(-50%, calc(-100% - 8px)); z-index: 3; }
+.tip b { font-weight: 600; }
+.linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.callout { border-left: 3px solid var(--serious); padding: 6px 10px; margin-top: 10px; font-size: 13px; color: var(--ink-2); background: color-mix(in srgb, var(--serious) 8%, transparent); }
+
+/* Рецензенти й квоти */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.qblock { border: 1px solid var(--rule); border-radius: 3px; padding: 10px 12px 12px; }
+.qblock + .qblock { margin-top: 10px; }
+.qblock .qh { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.qblock .qh b { font-weight: 600; }
+.qblock .pace { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+.qblock .pace b { color: var(--ink); font-weight: 600; }
+
+/* Джерела й архітектура */
+.arch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
+.arch div { border: 1.5px solid var(--ink); padding: 10px 12px; position: relative; background: var(--sheet); }
+.arch div + div { border-left: 0; }
+.arch div:not(:last-child)::after { content: "→"; position: absolute; right: -9px; top: 50%; transform: translateY(-50%); background: var(--sheet); color: var(--ink); font-weight: 600; width: 16px; text-align: center; z-index: 1; }
+.arch b { font-family: var(--font-cond); font-weight: 600; display: block; }
+.arch span { color: var(--ink-2); font-size: 13px; }
+pre.env { margin: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 3px; padding: 10px 12px; font-family: var(--font-mono); font-size: 12.5px; overflow-x: auto; color: var(--ink); }
+.rules { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); }
+.rules li { margin: 3px 0; }
+.foot { margin-top: 18px; color: var(--ink-3); font-size: 12.5px; max-width: 90ch; }
+.demo { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); margin-top: 10px; }
+
+@media (max-width: 1100px) {
+  .quotas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1000px) {
+  .pair, .pair.even, .two { grid-template-columns: minmax(0, 1fr); }
+  .top { grid-template-columns: minmax(0, 1fr); }
+  .stamp { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stamp > div:nth-child(4) { border-left: 0; }
+  .stamp > div:nth-child(n+4) { border-top: 1px solid var(--rule-strong); }
+  .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strip .hero { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .quotas, .strip, .sched { grid-template-columns: minmax(0, 1fr); }
+  .stamp { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stamp > div { border-left: 0; }
+  .stamp > div:nth-child(even) { border-left: 1px solid var(--rule-strong); }
+  .stamp > div:nth-child(n+3) { border-top: 1px solid var(--rule-strong); }
+  .counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .proc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .proc .freq { grid-column: 1 / -1; }
+  .proc .pn { grid-column: 1 / -1; }
+  .item details > summary { grid-template-columns: minmax(0, 1fr); }
+  .item .act { text-align: left; max-width: none; }
+  .item .act .st { justify-content: flex-start; }
+  .arch { grid-template-columns: minmax(0, 1fr); }
+  .arch div + div { border-left: 1.5px solid var(--ink); border-top: 0; }
+  .arch div:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -11px; transform: translateX(50%); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="mock"><span>МАКЕТ v3, затверджений з правками. Дані — приклад станом на ранок 30.09: частина вигадана, частина справжня (позначено в кожному розділі). Кнопки не змінюють нічого поза сторінкою.</span></div>
+
+<header class="top">
+  <div class="brand">
+    <h1>Пульт розробки flatcraft</h1>
+    <p>Знімок автономного середовища: що чекає на вас, що заплановано і що зараз робить A8, скільки лишилось квот ШІ і де ми на дорожній карті.</p>
+  </div>
+  <div class="stamp" aria-label="Штамп знімка">
+    <div><small>Знімок</small><b id="snap-time">30.09 · 14:05 UTC</b></div>
+    <div><small>Джерел</small><b><span id="src-ok">8</span> з 10</b></div>
+    <div><small>Потребують уваги</small><b id="attn">3 розділи</b></div>
+    <div><small>Натискань сьогодні</small><b>0 · учора 15</b></div>
+    <div><small>Режим</small><b>лише читання</b></div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="refresh" type="button">Оновити знімок</button>
+    <button class="btn-stop" type="button" disabled title="Етап 2: кнопка kill switch для A8"><b>STOP</b> A8 · з'явиться на етапі 2</button>
+    <span class="progress" id="progress" aria-live="polite"></span>
+  </div>
+</header>
+
+<section aria-labelledby="h-quotas">
+  <div class="quotas-h">
+    <h2 id="h-quotas">Квоти ШІ</h2>
+    <span>Залишок до наступного оновлення. Підписку Claude спільно витрачають оркестратор на T470, агенти на A8 і окремі сесії-рецензенти.</span>
+  </div>
+  <div class="quotas">
+    <div class="q">
+      <div class="who">Claude, підписка · тиждень<small>усі моделі · показ /usage <span class="tag">приклад</span></small></div>
+      <div class="big"><b class="num">54 %</b><span>залишок</span></div>
+      <span class="st st-good"><i>✓</i>вистачить до скидання</span>
+      <div class="foot-q">Скидання 03.10, 06:00 UTC · прогноз запасу ≈ 25 %</div>
+    </div>
+    <div class="q">
+      <div class="who">Claude, підписка · 5 год<small>поточне вікно · показ /usage <span class="tag">приклад</span></small></div>
+      <div class="big"><b class="num">82 %</b><span>залишок</span></div>
+      <span class="st st-good"><i>✓</i>достатньо</span>
+      <div class="foot-q">Скидання сьогодні о 16:40 UTC</div>
+    </div>
+    <div class="q">
+      <div class="who">agy · Claude і GPT<small>Opus 4.6 — контрприклади <span class="tag tag-real">справжні</span></small></div>
+      <div class="big"><b class="num">0 %</b><span>залишок</span></div>
+      <span class="st st-crit"><i>✕</i>вичерпано</span>
+      <div class="foot-q" id="q-agy-claude">Скидання о 19:21 UTC, через 5 год 16 хв</div>
+    </div>
+    <div class="q">
+      <div class="who">agy · Gemini<small>Flash — основна рецензія <span class="tag tag-real">справжні</span></small></div>
+      <div class="big"><b class="num">≈ 100 %</b><span>оцінка</span></div>
+      <span class="st st-warn"><i>◷</i>показ застарів</span>
+      <div class="foot-q">Показ 29.09 — 93 %; квота скинулась сьогодні о 08:16 UTC, нового показу немає</div>
+    </div>
+  </div>
+</section>
+
+<section class="strip" aria-label="Підсумок">
+  <div class="tile hero">
+    <div class="label">Чекає на вас</div>
+    <div class="value num">9<small>першим — merge #153</small></div>
+    <div class="sub">2 рішення · 3 PR готові до merge · 1 ручний крок · 3 чекають не на вас</div>
+  </div>
+  <div class="tile">
+    <div class="label">A8</div>
+    <div class="value" id="tile-a8">Працює, черга порожня</div>
+    <div class="sub">Kill switch немає · ліміт 0 з 12</div>
+  </div>
+  <div class="tile">
+    <div class="label">Трек T5</div>
+    <div class="value">Крок 5 закрито</div>
+    <div class="sub">Далі крок 4: беклог 0 з 20 задач</div>
+  </div>
+</section>
+
+<div class="legend-states" aria-label="Стани розділів">
+  <span>Стан розділу</span>
+  <span class="st st-good"><i>✓</i>дані свіжі</span>
+  <span class="st st-warn"><i>◷</i>застаріли</span>
+  <span class="st st-crit"><i>✕</i>збирач не відповів</span>
+  <span class="st st-none"><i>–</i>не виміряно</span>
+  <span class="muted">Застарілий чи порожній розділ ніколи не зелений.</span>
+</div>
+
+<main class="flow">
+  <!-- 1. Чекає на вас -->
+  <section class="panel" id="inbox" aria-labelledby="h-inbox">
+    <div class="panel-h">
+      <div>
+        <h2 id="h-inbox"><span class="ord">1</span>Чекає на вас</h2>
+        <div class="meta">GitHub (PR, CI, рецензії) і «Черга yurii» #78 · зібрано <span class="ago">щойно</span><span class="tag tag-real">справжні, ранок 30.09</span></div>
+      </div>
+      <span class="st st-good"><i>✓</i>дані свіжі</span>
+    </div>
+    <div class="panel-b">
+      <div class="chips" role="group" aria-label="Фільтр">
+        <button class="chip" type="button" data-f="all" aria-pressed="true">Усе<span class="num">9</span></button>
+        <button class="chip" type="button" data-f="decide" aria-pressed="false">Ваше рішення<span class="num">2</span></button>
+        <button class="chip" type="button" data-f="ready" aria-pressed="false">Готово до merge<span class="num">3</span></button>
+        <button class="chip" type="button" data-f="manual" aria-pressed="false">Ручні кроки<span class="num">1</span></button>
+        <button class="chip" type="button" data-f="wait" aria-pressed="false">Чекає не на вас<span class="num">3</span></button>
+      </div>
+      <div class="sortnote">Згори вниз: що розблоковує найбільше → що має термін → решта ланцюжка merge → рішення без терміну → ручні кроки → те, що чекає не на вас.</div>
+      <ul class="items" id="items"></ul>
+    </div>
+  </section>
+
+  <!-- 2. Черга і розклад + 3. A8 -->
+  <div class="pair">
+    <section class="panel" id="queue" aria-labelledby="h-queue">
+      <div class="panel-h">
+        <div>
+          <h2 id="h-queue"><span class="ord">2</span>Черга A8 і процеси за розкладом</h2>
+          <div class="meta">Черга на диску A8, таймери systemd, ритми з docs/02 · зібрано <span class="ago">щойно</span><span class="tag">змішані</span></div>
+        </div>
+        <span class="st st-serious"><i>!</i>2 процеси без механізму</span>
+      </div>
+      <div class="panel-b">
+        <div class="counts">
+          <div class="count"><b class="num">0</b><span>очікує</span></div>
+          <div class="count"><b class="num">0</b><span>виконується</span></div>
+          <div class="count"><b class="num">3</b><span>готово за 7 днів</span></div>
+          <div class="count"><b class="num">2</b><span>впало з 16.09</span></div>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Задача, що впала</th><th>Коли</th><th>Причина</th><th>Що далі</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">wall-shelf-registry</td><td class="num">22.09</td><td>оракул rc=2: в образі не було бібліотек CadQuery</td><td>повтор 29.09 — rc=0, PR #154</td></tr>
+              <tr><td class="mono">oracle-red</td><td class="num">21.09</td><td>«гілка вже існує»</td><td>issue #152: повтор без агента</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="subh">Автоматично: A8 і staging · найчастіші вгорі</div>
+        <ul class="plist" id="plist"></ul>
+        <div class="subh">Ваші ритми</div>
+        <div class="sched" id="sched-rhythm"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="a8" aria-labelledby="h-a8">
+      <div class="panel-h">
+        <div>
+          <h2 id="h-a8"><span class="ord">3</span>A8 зараз</h2>
+          <div class="meta">a8-report.sh через a8-ro-shell · зібрано <span class="ago" id="a8-ago">щойно</span><span class="tag">приклад, частково справжні</span></div>
+        </div>
+        <span class="st st-good" id="a8-state"><i>✓</i>дані свіжі</span>
+      </div>
+      <div class="panel-b">
+        <p class="error-note"><b>Збирач A8 не відповів.</b> Нижче — останні відомі дані, зібрані 42 хв тому. Чи працює машина зараз, з пульта не видно: перевірте Tailscale або спитайте оркестратора.</p>
+        <div class="rows">
+          <div class="row"><div class="k">Машина</div><div class="v"><span class="st st-good"><i>✓</i>працює, 18 год</span></div></div>
+          <div class="row"><div class="k">Kill switch<small>/home/agent/STOP</small></div><div class="v"><span class="st st-good"><i>✓</i>немає, черга йде</span></div></div>
+          <div class="row"><div class="k">Тік черги</div><div class="v"><span class="st st-good"><i>✓</i>активний</span></div></div>
+          <div class="row"><div class="k">Egress-фільтр<small>V20: агент не дістає чужий хост, контроль — дістає</small></div><div class="v"><span class="st st-good"><i>✓</i>примус, V20 ok</span></div></div>
+          <div class="row"><div class="k">Ребут → робочий стан<small>м'який, 29.09</small></div><div class="v num">40 с <span class="muted">≤ 5 хв</span></div></div>
+          <div class="row"><div class="k">Вимкнення живлення</div><div class="v"><span class="st st-none"><i>–</i>не виміряно</span></div></div>
+          <div class="row"><div class="k">Температура під навантаженням<small>ADR-041, метрика 5</small></div><div class="v"><span class="st st-none"><i>–</i>не виміряно</span></div></div>
+        </div>
+        <div class="meter">
+          <div class="mh"><span>Денний ліміт задач</span><span class="num">0 з 12</span></div>
+          <div class="track"><div class="fill" style="width: 0%"></div></div>
+        </div>
+        <div class="meter">
+          <div class="mh"><span>Диск: зайнято</span><span class="num">39 %</span></div>
+          <div class="track"><div class="fill" style="width: 39%"></div></div>
+          <div class="note">Поріг ADR-041: вільно ≥ 30 % на кінець кварталу.</div>
+        </div>
+        <label class="demo"><input type="checkbox" id="demo-fail"> Показати, як виглядає збій збирача</label>
+      </div>
+    </section>
+  </div>
+
+  <!-- 4. Рецензенти й квоти -->
+  <section class="panel" id="reviewers" aria-labelledby="h-rev">
+    <div class="panel-h">
+      <div>
+        <h2 id="h-rev"><span class="ord">4</span>Рецензенти й квоти</h2>
+        <div class="meta">agy-stats-summary.sh, agy-opus-budget.sh, agy-quota.md, показ /usage · зібрано <span class="ago">щойно</span><span class="tag tag-real">agy — справжні</span><span class="tag">підписка Claude — приклад</span></div>
+      </div>
+      <span class="st st-warn"><i>!</i>Opus в agy закінчиться раніше за скидання</span>
+    </div>
+    <div class="panel-b">
+      <div class="two">
+        <div>
+          <div class="subh">Хто рецензує зараз</div>
+          <div class="rows">
+            <div class="row"><div class="k">Основна рецензія</div><div class="v">Gemini 3.8 Flash (High)</div></div>
+            <div class="row"><div class="k">Контрприклади зараз<small>квота Claude в agy на нулі</small></div><div class="v">окрема сесія, Sonnet 5.5</div></div>
+            <div class="row"><div class="k">Після скидання</div><div class="v"><span id="reset-when">Opus 4.6 через agy, 30.09 о 19:21 UTC</span></div></div>
+          </div>
+          <div class="subh">Іспит: перші 10 викликів, межа — 50 % з вигадками</div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Модель</th><th class="n">Викликів</th><th class="n">З вигадками</th><th>Вердикт</th></tr></thead>
+              <tbody>
+                <tr><td>Gemini 3.8 Flash (High)</td><td class="n">18</td><td class="n">1 з 10</td><td><span class="st st-good"><i>✓</i>тримається</span></td></tr>
+                <tr><td>Claude Opus 4.6</td><td class="n">23</td><td class="n">1 з 10</td><td><span class="st st-good"><i>✓</i>тримається</span></td></tr>
+                <tr><td>Sonnet 5.5, окрема сесія</td><td class="n">2</td><td class="n">0 з 2</td><td><span class="st st-info"><i>i</i>рано: 2 з 10</span></td></tr>
+                <tr><td>Gemini 3.1 Pro (High)</td><td class="n">17</td><td class="n">5 з 10</td><td><span class="st st-crit"><i>✕</i>пішов з ролі</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="subh">Квоти й темп витрат</div>
+          <div class="qblock">
+            <div class="qh"><b>Claude, підписка · тиждень</b><span class="st st-good"><i>✓</i>вистачить</span></div>
+            <div class="meter">
+              <div class="mh"><span>Використано / прогноз на скидання 03.10, 06:00 UTC</span><span class="num">46 % → 75 %</span></div>
+              <div class="track"><div class="fill" style="width: 46%"></div><div class="proj" style="left: 46%; width: 29%"></div></div>
+              <div class="keyline"><span><i class="k-used"></i>використано</span><span><i class="k-proj"></i>прогноз за нинішнім темпом</span></div>
+            </div>
+            <div class="pace">Темп за 3 дні ≈ <b>11 %/день</b>: оркестратор ≈ 7 %, агенти A8 ≈ 3 %, сесії-рецензенти ≈ 1 %.<br>Задача A8 ≈ 2 % → запас на скидання ≈ <b>25 % ≈ 12 задач</b>. <span class="tag">приклад</span></div>
+          </div>
+          <div class="qblock">
+            <div class="qh"><b>agy · Claude і GPT (Opus 4.6)</b><span class="st st-warn"><i>!</i>не вистачить на тиждень</span></div>
+            <div class="meter crit">
+              <div class="mh"><span>Залишок зараз</span><span class="num">0 %</span></div>
+              <div class="track"><div class="fill" style="width: 0%"></div></div>
+            </div>
+            <div class="pace">Після скидання о 19:21 UTC — бюджет <b>13 викликів</b> до залишку 20 %. Темп 23–28.09 — <b>3,8 виклику/день</b>, тож бюджету вистачить приблизно <b>до 04.10</b>; далі до 07.10 контрприклади знову дає окрема сесія. <span class="tag tag-real">оцінка за журналом</span></div>
+          </div>
+          <div class="qblock">
+            <div class="qh"><b>agy · Gemini (Flash)</b><span class="st st-warn"><i>◷</i>показ застарів</span></div>
+            <div class="meter">
+              <div class="mh"><span>Останній показ, 29.09 07:09 UTC</span><span class="num">93 %</span></div>
+              <div class="track"><div class="fill" style="width: 93%"></div></div>
+              <div class="note">Квота скинулась сьогодні о 08:16 UTC. Нового показу немає, тож «≈ 100 %» — оцінка, а не вимір.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. T5 + 6. Продукт і процес -->
+  <div class="pair even">
+    <section class="panel" id="roadmap" aria-labelledby="h-road">
+      <div class="panel-h">
+        <div>
+          <h2 id="h-road"><span class="ord">5</span>Трек T5</h2>
+          <div class="meta">docs/02, a8-metrics.sh · зібрано <span class="ago">щойно</span><span class="tag tag-real">справжні</span></div>
+        </div>
+        <span class="st st-good"><i>✓</i>дані свіжі</span>
+      </div>
+      <div class="panel-b">
+        <ol class="steps">
+          <li><span class="no">1</span><div><div class="nm">Хвости <span class="st st-good"><i>✓</i>закрито</span></div><div class="cr">Жодної роботи лише на диску · PR #99</div></div></li>
+          <li><span class="no">2</span><div><div class="nm">A8 preflight <span class="st st-warn"><i>◐</i>частково</span></div><div class="cr">A, B, C зелені; D.1 і D.2 відкладено вашим рішенням 16.09 (OQ-30)</div></div></li>
+          <li><span class="no">3</span><div><div class="nm">Інспекція і контракт <span class="st st-good"><i>✓</i>закрито</span></div><div class="cr">Master Run 14 · PR #104</div></div></li>
+          <li><span class="no">4</span><div><div class="nm">Генеральний план → беклог <span class="st st-serious"><i>!</i>далі</span></div><div class="cr">Задач з оракулом: <b class="num">0 з 20</b></div></div></li>
+          <li><span class="no">5</span><div><div class="nm">Середовище на A8 <span class="st st-good"><i>✓</i>закрито 29.09</span></div><div class="cr">Kill switch 3 с (≤ 60) · ребут 40 с, м'який (≤ 5 хв) · 3 з 3 задачі поспіль. Вимкнення живлення — до кроку 6.</div></div></li>
+          <li class="locked"><span class="no">6</span><div><div class="nm">Автономія під наглядом <span class="st st-none"><i>–</i>лише вашим рішенням</span></div><div class="cr">Бракує: беклог, прев'ю, протокол питань</div></div></li>
+          <li class="locked"><span class="no">7</span><div><div class="nm">Auto-merge оборотного класу</div><div class="cr">ADR-040, після кроку 6</div></div></li>
+          <li class="locked"><span class="no">8</span><div><div class="nm">Самокерований беклог</div><div class="cr">Вихід — публічний запуск</div></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="panel" id="trend" aria-labelledby="h-trend">
+      <div class="panel-h">
+        <div>
+          <h2 id="h-trend"><span class="ord">6</span>Продукт і процес: коміти в main по тижнях</h2>
+          <div class="meta">git log origin/main · зібрано <span class="ago">щойно</span><span class="tag tag-real">справжні</span></div>
+        </div>
+        <span class="st st-serious"><i>!</i>7 тижнів без продукту</span>
+      </div>
+      <div class="panel-b">
+        <div class="legend" aria-hidden="true">
+          <span><i style="background: var(--s1)"></i>продукт: apps/, workers/, packages/</span>
+          <span><i style="background: var(--s2)"></i>процес: усе інше</span>
+        </div>
+        <div class="chart" id="chart"></div>
+        <button class="linkbtn" type="button" id="tbl-toggle" aria-expanded="false">Показати таблицею</button>
+        <div class="tablewrap" id="tbl" hidden></div>
+        <div class="callout">Останній коміт у продуктовому коді — #101 (z_bracket), 07.08. Перший кандидат після перерви — #154 (wall_shelf).</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 7. Джерела даних -->
+  <section class="panel" id="sources" aria-labelledby="h-src">
+    <div class="panel-h">
+      <div>
+        <h2 id="h-src"><span class="ord">7</span>Джерела даних</h2>
+        <div class="meta">Кожен розділ пульта наповнює свій збирач. Новий розділ = новий збирач + новий віджет.</div>
+      </div>
+      <span class="st st-info"><i>i</i><span id="src-count">8 з 10 підключено</span></span>
+    </div>
+    <div class="panel-b">
+      <div class="two">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Збирач</th><th>Що дає</th><th>Звідки</th><th>Як часто</th><th>Стан</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">github</td><td>PR, CI, рецензії, #78</td><td>GitHub API, лише читання</td><td>5 хв</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr id="src-a8"><td class="mono">a8-report</td><td>машина, kill switch, тік, ліміт, диск</td><td>A8 через a8-ro-shell</td><td>5 хв</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">a8-queue</td><td>черга, журнал, таймери</td><td>A8, диск черги, systemd</td><td>5 хв</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">a8-metrics</td><td>критерії кроків T5</td><td>a8-metrics.sh</td><td>1 год</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">review-exam</td><td>іспити, хто рецензує, квоти agy</td><td>agy-stats-summary.sh, agy-opus-budget.sh, agy-quota.md</td><td>1 год</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">claude-usage</td><td>квота підписки Claude, темп</td><td>показ /usage — ваш скріншот, як agy-quota.md</td><td>за показом</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">clicks</td><td>ваші натискання</td><td>лічильник на T470</td><td>1 год</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">git-trend</td><td>продукт і процес</td><td>git log</td><td>1 год</td><td><span class="st st-good"><i>✓</i>ok</span></td></tr>
+              <tr><td class="mono">product</td><td>експорти, помилки, фідбек</td><td>Umami, Sentry</td><td>—</td><td><span class="st st-none"><i>–</i>не підключено</span></td></tr>
+              <tr><td class="mono">questions</td><td>питання класу A і B</td><td>протокол питань ADR-039 §6</td><td>—</td><td><span class="st st-none"><i>–</i>механізму ще немає</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="arch" aria-label="Як нарощувати пульт">
+            <div><b>Збирач</b><span>скрипт, що вже рахує: a8-report, agy-stats-summary…</span></div>
+            <div><b>Розділ знімка</b><span>JSON з однаковою обгорткою</span></div>
+            <div><b>Віджет</b><span>блок на сторінці, лише читає</span></div>
+          </div>
+<pre class="env">{
+  "section": "a8",
+  "source": "a8-report.sh через a8-ro-shell",
+  "collected_at": "2026-09-30T14:05:12Z",
+  "status": "ok",        // ok | stale | error | not_measured
+  "data": { … }
+}</pre>
+          <ul class="rules">
+            <li>Розділ, старший за три інтервали збирача, стає «застарілим» і ніколи не показується зеленим.</li>
+            <li>Показ квоти після її скидання — теж «застарілий»: далі лише оцінка.</li>
+            <li>У знімку немає IP-адрес і секретів — це перевіряє тест, як «IP у diff — 0».</li>
+            <li>Знімок не комітиться в git і не публікується: пульт бачите лише ви.</li>
+            <li>Пульт нічого не змінює. Єдина кнопка дії на майбутнє — STOP.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<p class="foot">Що в макеті справжнє: PR і їхні стани на ранок 30.09, результати кроку 5, іспити рецензентів і темп agy (журнал у main), квоти agy з ваших скріншотів, коміти по тижнях, відсутній digest-cron. Що вигадано: квота підписки Claude і її темп, розклади таймерів, аптайм і диск A8, час знімка, лічильники «за 7 днів». Кроки перевірки очима для #154 — скорочений приклад; повний перелік — в описі PR.</p>
+
+<script>
+(function () {
+  "use strict";
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  /* 1. Чекає на вас — у порядку пріоритету */
+  var ITEMS = [
+    { need: "ready", kind: "PR · звичайний", n: "#153", title: "docs/13: запис про PR #104 (Master Run 14)",
+      why: "Розблоковує ланцюжок: #155 → #156 → #157 → #158",
+      facts: ["Flash ✓", "CI ✓ (UNSTABLE — прогін без схвалення, так задумано)"], state: ["st-good", "✓", "Готово до merge"], act: "Merge — першим.",
+      more: { h: "Як перевірити очима", steps: ["Запис стоїть на початку docs/13, дата 2026-08-11."] }, link: 153 },
+    { need: "decide", kind: "Питання · клас B", n: "", title: "Розширити згоду на ще одне речення §6.2?",
+      why: "Від відповіді залежить #158 · мовчання = «ні»",
+      facts: ["від оркестратора", "оборотно"], state: ["st-warn", "!", "Ваше рішення"], act: "Так чи ні.",
+      more: { h: "Суть", steps: ["«Звичайна сесія механічних обмежень не має» — правда для чистого клону, не для T470: там профіль оркестратора лежить у settings.local.json."] } },
+    { need: "ready", kind: "PR · звичайний", n: "#155", title: "docs/13: запис про PR #103 (A8 preflight)",
+      why: "Другий у ланцюжку merge",
+      facts: ["Flash ✓", "CI ✓"], state: ["st-good", "✓", "Готово до merge"], act: "Merge — 2-м, після #153.",
+      more: { h: "Як перевірити очима", steps: ["Запис стоїть на початку docs/13, дата 2026-08-09."] }, link: 155 },
+    { need: "ready", kind: "PR · звичайний", n: "#156", title: "docs/13: запис про PR #101 (z_bracket)",
+      why: "Третій у ланцюжку merge",
+      facts: ["Flash ✓", "CI ✓", "факти звірено з комітом"], state: ["st-good", "✓", "Готово до merge"], act: "Merge — 3-м.",
+      more: { h: "Як перевірити очима", steps: ["Запис стоїть на початку docs/13.", "Замість «мінус 93 рядки» — −83/+10."] }, link: 156 },
+    { need: "decide", kind: "Рішення", n: "OQ-36", title: "Квартальний аудит: точка повернення настала",
+      why: "Терміну немає, але крок 5 уже закрито",
+      facts: ["довідка на гілці, не в main"], state: ["st-warn", "!", "Ваше рішення"], act: "Вводимо ритм? Відкрити PR довідки?",
+      more: { h: "Що вирішити", steps: ["Квартальний аудит у docs/02 §Ритми — так чи ні.", "Перший прогін — одразу після кроку 5 чи через квартал."] } },
+    { need: "manual", kind: "Черга yurii #78", n: "", title: "Тест вимкненням живлення A8",
+      why: "Потрібен до кроку 6",
+      facts: ["BIOS «Restore on AC Power Loss»"], state: ["st-info", "✋", "Ручний крок"], act: "Коли будете біля A8.",
+      more: { h: "Навіщо", steps: ["М'який ребут довів, що служби піднімаються самі. Чи переживе машина вимкнення світла — ще ні."] } },
+    { need: "wait", kind: "PR · звичайний", n: "#157", title: "Крок 5 треку T5 закрито: docs/13, docs/02",
+      why: "Чекає CI; 4-й у ланцюжку merge",
+      facts: ["Flash ✓", "CI іде"], state: ["st-info", "⏸", "Чекає CI"], act: "Merge — 4-м, коли CI стане зеленим.",
+      more: { h: "Як перевірити очима", steps: ["У docs/02 крок 5 з ✅ і приміткою про м'який ребут.", "Запис у docs/13 має обидва моменти зупинки: 11:57:51 і 11:57:52."] }, link: 157 },
+    { need: "wait", kind: "PR · ризиковий", n: "#158", title: "CLAUDE.md: §13, §6.2 і §11 п.4",
+      why: "Чекає #157 і відповіді на питання вище",
+      facts: ["Flash ✓", "контрприклади ✓ (Sonnet 5.5, окрема сесія)", "CI іде"], state: ["st-info", "⏸", "Чекає черги"], act: "Merge — 5-м.",
+      more: { h: "Як перевірити очима", steps: ["Розділ §13 уміщається в 2000 знаків (1 974).", "Віха кроку 5 каже, що ребут був м'який.", "§6.2 більше не згадує «37 записів»."] }, link: 158 },
+    { need: "wait", kind: "PR · ризиковий", n: "#154", title: "wall_shelf на Template Registry",
+      why: "Чекає PR з виправленням форми і контрприкладів Opus після 19:21 UTC",
+      facts: ["оракул rc=0", "Flash ✓", "CI ✓"], state: ["st-info", "⏸", "Чекає іншого"], act: "Спершу PR з виправленням visibleFields.",
+      more: { h: "Як перевірити очима (приклад, 3 з 9)", steps: ["Відкрити студію настінної полиці — вигляд як раніше.", "Губа 0 мм → L-профіль, губа 20 мм → U-канал на 3D.", "У формі немає рядка «Напрями згину: array fields…»."] }, link: 154 }
+  ];
+  var list = document.getElementById("items");
+  list.innerHTML = ITEMS.map(function (it, i) {
+    var steps = it.more.steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("");
+    var url = it.link ? "https://github.com/stjurik/flatcraft/pull/" + it.link : "";
+    return '<li class="item" data-need="' + it.need + '"' + (i < 2 ? ' data-top="1"' : "") + '><span class="rank" aria-label="Пріоритет ' + (i + 1) + '">' + (i + 1) + '</span><details>' +
+      '<summary><div><div class="kind">' + esc(it.kind) + '<span class="caret" aria-hidden="true">›</span></div>' +
+      '<div class="t">' + (it.n ? '<span class="mono">' + esc(it.n) + '</span>' : "") + esc(it.title) + '</div>' +
+      '<span class="why">' + esc(it.why) + '</span>' +
+      '<div class="facts">' + it.facts.map(function (f) { return "<span>" + esc(f) + "</span>"; }).join("") + '</div></div>' +
+      '<div class="act"><span class="st ' + it.state[0] + '"><i>' + it.state[1] + '</i>' + esc(it.state[2]) + '</span><div>' + esc(it.act) + '</div></div></summary>' +
+      '<div class="more"><h3>' + esc(it.more.h) + '</h3><ol>' + steps + '</ol>' +
+      (url ? '<p style="margin:8px 0 0"><a href="' + url + '" target="_blank" rel="noopener">Відкрити ' + esc(it.n) + ' на GitHub</a></p>' : "") +
+      '</div></details></li>';
+  }).join("");
+  var chips = document.querySelectorAll(".chip");
+  function applyFilter(f) {
+    chips.forEach(function (c) { c.setAttribute("aria-pressed", String(c.dataset.f === f)); });
+    list.querySelectorAll(".item").forEach(function (li) { li.hidden = !(f === "all" || li.dataset.need === f); });
+    try { localStorage.setItem("pult-filter", f); } catch (e) {}
+  }
+  chips.forEach(function (c) { c.addEventListener("click", function () { applyFilter(c.dataset.f); }); });
+  var saved = null;
+  try { saved = localStorage.getItem("pult-filter"); } catch (e) {}
+  applyFilter(saved && document.querySelector('.chip[data-f="' + saved + '"]') ? saved : "all");
+
+  /* 2. Процеси за розкладом: кожен — окрема картка з наступним запуском */
+  var SNAP0 = Date.UTC(2026, 8, 30, 14, 5);
+  function T(d, h, m) { return Date.UTC(2026, 8, d, h, m); }
+  /* Автоматичні процеси: список, відсортований за частотою (хвилини між запусками; 0 — механізму немає) */
+  var AUTO = [
+    { n: "Тік черги", w: "A8 · a8-tick.timer", every: 5, cad: "кожні 5 хв", last: T(30, 14, 0), res: "ok", next: T(30, 14, 10), st: ["st-good", "✓", "працює"], s: "good" },
+    { n: "Оновлення egress-allowlist", w: "A8 · a8-egress-refresh.timer", every: 60, cad: "щогодини", last: T(30, 14, 0), res: "ok", next: T(30, 15, 0), st: ["st-good", "✓", "працює"], s: "good" },
+    { n: "Бекап бази staging", w: "staging", every: 1440, cad: "щодня 03:00", last: T(30, 3, 0), res: "ok", next: T(31, 3, 0), st: ["st-good", "✓", "бекап є"], s: "good" },
+    { n: "Щотижневий digest", w: "Discord", every: 10080, cad: "неділя 18:00", last: null, next: null, st: ["st-crit", "✕", "не існує"], s: "crit", note: "механізму розкладу в git немає" },
+    { n: "Перевірене відновлення з бекапу", w: "staging", every: 0, cad: "не заплановано", last: null, next: null, st: ["st-none", "–", "не виміряно"], s: "none", note: "відновлення ще ніхто не перевіряв (#139)" }
+  ];
+  AUTO.sort(function (a, b) { return (a.every || Infinity) - (b.every || Infinity); });
+  var JOBS = {
+    "sched-rhythm": [
+      { n: "Huddle A4", w: "ви, звичайний чат", cad: "1-го числа", last: null, next: T(31, 9, 0), s: "good", st: ["st-info", "i", "завтра"] },
+      { n: "Недільний digest-ритуал", w: "ви, ≤ 15 хв", cad: "неділя", last: T(27, 18, 0), lastOk: "вручну", next: T(34, 18, 0), s: "none", st: ["st-none", "–", "без автоматики"], note: "Ритуал є, а механізм digest'а — ні" },
+      { n: "Квартальний аудит (OQ-36)", w: "окрема сесія", cad: "раз на квартал", last: null, next: null, s: "warn", st: ["st-warn", "!", "чекає рішення"] }
+    ]
+  };
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function hm(t) { var d = new Date(t); return pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()); }
+  function dm(t) { var d = new Date(t); return pad(d.getUTCDate()) + "." + pad(d.getUTCMonth() + 1); }
+  function when(t, now) {
+    var d = new Date(t), n = new Date(now);
+    return d.getUTCDate() === n.getUTCDate() && d.getUTCMonth() === n.getUTCMonth() ? "сьогодні " + hm(t) : dm(t) + " " + hm(t);
+  }
+  function inWords(ms) {
+    if (ms <= 0) return "минуло";
+    var m = Math.round(ms / 60000);
+    if (m < 60) return "через " + m + " хв";
+    var h = Math.floor(m / 60), mm = m % 60;
+    if (h < 24) return "через " + h + " год" + (mm ? " " + mm + " хв" : "");
+    var dd = Math.floor(h / 24);
+    return "через " + dd + " дн " + (h % 24) + " год";
+  }
+  function renderAuto(now) {
+    document.getElementById("plist").innerHTML = AUTO.map(function (j) {
+      var last = j.last ? esc(when(j.last, now)) + " · " + esc(j.res) : "—";
+      var next = j.next ? "<b>" + esc(inWords(j.next - now)) + "</b><span>" + esc(when(j.next, now)) + "</span>" : "<b>—</b><span>" + esc(j.note) + "</span>";
+      return '<li class="proc" data-s="' + j.s + '"><span class="freq">' + esc(j.cad) + '</span>' +
+        '<div class="pn"><b>' + esc(j.n) + '</b><span>' + esc(j.w) + '</span>' +
+        '<span class="st ' + j.st[0] + '"><i>' + j.st[1] + '</i>' + esc(j.st[2]) + '</span></div>' +
+        '<div class="pl"><span>останній, UTC</span>' + last + '</div>' +
+        '<div class="px"><span>наступний, UTC</span>' + next + '</div></li>';
+    }).join("");
+  }
+  function renderJobs(now) {
+    renderAuto(now);
+    Object.keys(JOBS).forEach(function (id) {
+      document.getElementById(id).innerHTML = JOBS[id].map(function (j) {
+        var next = j.next ? "<b>" + esc(inWords(j.next - now)) + "</b><span>" + esc(when(j.next, now)) + " UTC</span>" : "<b>—</b><span>" + esc(j.note || "") + "</span>";
+        var last = j.last ? '<div class="jw">Останній: ' + esc(when(j.last, now)) + " UTC · " + esc(j.lastOk) + "</div>" : (j.next && j.note ? '<div class="jw">' + esc(j.note) + "</div>" : "");
+        return '<div class="job" data-s="' + j.s + '"><div class="jh"><div><div class="jn">' + esc(j.n) + '</div><div class="jw">' + esc(j.w) + '</div></div>' +
+          '<span class="st ' + j.st[0] + '"><i>' + j.st[1] + '</i>' + esc(j.st[2]) + '</span></div>' +
+          '<span class="cad">' + esc(j.cad) + '</span>' + last +
+          '<div class="next"><span>Наступний</span><div>' + next + '</div></div></div>';
+      }).join("");
+    });
+  }
+
+  /* 6. Графік: справжні коміти в main по тижнях (git log, 30.09) */
+  var WEEKS = [
+    ["06.07", 6, 7], ["13.07", 4, 13], ["20.07", 4, 2], ["27.07", 0, 3], ["03.08", 2, 3], ["10.08", 0, 2],
+    ["17.08", 0, 0], ["24.08", 0, 0], ["31.08", 0, 0], ["07.09", 0, 0], ["14.09", 0, 19], ["21.09", 0, 13], ["28.09", 0, 7]
+  ];
+  var W = 560, H = 230, L = 30, R = 8, TOP = 10, B = 28, YMAX = 20;
+  var pw = W - L - R, ph = H - TOP - B, slot = pw / WEEKS.length, bw = Math.min(20, slot * 0.5);
+  function y(v) { return TOP + ph - (v / YMAX) * ph; }
+  function roundTop(x, y0, w, h, r) {
+    if (h <= 0) return "";
+    r = Math.min(r, h, w / 2);
+    return "M" + x + "," + (y0 + h) + "V" + (y0 + r) + "Q" + x + "," + y0 + " " + (x + r) + "," + y0 + "H" + (x + w - r) + "Q" + (x + w) + "," + y0 + " " + (x + w) + "," + (y0 + r) + "V" + (y0 + h) + "Z";
+  }
+  var svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Коміти в main по тижнях: продукт і процес. З 10 серпня продуктових комітів немає.">';
+  [0, 5, 10, 15, 20].forEach(function (v) {
+    svg += '<line class="' + (v ? "grid-l" : "axis") + '" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>';
+    svg += '<text x="' + (L - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + v + "</text>";
+  });
+  WEEKS.forEach(function (w, i) {
+    var cx = L + slot * i + slot / 2, x = cx - bw / 2, prod = w[1], proc = w[2];
+    var hProd = (prod / YMAX) * ph, hProc = (proc / YMAX) * ph;
+    svg += '<g class="col-g" data-i="' + i + '"><rect class="hl" x="' + (L + slot * i + 1) + '" y="' + TOP + '" width="' + (slot - 2) + '" height="' + ph + '"/>';
+    if (proc && prod) {
+      svg += '<rect class="b-prod" x="' + x + '" y="' + (y(0) - hProd) + '" width="' + bw + '" height="' + hProd + '"/>';
+      svg += '<path class="b-proc" d="' + roundTop(x, y(0) - hProd - 2 - hProc, bw, hProc, 4) + '"/>';
+    } else if (prod) {
+      svg += '<path class="b-prod" d="' + roundTop(x, y(0) - hProd, bw, hProd, 4) + '"/>';
+    } else if (proc) {
+      svg += '<path class="b-proc" d="' + roundTop(x, y(0) - hProc, bw, hProc, 4) + '"/>';
+    }
+    if (i % 3 === 0 || i === WEEKS.length - 1) svg += '<text x="' + cx + '" y="' + (H - 9) + '" text-anchor="middle">' + w[0] + "</text>";
+    svg += '<rect class="hit" x="' + (L + slot * i) + '" y="' + TOP + '" width="' + slot + '" height="' + (ph + B) + '"/></g>';
+  });
+  svg += "</svg>";
+  var chart = document.getElementById("chart");
+  chart.innerHTML = svg + '<div class="tip" id="tip" hidden></div>';
+  var tip = document.getElementById("tip");
+  chart.querySelectorAll(".col-g").forEach(function (g) {
+    g.addEventListener("mousemove", function (ev) {
+      var w = WEEKS[+g.dataset.i], rect = chart.getBoundingClientRect();
+      tip.innerHTML = "<b>тиждень з " + w[0] + "</b><br>продукт: " + w[1] + " · процес: " + w[2] + (w[1] + w[2] === 0 ? "<br>комітів у main немає" : "");
+      tip.style.left = Math.min(Math.max(ev.clientX - rect.left, 70), rect.width - 70) + "px";
+      tip.style.top = (ev.clientY - rect.top) + "px";
+      tip.hidden = false;
+    });
+    g.addEventListener("mouseleave", function () { tip.hidden = true; });
+  });
+  var tbl = document.getElementById("tbl"), tt = document.getElementById("tbl-toggle");
+  tbl.innerHTML = "<table><thead><tr><th>Тиждень з</th><th class='n'>Продукт</th><th class='n'>Процес</th></tr></thead><tbody>" +
+    WEEKS.map(function (w) { return "<tr><td>" + w[0] + "</td><td class='n'>" + w[1] + "</td><td class='n'>" + w[2] + "</td></tr>"; }).join("") + "</tbody></table>";
+  tt.addEventListener("click", function () {
+    tbl.hidden = !tbl.hidden;
+    tt.setAttribute("aria-expanded", String(!tbl.hidden));
+    tt.textContent = tbl.hidden ? "Показати таблицею" : "Сховати таблицю";
+  });
+
+  /* Знімок, відлік до скидання квоти, демонстрація збою */
+  var RESET = T(30, 19, 21);
+  var snap = SNAP0;
+  var failing = false;
+  function renderTimes() {
+    document.getElementById("snap-time").textContent = dm(snap) + " · " + hm(snap) + " UTC";
+    var left = RESET - snap;
+    document.getElementById("q-agy-claude").textContent = left > 0 ? "Скидання о 19:21 UTC, " + inWords(left) : "Квота скинулась о 19:21 UTC — потрібен новий показ";
+    document.getElementById("reset-when").textContent = left > 0 ? "Opus 4.6 через agy, 30.09 о 19:21 UTC" : "Opus 4.6 через agy — уже доступний";
+    renderJobs(snap);
+  }
+  function renderA8() {
+    var p = document.getElementById("a8"), st = document.getElementById("a8-state"), ago = document.getElementById("a8-ago");
+    var srcCell = document.querySelector("#src-a8 td:last-child");
+    p.classList.toggle("is-error", failing);
+    st.className = failing ? "st st-crit" : "st st-good";
+    st.innerHTML = failing ? "<i>✕</i>збирач не відповів" : "<i>✓</i>дані свіжі";
+    ago.textContent = failing ? "42 хв тому" : "щойно";
+    srcCell.innerHTML = failing ? '<span class="st st-crit"><i>✕</i>не відповів</span>' : '<span class="st st-good"><i>✓</i>ok</span>';
+    document.getElementById("tile-a8").textContent = failing ? "Невідомо: немає зв'язку" : "Працює, черга порожня";
+    document.getElementById("src-ok").textContent = failing ? "7" : "8";
+    document.getElementById("src-count").textContent = failing ? "7 з 10 відповіли" : "8 з 10 підключено";
+    document.getElementById("attn").textContent = failing ? "4 розділи" : "3 розділи";
+  }
+  document.getElementById("demo-fail").addEventListener("change", function (e) { failing = e.target.checked; renderA8(); });
+  var btn = document.getElementById("refresh"), prog = document.getElementById("progress");
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    var total = 8, k = 0;
+    prog.textContent = "Збираю: 0 з " + total;
+    var timer = setInterval(function () {
+      k += 1;
+      prog.textContent = "Збираю: " + k + " з " + total;
+      if (k >= total) {
+        clearInterval(timer);
+        snap = Date.now();
+        renderTimes();
+        document.querySelectorAll(".ago").forEach(function (a) { if (!(failing && a.id === "a8-ago")) a.textContent = "щойно"; });
+        prog.textContent = failing ? "Готово: 7 з 8 збирачів відповіли, A8 — ні" : "Готово: знімок оновлено (у макеті змінюються лише час і відліки)";
+        btn.disabled = false;
+      }
+    }, 180);
+  });
+  renderTimes();
+  renderA8();
+})();
+</script>
+
+</body>
+</html>
