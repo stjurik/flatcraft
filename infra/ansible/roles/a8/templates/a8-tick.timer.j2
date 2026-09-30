@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+# Постачається ВИМКНЕНИМ (a8_tick_timer_enabled: false). Вмикає yurii після
+# першого ручного тіку під наглядом — зміною змінної в git, а не
+# `systemctl enable` руками: конфігурація, якої немає в git, не існує.
+[Unit]
+Description=a8 queue tick every {{ a8_tick_interval_minutes }} minutes after the previous one finished
+
+[Timer]
+OnBootSec=10min
+# Від завершення попереднього тіку, а не від його старту: довга задача не
+# накладається на наступну (плюс flock у самому a8-tick).
+OnUnitInactiveSec={{ a8_tick_interval_minutes }}min
+
+[Install]
+WantedBy=timers.target

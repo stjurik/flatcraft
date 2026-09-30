@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=a8 queue tick — one task at most, then exit (ADR-039 §3)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ a8_agent_user }}
+Group={{ a8_agent_user }}
+ExecStart=/usr/local/bin/a8-tick
+# Верхня межа тіку: таймаут задачі + запас на fetch, залежності, push.
+TimeoutStartSec={{ a8_task_timeout_s + 1800 }}

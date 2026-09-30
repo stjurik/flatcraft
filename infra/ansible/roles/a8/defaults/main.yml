@@ -1,0 +1,125 @@
+---
+# Роль a8 — усі змінні тут, у defaults, а не в group_vars.
+# Причина: group_vars/all.yml належить play'ю staging і тягне за собою vault
+# (див. коментар у a8.yml). A8 має бути описана самодостатньо.
+
+# ─── Користувач і розкладка ────────────────────────────────────────────────
+a8_agent_user: agent
+a8_agent_home: /home/agent
+a8_repo_dir: /home/agent/hart # головний клон; ключ довіри Claude Code — саме він
+a8_worktrees_dir: /home/agent/hart-wt # worktree на задачу (ADR-039 §2)
+a8_logs_dir: /home/agent/agent-logs # журнал прогонів (ADR-039 §8)
+a8_queue_dir: /home/agent/agent-queue # черга задач на диску (ADR-039 §3)
+a8_container_home: /home/agent/container-home # записуваний $HOME для контейнера
+
+# ─── Запобіжники (docs/19 §7 п.5 — існують ДО першого прогону) ─────────────
+a8_kill_switch_path: /home/agent/STOP
+a8_daily_task_limit: 12
+a8_consecutive_failure_limit: 3
+a8_config_dir: /etc/a8
+
+# ─── Контейнер агента ──────────────────────────────────────────────────────
+# Образ агента збирає роль із files/agent.Dockerfile (рішення yurii Q2-г).
+# Тег несе версії: зміна версії = новий тег = нова збірка, старий лишається.
+a8_claude_code_version: "2.1.272" # виміряна на A8 (PR #110); звірено 2026-09-19
+a8_uv_version: "0.12.17"
+# Мусить збігатися з `packageManager` у package.json і PNPM_VERSION у ci.yml:
+# розбіжність означала б, що агент збирає не те, що потім перевіряє CI.
+a8_pnpm_version: "9.12.0"
+a8_agent_image: "hart-agent:cc{{ a8_claude_code_version }}-uv{{ a8_uv_version }}-pnpm{{ a8_pnpm_version }}"
+# Відкат на голий образ — один рядок: `a8_container_image: node:22`. Тоді демон
+# не зможе запустити агента (у node:22 немає claude), решта ролі працює.
+a8_container_image: "{{ a8_agent_image }}"
+a8_container_uid: 1002 # МУСИТЬ дорівнювати власнику a8_repo_dir (вимір №6)
+a8_container_gid: 1002
+a8_python_version: "3.12" # uv sync падає на 3.14 (М-3, PR #110)
+# Шляхи (відносно кореня клону і worktree), змонтовані в контейнер read-only.
+# Список виміряний у М-3-fix (PR #110): 5 шляхів → EROFS, pnpm/uv/vitest 0 помилок ФС.
+# infra/discord сюди НЕ входить навмисно — workspace-пакет, pnpm пише туди node_modules.
+a8_ro_paths:
+  - infra/ansible
+  - infra/compose
+  - infra/docker
+  - .github
+  - packages/db/src/migrations
+a8_git_author_name: "hart agent"
+a8_git_author_email: "agent@hart.local"
+
+# ─── Egress-allowlist ──────────────────────────────────────────────────────
+# Два прапорці, а не один — свідомо. Наповнення ipset безпечне саме по собі
+# (нічого не блокує), тому вмикається одразу; ПРИМУС (DROP усього іншого)
+# вимкнений, доки yurii не перевірить його на живому прогоні за README §6.
+# Увімкнути примус наосліп означало б ризикнути тим, що демон тихо втратить
+# мережу, а виглядатиме це як зависання задачі.
+a8_egress_enabled: true
+a8_egress_enforce: false
+a8_egress_bridge: docker0
+a8_egress_ipset: a8_egress
+a8_egress_refresh_minutes: 30
+
+# Мінімальний список. Кожен рядок має причину — без неї домен сюди не потрапляє.
+a8_egress_domains:
+  - api.anthropic.com # виклик моделі; без нього агента немає
+  - statsig.anthropic.com # телеметрія Claude Code; без неї CLI стартує, але шумить
+  - github.com # git fetch/push по HTTPS
+  - api.github.com # gh: створення draft PR, читання стану
+  - codeload.github.com # tarball-и, які тягне gh/npm
+  - objects.githubusercontent.com # LFS і release-артефакти
+  - registry.npmjs.org # pnpm
+  - pypi.org # uv
+  - files.pythonhosted.org # колеса пакетів для uv
+  - generativelanguage.googleapis.com # agy/Gemini у ролі рев'юера
+
+# CIDR'и, які додаються без DNS-резолву.
+a8_egress_extra_cidrs: []
+
+# Ціль живого виміру фільтра V20: адреса, якої НЕМАЄ в allowlist. Агент не мусить її
+# дістати, а той самий образ із мережею хоста — мусить (контроль). Саме цей хост
+# агент не дістав 2026-09-28 (`apt-get` у збірці образу, PR #147). Поза
+# a8_egress_domains її тримає інваріант 13 у tools/scripts/check-ansible-a8.sh.
+a8_egress_probe_host: deb.debian.org
+# Позитивний контроль V20: хост З allowlist (порт 443). Агент мусить його дістати —
+# інакше BLOCKED цілі вище міг дати будь-який злам шляху через docker0, а не фільтр.
+# У a8_egress_domains його тримає інваріант 13.
+a8_egress_allowed_probe_host: pypi.org
+
+# ─── Креденшал на push (вимір №7) ──────────────────────────────────────────
+# ДЕФОЛТ — ПОРОЖНЬО, І ЦЕ НАВМИСНО. Роль креденшал НЕ створює: це незворотна
+# дія в акаунті yurii (питання класу A, issue #78). Доки значення порожнє,
+# роль застосовується повністю, але задачі креденшала пропускає і verify.yml
+# каже про це вголос — замість тихо створити дірку.
+# ДЕФОЛТ `keep` — «не чіпати те, що вже налаштовано на машині».
+#
+# Раніше дефолтом було `none`, і це виявилось пасткою: kind треба було
+# передавати `-e` при КОЖНОМУ застосуванні, а забутий прапорець тихо переписував
+# a8.env на `none`. Ключ лишався на диску, play був зелений, а демон починав
+# закінчувати задачі станом `no-credential` замість push'а. Зелений результат
+# при недієздатному стані — рівно те, що ця роль ловить у себе весь час.
+#
+# Тепер: `keep` читає чинне значення з {{ a8_config_dir }}/a8.env і лишає його.
+# На чистій машині файла немає, отже `keep` означає `none` — поведінка першого
+# застосування не змінилась. Явно передане значення завжди перемагає.
+#
+# `none` теж лишається доступним — але тепер це СВІДОМЕ зняття креденшала, яке
+# треба написати, а не наслідок забутого прапорця.
+a8_push_credential_kind: keep # keep | none | deploy_key | token_file
+a8_push_deploy_key_src: "" # локальний шлях до приватного ключа
+a8_push_token_file_src: "" # локальний шлях до файла з токеном
+
+# ─── Демон черги (a8-tick) ─────────────────────────────────────────────────
+# ТАЙМЕР ВИМКНЕНИЙ. Вмикає yurii після першого ручного тіку під наглядом —
+# зміною цього рядка, не `systemctl enable` руками.
+a8_tick_timer_enabled: false
+a8_tick_interval_minutes: 10
+a8_task_timeout_s: 5400 # 90 хв на задачу; далі контейнер убивається
+# Оракул приймання — окремий, набагато коротший бюджет: це перевірка вже
+# зробленого (тест, grep, prettier), а не робота. Спільний таймаут із задачею
+# означав би, що зациклений оракул тримає flock черги півтори години.
+a8_oracle_timeout_s: 900 # 15 хв на прогін оракула
+a8_max_turns: 200 # як у tools/scripts/autorun.sh
+a8_default_model: sonnet # docs/15 §0: Opus — для проєктування, не для кожної задачі
+a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only: 600 agent
+# Режим (а) OQ-34: доки звужені набори дозволів для external/derived не
+# реалізовані й не покриті тестом, демон приймає лише human.
+a8_sources_allowed: human
+a8_push_ssh_url: "git@github.com:stjurik/flatcraft.git"

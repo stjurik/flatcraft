@@ -60,15 +60,26 @@
     groups: docker
     append: true
 
-- name: Docker login до ghcr.io (для приватних flatcraft-* образів)
-  # Чому через `docker login` запис у /root/.docker/config.json: docker compose
-  # pull на root-systemd-сервісі (якщо колись з'явиться) бачитиме credentials.
+# ─── GHCR login — НЕ обов'язковий, доки образи публічні ────────────────────
+# Було «для приватних flatcraft-* образів» — станом на 2026-09-17 це неправда:
+# `ghcr.io/stjurik/flatcraft-{api,web,cad-worker}` читаються анонімно, бо
+# виконання D.1 (ADR-038, репо → private) відкладено рішенням OQ-30. Логін
+# лишається, щоб середовище пережило перехід у private без правок, але
+# **перестає бути фатальним**: протермінований PAT не має права валити
+# провізіонінг машини, яка й без нього чудово тягне образи.
+#
+# Прямий наслідок інциденту 2026-09-14…17 (див. роль `flatcraft`, крок 3b):
+# саме мовчазне протермінування цього токена зупинило три deploy'ї підряд.
+- name: Docker login до ghcr.io (root) — знадобиться, якщо образи стануть приватними
+  # Чому запис саме у /root/.docker/config.json: docker compose pull на
+  # root-systemd-сервісі (якщо колись з'явиться) бачитиме credentials.
   # Для deploy-user логін окремий нижче.
   ansible.builtin.command:
     cmd: "docker login ghcr.io -u {{ vault_ghcr_username }} --password-stdin"
     stdin: "{{ vault_ghcr_token }}"
   register: docker_ghcr_login_root
   changed_when: "'Login Succeeded' in docker_ghcr_login_root.stdout"
+  failed_when: false
   no_log: true # ховаємо токен з viewer'а
 
 - name: Docker login до ghcr.io для deploy-user
@@ -79,4 +90,19 @@
   become_user: "{{ app_user }}"
   register: docker_ghcr_login_deploy
   changed_when: "'Login Succeeded' in docker_ghcr_login_deploy.stdout"
+  failed_when: false
   no_log: true
+
+- name: Попередити, якщо GHCR-логін не вдався
+  # Без цього `failed_when: false` перетворює відмову на тишу — рівно той клас,
+  # що вже коштував трьох deploy'їв. Провізіонінг іде далі, але слід у логу є.
+  ansible.builtin.debug:
+    msg: >-
+      GHCR login не вдався (root rc={{ docker_ghcr_login_root.rc | default('n/a') }},
+      deploy rc={{ docker_ghcr_login_deploy.rc | default('n/a') }}).
+      Доки образи публічні — це не блокер: pull піде анонімно, а роль `flatcraft`
+      (крок 3b) прибере непрацездатний креденшал. Перед переходом у private
+      (D.1, ADR-038) оновіть `vault_ghcr_token`.
+  when: >-
+    docker_ghcr_login_root.rc | default(0) != 0
+    or docker_ghcr_login_deploy.rc | default(0) != 0

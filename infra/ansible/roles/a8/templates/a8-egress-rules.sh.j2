@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# a8-egress-rules — примус allowlist'а правилами в ланцюзі DOCKER-USER.
+#
+# ПОЗИЦІЯ ПРАВИЛ — НЕ ДЕТАЛЬ, А ГОЛОВНЕ. Виміряно на A8 2026-09-18:
+#
+#   num  pkts  target   prot  in       ctstate
+#   1    253K  RETURN   all   *        RELATED,ESTABLISHED
+#   2    0     DROP     all   enp1s0
+#   3    258   RETURN   all   *
+#
+# Правило 1 повертає зворотний трафік ДО того, як щось устигне його впустити;
+# правило 2 стосується ВХІДНОГО трафіку з enp1s0 і за весь час не спрацювало
+# жодного разу (лічильник 0). Тобто вихідний трафік контейнерів сьогодні не
+# фільтрується нічим.
+#
+# Звідси два наслідки для вставки:
+#   * вставляти ПІСЛЯ правила 1 — інакше обріжеться зворотний трафік усіх
+#     контейнерів, і виглядатиме це як «мережа зникла»;
+#   * вставляти ПЕРЕД фінальним RETURN — інакше правила не досягаються взагалі.
+# Тому позиція обчислюється, а не пишеться числом.
+set -euo pipefail
+
+SET="{{ a8_egress_ipset }}"
+BRIDGE="{{ a8_egress_bridge }}"
+CHANGED=0
+
+rule_allow=(-i "$BRIDGE" -m set --match-set "$SET" dst -j RETURN)
+rule_drop=(-i "$BRIDGE" -j DROP)
+
+have() { iptables -C DOCKER-USER "$@" 2>/dev/null; }
+
+apply() {
+  ipset list -n | grep -qx "$SET" || {
+    echo "a8-egress-rules: набору $SET немає — спершу a8-egress-refresh" >&2
+    exit 1
+  }
+
+  # Позиція: одразу після останнього стейтового RETURN на початку ланцюга.
+  # Порядок станів у виводі iptables не гарантований, тому шукаємо обидва
+  # написання; рядок мусить бути саме RETURN, щоб коментар чи чуже правило зі
+  # словом ESTABLISHED не зійшли за стейтовий accept.
+  local pos
+  pos="$(iptables -L DOCKER-USER --line-numbers -n |
+    awk '$2 == "RETURN" && (/RELATED,ESTABLISHED/ || /ESTABLISHED,RELATED/) {print $1}' | tail -1)"
+
+  # FAIL CLOSED. Попередня версія мала тут `pos="${pos:-0}"`, і при ненайденому
+  # стейтовому RETURN правило лягало на позицію 1 — ПЕРЕД ним, тобто робило рівно
+  # ту катастрофу, від якої застерігає коментар у шапці: зворотний трафік усіх
+  # контейнерів обрізався б, а виглядало б це як «мережа зникла». Знайдено
+  # рев'юером (agy, виклик №2). Правильна реакція на невідомий ланцюг — відмова,
+  # а не здогад про позицію.
+  if [[ -z "$pos" ]]; then
+    echo "a8-egress-rules: у DOCKER-USER не знайдено стейтового RETURN." >&2
+    echo "  Вставляти правила наосліп не можна — позиція визначає, чи вціліє" >&2
+    echo "  зворотний трафік контейнерів. Подивіться ланцюг: a8-egress-rules status" >&2
+    exit 2
+  fi
+  pos=$((pos + 1))
+
+  if ! have "${rule_allow[@]}"; then
+    iptables -I DOCKER-USER "$pos" "${rule_allow[@]}"
+    CHANGED=1
+  fi
+  if ! have "${rule_drop[@]}"; then
+    # DROP іде ОДРАЗУ за allow-правилом, інакше між ними може вклинитись RETURN.
+    iptables -I DOCKER-USER $((pos + 1)) "${rule_drop[@]}"
+    CHANGED=1
+  fi
+
+  ((CHANGED == 1)) && echo "CHANGED: правила egress застосовано" || echo "OK: правила вже на місці"
+}
+
+remove() {
+  have "${rule_drop[@]}" && {
+    iptables -D DOCKER-USER "${rule_drop[@]}"
+    CHANGED=1
+  }
+  have "${rule_allow[@]}" && {
+    iptables -D DOCKER-USER "${rule_allow[@]}"
+    CHANGED=1
+  }
+  ((CHANGED == 1)) && echo "CHANGED: правила egress знято" || echo "OK: правил не було"
+}
+
+status() {
+  iptables -L DOCKER-USER -n -v --line-numbers
+}
+
+case "${1:-status}" in
+apply) apply ;;
+remove) remove ;;
+status) status ;;
+*)
+  echo "використання: a8-egress-rules {apply|remove|status}" >&2
+  exit 1
+  ;;
+esac

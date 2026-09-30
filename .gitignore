@@ -84,6 +84,8 @@ infra/ansible/inventory.ini
 # runtime-generated у deploy-staging.yml + може містити реальний origin IP
 infra/ansible/inventory.staging.ini
 infra/ansible/inventory.production.ini
+# A8 — домашня машина; містить tailnet-адресу й ім'я користувача з sudo
+infra/ansible/inventory.a8.ini
 # all.yml — non-secret config-as-code, committed: site.yml vars_files його вимагає
 # у CI-чекауті (deploy-staging.yml). Секрети — лише в all.vault.yml (зашифровано).
 !infra/ansible/inventory.ini.example

@@ -1,0 +1,13 @@
+; Скопіювати у inventory.a8.ini (gitignored) і вписати реальну адресу.
+;
+; A8 — домашня машина автономної розробки. Підключаємось користувачем, який має
+; passwordless sudo (НЕ `agent`: у нього sudo немає і не має бути — docs/19 §B.1).
+;
+; Маршрут: LAN-адреса на практиці дає timeout, tailnet відповідає — перевірено
+; 2026-09-18. Тому в прикладі — tailnet-адреса A8.
+
+[a8]
+; a8 ansible_host=__REPLACE_with_tailnet_ip__ ansible_user=__REPLACE_with_sudo_user__
+
+[a8:vars]
+ansible_python_interpreter=/usr/bin/python3

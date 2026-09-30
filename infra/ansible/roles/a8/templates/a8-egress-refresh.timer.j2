@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Refresh a8 egress allowlist every {{ a8_egress_refresh_minutes }} minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ a8_egress_refresh_minutes }}min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

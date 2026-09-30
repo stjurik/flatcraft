@@ -90,7 +90,7 @@ apps/api/
 
 ```bash
 cd workers/cad
-uv sync
+uv sync --extra dev   # як у CI: pytest, mypy, ruff — в extra dev
 uv run pytest
 uv run mypy .
 uv run ruff check .

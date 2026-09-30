@@ -1,0 +1,12 @@
+---
+- name: Restart docker
+  # ⚠️ Перезапуск docker зупиняє контейнери, що працюють. live-restore пом'якшує
+  # це для вже запущених, але задача агента в момент рестарту може обірватись.
+  # Тому хендлер, а не задача: спрацьовує лише коли daemon.json справді змінився.
+  ansible.builtin.systemd_service:
+    name: docker
+    state: restarted
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
