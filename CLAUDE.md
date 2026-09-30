@@ -310,11 +310,11 @@ flatcraft/
 Середовище: `~/hart` (WSL Ubuntu-24.04, native ext4), реальні креденшали,
 можлива незакомічена робота в сусідніх гілках, людина поруч.
 
-⚠️ **Фактичний стан захисту (оновлено 2026-09-17).** Трекований
-`.claude/settings.json` і далі містить лише `permissions.allow` — 37 записів,
-жодного `deny`. Тобто **звичайна інтерактивна сесія механічних обмежень не
-має**: усе тримається на `--allowedTools`, тексті промпту і на тому, що yurii
-поруч.
+⚠️ **Фактичний стан захисту (оновлено 2026-09-30).** Трекований
+`.claude/settings.json` порожній з PR #141. Тобто **звичайна інтерактивна сесія
+механічних обмежень не має**: усе тримається на `--allowedTools`, тексті
+промпту і на тому, що yurii поруч. Профіль оркестратора —
+`.claude/settings.orchestrator.json`.
 
 Автономний прогін — інша справа, і крок 5 треку T5 **закритий**: портативні
 deny-правила перенесені в git (`.claude/settings.autonomous.json`, PR #108), а
@@ -435,7 +435,7 @@ deny-правила перенесені в git (`.claude/settings.autonomous.js
 3. **Автономна реалізація.** Оркестратор бере задачу з черги → створює worktree →
    запускає **свіжу сесію** в контейнері → TDD (тест → код → рефактор) → draft PR.
    Стан живе в git і черзі на диску, ніколи в контексті моделі (ADR-039 §3).
-4. **Оракули.** 10 job'ів `ci.yml` у GitHub Actions — детермінована частина
+4. **Оракули.** Job'и `ci.yml` у GitHub Actions — детермінована частина
    конвеєра. Межі кожного оракула («що доводить / чого НЕ доводить») —
    інспекція §B; зелений CI не є доказом enforcement сам по собі.
 5. **Незалежне рев'ю** — інший агент, не той, що писав код (ADR-036 §3).
@@ -486,31 +486,22 @@ deny-правила перенесені в git (`.claude/settings.autonomous.js
 
 ## 13. Поточний стан
 
-> Повний журнал — `docs/13_PROGRESS_LOG.md`. Цей розділ — лише snapshot для контексту нових сесій. Тримайте його ≤ 2k chars.
+> Snapshot для нових сесій, ≤ 2000 знаків до кінця файлу; подробиці — `docs/13_PROGRESS_LOG.md`.
 
-**Де ми зараз (2026-08-11):** staging.hart.crimea.ua live, MVP feature-complete + EN-версія (i18n Etap A, ADR-037). **Template Registry — 4 з 6 шаблонів** (`perforated_panel`, `corner_angle`, `l_bracket`, `z_bracket`; PR #101); лишились `wall_shelf`, `enclosed_shelf` — 6 per-template файлів у `apps/web/src/components/`. **Master Run 14 (інспекція фактичного стану, PR #104)** зафіксував три розриви, які визначають найближчу роботу: (1) клас «код + тест, 0 викликів у пайплайні» — `validateSheet`, `validateHoles`, а перевірка §7 п.5 (`CadQuery isValid`) не існує в кодовій базі взагалі; (2) механічних deny-правил для локального прогону немає — реальний захист живе лише в `.github/workflows/ai-fix.yml`; (3) cron щотижневого digest'а відсутній у git, хоча `docs/11` позначає його «✅». Прийнято **ADR-038** (репо → private; фактично ще `PUBLIC`, виконання — крок D.1 `docs/19`), **ADR-039** (автономне середовище на A8), **ADR-040** (auto-merge оборотного класу в тестовому режимі), **ADR-041** (метрики prod-переїзду, Proposed — ADR-011 чинний). Вартість CI виміряна: **16.3 billed-хв/PR** (3 останні PR). Наступний фокус — **крок 4 треку T5** (генеральний план → беклог з оракулами) і **крок 5** (розгортання середовища за `docs/19` §6).
+**Де ми зараз (2026-09-30):** staging.hart.crimea.ua працює; MVP + EN-версія (ADR-037). Template Registry — 4 з 6 шаблонів у main, `wall_shelf` — draft PR #154, лишається `enclosed_shelf`. **Крок 5 треку T5 закрито 2026-09-29:** A8 — kill switch 3 с, м'який ребут 40 с, 3 задачі end-to-end поспіль. Не зроблено: прев'ю, CI на self-hosted, повна заборона force-push (#151), тест вимкненням живлення (до кроку 6). Крок 4 не закрито; крок 6 — лише рішенням yurii. Репо `PUBLIC` — ADR-038 не виконано.
 
 **Останні 3 milestones:**
 
-- **Master Run 14 — інспекція фактичного стану + контракт автономної розробки** (2026-08-11, трек T5 кроки 3): Стадія 1 (PR **#104**) — `docs/promts/inputs/inspection-2026-08.md`, таблиці A–G, кожен рядок з доказом `файл:рядок`/PR/лог; перехресний скан `agy` — 0 розбіжностей на 7 цільових твердженнях. Головні знахідки: 2 з 6 перевірок §7 — `декларація` (габарит у 2 осях; `isValid` не існує); `permissions.deny` у `.claude/settings.json` немає (37 записів, усі `allow`); реальний захист — 12 правил у `ai-fix.yml` + 8 патернів `check-forbidden-paths.sh`; digest-cron відсутній в Ansible; CI = 16.3 billed-хв/PR проти оцінки 25–40. Стадія 2 — ADR-038..041 + `docs/promts/inputs/claude-md-2.0.md` (цей файл), `docs/02` T5 переписано у вісім кроків із числовими критеріями виходу, `docs/16` §1 приведено до правди, `AGENTS.md` §A8. _Запис у `docs/13` — борг (issue #78)._
-- **A8 preflight — мануальний чеклист автономного середовища** (2026-08-09, PR **#103**): `docs/19_A8_PREFLIGHT.md` — рішення Q1–Q13, треки A (Ubuntu 24.04 + BIOS «Restore on AC Power Loss»), B (три користувачі без sudo, SSH key-only, UFW, swap 8 GB), C (Docker, Node 22, uv, Playwright), D (deploy key → private → runner → `claude setup-token` → тунель → Discord-бот), чекпоінти для кожного. Інваріант §7: на A8 немає vault-пароля, SSH-ключа до Mirohost і GHCR-токена на запис. _Запис у `docs/13` — борг (issue #78)._
-- **Run 7 Етап 2 — `z_bracket` на Template Registry** (2026-08-07, PR **#101**, ADR-033, трек T2): четвертий із шести шаблонів у `TEMPLATE_REGISTRY`; `ts_registry_slugs.json` регенеровано (паритет 4/4 підтверджено інспекцією). WIP-гілка `feat/migrate-z-bracket` (`52ef450`) до `main` НЕ влита — міграція пройшла окремим PR, гілка лишається осторонь. _Запис у `docs/13` — борг (issue #78)._
+- **Крок 5 T5 — середовище на A8** (2026-09-29, PR #157): три критерії виходу виміряно; deny-правила агента — `.claude/settings.autonomous.json`.
+- **Master Run 14 — інспекція + контракт** (2026-08-11, стадія 1 — PR #104): таблиці A–G з доказами, ADR-038..041, T5 у вісім кроків.
+- **A8 preflight** (2026-08-09, PR #103): `docs/19`, треки A–D; `yurii` — адмін, `runner` і `agent` — без sudo; на A8 немає vault-пароля, ключа до Mirohost і GHCR-токена на запис.
 
-**Інваріанти (must-not-break):**
+**Інваріанти (must-not-break):** render-gate `validateProfile` (паритет з `geometry.ts`) + `R3FErrorBoundary` (ADR-026); DXF/PDF байт-у-байт детерміновані (§2.4, ADR-025); серверна валідація `bend_radius` + Python parity (ADR-019); `events` без PII (ADR-032); bend-матриця — лише `bend-machine-esi.yaml`, `baked-spec.ts` руками не правити; головний entry cad-engine без `node:*`; розробка — WSL `~/hart`; хостинг — Mirohost MS21 (ADR-011).
 
-- У viewport'ах студій сцена R3F рендериться ЛИШЕ при валідних параметрах (`validateProfile` render-gate); будь-який uncaught error у R3F ловиться `R3FErrorBoundary` (ADR-026). `validateProfile` — паритет з assertion'ами `geometry.ts` (клієнт render-gate/банер + Fastify-gate + Python worker).
-- PDF/DXF експорт — байт-у-байт детермінований (CLAUDE.md §2.4). Ізометрія (ADR-025) теж: HLR-проєкція + дискретизація детерміновані, геометрія — чиста функція params. `export/isometric.py` головний entry імпортує `OCP.*` напряму (scoped mypy-override).
-- Серверна валідація `bend_radius` через cad-engine у Fastify + Python parity (ADR-019). Клієнтська матрична валідація (ADR-022) — лише UX, не замінює серверну.
-- `events` — без PII (жодного email/IP); `session_hash` з добовим salt (ADR-032).
-- Single source of truth для bend-матриці: `packages/cad-engine/data/bend-machine-esi.yaml`. `bakedSpec` (`src/generated/baked-spec.ts`) — похідний snapshot, регенерується у `prebuild`; не редагувати руками.
-- Головний entry `@flatcraft/cad-engine` browser-safe (без `node:*`); fs-loader — лише через subpath `/node`.
-- Розробка у WSL Ubuntu-24.04 / `~/hart` (native ext4), не на /mnt/c.
-- Hosting: Mirohost Cloud MS21 (ADR-011), single-server staging/prod (R-11).
+**Відомі розриви** (перевіряй факт): `validateSheet` і `validateHoles` в експорті не викликаються; `isValid` (§7 п.5) не існує; browser-safe cad-engine і свіжість `baked-spec.ts` автоматично не перевіряються; розкладу щотижневого digest'а в git немає.
 
-**Відомі розриви між §7 і кодом** (інспекція 2026-08-10 — не інваріанти, а борг; перевіряй факт перед тим, як спиратись): §7 п.4 повна 2-осьова перевірка габариту (`validateSheet`) і `validateHoles` — код і тести є, викликів у export-пайплайні немає; §7 п.5 (`CadQuery isValid`) — механізму не існує; browser-safe-інваріант cad-engine — код без автоматичного тесту; `baked-spec.ts` — без CI-guard'а «файл у git = свіжій генерації».
-
-**Як додати новий запис:** додати ПОВНИЙ опис у `docs/13_PROGRESS_LOG.md` нагору, ОНОВИТИ список «Останні 3 milestones» вище (видалити найстаріший, додати новий зверху). Не append — replace.
+**Новий запис:** опис — нагору `docs/13`, тут — замінити найстарішу віху.
 
 ---
 
-_Останнє оновлення: 2026-08-11. Коли архітектура змінюється — оновлюйте CLAUDE.md (§0-12) першим. Завершення пункту черги — у `docs/13_PROGRESS_LOG.md` + ротація §13._
+_Останнє оновлення: 2026-09-30. Архітектура змінилась — спершу CLAUDE.md §0-12._
