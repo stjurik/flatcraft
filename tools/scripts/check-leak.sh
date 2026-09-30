@@ -97,6 +97,9 @@ def find_ipv6(line):
                 cand = text[s:end]
                 if cand.count(":") < 2:
                     break
+                # Голе `::` у прозі — позначка стиснення, а не адреса; `::1` — адреса.
+                if not re.search(r"[0-9A-Fa-f]", cand):
+                    continue
                 addr = parse_ip(cand)
                 if addr is not None and addr.version == 6:
                     out.append((cand, addr))

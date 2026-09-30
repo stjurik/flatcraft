@@ -75,6 +75,8 @@ expect "IPv4 з провідними нулями" 1 "сервер 10.0.0.01" "�
 expect "IPv4 з markdown-екрануванням крапок" 1 'сервер 10\.0\.0\.1' "блок"
 expect "IPv6 у квадратних дужках з портом" 1 "https://[2a01:4f8:c0c:1::1]:443/" "блок"
 expect "C++, Rust і час — досі не адреси" 0 "std::vector, Foo::bar, std::io::Result, 12:00, 14:31:15" "чисто"
+expect "голе :: у прозі — не адреса, а ::1 — так" 0 "стиснення \`::\` на початку" "чисто"
+expect "::1 (loopback IPv6) — блок" 1 "слухає ::1" "блок"
 
 # ─── 3. (в) Документаційні діапазони — попередження, не блок ─────────────────
 expect "RFC 5737 192.0.2.0/24" 0 "приклад: 192.0.2.10" "попередження" "RFC 5737" "192.0.2.10"
@@ -143,6 +145,7 @@ if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "відомі адреси не порівнюються як адреси" 'if hit or any(is_known(addr) for _, addr in found):' 'if hit:'
   mutate "документаційні діапазони блокують" 'warned.append' 'blocked.append'
   mutate "IPv6 не шукається" 'found += find_ipv6(scan)' 'found += []'
+  mutate "кандидат без hex-цифри — адреса" 'if not re.search(r"[0-9A-Fa-f]", cand):' 'if False:'
   mutate "IPv4 не шукається" 'for m in IPV4.finditer(scan):' 'for m in []:'
   mutate "IPv6 лише з початку кандидата" 'starts = [0] + [k + 1 for k, c in enumerate(text) if c == ":"]' 'starts = [0]'
   mutate "провідні нулі — не адреса" 'return ipaddress.ip_address(".".join(str(int(x)) for x in parts))' 'return None'
