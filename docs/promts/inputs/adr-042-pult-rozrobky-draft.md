@@ -70,7 +70,7 @@
   "schema_version": 1,
   "section": "a8",
   "title": "A8 зараз",
-  "source": "a8-report.sh через a8-ro-shell",
+  "source": "a8-ro-shell: systemctl list-timers, df",
   "collected_at": "2026-09-30T14:05:12Z",
   "interval_s": 300,
   "status": "ok",
@@ -102,6 +102,19 @@
 - Збирачі на A8 ходять **лише через `a8-ro-shell`**. `a8-report.sh --killswitch-test`
   (тимчасово ставить kill switch) збирачам заборонено; тест перевіряє, що жоден
   збирач цього режиму не викликає.
+- **`a8-report.sh` через `a8-ro-shell` не працює взагалі** (рецензія Flash на #159,
+  звірено з кодом 2026-09-30). Звіт шле на A8 `cd /tmp && …` і `sudo -u agent bash -c …`
+  (`a8-report.sh:68, 114, 124`), а `a8-ro-shell` відхиляє будь-який метасимвол
+  (`a8-ro-shell.sh:42`) і пропускає `sudo -n` лише перед `docker`, `iptables`, `ufw`,
+  `crontab`, `ls`, `stat` (рядок 56). Тож збирачі хвилі 4 (`dash-a8.sh`, `dash-queue.sh`)
+  кличуть через `a8-ro-shell` окремі дозволені дієслова: `systemctl list-timers`,
+  `df`, `free`, `sudo -n ls` для черги й прапорця STOP. Чого так не дістати — журнал
+  `runs.log` і `a8-guard check`, що читаються від імені `agent`, — показується як
+  `not_measured` з поясненням, а не обходиться.
+- **Відкрите питання хвилі 4 (клас A, yurii):** щоб бачити журнал і guard, межу доступу
+  треба розширити — наприклад, одна фіксована команда на A8, що друкує стан у JSON і
+  дозволена `a8-ro-shell` як окреме дієслово. Це правка `infra/` і межі читання, тож лише
+  з рішенням yurii перед хвилею 4.
 - GitHub — лише читання, наявною автентифікацією `gh` на T470.
 - Кнопка STOP (kill switch) — **не в цьому ADR**. Це шлях запису, і він потребує
   окремого рішення: див. етап 2.
@@ -129,8 +142,8 @@
 | --- | ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
 | —   | Штамп і «Квоти ШІ»              | `dash-quotas.sh`  | `agy-quota.md`, `agy-opus-budget.sh`, покази `/usage` (п. 8)                                           |
 | 1   | Чекає на вас                    | `dash-inbox.sh`   | GitHub (PR, CI), журнал `agy-stats.md` (хто рецензував), чекліст #78                                   |
-| 2   | Черга A8 і процеси за розкладом | `dash-queue.sh`   | черга й журнал A8, `systemctl list-timers` через `a8-ro-shell`, ритми з `docs/02`                      |
-| 3   | A8 зараз                        | `dash-a8.sh`      | `a8-report.sh` (без `--killswitch-test`)                                                               |
+| 2   | Черга A8 і процеси за розкладом | `dash-queue.sh`   | через `a8-ro-shell`: `sudo -n ls` черги, `systemctl list-timers`; журнал — див. §4; ритми з `docs/02`  |
+| 3   | A8 зараз                        | `dash-a8.sh`      | через `a8-ro-shell`: `df`, `free`, `systemctl status`, `sudo -n ls` прапорця STOP; guard — див. §4     |
 | 4   | Рецензенти й квоти              | `dash-review.sh`  | `agy-stats-summary.sh`, `agy-opus-budget.sh`, покази `/usage`                                          |
 | 5   | Трек T5                         | `dash-t5.sh`      | `a8-metrics.sh --json`, `docs/02`                                                                      |
 | 6   | Продукт і процес                | `dash-trend.sh`   | `git log origin/main`: продукт — коміти, що зачіпають `apps/`, `workers/`, `packages/`; процес — решта |
