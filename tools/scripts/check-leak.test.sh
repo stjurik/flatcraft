@@ -19,7 +19,7 @@ bad() {
 T="$(mktemp -d)"
 KNOWN="$T/origin-host"
 # Порожній рядок у кінці — навмисно: `grep -F` з порожнім шаблоном збігся б з усім.
-printf '%s\n' '203.0.113.77' 'secret-origin.invalid' '2001:db8::cafe' '2a01:4f8::77' '' >"$KNOWN"
+printf '%s\n' '203.0.113.77' 'secret-origin.invalid' '2001:db8::cafe' '2a01:4f8::77' '203.0.77.77' '' >"$KNOWN"
 
 # expect <назва> <очікуваний exit> <текст> [підрядок]... — «!підрядок»: у виводі його
 # бути НЕ повинно. Текст пишеться у файл; вивід — stdout і stderr разом.
@@ -100,13 +100,44 @@ expect "відома документаційна IPv6 в іншому регі�
   "адреса 2001:DB8::CAFE" "файлом відомої адреси" "!CAFE" "!cafe"
 expect "відома IPv6 в іншому записі — блок і не друкується" 1 \
   "адреса 2a01:04f8:0:0:0:0:0:77" "файлом відомої адреси" "!2a01:04f8" "!2a01:4f8::77"
-KNOWN_OVERRIDE="secret-value-not-a-path" expect "значення LEAK_ORIGIN_FILE не друкується" 0 \
-  "чисто тут" "файла відомої адреси немає" "!secret-value-not-a-path"
+KNOWN_OVERRIDE="secret-value-not-a-path" expect "значення LEAK_ORIGIN_FILE не друкується" 3 \
+  "чисто тут" "файл відомої адреси недоступний" "!secret-value-not-a-path"
 
-KNOWN_OVERRIDE="$T/немає-такого" expect "без файла відомої адреси — попередження, адреси й далі блок" 1 \
-  "10.1.2.3" "файла відомої адреси немає" "10.1.2.3"
-KNOWN_OVERRIDE="$T/немає-такого" expect "без файла відомої адреси, чистий текст — 0" 0 \
-  "чисто тут" "файла відомої адреси немає"
+KNOWN_OVERRIDE="$T/немає-такого" expect "без файла відомої адреси — адреси й далі блок" 1 \
+  "10.1.2.3" "файл відомої адреси недоступний" "10.1.2.3"
+KNOWN_OVERRIDE="$T/немає-такого" expect "без файла відомої адреси, чистий текст — 3, не «чисто»" 3 \
+  "чисто тут" "не перевірено"
+
+# ─── 4а. Контрприклади окремої сесії Claude (#170) ────────────────────────────
+expect "IPv4 з портом через крапку (tcpdump)" 1 "IP 10.0.0.5.51234 > 8.8.8.8.53: UDP" "10.0.0.5"
+expect "IPv4 після «цифра.»" 1 "ver1.8.8.8.8" "8.8.8.8"
+expect "дефанг [.]" 1 "10[.]0[.]0[.]1" "блок"
+expect "відомий хост з markdown-екрануванням \\-" 1 'secret\-origin.invalid' "файлом відомої адреси"
+expect "відомий хост з екрануванням \\." 1 'secret-origin\.invalid' "файлом відомої адреси"
+expect "відома IPv4 як IPv4-mapped IPv6 — блок і не друкується" 1 "адреса ::ffff:cb00:4d4d" "файлом відомої адреси" "!cb00"
+expect "відома IPv4 як NAT64 — блок і не друкується" 1 "адреса 64:ff9b::cb00:4d4d" "файлом відомої адреси" "!64:ff9b"
+expect "відома IPv4 як 6to4 — блок і не друкується" 1 "адреса 2002:cb00:4d4d::1" "файлом відомої адреси" "!2002:"
+expect "Rust і C++ зі шляхами модулів — не адреси" 0 "crate::a::b, ::add_one(), my_d::bad_alloc, x.c_str()" "чисто"
+printf '\xff\xfe сміття 10.1.2.3\n' >"$T/bad-utf8.md"
+out="$(LEAK_ORIGIN_FILE="$KNOWN" bash "$SCRIPT" "$T/bad-utf8.md" 2>&1)"
+rc=$?
+if [[ $rc == 1 && "$out" != *Traceback* ]]; then ok "невалідний UTF-8 у тексті — блок без краху"; else bad "невалідний UTF-8 — rc=$rc: $out"; fi
+
+# Файл відомої адреси в незвичному вигляді: BOM, прикраси, CRLF, UTF-16, порожній.
+printf '\xef\xbb\xbfbom-host.invalid\n' >"$T/k-bom"
+KNOWN_OVERRIDE="$T/k-bom" expect "BOM на початку файла відомої адреси" 1 "https://bom-host.invalid/" "файлом відомої адреси" "!bom-host"
+printf '%s\n' '203.0.113.88 # origin' 'deploy@198.51.100.9:22' '192.0.2.44/32' >"$T/k-decor"
+KNOWN_OVERRIDE="$T/k-decor" expect "відома адреса з коментарем у файлі — блок, не попередження" 1 "адреса 203.0.113.88" "файлом відомої адреси" "!203.0.113.88"
+KNOWN_OVERRIDE="$T/k-decor" expect "відома адреса з user@ і портом у файлі" 1 "адреса 198.51.100.9" "файлом відомої адреси" "!198.51.100.9"
+KNOWN_OVERRIDE="$T/k-decor" expect "відома адреса з CIDR у файлі" 1 "адреса 192.0.2.44" "файлом відомої адреси" "!192.0.2.44"
+printf '  crlf-host.invalid  \r\n' >"$T/k-crlf"
+KNOWN_OVERRIDE="$T/k-crlf" expect "CRLF і пробіли у файлі відомої адреси" 1 "https://crlf-host.invalid/" "файлом відомої адреси"
+printf 'utf16-host.invalid\n' | iconv -t UTF-16 >"$T/k-utf16"
+KNOWN_OVERRIDE="$T/k-utf16" expect "файл відомої адреси в UTF-16 — 3 без traceback і шляху" 3 "чисто тут" "недоступний" "!Traceback" "!k-utf16"
+printf '\n  \n' >"$T/k-empty"
+KNOWN_OVERRIDE="$T/k-empty" expect "порожній файл відомої адреси — 3, а не «чисто»" 3 "чисто тут" "не перевірено"
+KNOWN_OVERRIDE="none" expect "LEAK_ORIGIN_FILE=none — правило 1 свідомо вимкнено, чисто — 0" 0 "чисто тут" "правило 1 вимкнено"
+KNOWN_OVERRIDE="none" expect "LEAK_ORIGIN_FILE=none — адреси й далі блок" 1 "10.1.2.3" "блок"
 
 # ─── 5. Кілька файлів і помилки виклику ──────────────────────────────────────
 printf 'чисто\n' >"$T/a.md"
@@ -124,6 +155,7 @@ if [[ $rc == 2 ]]; then ok "неіснуючий файл — exit 2, а не «
 # ─── 6. Мутації: кожне правило тримається тестом ────────────────────────────
 if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
   src="$(<"$SCRIPT")"
+  printf 'Звичайний опис PR без адрес.\n' >"$T/clean.md"
   mutate() { # mutate <назва> <було> <стало> — «було» мусить стояти в скрипті рівно раз
     local name="$1" from="$2" to="$3" rest m="$T/mut.$((++n)).sh"
     rest="${src#*"$from"}"
@@ -132,6 +164,15 @@ if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
       return
     fi
     printf '%s\n' "${src/"$from"/"$to"}" >"$m"
+    # Мутант мусить бути живим: на чистому тексті — вихід 0, 1 або 3 і без traceback.
+    # Інакше його «вбив» би будь-який збій (синтаксична помилка python), а не сценарій
+    # його правила.
+    LEAK_ORIGIN_FILE="$KNOWN" bash "$m" "$T/clean.md" >"$m.clean" 2>&1
+    local crc=$?
+    if [[ $crc != [013] ]] || grep -qE 'Traceback|SyntaxError' "$m.clean"; then
+      bad "мутант «$name» нежиттєздатний (exit $crc): $(tail -1 "$m.clean")"
+      return
+    fi
     if CHECK_LEAK_UNDER_TEST="$m" bash "$HERE/$(basename "$0")" >"$m.out" 2>&1; then
       bad "мутант ВИЖИВ: $name"
     else
@@ -139,24 +180,47 @@ if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
     fi
   }
   n=0
-  mutate "будь-який збіг — вихід 0 (вада 2026-09-30)" 'sys.exit(1 if blocked else 0)' 'sys.exit(0)'
+  mutate "будь-який збіг — вихід 0 (вада 2026-09-30)" \
+    '    print(f"check-leak: блок — знайдено {len(blocked)}; публікувати не можна")
+    sys.exit(1)' \
+    '    print(f"check-leak: блок — знайдено {len(blocked)}; публікувати не можна")
+    sys.exit(0)'
+  mutate "без файла відомої адреси — «чисто»" \
+    '    print("check-leak: не перевірено — без файла відомої адреси публікувати не можна")
+    sys.exit(3)' \
+    '    print("check-leak: не перевірено — без файла відомої адреси публікувати не можна")
+    sys.exit(0)'
   mutate "файл відомої адреси не перевіряється" 'hit = any(p in scan.casefold() for p in known_fold)' 'hit = False'
   mutate "регістр відомого рядка враховується" 'hit = any(p in scan.casefold() for p in known_fold)' 'hit = any(p in scan for p in known)'
-  mutate "відомі адреси не порівнюються як адреси" 'if hit or any(is_known(addr) for _, addr in found):' 'if hit:'
+  mutate "відомі адреси не порівнюються як адреси" 'if hit or any(forms(addr) & known_ips for _, addr in found):' 'if hit:'
+  mutate "адреси з прикрашених рядків відомого файла не беруться" '        for _, a in find_ipv4(nk) + find_ipv6(nk):' '        for _, a in []:'
+  mutate "BOM з'їдає перший рядок відомого файла" 'encoding="utf-8-sig"' 'encoding="utf-8"'
+  mutate "LEAK_ORIGIN_FILE=none не вимикає правило" 'if known_path == "none":' 'if False:'
+  mutate "IPv4-mapped і 6to4 не розпізнаються" '        for v4 in (addr.ipv4_mapped, addr.sixtofour):' '        for v4 in ():'
+  mutate "NAT64 не розпізнається" 'if addr in NAT64 or (addr in V4_COMPAT and int(addr) > 1):' 'if False:'
   mutate "документаційні діапазони блокують" 'warned.append' 'blocked.append'
-  mutate "IPv6 не шукається" 'found += find_ipv6(scan)' 'found += []'
-  mutate "кандидат без hex-цифри — адреса" 'if not re.search(r"[0-9A-Fa-f]", cand):' 'if False:'
-  mutate "IPv4 не шукається" 'for m in IPV4.finditer(scan):' 'for m in []:'
-  mutate "IPv6 лише з початку кандидата" 'starts = [0] + [k + 1 for k, c in enumerate(text) if c == ":"]' 'starts = [0]'
-  mutate "провідні нулі — не адреса" 'return ipaddress.ip_address(".".join(str(int(x)) for x in parts))' 'return None'
-  mutate "markdown-екранування не знімається" 'scan = line.replace("\\.", ".")' 'scan = line'
   mutate "RFC 5737 — лише одна мережа" '("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")' '("192.0.2.0/24",)'
-  mutate "шлях LEAK_ORIGIN_FILE друкується" 'print("check-leak: попередження — файла відомої адреси немає, правило 1 не діє"' 'print(f"check-leak: попередження — файла відомої адреси немає ({known_path}), правило 1 не діє"'
-  mutate "порожні рядки файла відомої адреси лишаються" 'if ln.strip()]' ']'
-  mutate "документаційні — лише RFC 5737" '"2001:db8::/32"' '"2001:db8::/128"'
+  mutate "документаційні — без RFC 3849" '"2001:db8::/32"' '"2001:db8::/128"'
+  mutate "IPv6 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv4(scan)'
+  mutate "IPv4 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv6(scan)'
+  mutate "IPv4 — лише перше вікно з чотирьох частин" '        for k in range(len(parts) - 3):' '        for k in range(min(1, len(parts) - 3)):'
+  mutate "IPv6 лише з початку кандидата" 'starts = [0] + [k + 1 for k, c in enumerate(text) if c == ":"]' 'starts = [0]'
+  mutate "IPv6 може починатися після ::" '            if s >= 2 and text[s - 2 : s] == "::":' '            if False:'
+  mutate "ліва межа IPv6 не перевіряється" 'if s < covered or (t0 + s > 0 and word_char(line[t0 + s - 1])):' 'if s < covered:'
+  mutate "права межа IPv6 не перевіряється" '                if t0 + end < len(line) and word_char(line[t0 + end]):' '                if False:'
+  mutate "_ — не частина слова" '    return c.isalnum() or c == "_"' '    return c.isalnum()'
+  mutate "кандидат без hex-цифри — адреса" 'if not re.search(r"[0-9A-Fa-f]", cand):' 'if False:'
+  mutate "провідні нулі — не адреса" 'return ipaddress.ip_address(".".join(str(int(x)) for x in parts))' 'return None'
+  mutate "екранування й дефанг не знімаються" \
+    'return line.replace("\\.", ".").replace("\\-", "-").replace("\\_", "_").replace("[.]", ".")' 'return line'
+  mutate "порожні рядки файла відомої адреси лишаються" 'known = [ln.strip() for ln in fh if ln.strip()]' 'known = [ln.strip() for ln in fh]'
   mutate "вміст відомого рядка друкується" \
     'report(blocked, f, i, "збіг з файлом відомої адреси (вміст не друкується)")' \
     'report(blocked, f, i, "збіг з файлом відомої адреси: " + line.strip())'
+  mutate "шлях LEAK_ORIGIN_FILE друкується" \
+    'print("check-leak: файл відомої адреси недоступний (немає, не читається або порожній) — правило 1 не перевірено", file=sys.stderr)' \
+    'print(f"check-leak: файл відомої адреси недоступний ({known_path}) — правило 1 не перевірено", file=sys.stderr)'
+  mutate "невалідний UTF-8 у тексті — крах" 'encoding="utf-8", errors="replace"' 'encoding="utf-8"'
   mutate "неіснуючий файл — не помилка" '[[ -f "$f" ]] || {' '[[ -e / ]] || {'
 fi
 

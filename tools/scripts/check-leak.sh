@@ -17,15 +17,29 @@
 #      198.51.100.0/24, 203.0.113.0/24) і RFC 3849 (2001:db8::/32). Їх пишуть у
 #      прикладах навмисно.
 #
-# ЧОГО НЕ ДОВОДИТЬ. Шукає адреси й рядки відомого файла, а не секрети взагалі
-# (токени, ключі) і не імена машин. Без файла відомої адреси правило 1 не діє —
-# про це друкується попередження. Рядок на кшталт версії з чотирьох чисел
-# (1.2.3.4) — теж «адреса»: помилка в бік блоку.
+# Що ще ловить (рецензія #170, Flash і окрема сесія Claude): регістр і BOM у файлі
+# відомої адреси, адреси з «прикрашених» рядків (`# коментар`, `user@`, `:порт`,
+# `/32`), відому IPv4 у записах IPv6 (mapped, 6to4, NAT64), markdown-екранування й
+# дефанг `[.]`, IPv4 з провідними нулями, `IP.порт` з tcpdump.
+#
+# ЧОГО НЕ ДОВОДИТЬ.
+#   - Секрети взагалі (токени, ключі) й імена машин — лише адреси й рядки відомого файла.
+#   - Рідкісні записи IPv4: ціле (2130706433), шістнадцяткове (0x7f000001),
+#     вісімкове як таке (0177.0.0.1 читається як десяткове 177.0.0.1), скорочене (127.1).
+#   - IPv6 впритул після літери (`адреса2a01:…`) — межу слова не перейти без
+#     хибних тривог на коді.
+#   - Помилка в бік блоку: версія з чотирьох чисел (6.6.87.2) і вісім hex-байтів
+#     через двокрапку (WWN) — теж «адреси».
+#   - Механічно перевірку ніщо не вмикає: її запускає оркестратор перед `gh`.
 #
 # Використання: tools/scripts/check-leak.sh <файл>...
 #   LEAK_ORIGIN_FILE — файл відомої адреси, по одному шаблону в рядку
-#                      (дефолт ~/.flatcraft/leak/origin-host).
-# Вихід: 0 — чисто (попередження можливі); 1 — блок; 2 — помилка виклику.
+#                      (дефолт ~/.flatcraft/leak/origin-host);
+#                      `none` — свідомо без правила 1 (чиста копія, хмарна сесія).
+# Вихід: 0 — чисто (попередження можливі); 1 — блок; 2 — помилка виклику;
+#        3 — не перевірено: файл відомої адреси недоступний (немає, не читається,
+#        порожній). 3, а не 0: перевірка, що мовчки пропускає без конфігурації, —
+#        та сама вада, що до 2026-09-30.
 set -uo pipefail
 
 if [[ $# -eq 0 ]]; then
@@ -41,7 +55,6 @@ done
 
 exec python3 - "${LEAK_ORIGIN_FILE:-$HOME/.flatcraft/leak/origin-host}" "$@" <<'PY'
 import ipaddress
-import os
 import re
 import sys
 
@@ -51,13 +64,21 @@ DOC_NETS = {
     "RFC 5737": [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")],
     "RFC 3849": [ipaddress.ip_network(n) for n in ("2001:db8::/32",)],
 }
-# Межі — не цифра й не «цифра.» перед, не цифра й не «.цифра» після: так крапка в
-# кінці речення не ховає адресу, а версія 2.1.272 не стає нею.
-IPV4 = re.compile(r"(?<![0-9])(?<![0-9]\.)(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])(?!\.[0-9])")
-# Кандидат IPv6 — будь-яка послідовність hex-цифр, двокрапок і крапок щонайменше з
-# двома двокрапками. Далі find_ipv6 шукає в ній адресу; регулярний вираз з межами
-# (перша версія) пропускав `server:2a01:…` і адреси з 8 двокрапками — рецензія #170.
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
+V4_COMPAT = ipaddress.ip_network("::/96")
+
+# IPv4 — будь-яке вікно з чотирьох частин у послідовності чисел через крапку. Так
+# `10.0.0.5.51234` (tcpdump) і `ver1.8.8.8.8` дають адресу, а версія 2.1.272 —
+# ні: у ній лише три частини. Перша версія з межами «не .цифра» пропускала їх (#170).
+DOTTED = re.compile(r"(?<![0-9])[0-9]+(?:\.[0-9]+){3,}")
+# Кандидат IPv6 — послідовність hex-цифр, двокрапок і крапок; саму адресу в ньому
+# шукає find_ipv6.
 V6_TOKEN = re.compile(r"[0-9A-Fa-f:.]+")
+
+
+def word_char(c):
+    # `_` — теж частина слова: інакше `my_d::bad_alloc` і `::add_one` стали б адресами.
+    return c.isalnum() or c == "_"
 
 
 def parse_ip(text):
@@ -73,13 +94,25 @@ def parse_ip(text):
     return None
 
 
+def find_ipv4(line):
+    out = []
+    for m in DOTTED.finditer(line):
+        parts = m.group(0).split(".")
+        for k in range(len(parts) - 3):
+            text = ".".join(parts[k : k + 4])
+            addr = parse_ip(text)
+            if addr is not None:
+                out.append((text, addr))
+    return out
+
+
 def find_ipv6(line):
     """(текст, адреса) для кожної IPv6 у рядку.
 
-    Адреса починається на початку кандидата або одразу після його двокрапки (так
-    `server:2a01:…` дає `2a01:…`), і перед нею та після неї не стоїть літера чи
-    цифра — тож `d::` у `std::vector` не адреса. З кількох кінців береться
-    найдовший; уже знайдену адресу не ріжемо на коротші.
+    Адреса починається на початку кандидата або одразу після одинарної двокрапки
+    (`server:2a01:…`), але не після `::` (`crate::a::b` — шлях, а не адреса); перед
+    нею й після неї не стоїть літера, цифра чи `_` (`std::vector`). З кількох кінців
+    береться найдовший; уже знайдену адресу не ріжемо на коротші.
     """
     out = []
     for tok in V6_TOKEN.finditer(line):
@@ -89,10 +122,12 @@ def find_ipv6(line):
         starts = [0] + [k + 1 for k, c in enumerate(text) if c == ":"]
         covered = 0
         for s in starts:
-            if s < covered or (t0 + s > 0 and line[t0 + s - 1].isalnum()):
+            if s < covered or (t0 + s > 0 and word_char(line[t0 + s - 1])):
+                continue
+            if s >= 2 and text[s - 2 : s] == "::":
                 continue
             for end in range(len(text), s + 1, -1):
-                if t0 + end < len(line) and line[t0 + end].isalnum():
+                if t0 + end < len(line) and word_char(line[t0 + end]):
                     continue
                 cand = text[s:end]
                 if cand.count(":") < 2:
@@ -108,6 +143,25 @@ def find_ipv6(line):
     return out
 
 
+def normalize(line):
+    # Markdown-екранування (`10\.0\.0\.1`, `secret\-origin`) і дефанг (`10[.]0[.]0[.]1`)
+    # не міняють адреси.
+    return line.replace("\\.", ".").replace("\\-", "-").replace("\\_", "_").replace("[.]", ".")
+
+
+def forms(addr):
+    """Сама адреса і IPv4, вбудована в IPv6: mapped, 6to4, NAT64, IPv4-compatible.
+    Відома IPv4 у будь-якому з цих записів — усе одно відома і не друкується."""
+    out = {addr}
+    if addr.version == 6:
+        for v4 in (addr.ipv4_mapped, addr.sixtofour):
+            if v4 is not None:
+                out.add(v4)
+        if addr in NAT64 or (addr in V4_COMPAT and int(addr) > 1):
+            out.add(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
+    return out
+
+
 def doc_range(addr):
     for rfc, nets in DOC_NETS.items():
         if any(addr in n for n in nets):
@@ -115,18 +169,36 @@ def doc_range(addr):
     return None
 
 
-known = []
-if os.path.isfile(known_path):
-    with open(known_path, encoding="utf-8") as fh:
-        # Порожній шаблон збігся б з кожним рядком — відкидаємо.
-        known = [ln.strip() for ln in fh if ln.strip()]
+# Файл відомої адреси. Без нього правило 1 не діє — і це не «чисто», а «не
+# перевірено» (вихід 3): перевірка, що мовчки пропускає без конфігурації, — та сама
+# вада, що в перевірки поза git до 2026-09-30. Свідомо вимкнути правило можна лише
+# явно: LEAK_ORIGIN_FILE=none. Шлях не друкуємо: у змінній помилково може стояти
+# сама адреса; причину помилки теж — у ній шлях.
+known, known_ips, rule1 = [], set(), "ok"
+if known_path == "none":
+    rule1 = "off"
+    print("check-leak: попередження — правило 1 вимкнено (LEAK_ORIGIN_FILE=none)", file=sys.stderr)
 else:
-    # Шлях не друкуємо: у LEAK_ORIGIN_FILE помилково може стояти сама адреса.
-    print("check-leak: попередження — файла відомої адреси немає, правило 1 не діє", file=sys.stderr)
-# Ім'я хоста не залежить від регістру, а одна IPv6 має кілька записів — тому
-# порівнюємо і текст без регістру, і самі адреси.
-known_fold = [k.casefold() for k in known]
-known_ips = {a for a in (parse_ip(k) for k in known) if a is not None}
+    try:
+        # utf-8-sig — щоб BOM (Notepad) не з'їв перший рядок.
+        with open(known_path, encoding="utf-8-sig") as fh:
+            known = [ln.strip() for ln in fh if ln.strip()]
+    except (OSError, UnicodeError):
+        known = []
+    if not known:
+        rule1 = "unusable"
+        print("check-leak: файл відомої адреси недоступний (немає, не читається або порожній) — правило 1 не перевірено", file=sys.stderr)
+    for k in known:
+        # Адреси беремо й з «прикрашених» рядків: `203.0.113.77 # origin`,
+        # `deploy@198.51.100.9:22`, `192.0.2.44/32`.
+        nk = normalize(k)
+        for _, a in find_ipv4(nk) + find_ipv6(nk):
+            known_ips |= forms(a)
+        a = parse_ip(k)
+        if a is not None:
+            known_ips |= forms(a)
+# Ім'я хоста не залежить від регістру — порівнюємо текст без регістру.
+known_fold = [normalize(k).casefold() for k in known]
 
 blocked, warned = [], []
 
@@ -135,24 +207,13 @@ def report(bucket, f, i, what):
     bucket.append(f"{f}:{i}: {what}")
 
 
-def is_known(addr):
-    mapped = getattr(addr, "ipv4_mapped", None)
-    return addr in known_ips or (mapped is not None and mapped in known_ips)
-
-
 for f in files:
     with open(f, encoding="utf-8", errors="replace") as fh:
         for i, line in enumerate(fh, 1):
-            # `10\.0\.0\.1` — markdown-екранування крапок; адреса та сама.
-            scan = line.replace("\\.", ".")
+            scan = normalize(line)
             hit = any(p in scan.casefold() for p in known_fold)
-            found = []
-            for m in IPV4.finditer(scan):
-                addr = parse_ip(m.group(0))
-                if addr is not None:
-                    found.append((m.group(0), addr))
-            found += find_ipv6(scan)
-            if hit or any(is_known(addr) for _, addr in found):
+            found = find_ipv4(scan) + find_ipv6(scan)
+            if hit or any(forms(addr) & known_ips for _, addr in found):
                 # Решту адрес цього рядка теж не друкуємо: серед них може бути відома.
                 report(blocked, f, i, "збіг з файлом відомої адреси (вміст не друкується)")
                 continue
@@ -169,7 +230,10 @@ for b in blocked:
     print(f"БЛОК  {b}")
 if blocked:
     print(f"check-leak: блок — знайдено {len(blocked)}; публікувати не можна")
-else:
-    print(f"check-leak: чисто (попереджень: {len(warned)})")
-sys.exit(1 if blocked else 0)
+    sys.exit(1)
+if rule1 == "unusable":
+    print("check-leak: не перевірено — без файла відомої адреси публікувати не можна")
+    sys.exit(3)
+print(f"check-leak: чисто (попереджень: {len(warned)})")
+sys.exit(0)
 PY
