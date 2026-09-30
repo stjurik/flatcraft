@@ -1,3 +1,5 @@
+> Історичний промпт 13.08. Розійшлося з результатом: z_bracket ховає bends так само, як l_bracket і corner_angle (Hotfix 2.10.e); пункт DoD у docs/12 прибрано 30.09 — контракт без згоди yurii не міняється.
+
 [RUN T2 — форма студії читає `ui.visibleFields` (issue #96)]
 
 МЕТА

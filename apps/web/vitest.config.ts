@@ -14,7 +14,7 @@ export default defineConfig({
     // збігається і з "@flatcraft/ui/parameter-form" — тож вужчий запис іде першим.
     alias: [
       // Issue #96: справжня форма (без R3F) — для тесту складу форми
-      // (registry-template-editor.visible-fields.test.tsx). Із src, не з dist —
+      // (registry-template-editor-fields.test.tsx). Із src, не з dist —
       // з тієї ж причини, що й стаб нижче.
       {
         find: "@flatcraft/ui/parameter-form",
