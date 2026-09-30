@@ -492,7 +492,7 @@ deny-правила перенесені в git (`.claude/settings.autonomous.js
 
 **Останні 3 milestones:**
 
-- **Крок 5 T5 — середовище на A8** (2026-09-29, PR #157): три критерії виходу виміряно; deny-правила агента — `.claude/settings.autonomous.json`.
+- **Крок 5 T5 — середовище на A8** (2026-09-29, PR #157): критерії виходу виміряно, ребут — м'який; deny-правила агента — `.claude/settings.autonomous.json`.
 - **Master Run 14 — інспекція + контракт** (2026-08-11, стадія 1 — PR #104): таблиці A–G з доказами, ADR-038..041, T5 у вісім кроків.
 - **A8 preflight** (2026-08-09, PR #103): `docs/19`, треки A–D; `yurii` — адмін, `runner` і `agent` — без sudo; на A8 немає vault-пароля, ключа до Mirohost і GHCR-токена на запис.
 
