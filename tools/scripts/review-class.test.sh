@@ -42,6 +42,7 @@ done <<'EOF'
 дозволи й безпека|tools/agy/permissions.json
 дозволи й безпека|tools/scripts/install-orchestrator-profile.sh
 дозволи й безпека|tools/scripts/check-forbidden-paths.test.sh
+дозволи й безпека|tools/scripts/check-leak.sh
 дозволи й безпека|tools/scripts/claude-review-session.sh
 дозволи й безпека|tools/scripts/probe-profile-rules.sh
 дозволи й безпека|tools/scripts/review-class.sh

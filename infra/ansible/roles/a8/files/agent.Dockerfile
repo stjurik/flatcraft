@@ -54,5 +54,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libgl1 libglu1-mesa libxrender1 libxext6 libxi6 libsm6 libfontconfig1 \
  && rm -rf /var/lib/apt/lists/*
+# jq — для скриптів і оракулів, що розбирають JSON (збирачі пульта, ADR-042,
+# issue #160). Виміряно yurii на A8 2026-09-30: у образі його НЕМАЄ. Окремий шар,
+# а не додаток до переліку вище: той перелік — еталон бібліотек воркера, його
+# паритет тримає інваріант 9, і інструмент, якого воркер не потребує, його б
+# розмивав. jq є в Debian bookworm, тож окремих джерел пакетів не треба.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends jq \
+ && rm -rf /var/lib/apt/lists/*
 # Користувача НЕ задаємо: UID визначає a8-run-agent (`--user 1002:1002`),
 # бо він мусить збігатися з власником репо на хості (вимір №6).
