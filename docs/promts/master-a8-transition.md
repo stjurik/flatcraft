@@ -67,8 +67,9 @@ ls -la
 користувачі `yurii`/`runner`/`agent`, UFW active, `DOCKER-USER` з автовідновленням.
 **Автономність після знеструмлення підтверджена емпірично** — 8 год 55 хв, машина піднялась сама.
 
-**Канали доступу:** `a8-lan` (`192.168.1.20` через `ProxyJump owrt-ts`) — робочий, ним і
-працюй; `a8-ts` (`100.110.195.49`) — індикатор. Прямий `a8` — won't fix.
+**Канали доступу:** `a8-lan` (через `ProxyJump owrt-ts`) — робочий, ним і
+працюй; `a8-ts` — індикатор. Прямий `a8` — won't fix. Адреси — у [`PROGRESS.md`](https://github.com/stjurik/a8-ops/blob/main/PROGRESS.md)
+приватного `stjurik/a8-ops`; тут їх не пишемо.
 
 **Уже в git, не переробляй** (коміт `5e11cf6`): `.claude/settings.autonomous.json` +
 `autorun.sh --settings`; `prove-red-before-green.sh`; `check-deny-parity.sh`; job `guards`
