@@ -115,6 +115,13 @@ mk st-edit base "$J" 's/\*\*1\*\*/**0**/'
 mk st-del-row base "$J" 's/\| 2026-09-24 [^\n]*\n//'
 mk st-reorder base "$J" 's/(\| 2026-09-24 [^\n]*\n)(\| 2026-09-25 [^\n]*\n)/$2$1/'
 "${GIT[@]}" switch -q -c st-rm base && "${GIT[@]}" rm -q "$J" && "${GIT[@]}" commit -qm st-rm
+# Рядок без замикаючого `|`: зміна останньої клітинки — теж зміна.
+mk st-nopipe-base base "$J" 's/\z/| 2026-09-26 | рецензія #3 | Gemini 3.8 Flash (High) | **1**\n/'
+mk st-nopipe-edit st-nopipe-base "$J" 's/\| \*\*1\*\*\n\z/| **0**\n/'
+mk st-nopipe-pipe st-nopipe-base "$J" 's/(\| \*\*1\*\*)\n\z/$1 |\n/'
+# Підзаголовок третього рівня — не запис журналу (межа перевірки).
+mk sub-base base "$L" 's/(текст B\n)/$1\n### B.1 — деталь\n\nдеталь\n/'
+mk sub-drop sub-base "$L" 's/\n### B\.1 — деталь\n\nдеталь\n//'
 # Обидва журнали зіпсовано одразу.
 mk both-bad base "$J" 's/\*\*1\*\*/**0**/'
 perl -0pi -e 's/## C — третій запис \(2026-09-03\)\n\nтекст C\n\n//' "$G/$L" && "${GIT[@]}" commit -qam "both-bad: docs/13"
@@ -140,6 +147,9 @@ run "agy-stats: змінено старий рядок — блок" base st-edi
 run "agy-stats: видалено старий рядок — блок" base st-del-row 1 "agy-stats.md"
 run "agy-stats: переставлено старі рядки — блок" base st-reorder 1 "agy-stats.md"
 run "agy-stats: журнал видалено — блок" base st-rm 1 "agy-stats.md"
+run "agy-stats: рядок без | у кінці, змінено останню клітинку — блок" st-nopipe-base st-nopipe-edit 1 "agy-stats.md"
+run "agy-stats: до рядка дописано замикаючий | — чисто" st-nopipe-base st-nopipe-pipe 0
+run "docs/13: зник підзаголовок ### — не блок (рахуються лише ##)" sub-base sub-drop 0
 run "обидва журнали зіпсовано — два блоки в одному виводі" base both-bad 1 "agy-stats.md" "## C — третій запис" "порушень — 2"
 
 # ─── 3. Помилки виклику — «не звірено», а не «чисто» ───────────────────────
@@ -234,6 +244,8 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
     '[[ "$(head -n "$n" <<<"$new")" == "$old" ]] || return 0' \
     '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0' lib
   mutate "вирівнювання таблиці — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' '' lib
+  mutate "остання клітинка без | губиться" 'last = ($NF ~ /^[ \t]*$/) ? NF - 1 : NF;' 'last = NF - 1;' lib
+  mutate "заголовок — будь-який ##, не лише другого рівня" "headings() { grep -E '^## ' || true; }" "headings() { grep -E '^##' || true; }"
 fi
 
 if [[ $fail == 1 ]]; then
