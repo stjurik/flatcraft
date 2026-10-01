@@ -23,7 +23,12 @@ interface RegistryTemplateEditorProps<Params extends Record<string, unknown>> {
    * `TEMPLATES_WITH_BENDS`, задокументовано незмінно).
    */
   readonly materialCode?: string;
-  /** Product-mode allowlist (ADR-027 Рішення 4) — undefined у part-mode. */
+  /**
+   * Product-mode allowlist (ADR-027 Рішення 4) — undefined у part-mode.
+   * У part-mode fallback на `def.ui.visibleFields` (issue #96 / T2): один
+   * шлях фільтрації полів для обох режимів, з product-allowlist як
+   * найвищим пріоритетом, коли він явно заданий.
+   */
   readonly visibleFields?: readonly string[];
 }
 
@@ -96,12 +101,19 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
     () => new Set(extraControls.filter((c) => c.kind === "segmented").map((c) => c.field)),
     [extraControls],
   );
-  // part-mode: усі поля схеми, крім тих, якими керують segmented-контроли.
-  // product-mode: allowlist продукту (segmented-контроли рендеряться завжди,
-  // незалежно від visibleFields — паритет з наявним perforated-panel-editor).
+  // Пріоритет (issue #96 / T2 — один шлях фільтрації для обох режимів):
+  // 1) product-mode allowlist (проп, явний userEditableFields продукту);
+  // 2) def.ui.visibleFields — декларація шаблону (Hotfix 2.10.e паритет:
+  //    bend_direction/bends/holes ховаються так само, як до Registry ховав
+  //    per-slug `.omit()` у видалених *-editor.tsx);
+  // 3) усі поля схеми, крім тих, якими керують segmented-контроли — зворотна
+  //    сумісність для шаблонів без ui.visibleFields (perforated_panel).
   const effectiveVisibleFields = useMemo(
-    () => visibleFields ?? Object.keys(schema.shape).filter((f) => !segmentedFields.has(f)),
-    [visibleFields, schema, segmentedFields],
+    () =>
+      visibleFields ??
+      def.ui.visibleFields ??
+      Object.keys(schema.shape).filter((f) => !segmentedFields.has(f)),
+    [visibleFields, def.ui.visibleFields, schema, segmentedFields],
   );
 
   return (
