@@ -64,6 +64,7 @@ RULES=(
   'дозволи й безпека|tools/scripts/probe-profile-rules*'
   # Сам механізм рецензії: PR, що його послаблює, не має проходити з однією рецензією.
   'дозволи й безпека|tools/scripts/review-class*'
+  'дозволи й безпека|tools/scripts/journal-rules*'
   'дозволи й безпека|tools/scripts/agy-opus-budget*'
   'дозволи й безпека|infra/ansible/roles/firewall/*'
   # Дозволи ролей і каналів живої Discord-спільноти та код, що їх застосовує (ADR-023).
@@ -89,6 +90,7 @@ RULES=(
   'CI|.github/*'
   'CI|lefthook.yml'
   'CI|tools/scripts/prove-red-before-green*'
+  'CI|tools/scripts/check-journals*'
   # Експорт і валідатори §7: усе, що визначає файли, які отримає виробництво.
   'експорт і валідатори §7|workers/cad/flatcraft_cad/*'
   'експорт і валідатори §7|workers/cad/tests/snapshots/*'
@@ -116,40 +118,17 @@ RULES=(
   'інфраструктура|infra/*'
 )
 
-JOURNAL='docs/promts/inputs/agy-stats.md'
-QUOTA='docs/promts/inputs/agy-quota.md'
-JOURNAL_ROW_RE='^\|[0-9]{4}-[0-9]{2}-[0-9]{2}\|'
-QUOTA_ROW_RE='^\|[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\|'
 BASE="${REVIEW_CLASS_BASE:-origin/main}"
 HEAD_REF="${REVIEW_CLASS_HEAD:-HEAD}"
 
-# Зміст рядка без вирівнювання: клітинки таблиці обрізані від пробілів, роздільник
-# таблиці пропущено, у решті рядків — лише хвостові пробіли. `\|` — символ у клітинці.
-journal_norm() {
-  sed 's/\\|/\x1f/g' | awk -F'|' '
-    /^\|[ \t:-]*-[ \t:|-]*$/ { next }
-    /^\|/ { out = ""; for (i = 2; i < NF; i++) { f = $i; gsub(/^[ \t]+|[ \t]+$/, "", f); out = out "|" f } print out; next }
-    { sub(/[ \t]+$/, ""); if ($0 != "") print }'
+# Правило «журнал лише дописується» — спільне з check-journals.sh (issue #169).
+LIB="$(dirname "${BASH_SOURCE[0]}")/journal-rules.sh"
+[[ -r "$LIB" ]] || {
+  echo "відмова: немає $LIB — клас журналу не визначити" >&2
+  exit 2
 }
-# append_only_violated <файл> <регекс нового рядка> — 0: старий зміст змінено,
-# переставлено чи видалено, дописано щось, крім рядків за регексом у кінці, або
-# звірити не вдалось; 1 — лише дописано такі рядки в кінець (або нічого не змінено).
-append_only_violated() {
-  local file="$1" row_re="$2" mb old new rest n
-  mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0
-  old="$(git show "$mb:$file" 2>/dev/null)" || return 1 # файла в базі не було — усе дописано
-  new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0 # файл видалено
-  old="$(journal_norm <<<"$old")"
-  new="$(journal_norm <<<"$new")"
-  [[ "$new" == "$old" ]] && return 1
-  # Старий зміст — дослівний префікс нового: порядок і розташування теж звіряються.
-  # Через head/tail і просте порівняння: шаблон `"$old"*` на журналі в 300 КБ — 16 с.
-  n="$(wc -l <<<"$old")"
-  [[ "$(head -n "$n" <<<"$new")" == "$old" ]] || return 0
-  rest="$(tail -n +"$((n + 1))" <<<"$new")"
-  [[ -z "$(grep -Ev -- "$row_re" <<<"$rest")" ]] && return 1
-  return 0
-}
+# shellcheck source=tools/scripts/journal-rules.sh
+source "$LIB"
 
 hits=()
 seen=0

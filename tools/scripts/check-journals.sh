@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# check-journals.sh — оракул для PR: журнали лише поповнюються, а не втрачають записи.
+# Порівнює гілку з merge-base(BASE, HEAD), а не з кінчиком main чи з HEAD~1.
+#
+# ЧОМУ ЦЕ ІСНУЄ (issue #169, правило трьох, CLAUDE.md §0 п.6). 2026-09-30 клас
+# помилки «конфлікт у журналі, що лише доповнюється, розв'язали однією стороною»
+# повторився тричі за день: d3acef6, 475cbaa, 6b87384 (веб-редактор GitHub, merge main
+# у гілку ланцюжка). Після merge такої гілки в main зникав запис про попередній PR.
+# Правило оркестратора «конфлікти ланцюжка розв'язую, зберігаючи обидві сторони»
+# тримається на уважності; тут — механізм, який червонить PR сам.
+#
+# ЩО ПЕРЕВІРЯЄ
+#   docs/13_PROGRESS_LOG.md — кожен заголовок `## ` із файла на merge-base лишається в
+#     гілці (з урахуванням повторів: якщо в базі два однакові, в гілці теж мають бути
+#     два). Зниклий заголовок → вихід 1 і його назва у виводі.
+#   docs/promts/inputs/agy-stats.md — лише дописування рядків викликів у кінець. Це
+#     те саме правило, що в review-class.sh (там воно лише КЛАСИФІКУЄ PR як ризиковий,
+#     тут — БЛОКУЄ): одна функція append_only_violated в journal-rules.sh, яку
+#     підключають обидва скрипти.
+#
+# ЧОГО НЕ ДОВОДИТЬ
+#   - Для docs/13 звіряються заголовки, а не текст записів: урізаний запис зі
+#     збереженим заголовком пройде.
+#   - Легітимна правка старого рядка agy-stats.md чи перейменування старого заголовка
+#     docs/13 теж стане червоним. Винятку немає: мітку-виняток, яку ставить лише yurii,
+#     ще не збудовано (#167). Без неї правило довелося б обходити.
+#   - Push прямо в main перевірка бачить лише постфактум; у CI вона йде на PR і на
+#     push у ai/**. Push у main заборонено профілем оркестратора.
+#
+# ВИКОРИСТАННЯ (з кореня репо, з повною історією — у CI `fetch-depth: 0`):
+#   bash tools/scripts/check-journals.sh
+# Змінні: CHECK_JOURNALS_BASE (дефолт origin/main), CHECK_JOURNALS_HEAD (дефолт HEAD).
+#
+# exit 0 — журнали цілі; 1 — порушення (список у виводі); 2 — не вдалося звірити
+# (немає бібліотеки правила чи спільного предка): сумнів іде проти PR, а не «чисто».
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE="${CHECK_JOURNALS_BASE:-origin/main}"
+HEAD_REF="${CHECK_JOURNALS_HEAD:-HEAD}"
+PROGRESS_LOG='docs/13_PROGRESS_LOG.md'
+
+LIB="$HERE/journal-rules.sh"
+[[ -r "$LIB" ]] || {
+  echo "відмова: немає $LIB — журнали не звірено" >&2
+  exit 2
+}
+# shellcheck source=tools/scripts/journal-rules.sh
+source "$LIB"
+
+mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || {
+  echo "відмова: немає спільного предка $BASE і $HEAD_REF — журнали не звірено (у CI потрібен fetch-depth: 0)" >&2
+  exit 2
+}
+
+# Заголовки другого рівня в порядку файла. Порожній збіг — не помилка.
+headings() { grep -E '^## ' || true; }
+
+violations=()
+
+# ─── docs/13: заголовки з бази лишаються в гілці ──────────────────────────
+if old="$(git show "$mb:$PROGRESS_LOG" 2>/dev/null)"; then
+  new="$(git show "$HEAD_REF:$PROGRESS_LOG" 2>/dev/null)" || new="" # файл видалено — зникли всі
+  old_h="$(headings <<<"$old")"
+  new_h="$(headings <<<"$new")"
+  # Заголовок із бази «з'їдає» один такий самий із гілки; хто лишився без пари — зник.
+  # Звірка за ім'ям файла, а не за NR==FNR: порожній перший вхід зламав би другий.
+  missing="$(awk 'FILENAME == ARGV[1] { c[$0]++; next } { if (c[$0] > 0) c[$0]--; else print }' \
+    <(printf '%s\n' "$new_h") <(printf '%s\n' "$old_h"))"
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    violations+=("$PROGRESS_LOG: зник заголовок «$h»")
+  done <<<"$missing"
+fi
+
+# ─── agy-stats.md: лише дописування ───────────────────────────────────────
+if append_only_violated "$JOURNAL" "$JOURNAL_ROW_RE"; then
+  violations+=("$JOURNAL: старий зміст змінено, переставлено чи видалено, або дописано щось, крім нових рядків таблиці в кінці")
+fi
+
+if ((${#violations[@]})); then
+  printf 'БЛОК  %s\n' "${violations[@]}"
+  echo "check-journals: порушень — ${#violations[@]} (база порівняння ${mb:0:7}); журнал лише доповнюється"
+  exit 1
+fi
+echo "check-journals: журнали цілі (база порівняння ${mb:0:7})"
