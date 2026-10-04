@@ -20,10 +20,9 @@
 #   inbox-pull.sh mark <N> <підсумок> <файл-коментаря>
 #       підсумок: «в беклозі» | «потрібна відповідь» | «відхилено»
 #
-# Що «нерозібране»: відкрите issue без мітки «оброблено» — або з міткою «потрібна
-# відповідь», якщо останній коментар написав yurii (у коментарях оркестратора є
-# прихована позначка INBOX_MARK). Так відповідь yurii повертає issue на розбір без
-# зайвого натискання.
+# Що «нерозібране»: відкрите issue без мітки «оброблено» — дослівно за рішенням yurii.
+# Коментарі оркестратора несуть приховану позначку INBOX_MARK: в issue.md видно, хто
+# що написав.
 #
 # Що лягає в _inbox/<N>/:
 #   issue.md           — заголовок, мітки, посилання, текст і коментарі;
@@ -95,26 +94,24 @@ fi
 top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "не в git-дереві — запускайте з робочого дерева flatcraft"
 [[ -f "$top/docs/18_NEW_PART_SPEC.md" && -f "$top/tools/inbox/labels.tsv" ]] ||
   die "«$top» — не flatcraft; деінде скрипт не пише"
+# Лише головне дерево: agy пише тільки в його docs/promts/inputs/, а не у worktree.
+[[ "$(git -C "$top" rev-parse --path-format=absolute --git-dir)" == "$(git -C "$top" rev-parse --path-format=absolute --git-common-dir)" ]] ||
+  die "«$top» — git worktree; запускайте в головному дереві (~/hart), куди може писати agy"
 rel="docs/promts/inputs/_inbox"
 out="$top/$rel"
 # Посилання — до check-ignore: той за посиланням теж відмовить, але з хибною причиною.
 for p in "$top/docs/promts/inputs" "$out"; do
   [[ -L "$p" ]] && die "$p — символьне посилання; пишу лише в справжню теку"
 done
-git -C "$top" check-ignore -q "$rel/1/issue.md" ||
+# Саму теку, а не файл у ній: правило `*.md` зробило б issue.md «ігнорованим», а
+# зображення поруч — ні (рецензія Gemini 3.8 Flash).
+git -C "$top" check-ignore -q "$rel/" ||
   die "$rel не в .gitignore — вміст приватного репозиторію пішов би в публічний; відмова"
 mkdir -p "$out"
 
 # ─── pull: що забрати ────────────────────────────────────────────────────────
 list="$(gh issue list -R "$INBOX" --state open --limit 200 --json number,labels)" || die "gh: список $INBOX не прочитано" 1
-new="$(jq -r '.[] | select([.labels[].name] | index("оброблено") | not) | .number' <<<"$list")"
-waiting="$(jq -r '.[] | select([.labels[].name] | (index("оброблено") and index("потрібна відповідь"))) | .number' <<<"$list")"
-picked=()
-for n in $new; do picked+=("$n"); done
-for n in $waiting; do
-  last="$(gh api "repos/$INBOX/issues/$n/comments" --paginate -q '.[-1].body // ""')" || die "gh: коментарі #$n не прочитано" 1
-  [[ -n "$last" && "$last" != *"$INBOX_MARK"* ]] && picked+=("$n")
-done
+mapfile -t picked < <(jq -r '.[] | select([.labels[].name] | index("оброблено") | not) | .number' <<<"$list")
 if ((${#picked[@]} == 0)); then
   echo "inbox-pull: нерозібраних немає"
   exit 0
@@ -128,6 +125,7 @@ fetch_images() {
   local dir="$1" k=0 url clean f mime ext
   shift
   : >"$dir/images.txt"
+  # Тег може бути розбитий на рядки; `data-canonical-src` — не той src (рецензія Flash).
   while IFS= read -r url; do
     [[ -z "$url" ]] && continue
     # Заміна в лапках: у bash 5.2 голий `&` у заміні означає «знайдений текст».
@@ -161,7 +159,8 @@ fetch_images() {
     esac
     mv "$f" "$f.$ext"
     echo "img-$k.$ext ← $clean" >>"$dir/images.txt"
-  done < <(printf '%s\n' "$@" | grep -oE '<img [^>]*src="https://[^"]+"' | sed -E 's/.*src="([^"]+)"/\1/')
+  done < <(printf '%s\n' "$@" | tr '\n' ' ' | grep -oE '<img [^>]*>' |
+    sed -nE 's/.*[[:space:]]src="(https:\/\/[^"]+)".*/\1/p')
 }
 
 for n in "${picked[@]}"; do
