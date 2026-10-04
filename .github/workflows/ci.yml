@@ -46,6 +46,26 @@ jobs:
             bash "$t"
           done
 
+  # Журнали лише доповнюються (issue #169, правило трьох): заголовки docs/13 з бази
+  # лишаються в PR, agy-stats.md — тільки дописування. Окремий job, бо «Guard-скрипти»
+  # робить checkout з глибиною 1 і merge-base не бачить: тут потрібна повна історія.
+  # На PR і на push у ai/**: PR демона A8 створює a8-pr.yml під GITHUB_TOKEN, і його
+  # pull_request-прогін висить в action_required (див. коментар до `on.push`), тож чек
+  # для нього дає саме push. Push у main — не тут: порівнювати його ні з чим.
+  journals:
+    name: Журнали (docs/13, agy-stats)
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/ai/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          # У pull_request checkout за замовчуванням дає merge-ref (main + PR), де
+          # запис main ще на місці. Звіряти треба коміт самого PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Заголовки docs/13 лишаються, agy-stats лише дописується
+        run: bash tools/scripts/check-journals.sh
+
   install:
     name: Install + lockfile check
     runs-on: ubuntu-latest
