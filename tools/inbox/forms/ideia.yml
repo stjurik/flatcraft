@@ -1,0 +1,37 @@
+name: Ідея виробу
+description: Новий виріб для каталогу
+title: "Ідея: "
+labels: ["ідея", "нове"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Назва
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Для чого
+    validations:
+      required: true
+  - type: textarea
+    id: refs
+    attributes:
+      label: Фото, ескізи, посилання на джерела
+      description: Перетягніть зображення сюди; посилання — по одному в рядку
+    validations:
+      required: false
+  - type: textarea
+    id: known
+    attributes:
+      label: Що відомо
+      description: Розміри, матеріал, товщина — що є
+    validations:
+      required: false
+  - type: textarea
+    id: params
+    attributes:
+      label: Що користувач має налаштовувати
+    validations:
+      required: false
