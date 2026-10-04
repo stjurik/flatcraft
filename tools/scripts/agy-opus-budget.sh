@@ -164,5 +164,6 @@ fi
 if ((n >= limit)); then
   echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"
 else
-  echo "→ контрприклади ризикового PR: agy, Claude Opus 4.6 (--model claude-opus-4-6-thinking)"
+  # Без назви моделі (рішення yurii 2026-10-04): модель визначає автор PR, таблиця §3.1.
+  echo "→ контрприклади ризикового PR: agy, модель, відмінна від автора PR (orchestrator-autonomy.md §3.1)"
 fi
