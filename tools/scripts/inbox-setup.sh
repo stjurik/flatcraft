@@ -9,11 +9,11 @@
 # Пише в hart-inbox лише дві речі: мітки і файли `.github/ISSUE_TEMPLATE/<ім'я>`
 # з `tools/inbox/forms/`. Issues не чіпає.
 #
-# Використання: tools/scripts/inbox-setup.sh   (INBOX_REPO — дефолт stjurik/hart-inbox)
+# Використання: tools/scripts/inbox-setup.sh   (репозиторій зашитий — як в inbox-pull.sh)
 # Вихід: 0 — гаразд; 1 — збій gh; 2 — немає джерела.
 set -euo pipefail
 
-INBOX="${INBOX_REPO:-stjurik/hart-inbox}"
+INBOX="stjurik/hart-inbox"
 SRC="$(cd "$(dirname "$0")/../inbox" 2>/dev/null && pwd)" || {
   echo "inbox-setup: немає tools/inbox" >&2
   exit 2

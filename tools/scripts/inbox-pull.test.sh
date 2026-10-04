@@ -77,7 +77,8 @@ cat >"$D/inbox-list.json" <<'EOF'
   {"number": 6, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
   {"number": 7, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
   {"number": 8, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
-  {"number": 9, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]}
+  {"number": 9, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 10, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]}
 ]
 EOF
 echo '[{"number": 5, "title": "Кнопка експорту зникає на телефоні"}]' >"$D/backlog.json"
@@ -94,14 +95,20 @@ jq -n --arg h "$H" '{
   created_at: "2026-10-04T10:00:00Z", labels: [{name: "зауваження"}, {name: "нове"}],
   body: "### Сторінка\n\nhttps://staging.hart.crimea.ua/studio\n\n### Що не так / що хочу\n\nКнопка ховається",
   body_html: $h}' >"$D/issue-1.json"
-jq -n --arg m "$MARK" '[{created_at: "t1", body: ("Який браузер?\n\n" + $m), body_html: ""}, {created_at: "t2", body: "Chrome", body_html: ""}]' >"$D/comments-1.json"
+jq -n --arg m "$MARK" '[{user: {login: "stjurik", type: "User"}, created_at: "t1", body: ("Який браузер?\n\n" + $m), body_html: ""}, {user: {login: "stjurik", type: "User"}, created_at: "t2", body: "Chrome", body_html: ""}]' >"$D/comments-1.json"
 # «Потрібна відповідь»: мітку поставлено о 10:00 (події), далі — коментарі.
 # c <автор> <тип> <час> <текст> — один коментар.
 c() { jq -n --arg u "$1" --arg ty "$2" --arg t "2026-10-04T$3:00Z" --arg b "$4" '{user: {login: $u, type: $ty}, created_at: $t, body: $b, body_html: ""}'; }
-for n in 3 4 5 6 7 8 9; do
+for n in 4 5 6 7 8 9; do
   echo '[{"event": "labeled", "label": {"name": "потрібна відповідь"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-$n.json"
 done
 echo '[{"event": "labeled", "label": {"name": "оброблено"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-9.json"
+# #3: дві сторінки подій (як дає `gh api --paginate`) — мітка на другій.
+printf '%s\n' '[{"event": "assigned", "created_at": "2026-10-04T09:00:00Z"}]' \
+  '[{"event": "labeled", "label": {"name": "потрібна відповідь"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-3.json"
+echo '[{"event": "labeled", "label": {"name": "потрібна відповідь"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-10.json"
+jq -s . <(c stjurik User 10:05 "3 мм") <(c someone User 10:06 "цитата $MARK") >"$D/comments-10.json"
+jq -n '{number: 10, title: "t", html_url: "u", created_at: "c", labels: [], body: "b", body_html: ""}' >"$D/issue-10.json"
 jq -s . <(c stjurik User 09:59 "Яка товщина? $MARK") <(c stjurik User 10:05 "2 мм") >"$D/comments-3.json"
 jq -s . <(c someone User 10:05 "я теж хочу") >"$D/comments-4.json"
 jq -s . <(c stjurik User 09:30 "уточнення до мітки") >"$D/comments-5.json"
@@ -142,6 +149,8 @@ check "#6 коментар бота — не повертає" "[[ ! -e '$IN/6' 
 check "#7 лише коментар оркестратора (той самий обліковий запис) — не повертає" "[[ ! -e '$IN/7' ]]"
 check "#8 відповідь yurii вже розібрана (оркестратор коментував пізніше) — не повертає" "[[ ! -e '$IN/8' ]]"
 check "#9 події мітки «потрібна відповідь» немає — не повертає" "[[ ! -e '$IN/9' ]]"
+check "#10 чужий коментар із позначкою не ховає відповідь yurii" "[[ -f '$IN/10/issue.md' ]]"
+check "#10 чужий коментар підписано його login, а не «yurii»" "grep -q '— someone' '$IN/10/issue.md' && grep -c '— yurii' '$IN/10/issue.md' | grep -qx 1"
 check "issue.md: заголовок і текст" "grep -q 'Зауваження: кнопка' '$IN/1/issue.md' && grep -q 'Кнопка ховається' '$IN/1/issue.md'"
 check "коментарі розрізнено, позначку прибрано" \
   "grep -q 't1 — оркестратор' '$IN/1/issue.md' && grep -q 't2 — yurii' '$IN/1/issue.md' && ! grep -qF '$MARK' '$IN/1/issue.md'"
@@ -153,7 +162,10 @@ check "чужий хост не завантажується" "grep -q 'проп
 check "підписаний запит (jwt) не записано" "! grep -rq SECRETJWT '$IN'"
 check "&amp; розкодовано перед завантаженням" "grep -q 'jwt=SECRETJWT&x=1' '$T/curl.log'"
 check "назви беклогу flatcraft поруч" "grep -q '#5 Кнопка експорту' '$IN/1/backlog-titles.txt'"
-check "pull у hart-inbox нічого не пише" "! grep -qE '^issue (comment|edit|close|delete)|-X|--method' '$T/gh.log'"
+# Білий список читань: будь-який інший виклик (зокрема `gh api … -f state=closed` — неявний
+# POST) валить тест (контрприклад Sonnet 5.5).
+check "pull — лише читання з білого списку" \
+  "! grep -vE '^(issue list -R stjurik/(hart-inbox|flatcraft) --state open --limit [0-9]+ --json [a-z,]+( -q .*)?|api repos/stjurik/hart-inbox -q \.owner\.login|api repos/stjurik/hart-inbox/issues/[0-9]+(/(comments|events))?( --paginate)?( -H Accept: application/vnd\.github\.full\+json)?)$' '$T/gh.log' | grep -q ."
 check "у flatcraft — лише читання списку issues" \
   "! grep 'stjurik/flatcraft' '$T/gh.log' | grep -qv '^issue list -R stjurik/flatcraft --state open'"
 check "_inbox ігнорується — git status чистий від нього" "! git -C '$R' status --porcelain | grep -q _inbox"
@@ -175,6 +187,12 @@ run "$T/wt"
 rc=$?
 check "git worktree — відмова (2): agy пише лише в головне дерево" \
   "[[ $rc == 2 ]] && grep -q 'worktree' '$T/out.txt' && [[ ! -e '$T/wt/docs/promts/inputs/_inbox' ]]"
+cp "$D/inbox-list.json" "$T/list.bak"
+echo '<html>proxy error</html>' >"$D/inbox-list.json"
+run "$R"
+rc=$?
+check "список не JSON — збій (1), а не «нерозібраних немає»" "[[ $rc == 1 ]] && ! grep -q 'нерозібраних немає' '$T/out.txt'"
+cp "$T/list.bak" "$D/inbox-list.json"
 make_repo "$T/r3" без-маркера
 run "$T/r3"
 rc=$?
@@ -200,8 +218,8 @@ check "коментар у hart-inbox з позначкою" \
   "grep -q '^issue comment 1 -R stjurik/hart-inbox --body-file' '$T/gh.log' && grep -q 'беклозі: #200' '$T/comment-1.txt' && grep -qF '$MARK' '$T/comment-1.txt'"
 check "мітки: + оброблено і підсумок, − нове і старий підсумок" \
   "grep -qx 'issue edit 1 -R stjurik/hart-inbox --add-label оброблено,в беклозі --remove-label нове,потрібна відповідь' '$T/gh.log'"
-check "mark — лише comment/view/edit у hart-inbox" \
-  "! grep -vE '^issue (comment|view|edit) 1 -R stjurik/hart-inbox( |$)' '$T/gh.log' | grep -q ."
+check "mark — рівно три виклики: коментар, читання міток, мітки" \
+  "[[ \$(wc -l <'$T/gh.log') == 3 ]] && grep -c '^issue comment 1 -R stjurik/hart-inbox --body-file ' '$T/gh.log' | grep -qx 1 && grep -c '^issue view 1 -R stjurik/hart-inbox --json labels ' '$T/gh.log' | grep -qx 1"
 : >"$T/gh.log"
 run "$R" mark 1 "закрити" "$T/c.md"
 rc=$?
@@ -214,7 +232,7 @@ rc=$?
 check "немає файла коментаря — відмова (2)" "[[ $rc == 2 ]] && [[ ! -s '$T/gh.log' ]]"
 
 # ─── 4. Справжній .gitignore flatcraft ───────────────────────────────────────
-check "у flatcraft _inbox ігнорується" "git -C '$ROOT' check-ignore -q docs/promts/inputs/_inbox/1/issue.md"
+check "у flatcraft ігнорується сама тека _inbox/ (як перевіряє скрипт)" "git -C '$ROOT' check-ignore -q docs/promts/inputs/_inbox/"
 
 if ((fail)); then
   echo "inbox-pull.test: є провали"

@@ -46,12 +46,13 @@
 # авторів там немає); що зображення без чутливих даних — тому вони й лишаються поза
 # git. Розмір і тип зображення перевіряються, вміст — ні.
 #
-# Змінні: INBOX_REPO (дефолт stjurik/hart-inbox), INBOX_BACKLOG_REPO (stjurik/flatcraft).
+# Репозиторії зашиті, без змінних оточення: інакше `INBOX_REPO=stjurik/flatcraft … mark`
+# писав би мітки й коментарі в публічний flatcraft (контрприклад Sonnet 5.5).
 # Вихід: 0 — гаразд; 1 — збій gh/curl; 2 — відмова (місце запису, аргументи).
 set -euo pipefail
 
-INBOX="${INBOX_REPO:-stjurik/hart-inbox}"
-BACKLOG="${INBOX_BACKLOG_REPO:-stjurik/flatcraft}"
+INBOX="stjurik/hart-inbox"
+BACKLOG="stjurik/flatcraft"
 INBOX_MARK='<!-- inbox-bot -->'
 OUTCOMES=("в беклозі" "потрібна відповідь" "відхилено")
 MAX_IMAGE_BYTES=20000000
@@ -117,12 +118,14 @@ git -C "$top" check-ignore -q "$rel/" ||
 mkdir -p "$out"
 
 # ─── pull: що забрати ────────────────────────────────────────────────────────
-list="$(gh issue list -R "$INBOX" --state open --limit 200 --json number,labels)" || die "gh: список $INBOX не прочитано" 1
-mapfile -t picked < <(jq -r '.[] | select([.labels[].name] | index("оброблено") | not) | .number' <<<"$list")
-mapfile -t waiting < <(jq -r '.[] | select([.labels[].name] | (index("оброблено") and index("потрібна відповідь"))) | .number' <<<"$list")
-if ((${#waiting[@]})); then
-  owner="$(gh api "repos/$INBOX" -q .owner.login)" || die "gh: власника $INBOX не прочитано" 1
-fi
+owner="$(gh api "repos/$INBOX" -q .owner.login)" || die "gh: власника $INBOX не прочитано" 1
+list="$(gh issue list -R "$INBOX" --state open --limit 5000 --json number,labels)" || die "gh: список $INBOX не прочитано" 1
+# Через змінну, а не `< <(jq …)`: збій jq у підстановці мовчки дав би «нерозібраних немає».
+sel="$(jq -r '.[] | select([.labels[].name] | index("оброблено") | not) | .number' <<<"$list")" ||
+  die "список $INBOX — не JSON" 1
+wait_sel="$(jq -r '.[] | select([.labels[].name] | (index("оброблено") and index("потрібна відповідь"))) | .number' <<<"$list")"
+mapfile -t picked < <(printf '%s' "$sel" | grep .)
+mapfile -t waiting < <(printf '%s' "$wait_sel" | grep .)
 for n in "${waiting[@]}"; do
   # --paginate без -q: сторінки — потік масивів, jq зводить їх (`add`). З -q gh
   # фільтрував би кожну сторінку окремо.
@@ -133,12 +136,14 @@ for n in "${waiting[@]}"; do
     (($ev | add) // []) as $e | (($cm | add) // []) as $c
     | ([$e[] | select(.event == "labeled" and .label.name == "потрібна відповідь") | .created_at] | max) as $l
     | if $l == null then false else
-        ([$c[] | select((.body // "") | contains($mark)) | .created_at] | max // "") as $b
+        # Лише коментарі власника з позначкою: чужий рядок-позначка не зсуває відлік.
+        ([$c[] | select(.user.login == $owner and ((.body // "") | contains($mark))) | .created_at] | max // "") as $b
         | ([$l, $b] | max) as $since
         # Бот має власний login, тож перевірки власника досить; коментар оркестратора
         # не пізніший за $since за побудовою.
         | any($c[]; .user.login == $owner and .created_at > $since)
       end')"
+  [[ "$answered" == true || "$answered" == false ]] || die "події чи коментарі #$n — не JSON" 1
   [[ "$answered" == true ]] && picked+=("$n")
 done
 if ((${#picked[@]} == 0)); then
@@ -201,7 +206,8 @@ for n in "${picked[@]}"; do
   mkdir -p "$dir"
   {
     jq -r '"# #\(.number) — \(.title)\n\nПосилання (приватне): \(.html_url)\nМітки: \([.labels[].name] | join(", "))\nСтворено: \(.created_at)\n\n## Текст\n\n\(.body // "")"' <<<"$issue"
-    jq -r --arg mark "$INBOX_MARK" '.[] | "\n## Коментар \(.created_at)\(if (.body // "") | contains($mark) then " — оркестратор" else " — yurii" end)\n\n\(.body // "" | split($mark) | join(""))"' <<<"$comments"
+    # Автор — з login: «yurii» лише власник, і лише без позначки оркестратора.
+    jq -r --arg mark "$INBOX_MARK" --arg owner "$owner" '.[] | "\n## Коментар \(.created_at)\(if .user.login != $owner then " — \(.user.login)" elif (.body // "") | contains($mark) then " — оркестратор" else " — yurii" end)\n\n\(.body // "" | split($mark) | join(""))"' <<<"$comments"
   } >"$dir/issue.md"
   mapfile -t htmls < <(jq -r '.body_html // ""' <<<"$issue"; jq -r '.[].body_html // ""' <<<"$comments")
   fetch_images "$dir" "${htmls[@]}"
