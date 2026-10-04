@@ -483,7 +483,7 @@ deny-правила перенесені в git (`.claude/settings.autonomous.js
 - AI bugfix flow (issue → тріаж → фікс → мультиагентне рев'ю): `docs/17_AI_BUGFIX_FLOW.md` (ADR-035)
 - Специфікація нової Деталі (вхід для new-part-run): `docs/18_NEW_PART_SPEC.md` (ADR-033)
 - **A8 preflight — мануальний чеклист автономного середовища: `docs/19_A8_PREFLIGHT.md`** (рішення Q1–Q13 у §0.2)
-- **Автономне середовище — ADR-038** (repo private), **ADR-039** (контракт середовища на A8), **ADR-040** (auto-merge оборотного класу), **ADR-041** (критерії переїзду prod, Proposed) — усі в `docs/03_DECISIONS.md`
+- **Автономне середовище — ADR-038** (repo private), **ADR-039** (контракт середовища на A8), **ADR-040** (auto-merge оборотного класу), **ADR-041** (критерії переїзду prod, Proposed), **ADR-042** (пульт розробки, лише читання) — усі в `docs/03_DECISIONS.md`
 - **Промпти середовища:** `docs/promts/master-inspection-contract.md` (Master Run 14), `docs/promts/master-a8-transition.md` (розгортання: контейнер, демон, прев'ю), `docs/promts/a8-stage-0-login.md` (логіни на A8), `docs/promts/agy-d4-headless.md` (зонд Gemini); результат інспекції — `docs/promts/inputs/inspection-2026-08.md`, протоколи вимірів — `docs/promts/inputs/stage-1-step-0-measurements.md` і `measurement-6-git-in-container.md`
 - Open questions: `docs/00_OPEN_QUESTIONS.md` · відповіді: `docs/01_ANSWERED_QUESTIONS.md`
 - Опитувальник з відповідями: `01_questionnaire_answers.md`
