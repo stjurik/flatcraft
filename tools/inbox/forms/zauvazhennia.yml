@@ -1,0 +1,44 @@
+name: Зауваження до сайту
+description: Що не так на сторінці або що хочеться змінити
+title: "Зауваження: "
+labels: ["зауваження", "нове"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Сторінка
+      description: Скопіюйте адресу з браузера
+      placeholder: https://staging.hart.crimea.ua/...
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: Що не так / що хочу
+    validations:
+      required: true
+  - type: textarea
+    id: screens
+    attributes:
+      label: Скріни
+      description: Перетягніть або вставте зображення сюди
+    validations:
+      required: false
+  - type: dropdown
+    id: device
+    attributes:
+      label: Пристрій
+      options:
+        - ПК
+        - телефон
+    validations:
+      required: false
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Терміновість
+      options:
+        - заважає
+        - потім
+    validations:
+      required: false
