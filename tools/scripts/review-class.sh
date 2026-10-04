@@ -63,6 +63,9 @@ RULES=(
   'дозволи й безпека|tools/scripts/trust-worktree*'
   'дозволи й безпека|tools/scripts/claude-review-session*'
   'дозволи й безпека|tools/scripts/probe-profile-rules*'
+  # Межа «приватні вхідні yurii → публічний репозиторій» і запис у hart-inbox (рішення
+  # yurii 2026-10-04, orchestrator-autonomy.md §7).
+  'дозволи й безпека|tools/scripts/inbox-*'
   # Сам механізм рецензії: PR, що його послаблює, не має проходити з однією рецензією.
   'дозволи й безпека|tools/scripts/review-class*'
   'дозволи й безпека|tools/scripts/journal-rules*'
