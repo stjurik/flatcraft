@@ -33,6 +33,9 @@ emit() { if [[ -n "$q" ]]; then jq -r "$q" "$1"; else cat "$1"; fi; }
 case "$*" in
   "issue list -R stjurik/hart-inbox"*) emit "$D/inbox-list.json" ;;
   "issue list -R stjurik/flatcraft"*) emit "$D/backlog.json" ;;
+  "api repos/stjurik/hart-inbox -q .owner.login") echo stjurik ;;
+  "api repos/stjurik/hart-inbox/issues/"*"/events"*)
+    n="${2#repos/stjurik/hart-inbox/issues/}"; n="${n%/events}"; emit "$D/events-$n.json" ;;
   "api repos/stjurik/hart-inbox/issues/"*"/comments"*)
     n="${2#repos/stjurik/hart-inbox/issues/}"; n="${n%/comments}"; emit "$D/comments-$n.json" ;;
   "api repos/stjurik/hart-inbox/issues/"*)
@@ -69,7 +72,12 @@ cat >"$D/inbox-list.json" <<'EOF'
   {"number": 1, "labels": [{"name": "зауваження"}, {"name": "нове"}]},
   {"number": 2, "labels": [{"name": "оброблено"}, {"name": "в беклозі"}]},
   {"number": 3, "labels": [{"name": "ідея"}, {"name": "оброблено"}, {"name": "потрібна відповідь"}]},
-  {"number": 4, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]}
+  {"number": 4, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 5, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 6, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 7, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 8, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]},
+  {"number": 9, "labels": [{"name": "оброблено"}, {"name": "потрібна відповідь"}]}
 ]
 EOF
 echo '[{"number": 5, "title": "Кнопка експорту зникає на телефоні"}]' >"$D/backlog.json"
@@ -87,6 +95,21 @@ jq -n --arg h "$H" '{
   body: "### Сторінка\n\nhttps://staging.hart.crimea.ua/studio\n\n### Що не так / що хочу\n\nКнопка ховається",
   body_html: $h}' >"$D/issue-1.json"
 jq -n --arg m "$MARK" '[{created_at: "t1", body: ("Який браузер?\n\n" + $m), body_html: ""}, {created_at: "t2", body: "Chrome", body_html: ""}]' >"$D/comments-1.json"
+# «Потрібна відповідь»: мітку поставлено о 10:00 (події), далі — коментарі.
+# c <автор> <тип> <час> <текст> — один коментар.
+c() { jq -n --arg u "$1" --arg ty "$2" --arg t "2026-10-04T$3:00Z" --arg b "$4" '{user: {login: $u, type: $ty}, created_at: $t, body: $b, body_html: ""}'; }
+for n in 3 4 5 6 7 8 9; do
+  echo '[{"event": "labeled", "label": {"name": "потрібна відповідь"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-$n.json"
+done
+echo '[{"event": "labeled", "label": {"name": "оброблено"}, "created_at": "2026-10-04T10:00:00Z"}]' >"$D/events-9.json"
+jq -s . <(c stjurik User 09:59 "Яка товщина? $MARK") <(c stjurik User 10:05 "2 мм") >"$D/comments-3.json"
+jq -s . <(c someone User 10:05 "я теж хочу") >"$D/comments-4.json"
+jq -s . <(c stjurik User 09:30 "уточнення до мітки") >"$D/comments-5.json"
+jq -s . <(c 'github-actions[bot]' Bot 10:05 "автоматичний коментар") >"$D/comments-6.json"
+jq -s . <(c stjurik User 10:05 "Ще питання $MARK") >"$D/comments-7.json"
+jq -s . <(c stjurik User 10:05 "2 мм") <(c stjurik User 10:10 "Розібрано, знову питання $MARK") >"$D/comments-8.json"
+jq -s . <(c stjurik User 10:05 "2 мм") >"$D/comments-9.json"
+jq -n '{number: 3, title: "Ідея: полиця", html_url: "u", created_at: "c", labels: [], body: "Полиця", body_html: ""}' >"$D/issue-3.json"
 echo '{"labels": [{"name": "зауваження"}, {"name": "нове"}, {"name": "потрібна відповідь"}]}' >"$D/labels-1.json"
 
 # make_repo <тека> [без-ignore|лише-md|без-маркера] — мінімальне робоче дерево flatcraft.
@@ -112,7 +135,13 @@ IN="$R/docs/promts/inputs/_inbox"
 check "pull — вихід 0" "[[ $rc == 0 ]] || { cat '$T/out.txt'; false; }"
 check "#1 (нове) забрано" "[[ -f '$IN/1/issue.md' ]]"
 check "#2 (оброблено) — ні" "[[ ! -e '$IN/2' ]]"
-check "#3, #4 (оброблено + потрібна відповідь) — ні: лише без «оброблено»" "[[ ! -e '$IN/3' && ! -e '$IN/4' ]]"
+check "#3 потрібна відповідь + коментар yurii після мітки — повертається" "[[ -f '$IN/3/issue.md' ]]"
+check "#4 коментар іншого автора — не повертає" "[[ ! -e '$IN/4' ]]"
+check "#5 коментар yurii до мітки — не повертає" "[[ ! -e '$IN/5' ]]"
+check "#6 коментар бота — не повертає" "[[ ! -e '$IN/6' ]]"
+check "#7 лише коментар оркестратора (той самий обліковий запис) — не повертає" "[[ ! -e '$IN/7' ]]"
+check "#8 відповідь yurii вже розібрана (оркестратор коментував пізніше) — не повертає" "[[ ! -e '$IN/8' ]]"
+check "#9 події мітки «потрібна відповідь» немає — не повертає" "[[ ! -e '$IN/9' ]]"
 check "issue.md: заголовок і текст" "grep -q 'Зауваження: кнопка' '$IN/1/issue.md' && grep -q 'Кнопка ховається' '$IN/1/issue.md'"
 check "коментарі розрізнено, позначку прибрано" \
   "grep -q 't1 — оркестратор' '$IN/1/issue.md' && grep -q 't2 — yurii' '$IN/1/issue.md' && ! grep -qF '$MARK' '$IN/1/issue.md'"

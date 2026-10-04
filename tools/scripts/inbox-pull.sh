@@ -20,9 +20,16 @@
 #   inbox-pull.sh mark <N> <підсумок> <файл-коментаря>
 #       підсумок: «в беклозі» | «потрібна відповідь» | «відхилено»
 #
-# Що «нерозібране»: відкрите issue без мітки «оброблено» — дослівно за рішенням yurii.
-# Коментарі оркестратора несуть приховану позначку INBOX_MARK: в issue.md видно, хто
-# що написав.
+# Що «нерозібране» (рішення yurii 2026-10-04):
+#   - відкрите issue без мітки «оброблено»;
+#   - або з міткою «потрібна відповідь», якщо ПІСЛЯ цієї мітки є коментар yurii —
+#     власника репозиторію. Коментар іншого автора чи бота не повертає; коментар yurii
+#     до мітки — теж ні.
+# Оркестратор коментує з того самого облікового запису, що й yurii, тому його коментарі
+# несуть приховану позначку INBOX_MARK і за коментар yurii не рахуються. «Після» — після
+# пізнішого з двох: мітки чи останнього коментаря оркестратора. Інакше вже розібрана
+# відповідь поверталась би щодня: повторна «потрібна відповідь» на issue, де мітка вже
+# стоїть, нової події мітки не дає.
 #
 # Що лягає в _inbox/<N>/:
 #   issue.md           — заголовок, мітки, посилання, текст і коментарі;
@@ -112,6 +119,28 @@ mkdir -p "$out"
 # ─── pull: що забрати ────────────────────────────────────────────────────────
 list="$(gh issue list -R "$INBOX" --state open --limit 200 --json number,labels)" || die "gh: список $INBOX не прочитано" 1
 mapfile -t picked < <(jq -r '.[] | select([.labels[].name] | index("оброблено") | not) | .number' <<<"$list")
+mapfile -t waiting < <(jq -r '.[] | select([.labels[].name] | (index("оброблено") and index("потрібна відповідь"))) | .number' <<<"$list")
+if ((${#waiting[@]})); then
+  owner="$(gh api "repos/$INBOX" -q .owner.login)" || die "gh: власника $INBOX не прочитано" 1
+fi
+for n in "${waiting[@]}"; do
+  # --paginate без -q: сторінки — потік масивів, jq зводить їх (`add`). З -q gh
+  # фільтрував би кожну сторінку окремо.
+  events="$(gh api "repos/$INBOX/issues/$n/events" --paginate)" || die "gh: події #$n не прочитано" 1
+  comments="$(gh api "repos/$INBOX/issues/$n/comments" --paginate)" || die "gh: коментарі #$n не прочитано" 1
+  answered="$(jq -n --slurpfile ev <(printf '%s' "$events") --slurpfile cm <(printf '%s' "$comments") \
+    --arg owner "$owner" --arg mark "$INBOX_MARK" '
+    (($ev | add) // []) as $e | (($cm | add) // []) as $c
+    | ([$e[] | select(.event == "labeled" and .label.name == "потрібна відповідь") | .created_at] | max) as $l
+    | if $l == null then false else
+        ([$c[] | select((.body // "") | contains($mark)) | .created_at] | max // "") as $b
+        | ([$l, $b] | max) as $since
+        # Бот має власний login, тож перевірки власника досить; коментар оркестратора
+        # не пізніший за $since за побудовою.
+        | any($c[]; .user.login == $owner and .created_at > $since)
+      end')"
+  [[ "$answered" == true ]] && picked+=("$n")
+done
 if ((${#picked[@]} == 0)); then
   echo "inbox-pull: нерозібраних немає"
   exit 0
