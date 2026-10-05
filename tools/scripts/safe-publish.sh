@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# safe-publish.sh — публікація лише після check-leak.sh, з незамаскованим кодом виходу.
+#
+# ЧОМУ ЦЕ ІСНУЄ. 2026-10-01 ланцюжок `check-leak.sh … | tail -1 && gh …` замаскував код
+# виходу: пайп повернув код `tail`, тобто 0, і три коміти пройшли попри блок. Блок тоді
+# стосувався рядка, що вже лежав у журналі, а не нових. Рішення yurii 2026-10-01
+# дослівно: «публікація лише через обгортку, у коміті перевіряються лише додані рядки».
+#
+# РЕЖИМИ.
+#   safe-publish.sh gh <файл-тексту> <pr|issue> <create|edit|comment> [аргументи gh]...
+#       Перевіряє файл тексту і всі аргументи (у них заголовок PR — він теж публікація),
+#       лише тоді: gh <аргументи> --body-file <файл-тексту>. Текст іде тільки через
+#       перевірений файл: --body, --body-file, --fill, --editor, --web, --template
+#       обгортка відхиляє. `issue edit` не дозволено — оркестратор його не вживає.
+#   safe-publish.sh commit <файл-повідомлення>
+#       Перевіряє повідомлення і ДОДАНІ рядки індексу (`git diff --cached`), лише тоді
+#       git commit -F <файл-повідомлення>. Рядок, що вже був у файлі до коміту, не
+#       перевіряється: він уже в історії, і блок на ньому зупиняв би кожен коміт.
+#   safe-publish.sh push [remote]
+#       Перевіряє все, що push зробить публічним: повідомлення й додані рядки кожного
+#       коміту з HEAD, якого ще немає на жодній віддаленій гілці (`HEAD --not
+#       --remotes`). Покомітно, а не сумарним diff: адреса, додана й потім видалена,
+#       усе одно лишається в історії. Лише тоді git push -u <remote, дефолт origin> HEAD.
+#
+# Вихід: код check-leak.sh як є (1 — блок, 2 — помилка виклику, 3 — не перевірено), і
+# тоді нічого не опубліковано; 2 — помилка виклику обгортки; інакше — код gh чи git.
+#
+# ЧОГО НЕ ДОВОДИТЬ.
+#   - Механічно обгортку ніщо не вмикає: прямий `gh` чи `git push` її обходить.
+#   - Межі самого check-leak.sh (його шапка): лише адреси й файл відомої адреси.
+#   - Шляхи файлів у diff і бінарні файли не перевіряються — лише додані рядки тексту.
+#   - push перевіряє коміти відносно ЛОКАЛЬНИХ копій віддалених гілок: застарілий
+#     `git fetch` дає перевірку ширшу, а не вужчу.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CHECK="$HERE/check-leak.sh"
+
+die() {
+  echo "safe-publish: $1" >&2
+  exit 2
+}
+usage() {
+  die "використання: safe-publish.sh gh <файл> <pr|issue> <create|edit|comment> [аргументи] | commit <файл> | push [remote]"
+}
+
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+
+# Єдине місце, де запускається check-leak. Без пайпа і без `|| true`: код виходу
+# check-leak — код обгортки, і далі нічого не виконується.
+check() {
+  bash "$CHECK" "$@"
+  local rc=$?
+  if [[ $rc != 0 ]]; then
+    echo "safe-publish: check-leak дав $rc — нічого не опубліковано" >&2
+    exit "$rc"
+  fi
+}
+
+# Додані рядки diff з stdin: лише рядки `+` усередині hunk-ів, без заголовків `+++`.
+# Стан hunk-а скидається на кожному `diff --git`, тож `+++ b/…` наступного файла не
+# потрапляє в текст.
+added_lines() {
+  awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}'
+}
+
+staged_added() {
+  git diff --cached --no-color --no-ext-diff --no-textconv -U0 | added_lines
+}
+
+# Для кожного неопублікованого коміту — його diff з батьком (перший коміт — з порожнім
+# деревом); merge-коміт — з першим батьком, тобто те, що він приніс у гілку.
+unpushed_added() {
+  local c revs
+  revs="$(git rev-list HEAD --not --remotes)" || return 1
+  for c in $revs; do
+    git show --no-color --no-ext-diff --no-textconv -U0 --format= --diff-merges=first-parent "$c" | added_lines || return 1
+  done
+}
+
+mode="${1:-}"
+[[ $# -gt 0 ]] && shift
+case "$mode" in
+  gh)
+    [[ $# -ge 3 ]] || usage
+    body="$1"
+    shift
+    case "$1 $2" in
+      "pr create" | "pr edit" | "pr comment" | "issue create" | "issue comment") ;;
+      *) die "gh $1 $2 — не публікація з переліку (pr create|edit|comment, issue create|comment)" ;;
+    esac
+    for a in "$@"; do
+      case "$a" in
+        -b | -b?* | --body | --body=* | -F | -F?* | --body-file | --body-file=* | \
+          -f | --fill | --fill-first | --fill-verbose | -e | --editor | -w | --web | \
+          -T | -T?* | --template | --template=* | --recover | --recover=*)
+          die "аргумент «$a» передає текст повз перевірений файл — заборонено"
+          ;;
+      esac
+    done
+    printf '%s\n' "$@" >"$T/args"
+    check "$body" "$T/args"
+    gh "$@" --body-file "$body"
+    exit $?
+    ;;
+  commit)
+    [[ $# -eq 1 ]] || usage
+    msg="$1"
+    staged_added >"$T/added" || die "git diff --cached не вдався"
+    check "$msg" "$T/added"
+    git commit -F "$msg"
+    exit $?
+    ;;
+  push)
+    [[ $# -le 1 ]] || usage
+    remote="${1:-origin}"
+    git rev-list HEAD --not --remotes --format=%B >"$T/messages" || die "git rev-list не вдався"
+    unpushed_added >"$T/added" || die "git show не вдався"
+    check "$T/messages" "$T/added"
+    git push -u "$remote" HEAD
+    exit $?
+    ;;
+  *) usage ;;
+esac
