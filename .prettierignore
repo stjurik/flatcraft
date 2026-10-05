@@ -23,3 +23,7 @@ packages/cad-engine/src/generated/baked-spec.ts
 # (ручний). Лише два генеровані артефакти:
 docs/discord-config/snapshot.json
 docs/discord-config/README.md
+
+# Затверджений макет пульта розробки — еталон вигляду для ADR-042 (чернетка),
+# зберігається дослівно, як його погодив yurii 2026-09-30.
+docs/promts/inputs/pult-rozrobky-maket-v3.html
