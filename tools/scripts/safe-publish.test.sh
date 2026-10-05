@@ -82,9 +82,25 @@ run gh "$T/немає.md" pr edit 7
 if [[ $rc == 2 ]] && ! gh_called; then ok "немає файла тексту — exit 2, gh не викликано"; else bad "немає файла тексту — rc=$rc: $out"; fi
 
 for flag in --body "--body=x" -bx --body-file -F --fill --editor --web --template; do
-  run gh "$T/clean.md" pr create "$flag" "текст"
+  run gh "$T/clean.md" pr create --title "чисто" "$flag" "текст"
   if [[ $rc == 2 ]] && ! gh_called; then ok "«$flag» повз перевірений файл — відхилено"; else bad "«$flag» — rc=$rc: $out"; fi
 done
+
+# Кожна підкоманда з переліку проходить: вилучення будь-якої з переліку тест помічає.
+for sc in "pr create" "pr edit" "pr comment" "issue create" "issue comment"; do
+  # shellcheck disable=SC2086 # підкоманда — два слова
+  run gh "$T/clean.md" $sc 7 --title "чисто"
+  if [[ $rc == 0 ]] && gh_called && grep -qx "${sc#* }" "$GH_LOG"; then ok "gh $sc — опубліковано"; else bad "gh $sc — rc=$rc: $out"; fi
+done
+
+# create без --title: gh спитав би заголовок у терміналі, повз перевірку.
+for sc in "pr create" "issue create"; do
+  # shellcheck disable=SC2086
+  run gh "$T/clean.md" $sc --draft
+  if [[ $rc == 2 ]] && ! gh_called; then ok "gh $sc без --title — відхилено"; else bad "gh $sc без --title — rc=$rc: $out"; fi
+done
+run gh "$T/clean.md" pr create -tчисто
+if [[ $rc == 0 ]] && gh_called; then ok "gh pr create -t<заголовок> — опубліковано"; else bad "pr create -t… — rc=$rc: $out"; fi
 
 run gh "$T/clean.md" repo delete
 if [[ $rc == 2 ]] && ! gh_called; then ok "gh repo delete — не з переліку, відхилено"; else bad "gh repo delete — rc=$rc: $out"; fi
@@ -158,6 +174,24 @@ run push
 if [[ $rc == 0 ]] && remote_has p3 && [[ "$(git --git-dir="$T/origin.git" rev-parse p3)" == "$(git rev-parse HEAD)" ]]; then
   ok "чисті коміти поверх опублікованої адреси — push є"
 else bad "чистий push — rc=$rc: $out"; fi
+
+# Другий remote: коміт, що вже лежить на backup, на origin ще не публічний.
+git init -q --bare "$T/backup.git"
+git remote add backup "$T/backup.git"
+backup_has() { git --git-dir="$T/backup.git" rev-parse -q --verify "refs/heads/$1" >/dev/null; }
+git checkout -q -b p4 main
+printf 'адреса 203.0.113.77\n' >>journal.md && git commit -qam "на backup"
+git push -q backup p4
+run push origin
+if [[ $rc == 1 ]] && ! remote_has p4; then ok "коміт з адресою, що є лише на іншому remote — exit 1, push в origin немає"; else bad "коміт лише на backup — rc=$rc: $out"; fi
+
+git checkout -q -b p5 main
+printf 'чисто p5\n' >>journal.md && git commit -qam "p5"
+run push backup
+if [[ $rc == 0 ]] && backup_has p5 && ! remote_has p5; then ok "push backup — іде в названий remote, не в origin"; else bad "push backup — rc=$rc: $out"; fi
+
+run push немає
+if [[ $rc == 2 ]]; then ok "push у неіснуючий remote — exit 2"; else bad "push немає — rc=$rc: $out"; fi
 cd "$HERE" || exit 1
 
 # ─── 4. Мутації: кожне правило тримається тестом ──────────────────────────────
@@ -214,8 +248,13 @@ if [[ -z "${SAFE_PUBLISH_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "gh: код помилки gh замасковано" '    gh "$@" --body-file "$body"
     exit $?' '    gh "$@" --body-file "$body"
     exit 0'
-  mutate "push: лише останній коміт" 'revs="$(git rev-list HEAD --not --remotes)"' 'revs="$(git rev-list -1 HEAD)"'
-  mutate "push: уся історія, а не лише неопубліковане" 'revs="$(git rev-list HEAD --not --remotes)"' 'revs="$(git rev-list HEAD)"'
+  mutate "push: лише останній коміт" 'revs="$(git rev-list HEAD --not --remotes="$remote")"' 'revs="$(git rev-list -1 HEAD)"'
+  mutate "push: уся історія, а не лише неопубліковане" 'revs="$(git rev-list HEAD --not --remotes="$remote")"' 'revs="$(git rev-list HEAD)"'
+  mutate "push: виключено коміти будь-якого remote, а не цільового" \
+    'revs="$(git rev-list HEAD --not --remotes="$remote")"' 'revs="$(git rev-list HEAD --not --remotes)"' \
+    'git rev-list HEAD --not --remotes="$remote" --format=%B' 'git rev-list HEAD --not --remotes --format=%B'
+  mutate "push: завжди origin" 'remote="${1:-origin}"' 'remote="origin"'
+  mutate "gh: create без заголовка" '[[ -n "$has_title" ]] ||' 'true ||'
   mutate "push: повідомлення не перевіряються" 'check "$T/messages" "$T/added"' 'check "$T/added"'
 fi
 

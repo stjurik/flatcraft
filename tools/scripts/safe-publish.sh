@@ -11,15 +11,16 @@
 #       Перевіряє файл тексту і всі аргументи (у них заголовок PR — він теж публікація),
 #       лише тоді: gh <аргументи> --body-file <файл-тексту>. Текст іде тільки через
 #       перевірений файл: --body, --body-file, --fill, --editor, --web, --template
-#       обгортка відхиляє. `issue edit` не дозволено — оркестратор його не вживає.
+#       обгортка відхиляє; create без --title теж (gh спитав би заголовок у терміналі). `issue edit` не дозволено — оркестратор його не вживає.
 #   safe-publish.sh commit <файл-повідомлення>
 #       Перевіряє повідомлення і ДОДАНІ рядки індексу (`git diff --cached`), лише тоді
 #       git commit -F <файл-повідомлення>. Рядок, що вже був у файлі до коміту, не
 #       перевіряється: він уже в історії, і блок на ньому зупиняв би кожен коміт.
 #   safe-publish.sh push [remote]
 #       Перевіряє все, що push зробить публічним: повідомлення й додані рядки кожного
-#       коміту з HEAD, якого ще немає на жодній віддаленій гілці (`HEAD --not
-#       --remotes`). Покомітно, а не сумарним diff: адреса, додана й потім видалена,
+#       коміту з HEAD, якого ще немає на гілках ЦЬОГО remote (`HEAD --not
+#       --remotes=<remote>`): коміт, що є лише на іншому remote, для цього ще не
+#       публічний. Покомітно, а не сумарним diff: адреса, додана й потім видалена,
 #       усе одно лишається в історії. Лише тоді git push -u <remote, дефолт origin> HEAD.
 #
 # Вихід: код check-leak.sh як є (1 — блок, 2 — помилка виклику, 3 — не перевірено), і
@@ -73,7 +74,7 @@ staged_added() {
 # деревом); merge-коміт — з першим батьком, тобто те, що він приніс у гілку.
 unpushed_added() {
   local c revs
-  revs="$(git rev-list HEAD --not --remotes)" || return 1
+  revs="$(git rev-list HEAD --not --remotes="$remote")" || return 1
   for c in $revs; do
     git show --no-color --no-ext-diff --no-textconv -U0 --format= --diff-merges=first-parent "$c" | added_lines || return 1
   done
@@ -99,6 +100,14 @@ case "$mode" in
           ;;
       esac
     done
+    # create без заголовка: gh питає його в терміналі, і введене минає перевірку.
+    if [[ "$2" == create ]]; then
+      has_title=""
+      for a in "$@"; do
+        case "$a" in -t | -t?* | --title | --title=*) has_title=1 ;; esac
+      done
+      [[ -n "$has_title" ]] || die "$1 create без --title — gh спитав би заголовок повз перевірку"
+    fi
     printf '%s\n' "$@" >"$T/args"
     check "$body" "$T/args"
     gh "$@" --body-file "$body"
@@ -115,7 +124,8 @@ case "$mode" in
   push)
     [[ $# -le 1 ]] || usage
     remote="${1:-origin}"
-    git rev-list HEAD --not --remotes --format=%B >"$T/messages" || die "git rev-list не вдався"
+    git remote get-url "$remote" >/dev/null 2>&1 || die "немає remote «$remote»"
+    git rev-list HEAD --not --remotes="$remote" --format=%B >"$T/messages" || die "git rev-list не вдався"
     unpushed_added >"$T/added" || die "git show не вдався"
     check "$T/messages" "$T/added"
     git push -u "$remote" HEAD
