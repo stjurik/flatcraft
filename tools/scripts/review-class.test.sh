@@ -46,6 +46,7 @@ done <<'EOF'
 дозволи й безпека|tools/scripts/claude-review-session.sh
 дозволи й безпека|tools/scripts/probe-profile-rules.sh
 дозволи й безпека|tools/scripts/review-class.sh
+дозволи й безпека|tools/scripts/journal-rules.sh
 дозволи й безпека|tools/scripts/agy-opus-budget.sh
 дозволи й безпека|infra/ansible/roles/firewall/tasks/main.yml
 дозволи й безпека|infra/discord/config/roles.ts
@@ -62,6 +63,8 @@ done <<'EOF'
 CI|.github/workflows/ci.yml
 CI|lefthook.yml
 CI|tools/scripts/prove-red-before-green.sh
+CI|tools/scripts/check-journals.sh
+CI|tools/scripts/check-journals.test.sh
 експорт і валідатори §7|workers/cad/flatcraft_cad/export/dxf.py
 експорт і валідатори §7|workers/cad/flatcraft_cad/validate/profile.py
 експорт і валідатори §7|workers/cad/tests/snapshots/l_bracket.dxf
@@ -233,20 +236,46 @@ expect "інше екранування в лапках — не розпізн�
 expect "порожній вхід — exit 2" 2 "" "порожній список"
 expect "лише порожні рядки — exit 2" 2 $'\n\n' "порожній список"
 
+# ─── 6b. Без бібліотеки журналу — відмова, а не клас без перевірки журналу ──
+X="$(mktemp -d)"
+cp "$SCRIPT" "$X/review-class.sh"
+out="$(printf 'docs/a.md\n' | bash "$X/review-class.sh" 2>&1)"
+rc=$?
+rm -rf "$X"
+if [[ $rc == 2 && "$out" == *"немає"*"journal-rules.sh"* ]]; then
+  ok "без journal-rules.sh — відмова, exit 2"
+else
+  bad "без journal-rules.sh — очікував exit 2 і «немає …journal-rules.sh», отримав $rc: $out"
+fi
+
 # ─── 7. Мутації: кожна категорія й відмова тримаються тестом ────────────────
 if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   M="$(mktemp -d)"
   trap 'rm -rf "$M"' EXIT
   src="$(<"$SCRIPT")"
-  mutate() { # mutate <назва> <було> <стало> — «було» мусить стояти в скрипті рівно раз
-    local name="$1" from="$2" to="$3" rest m="$M/$((++n)).sh"
-    rest="${src#*"$from"}"
-    if [[ "$rest" == "$src" || "$rest" == *"$from"* ]]; then
+  # Правило «журнал лише дописується» живе в journal-rules.sh, який скрипт підключає
+  # поруч із собою (спільне з check-journals.sh, issue #169). Тож мутант — це тека з
+  # копією скрипта і копією бібліотеки, де змінено ОДНУ з двох.
+  lib="$HERE/journal-rules.sh"
+  libsrc="$(<"$lib")"
+  mutate() { # mutate <назва> <було> <стало> [lib] — «було» мусить стояти в скрипті (або в lib) рівно раз
+    local name="$1" from="$2" to="$3" which="${4:-script}" body rest d="$M/$((++n))"
+    body="$src"
+    [[ "$which" == lib ]] && body="$libsrc"
+    rest="${body#*"$from"}"
+    if [[ "$rest" == "$body" || "$rest" == *"$from"* ]]; then
       bad "мутант «$name»: текст не знайдено рівно один раз — мутація застаріла"
       return
     fi
-    printf '%s\n' "${src/"$from"/"$to"}" >"$m"
-    if REVIEW_CLASS_UNDER_TEST="$m" bash "$HERE/$(basename "$0")" >"$m.out" 2>&1; then
+    mkdir -p "$d"
+    cp "$SCRIPT" "$d/review-class.sh"
+    cp "$lib" "$d/journal-rules.sh"
+    if [[ "$which" == lib ]]; then
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
+    else
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/review-class.sh"
+    fi
+    if REVIEW_CLASS_UNDER_TEST="$d/review-class.sh" bash "$HERE/$(basename "$0")" >"$d/out" 2>&1; then
       bad "мутант ВИЖИВ: $name"
     else
       ok "мутанта вбито: $name"
@@ -258,23 +287,32 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "без снапшотів експорту" "  'експорт і валідатори §7|workers/cad/tests/snapshots/*'" ''
   mutate "роль A8 не ризикова" "  'роль і демон A8|infra/ansible/roles/a8/*'" ''
   mutate "механізм рецензії не ризиковий" "  'дозволи й безпека|tools/scripts/review-class*'" ''
-  mutate "порожній вхід — звичайний" "  exit 2" "  exit 0"
+  mutate "порожній вхід — звичайний" 'нічого класифікувати" >&2
+  exit 2' 'нічого класифікувати" >&2
+  exit 0'
   mutate "шаблон як рядок, а не glob" '[[ "$f" == ${r#*|} ]]' '[[ "$f" == "${r#*|}" ]]'
   mutate "infra/** не ризикова" "  'інфраструктура|infra/*'" ''
   mutate "CLAUDE.md не ризиковий" "  'правила й контракт|CLAUDE.md'" ''
   mutate "журнал не перевіряється" '    append_only_violated "$f" "$re" &&' '    false &&'
-  mutate "без бази — «звичайний»" 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1'
-  mutate "вирівнювання — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' ''
-  mutate "дописане поза рядками викликів — «звичайний»" '[[ -z "$(grep -Ev -- "$row_re" <<<"$rest")" ]] && return 1' 'return 1'
+  mutate "без бази — «звичайний»" 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1' lib
+  mutate "вирівнювання — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' '' lib
+  mutate "дописане поза рядками викликів — «звичайний»" '[[ -z "$(grep -Ev -- "$row_re" <<<"$rest")" ]] && return 1' 'return 1' lib
   mutate "порядок не звіряється" \
     '[[ "$(head -n "$n" <<<"$new")" == "$old" ]] || return 0' \
-    '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0'
-  mutate "рядок виклику — будь-який рядок з |" "JOURNAL_ROW_RE='^\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|'" "JOURNAL_ROW_RE='^\\|'"
+    '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0' lib
+  mutate "рядок виклику — будь-який рядок з |" "JOURNAL_ROW_RE='^\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|'" "JOURNAL_ROW_RE='^\\|'" lib
   mutate "покази квоти не перевіряються" '[[ "$f" == "$JOURNAL" || "$f" == "$QUOTA" ]]' '[[ "$f" == "$JOURNAL" ]]'
   mutate "docs/20 не ризиковий" "  'правила й контракт|docs/20_OPEN_DECISIONS.md'" ''
   mutate "шлях у лапках не розкодовується" 'if [[ "$f" == \"*\" ]]; then' 'if false; then'
   mutate "agy-stats-summary не ризиковий" "  'правила й контракт|tools/scripts/agy-stats-summary*'" ''
-  mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 1'
+  mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 1' lib
+  mutate "спільна бібліотека журналу не ризикова" "  'дозволи й безпека|tools/scripts/journal-rules*'" ''
+  mutate "check-journals не ризиковий" "  'CI|tools/scripts/check-journals*'" ''
+  mutate "бібліотеки немає — не відмова" '  exit 2
+}
+# shellcheck source' '  exit 0
+}
+# shellcheck source'
 fi
 
 if [[ $fail == 1 ]]; then
