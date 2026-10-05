@@ -81,7 +81,8 @@ if [[ $rc == 3 ]] && ! gh_called; then ok "без файла відомої ад
 run gh "$T/немає.md" pr edit 7
 if [[ $rc == 2 ]] && ! gh_called; then ok "немає файла тексту — exit 2, gh не викликано"; else bad "немає файла тексту — rc=$rc: $out"; fi
 
-for flag in --body "--body=x" -bx --body-file -F --fill --editor --web --template; do
+for flag in --body "--body=x" -bx --body-file -F --fill --editor --web --template \
+  --editor=true --web=true --fill=true -de -dw -df; do
   run gh "$T/clean.md" pr create --title "чисто" "$flag" "текст"
   if [[ $rc == 2 ]] && ! gh_called; then ok "«$flag» повз перевірений файл — відхилено"; else bad "«$flag» — rc=$rc: $out"; fi
 done
@@ -101,6 +102,14 @@ for sc in "pr create" "issue create"; do
 done
 run gh "$T/clean.md" pr create -tчисто
 if [[ $rc == 0 ]] && gh_called; then ok "gh pr create -t<заголовок> — опубліковано"; else bad "pr create -t… — rc=$rc: $out"; fi
+
+# «-» — це stdin для gh --body-file і git commit -F, тобто текст повз перевірку.
+# Чистий файл з іменем «-» поруч: check-leak перевірив би його, а gh читав би stdin.
+mkdir -p "$T/dash" && printf 'чисто\n' >"$T/dash/-"
+cd "$T/dash" || exit 1
+run gh - pr comment 12 </dev/null
+cd "$HERE" || exit 1
+if [[ $rc == 2 ]] && ! gh_called; then ok "файл тексту «-» (stdin) — відхилено"; else bad "файл «-» — rc=$rc: $out"; fi
 
 run gh "$T/clean.md" repo delete
 if [[ $rc == 2 ]] && ! gh_called; then ok "gh repo delete — не з переліку, відхилено"; else bad "gh repo delete — rc=$rc: $out"; fi
@@ -144,6 +153,21 @@ git checkout -q -b c4 main
 printf 'другий рядок\n' >journal.md && git add journal.md
 run commit "$T/msg-clean"
 if [[ $rc == 0 && "$(git rev-parse HEAD)" != "$head0" ]]; then ok "видалення рядка з адресою — не блок"; else bad "видалення рядка з адресою — rc=$rc: $out"; fi
+
+# Старий рядок без кінцевого \n: дописування показує його в diff як «-» і «+».
+git checkout -q -b c6 main
+printf 'без кінця: 198.51.100.9' >tail.md && git add tail.md && git commit -qm "tail" && git push -q origin c6
+printf '\nновий рядок\n' >>tail.md && git add tail.md
+h6="$(git rev-parse HEAD)"
+run commit "$T/msg-clean"
+if [[ $rc == 0 && "$(git rev-parse HEAD)" != "$h6" ]]; then ok "дописано після старого рядка без \\n — коміт є"; else bad "рядок без \\n — rc=$rc: $out"; fi
+git checkout -q main
+
+git checkout -q -b c7 main
+printf 'чисто\n' >./- && printf 'c7\n' >>journal.md && git add journal.md
+run commit - </dev/null
+if [[ $rc == 2 && "$(git rev-parse HEAD)" == "$head0" ]]; then ok "commit «-» (stdin) — відхилено"; else bad "commit «-» — rc=$rc: $out"; fi
+rm -f ./- && git reset -q --hard main
 
 git checkout -q -b c5 main
 printf 'новий файл\n' >a.md
@@ -189,6 +213,27 @@ git checkout -q -b p5 main
 printf 'чисто p5\n' >>journal.md && git commit -qam "p5"
 run push backup
 if [[ $rc == 0 ]] && backup_has p5 && ! remote_has p5; then ok "push backup — іде в названий remote, не в origin"; else bad "push backup — rc=$rc: $out"; fi
+
+git checkout -q -b "p6-203.0.113.77" main
+printf 'чисто p6\n' >>journal.md && git commit -qam "p6"
+run push
+if [[ $rc == 1 ]] && ! remote_has "p6-203.0.113.77"; then ok "адреса в назві гілки — exit 1, push немає"; else bad "адреса в назві гілки — rc=$rc: $out"; fi
+
+# Merge origin/main у гілку: рядки main уже публічні — не блок; «злий» merge з новою
+# адресою — блок.
+git checkout -q main
+printf 'стара в main: 198.51.100.9\n' >main2.md && git add main2.md && git commit -qm "main2"
+git push -q origin main
+git checkout -q -b p7 main~1
+printf 'чисто p7\n' >p7.md && git add p7.md && git commit -qm "p7"
+git merge -q --no-edit main
+run push
+if [[ $rc == 0 ]] && remote_has p7; then ok "merge origin/main зі старою адресою — push є"; else bad "merge origin/main — rc=$rc: $out"; fi
+git checkout -q -b p8 p7~1
+git merge -q --no-commit main >/dev/null 2>&1
+printf 'злий merge 203.0.113.77\n' >>p7.md && git add p7.md && git commit -qm "merge"
+run push
+if [[ $rc == 1 ]] && ! remote_has p8; then ok "нова адреса в самому merge-коміті — exit 1"; else bad "злий merge — rc=$rc: $out"; fi
 
 run push немає
 if [[ $rc == 2 ]]; then ok "push у неіснуючий remote — exit 2"; else bad "push немає — rc=$rc: $out"; fi
@@ -238,8 +283,15 @@ if [[ -z "${SAFE_PUBLISH_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "блокує лише exit 1, а «не перевірено» (3) публікується" 'if [[ $rc != 0 ]]; then' 'if [[ $rc == 1 ]]; then'
   mutate "коміт: перевіряється весь файл, а не додані рядки" \
     'staged_added >"$T/added"' 'git diff --cached --name-only -z | xargs -0 cat >"$T/added"'
-  mutate "коміт: перевіряються й видалені рядки" "h && /^\\+/{print" "h && /^[-+]/{print"
-  mutate "коміт: лише перший файл diff" "/^diff --git /{h=0; next}" "/^diff --git /{if (seen++) exit; h=0; next}"
+  mutate "коміт: перевіряються й видалені рядки" 'pre ~ /-/ {if (np==1) gone[txt]++; next}' 'pre ~ /-/ {print txt; next}'
+  mutate "коміт: дослівно перенесений рядок вважається новим" 'if (gone[txt] > 0) {gone[txt]--; next} ' ''
+  mutate "merge: перший батько замість combined diff" '--format= --cc' '--format= --diff-merges=first-parent'
+  mutate "merge: combined diff не читається" 'pre ~ /\+/ {' 'np == 1 && pre ~ /\+/ {'
+  mutate "push: назва гілки не перевіряється" 'git rev-parse --abbrev-ref HEAD >>"$T/messages"' 'true'
+  mutate "gh: кластер коротких прапорців" '        -[!-]?*)' '        -[!-]?*-NEVER)'
+  mutate "gh: --editor=… повз перелік" '-e | --editor* |' '-e | --editor |'
+  mutate "stdin замість файла" '[[ "$body" != -* ]] ||' 'true ||' '[[ "$msg" != -* ]] ||' 'true ||'
+  mutate "коміт: лише перший файл diff" '/^diff (--git|--cc|--combined) /{h=0; next}' '/^diff (--git|--cc|--combined) /{if (seen++) exit; h=0; next}'
   mutate "коміт: повідомлення не перевіряється" 'check "$msg" "$T/added"' 'check "$T/added"'
   mutate "gh: заголовок і аргументи не перевіряються" 'check "$body" "$T/args"' 'check "$body"'
   mutate "gh: --body повз перевірений файл" '-b | -b?* | --body | --body=* | ' ''

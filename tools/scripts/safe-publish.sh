@@ -20,7 +20,7 @@
 #       Перевіряє все, що push зробить публічним: повідомлення й додані рядки кожного
 #       коміту з HEAD, якого ще немає на гілках ЦЬОГО remote (`HEAD --not
 #       --remotes=<remote>`): коміт, що є лише на іншому remote, для цього ще не
-#       публічний. Покомітно, а не сумарним diff: адреса, додана й потім видалена,
+#       публічний. Перевіряється й назва поточної гілки. Покомітно, а не сумарним diff: адреса, додана й потім видалена,
 #       усе одно лишається в історії. Лише тоді git push -u <remote, дефолт origin> HEAD.
 #
 # Вихід: код check-leak.sh як є (1 — блок, 2 — помилка виклику, 3 — не перевірено), і
@@ -61,9 +61,18 @@ check() {
 
 # Додані рядки diff з stdin: лише рядки `+` усередині hunk-ів, без заголовків `+++`.
 # Стан hunk-а скидається на кожному `diff --git`, тож `+++ b/…` наступного файла не
-# потрапляє в текст.
+# потрапляє в текст. Рядок, що в тому самому hunk-у видалено й додано дослівно, — не
+# новий: так git показує останній рядок без `\n`, до якого дописали (контрприклад
+# Claude Sonnet 5.5, #188). Combined diff merge-коміту (`@@@`, по колонці на батька):
+# рядок новий, якщо в його колонках є `+` і немає `-`.
 added_lines() {
-  awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}'
+  awk '
+    /^diff (--git|--cc|--combined) /{h=0; next}
+    /^@@/{h=1; match($0, /^@+/); np=RLENGTH-1; delete gone; next}
+    !h{next}
+    {pre=substr($0, 1, np); txt=substr($0, np+1)}
+    pre ~ /-/ {if (np==1) gone[txt]++; next}
+    pre ~ /\+/ {if (gone[txt] > 0) {gone[txt]--; next} print txt}'
 }
 
 staged_added() {
@@ -71,12 +80,15 @@ staged_added() {
 }
 
 # Для кожного неопублікованого коміту — його diff з батьком (перший коміт — з порожнім
-# деревом); merge-коміт — з першим батьком, тобто те, що він приніс у гілку.
+# деревом). Merge-коміт — combined diff (`--cc`): лише те, чого немає в жодному з
+# батьків. Батьки, яких ще немає на remote, перевіряються самі; ті, що вже є, — уже
+# публічні, і merge `origin/main` у гілку не блокується старим рядком main
+# (контрприклад Claude Sonnet 5.5, #188).
 unpushed_added() {
   local c revs
   revs="$(git rev-list HEAD --not --remotes="$remote")" || return 1
   for c in $revs; do
-    git show --no-color --no-ext-diff --no-textconv -U0 --format= --diff-merges=first-parent "$c" | added_lines || return 1
+    git show --no-color --no-ext-diff --no-textconv -U0 --format= --cc "$c" | added_lines || return 1
   done
 }
 
@@ -87,6 +99,8 @@ case "$mode" in
     [[ $# -ge 3 ]] || usage
     body="$1"
     shift
+    # «-» для gh --body-file і git commit -F — це stdin, а не перевірений файл.
+    [[ "$body" != -* ]] || die "файл тексту «$body» схожий на прапорець або stdin — дай шлях"
     case "$1 $2" in
       "pr create" | "pr edit" | "pr comment" | "issue create" | "issue comment") ;;
       *) die "gh $1 $2 — не публікація з переліку (pr create|edit|comment, issue create|comment)" ;;
@@ -94,9 +108,14 @@ case "$mode" in
     for a in "$@"; do
       case "$a" in
         -b | -b?* | --body | --body=* | -F | -F?* | --body-file | --body-file=* | \
-          -f | --fill | --fill-first | --fill-verbose | -e | --editor | -w | --web | \
+          -f | --fill* | -e | --editor* | -w | --web* | \
           -T | -T?* | --template | --template=* | --recover | --recover=*)
           die "аргумент «$a» передає текст повз перевірений файл — заборонено"
+          ;;
+        -t?*) ;; # -t<заголовок>: решта — значення заголовка, не прапорці
+        -[!-]?*)
+          # Кластер коротких прапорців (`-de` = --draft --editor) обходив перелік вище.
+          die "кластер коротких прапорців «$a» — пиши кожен прапорець окремо"
           ;;
       esac
     done
@@ -116,6 +135,7 @@ case "$mode" in
   commit)
     [[ $# -eq 1 ]] || usage
     msg="$1"
+    [[ "$msg" != -* ]] || die "файл повідомлення «$msg» схожий на прапорець або stdin — дай шлях"
     staged_added >"$T/added" || die "git diff --cached не вдався"
     check "$msg" "$T/added"
     git commit -F "$msg"
@@ -126,6 +146,8 @@ case "$mode" in
     remote="${1:-origin}"
     git remote get-url "$remote" >/dev/null 2>&1 || die "немає remote «$remote»"
     git rev-list HEAD --not --remotes="$remote" --format=%B >"$T/messages" || die "git rev-list не вдався"
+    # Назва гілки теж стає публічною (контрприклад Claude Sonnet 5.5, #188).
+    git rev-parse --abbrev-ref HEAD >>"$T/messages" || die "git rev-parse не вдався"
     unpushed_added >"$T/added" || die "git show не вдався"
     check "$T/messages" "$T/added"
     git push -u "$remote" HEAD
