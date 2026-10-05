@@ -1,16 +1,14 @@
 import { TEMPLATE_REGISTRY, type TemplateSlug } from "@flatcraft/templates";
-import type { MaterialChoice, TemplateDetail } from "@flatcraft/types";
 import {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   EnclosedShelfParametersSchema,
-  WALL_SHELF_DEFAULT_PARAMETERS,
-  WallShelfParametersSchema,
+  type MaterialChoice,
+  type TemplateDetail,
 } from "@flatcraft/types";
 import Link from "next/link";
 
 import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
 import { RegistryTemplateStudio } from "./registry-template-studio";
-import { WallShelfStudio } from "./wall-shelf-studio";
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
@@ -89,15 +87,6 @@ function TemplateStudioSwitch({
       <RegistryTemplateStudio
         slug={slug as TemplateSlug}
         initialParameters={parsed.success ? parsed.data : registryDef.defaults}
-        materials={materials}
-      />
-    );
-  }
-  if (slug === "wall_shelf") {
-    const parsed = WallShelfParametersSchema.safeParse(defaults);
-    return (
-      <WallShelfStudio
-        initialParameters={parsed.success ? parsed.data : WALL_SHELF_DEFAULT_PARAMETERS}
         materials={materials}
       />
     );
