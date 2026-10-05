@@ -57,6 +57,7 @@ RULES=(
   'дозволи й безпека|tools/scripts/check-deny-parity*'
   'дозволи й безпека|tools/scripts/check-agy-scope*'
   'дозволи й безпека|tools/scripts/check-leak*'
+  'дозволи й безпека|tools/scripts/safe-publish*'
   'дозволи й безпека|tools/scripts/agy-permissions-probe*'
   'дозволи й безпека|tools/scripts/measure-deny*'
   'дозволи й безпека|tools/scripts/measure-trust*'

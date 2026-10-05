@@ -3,7 +3,7 @@
 import type { TemplateDefinition } from "@flatcraft/templates";
 import { AutoForm, SegmentedControl, zodIssuesToFieldErrors } from "@flatcraft/ui";
 import { useMemo } from "react";
-import type { z } from "zod";
+import { z } from "zod";
 
 import { bendMatrixIssues } from "../lib/bend-matrix";
 
@@ -54,12 +54,15 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
   visibleFields,
 }: RegistryTemplateEditorProps<Params>) {
   const testId = `${toKebab(def.slug)}-editor`;
-  // ADR-033 §2 ALT-C дозволяє refined-схеми (ZodEffects) у реєстрі; AutoForm
-  // вимагає ZodObject. Для наявних (Етап 2) shape'ів це завжди plain ZodObject
-  // — рефайнед-схема (wall_shelf) обробляється в її власній міграційній PR.
-  const schema = def.schema as unknown as z.ZodObject<z.ZodRawShape>;
+  // ADR-033 §2 ALT-C дозволяє refined-схеми (ZodEffects) у реєстрі (wall_shelf
+  // — `.refine()` на `front_lip_mm`); AutoForm вимагає ZodObject (потребує
+  // `.shape`, якого ZodEffects не має). Валідація (safeParse) йде проти
+  // ПОВНОЇ `def.schema` (інакше cross-field-помилка refine губиться), а
+  // AutoForm отримує розгорнутий ZodObject — `unwrapToObjectSchema` знімає
+  // ZodEffects-обгортки (можливо кілька, хоч наразі є лише 1 рівень).
+  const objectSchema = useMemo(() => unwrapToObjectSchema(def.schema), [def.schema]);
 
-  const validation = useMemo(() => schema.safeParse(value), [schema, value]);
+  const validation = useMemo(() => def.schema.safeParse(value), [def.schema, value]);
   const fieldErrors = useMemo(
     () => (validation.success ? {} : zodIssuesToFieldErrors(validation.error.issues)),
     [validation],
@@ -112,8 +115,8 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
     () =>
       visibleFields ??
       def.ui.visibleFields ??
-      Object.keys(schema.shape).filter((f) => !segmentedFields.has(f)),
-    [visibleFields, def.ui.visibleFields, schema, segmentedFields],
+      Object.keys(objectSchema.shape).filter((f) => !segmentedFields.has(f)),
+    [visibleFields, def.ui.visibleFields, objectSchema, segmentedFields],
   );
 
   return (
@@ -134,7 +137,7 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
         ))}
 
       <AutoForm
-        schema={schema}
+        schema={objectSchema}
         value={value}
         onChange={onChange}
         errors={fieldErrors}
@@ -180,6 +183,15 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
       ) : null}
     </form>
   );
+}
+
+/** Знімає `ZodEffects`-обгортки (`.refine()`/`.transform()`) до базового ZodObject — AutoForm потребує `.shape`. */
+function unwrapToObjectSchema(schema: z.ZodTypeAny): z.ZodObject<z.ZodRawShape> {
+  let current: z.ZodTypeAny = schema;
+  while (current instanceof z.ZodEffects) {
+    current = current.innerType();
+  }
+  return current as z.ZodObject<z.ZodRawShape>;
 }
 
 function toKebab(slug: string): string {
