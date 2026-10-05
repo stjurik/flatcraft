@@ -139,6 +139,36 @@ expect_validate "validate: interval_s рядком" "$(base '.interval_s = "300"
 expect_validate "validate: collected_at без Z (офсет)" "$(base '.collected_at = "2026-09-30T14:00:00+02:00"')" "reject collected_at" 3
 expect_validate "validate: collected_at — не ISO 8601" "$(base '.collected_at = "30.09.2026"')" "reject collected_at" 3
 expect_validate "validate: section — порожній рядок" "$(base '.section = ""')" "reject section" 3
+# Рецензія Gemini 3.8 Flash (#197); правки оркестратора, не агента A8.
+expect_validate "validate: title — порожній рядок" "$(base '.title = ""')" "reject title" 3
+expect_validate "validate: source — порожній рядок" "$(base '.source = ""')" "reject source" 3
+expect_validate "validate: зайве поле (additionalProperties: false)" "$(base '.extra = 1')" "reject extra" 3
+expect_validate "validate: collected_at — 30 лютого" "$(base '.collected_at = "2026-02-30T00:00:00Z"')" "reject collected_at" 3
+expect_validate "validate: collected_at — 25:70" "$(base '.collected_at = "2026-09-30T25:70:00Z"')" "reject collected_at" 3
+expect_validate "validate: два JSON-документи підряд" "$(base)$(base)" "reject json" 3
+
+out="$(DASH_SCHEMA_FILE="$SCHEMA" bash "$SCRIPT" stale 2026-02-30T00:00:00Z 300 --now "$NOW" 2>&1)"
+rc=$?
+[[ $rc == 2 && "$out" == *"відмова"* ]] && ok "stale: 30 лютого — відмова exit 2" ||
+  bad "stale: 30 лютого — очікував відмову exit 2, отримав exit $rc: $out"
+
+out="$(bash "$SCRIPT" envelope a8 A s 300 measured ok '{}' --now 2026-02-30T00:00:00Z 2>&1)"
+rc=$?
+[[ $rc == 2 ]] && ok "envelope: --now 30 лютого — відмова exit 2" ||
+  bad "envelope: --now 30 лютого — очікував exit 2, отримав exit $rc: $out"
+
+# Як перевірити очима (#161) дослівно: data — файл через <(…).
+out="$(bash "$SCRIPT" envelope t5 "Трек T5" docs/02 3600 measured ok <(echo '{"n":2}') --now "$NOW" 2>&1)"
+rc=$?
+[[ $rc == 0 && "$(jq -c '[(keys | length), .data.n]' <<<"$out" 2>/dev/null)" == "[9,2]" ]] &&
+  ok "envelope: data файлом <(…) — 9 полів, data з файла" ||
+  bad "envelope: data файлом — exit $rc: $out"
+
+# Без DASH_SCHEMA_FILE — дефолтна схема поруч зі скриптом.
+printf '%s' "$(base '.status = "green"')" >"$T/green.json"
+out="$(env -u DASH_SCHEMA_FILE bash "$SCRIPT" validate "$T/green.json" 2>&1)"
+[[ "$out" == "reject status" ]] && ok "validate: дефолтна схема — reject status" ||
+  bad "validate: дефолтна схема — отримав «$out»"
 
 # Кілька причин одразу — усі перелічені, не лише перша.
 expect_validate "validate: кілька причин одразу" \
@@ -215,8 +245,26 @@ if [[ -z "${DASH_SCHEMA_UNDER_TEST:-}" && $fail == 0 ]]; then
     '(if ($data | type) != "object"' \
     '(if false'
   mutate "validate: невалідний JSON не ловиться" \
-    $'  jq -e . "$file" >/dev/null 2>&1 || {\n    echo "reject json"\n    return 3\n  }\n' \
+    $'  [[ "$(jq -s \'length\' "$file" 2>/dev/null)" == 1 ]] || {\n    echo "reject json"\n    return 3\n  }\n' \
     ''
+  mutate "validate: зайві поля не ловляться" \
+    '          (($data | keys) - ($s.properties | keys) | .[])' \
+    '          empty'
+  mutate "validate: неіснуюча дата проходить" \
+    'and (try (strptime("%Y-%m-%dT%H:%M:%SZ") | mktime | todate) catch null) == .)' \
+    ')'
+  mutate "stale/envelope: неіснуюча дата нормалізується" \
+    '[[ "$(date -u -d "@$s" +%Y-%m-%dT%H:%M:%SZ)" == "$ts" ]] || return 1' \
+    'true'
+  mutate "envelope: data-файл не читається" \
+    '    data="$(<"$data")"' \
+    '    :'
+  mutate "validate: title може бути порожнім" \
+    '(if ($data.title? | type == "string" and length > 0) then empty else "title" end),' \
+    '(if ($data.title? | type == "string") then empty else "title" end),'
+  mutate "validate: дефолтна схема — не та" \
+    'DASH_SCHEMA_FILE="${DASH_SCHEMA_FILE:-$DASH_HERE/../dashboard/snapshot.schema.json}"' \
+    'DASH_SCHEMA_FILE="${DASH_SCHEMA_FILE:-/nonexistent}"'
 
   rm -rf "$M"
 fi

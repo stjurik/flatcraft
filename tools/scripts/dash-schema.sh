@@ -14,13 +14,14 @@
 #
 # Використання (CLI):
 #   dash-schema.sh envelope <section> <title> <source> <interval_s> <origin> <status> \
-#                   <data-json> [--now 'РРРР-ММ-ДДTГГ:ХХ:ССZ']
+#                   <data.json | JSON-об'єкт> [--now 'РРРР-ММ-ДДTГГ:ХХ:ССZ']
 #       → друкує обгортку розділу (compact JSON) в stdout.
 #   dash-schema.sh stale <collected_at> <interval_s> [--now 'РРРР-ММ-ДДTГГ:ХХ:ССZ']
 #       → друкує "stale" (exit 0), "fresh" (exit 1) або "clock" (exit 2) —
 #         collected_at у майбутньому більш ніж на interval_s.
 #   dash-schema.sh validate <файл>
-#       → друкує "ok" (exit 0) або "reject <поле>[,<поле>…]" (exit 3, усі причини).
+#       → друкує "ok" (exit 0) або "reject <поле>[,<поле>…]" (exit 3, усі причини;
+#         зайве поле, якого немає в схемі, — його назвою; не один JSON-документ — json).
 #
 # Час — лише UTC. `--now` замінює системний час; тести завжди його задають, щоб не
 # залежати від моменту запуску.
@@ -37,10 +38,14 @@ DASH_SCHEMA_FILE="${DASH_SCHEMA_FILE:-$DASH_HERE/../dashboard/snapshot.schema.js
 DASH_TS_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 
 # dash_epoch <РРРР-ММ-ДДTГГ:ХХ:ССZ> — секунди з епохи (UTC) або помилка (exit 1).
+# Дата мусить існувати в календарі: 2026-02-30 чи 25:70 відхиляються, а не
+# нормалізуються (рецензія Gemini 3.8 Flash, #197; правка оркестратора).
 dash_epoch() {
-  local ts="$1"
+  local ts="$1" s
   [[ "$ts" =~ $DASH_TS_RE ]] || return 1
-  date -u -d "$ts" +%s 2>/dev/null
+  s="$(date -u -d "$ts" +%s 2>/dev/null)" || return 1
+  [[ "$(date -u -d "@$s" +%Y-%m-%dT%H:%M:%SZ)" == "$ts" ]] || return 1
+  printf '%s\n' "$s"
 }
 
 # dash_now <--now T> — час «зараз»: аргумент, якщо заданий, інакше системний UTC.
@@ -53,7 +58,7 @@ dash_now() {
 # ─── envelope ───────────────────────────────────────────────────────────────
 dash_envelope() {
   if (($# < 7)); then
-    echo "використання: dash-schema.sh envelope <section> <title> <source> <interval_s> <origin> <status> <data-json> [--now T]" >&2
+    echo "використання: dash-schema.sh envelope <section> <title> <source> <interval_s> <origin> <status> <data.json | JSON-об'єкт> [--now T]" >&2
     return 2
   fi
   local section="$1" title="$2" source="$3" interval_s="$4" origin="$5" status="$6" data="$7"
@@ -76,6 +81,14 @@ dash_envelope() {
     echo "відмова: interval_s має бути додатним цілим, отримано «$interval_s»" >&2
     return 2
   }
+  # data — файл (#161: <data.json>, зокрема <(…)) або сам JSON-об'єкт рядком.
+  if [[ ! "$data" =~ ^[[:space:]]*[\{\[] ]]; then
+    [[ -r "$data" ]] || {
+      echo "відмова: data — не JSON і не файл, що читається: $data" >&2
+      return 2
+    }
+    data="$(<"$data")"
+  fi
   jq -e . >/dev/null 2>&1 <<<"$data" || {
     echo "відмова: data не є JSON: $data" >&2
     return 2
@@ -86,7 +99,7 @@ dash_envelope() {
   }
   local ts
   ts="$(dash_now "$now_arg")"
-  [[ "$ts" =~ $DASH_TS_RE ]] || {
+  dash_epoch "$ts" >/dev/null || {
     echo "відмова: час має бути UTC ISO 8601 (РРРР-ММ-ДДTГГ:ХХ:ССZ), отримано «$ts»" >&2
     return 2
   }
@@ -171,7 +184,8 @@ dash_validate() {
     echo "відмова: немає файла «$file»" >&2
     return 2
   }
-  jq -e . "$file" >/dev/null 2>&1 || {
+  # Рівно один JSON-документ: `{…}{…}` інакше пройшов би за першим (рецензія Flash, #197).
+  [[ "$(jq -s 'length' "$file" 2>/dev/null)" == 1 ]] || {
     echo "reject json"
     return 3
   }
@@ -190,11 +204,15 @@ dash_validate() {
           (if ($data.section? | type == "string" and length > 0) then empty else "section" end),
           (if ($data.title? | type == "string" and length > 0) then empty else "title" end),
           (if ($data.source? | type == "string" and length > 0) then empty else "source" end),
-          (if ($data.collected_at? | (type == "string") and test($ts_pattern)) then empty else "collected_at" end),
+          (if ($data.collected_at? | (type == "string") and test($ts_pattern)
+               and (try (strptime("%Y-%m-%dT%H:%M:%SZ") | mktime | todate) catch null) == .)
+           then empty else "collected_at" end),
           (if ($data.interval_s? | type == "number" and . > 0 and (. | floor) == .) then empty else "interval_s" end),
           (if (($data.status? // null) as $v | $v != null and ($status_enum | index($v)) != null) then empty else "status" end),
           (if (($data.origin? // null) as $v | $v != null and ($origin_enum | index($v)) != null) then empty else "origin" end),
-          (if ($data.data? | type == "object") then empty else "data" end)
+          (if ($data.data? | type == "object") then empty else "data" end),
+          # additionalProperties: false — перелік полів теж зі схеми (рецензія Flash, #197).
+          (($data | keys) - ($s.properties | keys) | .[])
         ]
        end) as $bad
     | if ($bad | length) == 0 then "ok" else "reject " + ($bad | join(",")) end
