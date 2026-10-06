@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Пульт розробки flatcraft</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <style>
+      /* Пульт розробки — ADR-042. Лише читання: сторінка нічого не змінює ні в репо,
+   ні на A8, ні в GitHub. Кольори й структура — затверджений макет v3
+   (docs/promts/inputs/pult-rozrobky-maket-v3.html); тут — та сама палітра і
+   порядок розділів, але розмітку будує render.js з window.SNAPSHOT, а не
+   вигадані дані. */
+      :root {
+        --paper: #f3f4f5;
+        --sheet: #ffffff;
+        --ink: #12161b;
+        --ink-2: #47505a;
+        --ink-3: #707a85;
+        --rule: #d6dbe1;
+        --rule-strong: #99a2ad;
+        --accent: #1d5bd6;
+        --accent-soft: #e5edfb;
+        --good: #0ca30c;
+        --warn: #fab219;
+        --serious: #ec835a;
+        --crit: #d03b3b;
+        --s1: #2a78d6;
+        --s2: #eb6834;
+        --hatch: rgba(18, 22, 27, 0.06);
+        --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        --font-cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --paper: #0f1216;
+          --sheet: #161a1f;
+          --ink: #eef1f4;
+          --ink-2: #b3bac3;
+          --ink-3: #87909b;
+          --rule: #2a3038;
+          --rule-strong: #4b545f;
+          --accent: #6f9dff;
+          --accent-soft: #1a2640;
+          --s1: #3987e5;
+          --s2: #d95926;
+          --hatch: rgba(238, 241, 244, 0.07);
+          color-scheme: dark;
+        }
+      }
+      :root[data-theme="dark"] {
+        --paper: #0f1216;
+        --sheet: #161a1f;
+        --ink: #eef1f4;
+        --ink-2: #b3bac3;
+        --ink-3: #87909b;
+        --rule: #2a3038;
+        --rule-strong: #4b545f;
+        --accent: #6f9dff;
+        --accent-soft: #1a2640;
+        --s1: #3987e5;
+        --s2: #d95926;
+        --hatch: rgba(238, 241, 244, 0.07);
+        color-scheme: dark;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+      }
+      body {
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-body);
+        font-size: 14px;
+        line-height: 1.5;
+        padding: 0 clamp(16px, 3vw, 32px) 48px;
+      }
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+      }
+      .muted {
+        color: var(--ink-3);
+      }
+
+      .top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px 24px;
+        align-items: end;
+        padding-block: 20px 12px;
+      }
+      .brand h1 {
+        font-family: var(--font-cond);
+        font-weight: 600;
+        font-size: clamp(22px, 3.2vw, 30px);
+        letter-spacing: -0.01em;
+      }
+      .brand p {
+        margin: 4px 0 0;
+        color: var(--ink-2);
+        max-width: 60ch;
+      }
+      .stamp {
+        display: grid;
+        grid-template-columns: repeat(3, auto);
+        border: 1.5px solid var(--ink);
+        background: var(--sheet);
+        font-size: 13px;
+      }
+      .stamp > div {
+        padding: 5px 12px 6px;
+        border-left: 1px solid var(--rule-strong);
+        min-width: 0;
+      }
+      .stamp > div:first-child {
+        border-left: 0;
+      }
+      .stamp small {
+        display: block;
+        font-family: var(--font-cond);
+        font-weight: 500;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+      }
+      .stamp b {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .theme-btn {
+        border: 1px solid var(--rule-strong);
+        background: var(--sheet);
+        color: var(--ink);
+        padding: 6px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .banner {
+        border: 1px solid var(--warn);
+        background: var(--sheet);
+        border-radius: 3px;
+        padding: 10px 14px;
+        margin: 10px 0 16px;
+        font-size: 13.5px;
+      }
+      .banner b {
+        color: var(--ink);
+      }
+
+      .legend-states {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        align-items: center;
+        margin-bottom: 14px;
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+      .legend-states > span:first-child {
+        font-family: var(--font-cond);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        font-size: 12px;
+        color: var(--ink-3);
+      }
+
+      .st {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--ink);
+      }
+      .st i {
+        font-style: normal;
+        font-weight: 700;
+        font-size: 11px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        display: inline-grid;
+        place-items: center;
+        color: var(--sheet);
+        flex: none;
+      }
+      .st-good i {
+        background: var(--good);
+      }
+      .st-warn i {
+        background: var(--warn);
+        color: #12161b;
+      }
+      .st-serious i {
+        background: var(--serious);
+        color: #12161b;
+      }
+      .st-crit i {
+        background: var(--crit);
+      }
+      .st-none i {
+        background: transparent;
+        color: var(--ink-3);
+        border: 1.5px dashed var(--ink-3);
+      }
+      .st-info i {
+        background: var(--rule-strong);
+      }
+
+      .flow {
+        display: grid;
+        gap: 16px;
+      }
+      .panel {
+        background: var(--sheet);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        min-width: 0;
+      }
+      .panel-h {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .panel-h h2 {
+        font-family: var(--font-cond);
+        font-weight: 600;
+        font-size: 17px;
+      }
+      .panel-h h2 .ord {
+        font-family: var(--font-mono);
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--ink-3);
+        margin-right: 8px;
+      }
+      .meta {
+        color: var(--ink-3);
+        font-size: 12.5px;
+        margin-top: 2px;
+      }
+      .tag {
+        display: inline-block;
+        font-family: var(--font-cond);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 1px 6px;
+        border-radius: 2px;
+        margin-left: 6px;
+        vertical-align: 1px;
+        border: 1px solid var(--rule-strong);
+        color: var(--ink-2);
+      }
+      .tag-real {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .panel-b {
+        padding: 12px 16px 16px;
+      }
+      .panel.is-error .panel-b {
+        background: repeating-linear-gradient(135deg, var(--hatch) 0 6px, transparent 6px 12px);
+      }
+
+      .rows {
+        display: grid;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 12px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--rule);
+        align-items: baseline;
+      }
+      .row:last-child {
+        border-bottom: 0;
+      }
+      .row .k {
+        color: var(--ink-2);
+      }
+      .row .v {
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .steps li {
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr);
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .steps li:last-child {
+        border-bottom: 0;
+      }
+      .steps .no {
+        font-family: var(--font-mono);
+        font-weight: 500;
+        color: var(--ink-3);
+        padding-top: 1px;
+      }
+      .steps .nm {
+        font-weight: 600;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 10px;
+        align-items: center;
+      }
+      .steps .cr {
+        color: var(--ink-2);
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      .steps li.locked .nm {
+        color: var(--ink-3);
+      }
+
+      .legend {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 13px;
+        color: var(--ink-2);
+        margin-bottom: 8px;
+      }
+      .legend i {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      .chart-bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        height: 140px;
+        border-bottom: 1px solid var(--rule-strong);
+        padding-bottom: 2px;
+        overflow-x: auto;
+      }
+      .chart-bars .col {
+        flex: 1 0 18px;
+        min-width: 18px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 100%;
+        justify-content: flex-end;
+      }
+      .chart-bars .bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 120px;
+        width: 100%;
+        justify-content: center;
+      }
+      .chart-bars .bars span {
+        display: block;
+        width: 7px;
+        border-radius: 2px 2px 0 0;
+        min-height: 1px;
+      }
+      .chart-bars .b-prod {
+        background: var(--s1);
+      }
+      .chart-bars .b-proc {
+        background: var(--s2);
+      }
+      .chart-bars .wk {
+        font-size: 10.5px;
+        color: var(--ink-3);
+        margin-top: 4px;
+        white-space: nowrap;
+      }
+      .callout {
+        border-left: 3px solid var(--serious);
+        padding: 6px 10px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: var(--ink-2);
+        background: color-mix(in srgb, var(--serious) 8%, transparent);
+      }
+
+      .foot {
+        margin-top: 18px;
+        color: var(--ink-3);
+        font-size: 12.5px;
+        max-width: 90ch;
+      }
+
+      @media (max-width: 1000px) {
+        .top {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .stamp {
+          grid-template-columns: repeat(1, minmax(0, 1fr));
+        }
+        .stamp > div {
+          border-left: 0;
+          border-top: 1px solid var(--rule-strong);
+        }
+        .stamp > div:first-child {
+          border-top: 0;
+        }
+      }
+      @media (max-width: 560px) {
+        body {
+          padding-inline: 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <h1>Пульт розробки flatcraft</h1>
+        <p>
+          Знімок автономного середовища (ADR-042): що чекає на вас, що зараз робить A8, скільки
+          лишилось квот ШІ і де ми на дорожній карті. Лише читання — сторінка нічого не змінює.
+        </p>
+      </div>
+      <div class="stamp" aria-label="Штамп знімка">
+        <div><small>Знімок</small><b id="snap-time">—</b></div>
+        <div>
+          <small>Джерел</small><b><span id="src-count">—</span></b>
+        </div>
+        <div><small>Режим</small><b>лише читання</b></div>
+      </div>
+    </header>
+
+    <div style="margin-bottom: 14px">
+      <button class="theme-btn" type="button" id="theme-toggle">Тема: системна</button>
+    </div>
+
+    <p class="banner" id="snap-missing" hidden>
+      <b>Знімка немає.</b> Запустіть <span class="mono">tools/scripts/dash-collect.sh</span>, щоб
+      зібрати <span class="mono">snapshot.js</span> поруч із цією сторінкою. Доки файла немає —
+      жоден розділ не показується зеленим.
+    </p>
+    <p class="banner" id="snap-example-note" hidden>
+      <b>Режим прикладу (?example).</b> Дані нижче — з
+      <span class="mono">fixtures/snapshot.example.js</span>, не зі справжнього знімка.
+    </p>
+
+    <div class="legend-states" aria-label="Стани розділів" id="snap-ok" hidden>
+      <span>Стан розділу</span>
+      <span class="st st-good"><i>✓</i>дані свіжі</span>
+      <span class="st st-warn"><i>◷</i>застаріли</span>
+      <span class="st st-crit"><i>✕</i>збирач не відповів</span>
+      <span class="st st-none"><i>–</i>не виміряно / не підключено</span>
+      <span class="muted">Застарілий чи порожній розділ ніколи не зелений (ADR-042 §3).</span>
+    </div>
+
+    <main class="flow" id="flow"></main>
+
+    <p class="foot">
+      Схема розділу — <span class="mono">tools/dashboard/snapshot.schema.json</span>. Новий розділ =
+      новий збирач <span class="mono">tools/scripts/dash-&lt;розділ&gt;.sh</span> + (за потреби)
+      новий віджет у <span class="mono">tools/dashboard/render.js</span>; решта сторінки не
+      змінюється.
+    </p>
+
+    <script src="render.js"></script>
+    <script>
+      /* global window, document, DashRender */
+      (function () {
+        "use strict";
+
+        var SECTIONS = [
+          { key: "quotas", title: "Квоти ШІ" },
+          { key: "inbox", title: "Чекає на вас", ord: 1 },
+          { key: "queue", title: "Черга A8 і процеси за розкладом", ord: 2 },
+          { key: "a8", title: "A8 зараз", ord: 3 },
+          { key: "review", title: "Рецензенти й квоти", ord: 4 },
+          { key: "t5", title: "Трек T5", ord: 5 },
+          { key: "trend", title: "Продукт і процес", ord: 6 },
+          { key: "sources", title: "Джерела даних", ord: 7 },
+        ];
+
+        function isExampleMode() {
+          return /(?:^\?|[?&])example(?:=|&|$)/.test(window.location.search);
+        }
+
+        function byKey(sections) {
+          var map = {};
+          (sections || []).forEach(function (s) {
+            if (s && s.section) map[s.section] = s;
+          });
+          return map;
+        }
+
+        function fmtStamp(ms) {
+          if (!isFinite(ms)) return "невідомо";
+          var d = new Date(ms);
+          function pad(n) {
+            return (n < 10 ? "0" : "") + n;
+          }
+          return (
+            pad(d.getUTCDate()) +
+            "." +
+            pad(d.getUTCMonth() + 1) +
+            " · " +
+            pad(d.getUTCHours()) +
+            ":" +
+            pad(d.getUTCMinutes()) +
+            " UTC"
+          );
+        }
+
+        function render() {
+          var snap = window.SNAPSHOT;
+          var example = isExampleMode();
+          var flow = document.getElementById("flow");
+          var hasSnapshot = !!(snap && Array.isArray(snap.sections));
+
+          document.getElementById("snap-missing").hidden = hasSnapshot;
+          document.getElementById("snap-ok").hidden = !hasSnapshot;
+          document.getElementById("snap-example-note").hidden = !(hasSnapshot && example);
+
+          if (!hasSnapshot) {
+            document.getElementById("snap-time").textContent = "—";
+            document.getElementById("src-count").textContent = "0 з " + SECTIONS.length;
+            flow.innerHTML = SECTIONS.map(function (def) {
+              return DashRender.renderSection(null, Date.now(), {
+                key: def.key,
+                title: def.title,
+                ord: def.ord,
+              });
+            }).join("");
+            return;
+          }
+
+          var now = DashRender.pageNow(snap.collected_at, example, Date.now());
+          var map = byKey(snap.sections);
+          var envsInOrder = SECTIONS.map(function (def) {
+            return map[def.key] || null;
+          });
+          var summary = DashRender.sourcesSummary(envsInOrder, now);
+
+          flow.innerHTML = SECTIONS.map(function (def) {
+            return DashRender.renderSection(map[def.key] || null, now, {
+              key: def.key,
+              title: def.title,
+              ord: def.ord,
+              example: example,
+            });
+          }).join("");
+
+          document.getElementById("snap-time").textContent = fmtStamp(
+            Date.parse(snap.collected_at),
+          );
+          document.getElementById("src-count").textContent = summary.ok + " з " + summary.total;
+        }
+
+        function boot() {
+          var example = isExampleMode();
+          var src = example ? "fixtures/snapshot.example.js" : "snapshot.js";
+          var s = document.createElement("script");
+          s.src = src;
+          s.onload = render;
+          s.onerror = function () {
+            window.SNAPSHOT = null;
+            render();
+          };
+          document.head.appendChild(s);
+        }
+
+        var THEME_KEY = "pult-theme";
+        function applyTheme(t) {
+          if (t === "light" || t === "dark") {
+            document.documentElement.setAttribute("data-theme", t);
+          } else {
+            document.documentElement.removeAttribute("data-theme");
+          }
+          document.getElementById("theme-toggle").textContent =
+            "Тема: " + (t === "light" ? "світла" : t === "dark" ? "темна" : "системна");
+        }
+        document.getElementById("theme-toggle").addEventListener("click", function () {
+          var cur = null;
+          try {
+            cur = window.localStorage.getItem(THEME_KEY);
+          } catch (e) {
+            cur = null;
+          }
+          var next = cur === null ? "light" : cur === "light" ? "dark" : null;
+          try {
+            if (next === null) window.localStorage.removeItem(THEME_KEY);
+            else window.localStorage.setItem(THEME_KEY, next);
+          } catch (e) {
+            /* localStorage недоступний (file://, приватний режим) — тема лишається на сесію */
+          }
+          applyTheme(next);
+        });
+        var saved = null;
+        try {
+          saved = window.localStorage.getItem(THEME_KEY);
+        } catch (e) {
+          saved = null;
+        }
+        applyTheme(saved);
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>
