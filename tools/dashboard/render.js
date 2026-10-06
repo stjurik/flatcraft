@@ -151,10 +151,18 @@
     var steps = (env.data && env.data.steps) || [];
     var items = steps
       .map(function (s) {
-        var b = STEP_BADGE[s.state] || STEP_BADGE.none;
+        // Збирач dash-t5.sh (#163, PR #204) друкує {n, title, closed}; макет — {name,
+        // state, label}. Приймаємо обидва (правка оркестратора за рецензією Flash #204:
+        // без цього назви кроків порожні, а бейджів немає).
+        var closed = s.closed === true ? true : s.closed === false ? false : null;
+        var stepState = s.state || (closed === true ? "good" : closed === false ? "none" : "");
+        var stepLabel =
+          s.label || (closed === true ? "закрито" : closed === false ? "відкрито" : "");
+        var stepName = s.name || s.title || "";
+        var b = STEP_BADGE[stepState] || STEP_BADGE.none;
         if (state !== "ok" && b === STEP_BADGE.good) b = STEP_BADGE.none;
-        var badge = s.label
-          ? ' <span class="st ' + b.cls + '"><i>' + b.glyph + "</i>" + esc(s.label) + "</span>"
+        var badge = stepLabel
+          ? ' <span class="st ' + b.cls + '"><i>' + b.glyph + "</i>" + esc(stepLabel) + "</span>"
           : "";
         var note = s.note ? '<div class="cr">' + esc(s.note) + "</div>" : "";
         return (
@@ -163,7 +171,7 @@
           '><span class="no">' +
           esc(String(s.n != null ? s.n : "")) +
           '</span><div><div class="nm">' +
-          esc(s.name || "") +
+          esc(stepName) +
           badge +
           "</div>" +
           note +
@@ -176,6 +184,14 @@
 
   // Віджет «Продукт і процес» (хвиля 1) — графік тижнів, стовпчики без SVG
   // (висота — відсоток від максимуму тижня), так само читається на 400 px.
+  // Підпис тижня: макет дає week «06.07», збирач dash-trend.sh (#163, PR #204) —
+  // week_start ISO; без цього під стовпчиками стояло «undefined» (рецензія Flash #204).
+  function weekLabel(w) {
+    if (w.week != null) return String(w.week);
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(w.week_start || ""));
+    return m ? m[3] + "." + m[2] : "?";
+  }
+
   function widgetTrend(env) {
     var data = env.data || {};
     var weeks = data.weeks || [];
@@ -189,7 +205,7 @@
         var proc = Number(w.process) || 0;
         var prodH = Math.round((prod / max) * 100);
         var procH = Math.round((proc / max) * 100);
-        var label = esc(w.week) + ": продукт " + prod + ", процес " + proc;
+        var label = esc(weekLabel(w)) + ": продукт " + prod + ", процес " + proc;
         return (
           '<div class="col" title="' +
           label +
@@ -198,7 +214,7 @@
           '%"></span><span class="b-proc" style="height:' +
           procH +
           '%"></span></div><div class="wk">' +
-          esc(w.week) +
+          esc(weekLabel(w)) +
           "</div></div>"
         );
       })

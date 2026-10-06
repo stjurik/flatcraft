@@ -243,3 +243,32 @@ test("trend-віджет: висота стовпчика — частка ві�
   assert.ok(html.includes('class="b-prod" style="height:50%"'), html);
   assert.ok(html.includes('class="b-proc" style="height:100%"'), html);
 });
+
+// Контракт зі збирачами (#163, PR #204): поля, які справді друкують dash-t5.sh і
+// dash-trend.sh. Правка оркестратора за рецензією Gemini 3.8 Flash (#204).
+test("t5-віджет: формат dash-t5.sh {n, title, closed} — назви й бейджі є", () => {
+  const env = envelope({
+    section: "t5",
+    data: {
+      steps: [
+        { n: 1, title: "Хвости", closed: true },
+        { n: 2, title: "Сервер A8", closed: false },
+      ],
+      first_open: 2,
+    },
+  });
+  const html = DashRender.renderSection(env, NOW, { ord: 5 });
+  assert.ok(html.includes("Хвости") && html.includes("Сервер A8"), html);
+  assert.ok(html.includes('<span class="st st-good"><i>✓</i>закрито</span>'), html);
+  assert.ok(html.includes('<span class="st st-none"><i>–</i>відкрито</span>'), html);
+});
+
+test("trend-віджет: формат dash-trend.sh {week_start, product, process} — підпис дд.мм, не undefined", () => {
+  const env = envelope({
+    section: "trend",
+    data: { weeks: [{ week_start: "2026-09-28T00:00:00Z", product: 1, process: 22 }] },
+  });
+  const html = DashRender.renderSection(env, NOW, {});
+  assert.ok(!html.includes("undefined"), html);
+  assert.ok(html.includes('<div class="wk">28.09</div>'), html);
+});

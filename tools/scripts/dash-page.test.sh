@@ -90,8 +90,15 @@ if [[ $fail -eq 0 ]]; then
     'return env.status === "ok" ? "ok" : "error";' \
     'return "ok";'
   mutate "t5: бейдж кроку не рендериться" \
-    "var badge = s.label" \
-    'var badge = false && s.label'
+    "var badge = stepLabel" \
+    'var badge = false && stepLabel'
+
+  mutate "t5: поле title збирача ігнорується" \
+    'var stepName = s.name || s.title || "";' \
+    'var stepName = s.name || "";'
+  mutate "trend: week_start збирача ігнорується" \
+    'if (w.week != null) return String(w.week);' \
+    'return String(w.week);'
 
   # index.html бере «зараз» саме з pageNow (інакше функція тестована, але не викликана).
   grep -q 'DashRender.pageNow(snap.collected_at, example, Date.now())' "$DASH_DIR/index.html" &&
