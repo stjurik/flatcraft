@@ -90,7 +90,13 @@ current_week_start="$(monday_epoch_of "$now_epoch")"
 first_week_start=$((current_week_start - (WEEKS - 1) * 7 * 86400))
 
 # ─── усі коміти ref: epoch\x1fsha\x1fsubject, далі файли до наступного маркера ──
-log_out="$(git -C "$REPO" log "$REF" --format=$'\x01%ct\x1f%H\x1f%s' --name-only 2>/dev/null)" || {
+# --first-parent --diff-merges=first-parent: один запис на коміт, що ліг у ref; merge —
+# з файлами, які він приніс (без цього merge без файлів ішов у «процес», а коміти
+# гілки рахувались ще й окремо). core.quotePath=false: інакше «apps/документ.txt»
+# друкується в лапках і не впізнається як продукт. Правка оркестратора за рецензією
+# Gemini 3.8 Flash (#204).
+log_out="$(git -C "$REPO" -c core.quotePath=false log "$REF" --first-parent --diff-merges=first-parent \
+  --format=$'\x01%ct\x1f%H\x1f%s' --name-only 2>/dev/null)" || {
   echo "відмова: git log по «$REF» не вдався" >&2
   exit 2
 }

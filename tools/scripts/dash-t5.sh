@@ -88,6 +88,14 @@ else
       map({n: (.[0] | tonumber), title: .[1], closed: (.[2] == "true")})
     ')"
     first_open_json="$(jq -c '(map(select(.closed == false)) | min_by(.n) | .n) // null' <<<"$steps_json")"
+    # Номери — рівно 1…8 по порядку: «1, 1, 2…7» теж 8 рядків, але не 8 кроків
+    # (правка оркестратора за рецензією Gemini 3.8 Flash, #204).
+    if [[ "$(jq -c 'map(.n)' <<<"$steps_json")" != "[1,2,3,4,5,6,7,8]" ]]; then
+      status=error
+      reason="номери кроків у «### T5.» не 1–8 по порядку: $(jq -c 'map(.n)' <<<"$steps_json")"
+      steps_json="[]"
+      first_open_json="null"
+    fi
   fi
 fi
 

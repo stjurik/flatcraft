@@ -119,6 +119,15 @@ else
   bad "немає розділу T5 — очікував error, отримав (rc=$rc): $out"
 fi
 
+# ─── 3б. 8 рядків, але номери не 1…8 — error (правка оркестратора, рецензія Flash #204) ──
+make_roadmap "$T/dup.md" "1|✅|А" "1||Б" "2||В" "3||Г" "4||Д" "5||Е" "6||Є" "7||Ж"
+run --roadmap "$T/dup.md"
+if [[ $rc == 0 ]] && echo "$out" | jq -e '.status == "error" and (.data.error | test("1–8"))' >/dev/null 2>&1; then
+  ok "номери 1,1,2…7 — status error"
+else
+  bad "номери 1,1,2…7 — очікував error, отримав (rc=$rc): $out"
+fi
+
 # ─── 4. 7 кроків — error ───────────────────────────────────────────────────────
 make_roadmap "$T/roadmap7.md" "${STEPS8[@]:0:7}"
 run --roadmap "$T/roadmap7.md"
@@ -203,6 +212,10 @@ if [[ -z "${DASH_T5_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "секція не зупиняється на наступному заголовку" \
     'on && /^#/ { exit }' \
     'on && /^#####/ { exit }'
+
+  mutate "номери кроків не перевіряються" \
+    '!= "[1,2,3,4,5,6,7,8]" ]]; then' \
+    '== "ніколи" ]]; then'
 
   rm -rf "$M"
 fi

@@ -91,7 +91,9 @@ vout="$(bash "$HERE/dash-schema.sh" validate "$T/env.json" 2>&1)"
   bad "validate — $vout"
 
 # ─── 2. last_product_commit — multi-file коміт (apps/ не першим файлом) ───────
-if [[ $rc == 0 ]] && echo "$out" | jq -e '
+c4_sha="$(git -C "$REPO" log --format=%H --grep='^c4 multi-file product$' main)"
+if [[ $rc == 0 ]] && echo "$out" | jq -e --arg sha "$c4_sha" '
+    .data.last_product_commit.sha == $sha and
     .data.last_product_commit.subject == "c4 multi-file product" and
     .data.last_product_commit.date == "2026-09-28T09:00:00Z"
   ' >/dev/null 2>&1; then
@@ -140,6 +142,46 @@ if [[ $rc == 0 ]] && echo "$out" | jq -e '.data.last_product_commit.subject == "
 else
   bad "--ref feature-empty — rc=$rc: $out"
 fi
+
+# ─── 6б. правки оркестратора за рецензією Gemini 3.8 Flash (#204), не агента A8 ──
+# Дефолт --weeks — 13 тижнів.
+out="$(bash "$SCRIPT" --repo "$REPO" --ref main --now "$NOW" 2>&1)"
+[[ "$(jq '.data.weeks | length' <<<"$out" 2>/dev/null)" == 13 ]] && ok "без --weeks — 13 тижнів" ||
+  bad "без --weeks — очікував 13 тижнів: $out"
+
+# Merge-коміт: рахується один раз, за файлами, які приніс; коміти гілки — не окремо.
+R2="$T/repo2"
+git init -q -b main "$R2"
+c2() { # c2 <ISO-час> <повідомлення> <файл>
+  mkdir -p "$R2/$(dirname "$3")" && echo x >>"$R2/$3" && git -C "$R2" add "$3" &&
+    GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git -C "$R2" commit -q -m "$2"
+}
+c2 2026-09-28T08:00:00Z "base docs" docs/a.md
+git -C "$R2" checkout -q -b feat
+c2 2026-09-28T09:00:00Z "feat apps" apps/a.txt
+c2 2026-09-28T09:30:00Z "feat apps 2" apps/b.txt
+git -C "$R2" checkout -q main
+GIT_AUTHOR_DATE=2026-09-28T10:00:00Z GIT_COMMITTER_DATE=2026-09-28T10:00:00Z \
+  git -C "$R2" merge -q --no-ff -m "merge feat" feat
+# Кирилиця в шляху: без core.quotePath=false git бере шлях у лапки.
+c2 2026-09-29T08:00:00Z "кирилиця" "apps/документ.txt"
+out="$(bash "$SCRIPT" --repo "$R2" --ref main --now "$NOW" --weeks 1 2>&1)"
+if echo "$out" | jq -e '.data.weeks == [{"week_start":"2026-09-28T00:00:00Z","product":2,"process":1}]
+    and .data.last_product_commit.subject == "кирилиця"' >/dev/null 2>&1; then
+  ok "merge — один продуктовий запис; кириличний шлях у apps/ — продукт"
+else
+  bad "merge/кирилиця — отримав: $out"
+fi
+
+# Жодного продуктового коміту — last_product_commit null.
+R3="$T/repo3"
+git init -q -b main "$R3"
+mkdir -p "$R3/docs" && echo x >"$R3/docs/a.md" && git -C "$R3" add docs/a.md &&
+  GIT_AUTHOR_DATE=2026-09-28T08:00:00Z GIT_COMMITTER_DATE=2026-09-28T08:00:00Z git -C "$R3" commit -q -m "docs only"
+out="$(bash "$SCRIPT" --repo "$R3" --ref main --now "$NOW" --weeks 1 2>&1)"
+[[ "$(jq -c '.data.last_product_commit' <<<"$out" 2>/dev/null)" == null ]] &&
+  ok "без продуктових комітів — last_product_commit null" ||
+  bad "без продуктових комітів — отримав: $out"
 
 # ─── 7. відмови ─────────────────────────────────────────────────────────────────
 out="$(bash "$SCRIPT" --repo "$T/немає-репо" --ref main --now "$NOW" 2>&1)"
@@ -198,6 +240,20 @@ if [[ -z "${DASH_TREND_UNDER_TEST:-}" && $fail == 0 ]]; then
   empty_week_from="$(printf '%s\n' '  weeks_json="$(jq -c --arg ws "$ws" --argjson p "${week_product[$w]}" --argjson pr "${week_process[$w]}" \' '    '"'"'. + [{week_start: $ws, product: $p, process: $pr}]'"'"' <<<"$weeks_json")"')"
   empty_week_to="$(printf '%s\n' '  if ((week_product[$w] > 0 || week_process[$w] > 0)); then' '  weeks_json="$(jq -c --arg ws "$ws" --argjson p "${week_product[$w]}" --argjson pr "${week_process[$w]}" \' '    '"'"'. + [{week_start: $ws, product: $p, process: $pr}]'"'"' <<<"$weeks_json")"' '  fi')"
   mutate "порожній тиждень пропускається, а не нуль" "$empty_week_from" "$empty_week_to"
+
+  mutate "merge рахується без --first-parent" \
+    ' --first-parent --diff-merges=first-parent \' \
+    ' \'
+  mutate "шляхи в лапках (core.quotePath)" \
+    '-c core.quotePath=false log' \
+    'log'
+  mutate "дефолт --weeks не 13" 'WEEKS=13' 'WEEKS=12'
+  mutate "sha останнього продуктового не записується" \
+    '      last_product_sha="$commit_sha"' \
+    '      last_product_sha=""'
+  mutate "немає продуктових — не null" \
+    '  last_product_json="null"' \
+    '  last_product_json="{}"'
 
   rm -rf "$M"
 fi
