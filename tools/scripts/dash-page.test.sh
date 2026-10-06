@@ -77,6 +77,27 @@ if [[ $fail -eq 0 ]]; then
     "/[&<>\"']/g" \
     '/(?!)/g'
 
+  # Правки оркестратора за рецензією Gemini 3.8 Flash (#203), не агента A8.
+  mutate "pageNow: справжній знімок судиться за часом знімка, а не годинника" \
+    '    if (example) {
+      var snapMs' \
+    '    if (true) {
+      var snapMs'
+  mutate "t5: зелений крок у розділі не ok" \
+    'if (state !== "ok" && b === STEP_BADGE.good) b = STEP_BADGE.none;' \
+    ''
+  mutate "sectionState: невідомий status — ok" \
+    'return env.status === "ok" ? "ok" : "error";' \
+    'return "ok";'
+  mutate "t5: бейдж кроку не рендериться" \
+    "var badge = s.label" \
+    'var badge = false && s.label'
+
+  # index.html бере «зараз» саме з pageNow (інакше функція тестована, але не викликана).
+  grep -q 'DashRender.pageNow(snap.collected_at, example, Date.now())' "$DASH_DIR/index.html" &&
+    ok "index.html: «зараз» — через DashRender.pageNow" ||
+    bad "index.html не викликає DashRender.pageNow — правило «знімок міг лежати» не діє"
+
   rm -rf "$M"
 fi
 

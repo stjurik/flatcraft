@@ -573,8 +573,7 @@
             return;
           }
 
-          var now = Date.parse(snap.collected_at);
-          if (!isFinite(now)) now = Date.now();
+          var now = DashRender.pageNow(snap.collected_at, example, Date.now());
           var map = byKey(snap.sections);
           var envsInOrder = SECTIONS.map(function (def) {
             return map[def.key] || null;
@@ -590,7 +589,9 @@
             });
           }).join("");
 
-          document.getElementById("snap-time").textContent = fmtStamp(now);
+          document.getElementById("snap-time").textContent = fmtStamp(
+            Date.parse(snap.collected_at),
+          );
           document.getElementById("src-count").textContent = summary.ok + " з " + summary.total;
         }
 

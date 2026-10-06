@@ -187,3 +187,59 @@ test("renderSection: приклад — тег «приклад» у шапці 
   const html = DashRender.renderSection(envelope({}), NOW, { ord: 1, example: true });
   assert.ok(html.includes("приклад"));
 });
+
+// ─── Правки оркестратора за рецензією Gemini 3.8 Flash (#203), не агента A8 ───
+
+test("pageNow: справжній знімок — годинник глядача, не час знімка (знімок міг лежати)", () => {
+  const clock = Date.parse("2026-09-30T16:00:00Z");
+  assert.equal(DashRender.pageNow("2026-09-30T14:00:00Z", false, clock), clock);
+});
+
+test("pageNow: ?example — час фікстури; кривий час — годинник", () => {
+  const clock = Date.parse("2026-10-06T09:00:00Z");
+  assert.equal(DashRender.pageNow("2026-09-30T14:00:00Z", true, clock), Date.parse(NOW));
+  assert.equal(DashRender.pageNow("не час", true, clock), clock);
+});
+
+test("знімок, що пролежав 2 год: розділ з interval 300 — stale на сторінці", () => {
+  const env = envelope({ collected_at: "2026-09-30T14:00:00Z", interval_s: 300 });
+  const now = DashRender.pageNow("2026-09-30T14:00:00Z", false, Date.parse("2026-09-30T16:00:00Z"));
+  assert.equal(DashRender.sectionState(env, now), "stale");
+  assert.equal(DashRender.sourcesSummary([env], now).ok, 0);
+});
+
+test("t5-віджет: розділ не ok — жодного st-good і в кроках", () => {
+  for (const status of ["stale", "error", "not_measured"]) {
+    const env = envelope({
+      section: "t5",
+      status,
+      data: { steps: [{ n: 1, name: "Хвости", state: "good", label: "закрито" }] },
+    });
+    const html = DashRender.renderSection(env, NOW, { ord: 5 });
+    assert.ok(!html.includes("st-good"), status + ": " + html);
+    assert.ok(html.includes("закрито"));
+  }
+});
+
+test("t5-віджет: розділ ok — закритий крок зелений", () => {
+  const env = envelope({
+    section: "t5",
+    data: { steps: [{ n: 1, name: "Хвости", state: "good", label: "закрито" }] },
+  });
+  const html = DashRender.renderSection(env, NOW, { ord: 5 });
+  assert.ok(html.includes('<span class="st st-good"><i>✓</i>закрито</span>'), html);
+});
+
+test("sectionState: невідомий status («green») зі свіжим часом — не ok", () => {
+  assert.notEqual(DashRender.sectionState(envelope({ status: "green" }), NOW), "ok");
+});
+
+test("trend-віджет: висота стовпчика — частка від максимуму тижня", () => {
+  const env = envelope({
+    section: "trend",
+    data: { weeks: [{ week: "w1", product: 5, process: 10 }] },
+  });
+  const html = DashRender.renderSection(env, NOW, {});
+  assert.ok(html.includes('class="b-prod" style="height:50%"'), html);
+  assert.ok(html.includes('class="b-proc" style="height:100%"'), html);
+});

@@ -144,11 +144,15 @@
   };
 
   // Віджет «Трек T5» (хвиля 1) — крок за кроком, як у макеті v3.
-  function widgetT5(env) {
+  // state — стан розділу: якщо він не ok, «зелений» крок показується сірим
+  // (ADR-042 §3 п.2 — розділ не ok ніколи не зелений, і всередині теж;
+  // правка оркестратора за рецензією Gemini 3.8 Flash, #203).
+  function widgetT5(env, now, state) {
     var steps = (env.data && env.data.steps) || [];
     var items = steps
       .map(function (s) {
         var b = STEP_BADGE[s.state] || STEP_BADGE.none;
+        if (state !== "ok" && b === STEP_BADGE.good) b = STEP_BADGE.none;
         var badge = s.label
           ? ' <span class="st ' + b.cls + '"><i>' + b.glyph + "</i>" + esc(s.label) + "</span>"
           : "";
@@ -228,7 +232,7 @@
     if (!env) {
       body = missingBody(title);
     } else if (WIDGETS[key]) {
-      body = WIDGETS[key](env, now);
+      body = WIDGETS[key](env, now, state);
     } else {
       body = genericBody(env);
     }
@@ -251,7 +255,21 @@
     );
   }
 
+  // pageNow(snapCollectedAt, example, clockMs) → «зараз» для сторінки, мс.
+  // Справжній знімок судиться за годинником того, хто дивиться: знімок міг
+  // лежати годину (ADR-042 §3 п.1). Лише ?example бере час самої фікстури, щоб
+  // приклад виглядав так, як задумано, у будь-який день. Правка оркестратора за
+  // рецензією Gemini 3.8 Flash (#203): раніше «зараз» завжди був часом знімка.
+  function pageNow(snapCollectedAt, example, clockMs) {
+    if (example) {
+      var snapMs = toMs(snapCollectedAt);
+      if (isFinite(snapMs)) return snapMs;
+    }
+    return clockMs;
+  }
+
   var DashRender = {
+    pageNow: pageNow,
     sectionState: sectionState,
     sourcesSummary: sourcesSummary,
     renderSection: renderSection,
