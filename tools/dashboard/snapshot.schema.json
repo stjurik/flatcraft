@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flatcraft.local/tools/dashboard/snapshot.schema.json",
+  "title": "Пульт розробки — обгортка розділу знімка (ADR-042 §2)",
+  "description": "Одна й та сама обгортка для кожного розділу знімка пульту. Поле data — довільний об'єкт, свій для кожного розділу; решта полів однакові для всіх. dash-schema.sh читає status.enum і origin.enum звідси — вони не дублюються в коді.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "section",
+    "title",
+    "source",
+    "collected_at",
+    "interval_s",
+    "status",
+    "origin",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Версія цієї схеми. Поки одна — завжди 1.",
+      "const": 1
+    },
+    "section": {
+      "description": "Ключ розділу, напр. «a8», «t5» — реєструє WIDGETS[section] на сторінці.",
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "description": "Заголовок розділу, що показується людині.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "description": "Звідки зібрано дані — рядок для показу під заголовком (ADR-042 §2).",
+      "type": "string",
+      "minLength": 1
+    },
+    "collected_at": {
+      "description": "Коли зібрано, лише UTC ISO 8601, з суфіксом Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "interval_s": {
+      "description": "Очікуваний інтервал оновлення розділу, секунд. Межа «застарів» — 3 × interval_s (ADR-042 §3 п.1).",
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "status": {
+      "description": "Чесність даних (ADR-042 §3): лише ok показується зеленим.",
+      "type": "string",
+      "enum": ["ok", "stale", "error", "not_measured"]
+    },
+    "origin": {
+      "description": "measured — виміряно скриптом; reading — показ, переписаний людиною; estimate — розрахунок/прогноз (ADR-042 §2).",
+      "type": "string",
+      "enum": ["measured", "reading", "estimate"]
+    },
+    "data": {
+      "description": "Дані розділу — довільний об'єкт, свій для кожного збирача.",
+      "type": "object"
+    }
+  }
+}
