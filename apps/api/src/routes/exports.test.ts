@@ -555,5 +555,153 @@ describe("POST /exports — async flow", () => {
 
       await app2.close();
     });
+
+    /** Вузько типований доступ до полів `validation_rejected` (discriminated union). */
+    function rejectedErrorCodeOf(payload: EventPayload): string {
+      if (payload.event_type !== "validation_rejected") {
+        throw new Error(`очікувався validation_rejected, отримано ${payload.event_type}`);
+      }
+      return payload.error_code;
+    }
+    function rejectedAttemptIdOf(payload: EventPayload): unknown {
+      if (payload.event_type !== "validation_rejected") {
+        throw new Error(`очікувався validation_rejected, отримано ${payload.event_type}`);
+      }
+      return payload.params["attempt_id"];
+    }
+
+    // Issue #215: perforated_panel з радіусом поза allowed-set (t=2 → дозволено
+    // {1, 2.5, 4}, тут 5) ТА двома перетинами сітки отворів (pitch_x і pitch_y
+    // обидва <= hole_size) — 3 порушення, 2 УНІКАЛЬНІ коди.
+    const MULTI_VIOLATION_REQUEST = {
+      template_slug: "perforated_panel" as const,
+      parameters: {
+        length_mm: 300,
+        width_mm: 100,
+        hole_shape: "square" as const,
+        hole_size_mm: 20,
+        pitch_x_mm: 10,
+        pitch_y_mm: 10,
+        margin_mm: 15,
+        rib_height_mm: 30,
+        bend_radius_mm: 5 as const,
+        bend_angle_deg: 90 as const,
+      },
+      material_code: "cold_rolled_steel",
+      thickness_mm: 2,
+    };
+
+    it("validation_rejected: одна подія на кожен унікальний код", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+
+      const res = await app2.inject({
+        method: "POST",
+        url: "/exports",
+        payload: MULTI_VIOLATION_REQUEST,
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      // Вхідні дані дають 3 порушення: HOLES_OVERLAP двічі (pitch_x + pitch_y)
+      // і RADIUS_NOT_ALLOWED раз — 422-тіло (buildProblem) НЕ дедуплікується.
+      expect(problem.errors.filter((e) => e.code === "HOLES_OVERLAP")).toHaveLength(2);
+      expect(problem.errors.filter((e) => e.code === "RADIUS_NOT_ALLOWED")).toHaveLength(1);
+
+      // Телеметрія дедуплікує за кодом: 2 унікальні коди → 2 події, а не 3.
+      const rejected = rec.events.filter((e) => e.event_type === "validation_rejected");
+      expect(rejected).toHaveLength(2);
+      expect(rejected.map(rejectedErrorCodeOf).sort()).toEqual(
+        ["HOLES_OVERLAP", "RADIUS_NOT_ALLOWED"].sort(),
+      );
+
+      await app2.close();
+    });
+
+    it("validation_rejected: спільний attempt_id однієї спроби", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+
+      await app2.inject({ method: "POST", url: "/exports", payload: MULTI_VIOLATION_REQUEST });
+      const firstAttempt = rec.events
+        .filter((e) => e.event_type === "validation_rejected")
+        .map(rejectedAttemptIdOf);
+      // Одна спроба з 2 унікальними кодами → 2 події, спільний attempt_id.
+      expect(firstAttempt).toHaveLength(2);
+      expect(new Set(firstAttempt).size).toBe(1);
+      expect(typeof firstAttempt[0]).toBe("string");
+
+      rec.events.length = 0; // наступна спроба — чистий зріз подій.
+      await app2.inject({ method: "POST", url: "/exports", payload: MULTI_VIOLATION_REQUEST });
+      const secondAttempt = rec.events
+        .filter((e) => e.event_type === "validation_rejected")
+        .map(rejectedAttemptIdOf);
+      expect(new Set(secondAttempt).size).toBe(1);
+
+      // Два запити — два різні attempt_id.
+      expect(secondAttempt[0]).not.toBe(firstAttempt[0]);
+
+      await app2.close();
+    });
+
+    it("validation_rejected: attempt_id не похідний від IP", async () => {
+      const rec = recordingTelemetry();
+      const app2 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: rec.telemetry,
+      });
+      // Одне порушення — достатньо для одної події на запит.
+      const payload = {
+        template_slug: "z_bracket" as const,
+        parameters: {
+          top_flange_mm: 60,
+          bottom_flange_mm: 60,
+          offset_mm: 40,
+          bend_radius_mm: 2.5 as const,
+          bend_angle_deg: 90 as const,
+          width_mm: 100,
+          holes: [],
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 5,
+      };
+
+      // Обидва запити йдуть з того самого (інжектованого) IP — session_hash
+      // має лишитись однаковим, а attempt_id — попри це — різним щоразу.
+      await app2.inject({ method: "POST", url: "/exports", payload });
+      const [first] = rec.events.filter((e) => e.event_type === "validation_rejected");
+      rec.events.length = 0;
+      await app2.inject({ method: "POST", url: "/exports", payload });
+      const [second] = rec.events.filter((e) => e.event_type === "validation_rejected");
+
+      if (!first || !second) throw new Error("очікувались обидві validation_rejected події");
+      const attempt1 = rejectedAttemptIdOf(first);
+      const attempt2 = rejectedAttemptIdOf(second);
+      expect(attempt1).not.toBe(attempt2);
+
+      // session_hash (похідний від IP + добового salt) лишається тим самим —
+      // attempt_id змінюється незалежно від нього, тож він не похідний від IP.
+      expect(first.session_hash).toBe(second.session_hash);
+      expect(attempt1).not.toBe(first.session_hash);
+
+      // UUID-формат (crypto.randomUUID()), а не щось похідне від "127.0.0.1".
+      expect(String(attempt1)).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+      expect(String(attempt1)).not.toContain("127.0.0.1");
+
+      await app2.close();
+    });
   });
 });

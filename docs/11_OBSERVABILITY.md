@@ -69,7 +69,7 @@ CREATE INDEX events_template_idx ON events (template_slug, ts DESC);
 | `event_type`          | Хто емітить             | Коли                                 | Ключові поля                                            |
 | --------------------- | ----------------------- | ------------------------------------ | ------------------------------------------------------- |
 | `export_requested`    | api (Fastify hook)      | прийнято `POST /exports` (після Zod) | template_slug, params, session_hash                     |
-| `validation_rejected` | api (gate ADR-019/026)  | серверний gate відхилив (422)        | template_slug, params, error_code                       |
+| `validation_rejected` | api (gate ADR-019/026)  | серверний gate відхилив (422)        | template_slug, params (+ `attempt_id`), error_code      |
 | `export_completed`    | api                     | job done, артефакти в R2             | template_slug, duration_ms                              |
 | `export_failed`       | api                     | job failed (cad-worker/мережа)       | template_slug, error_code, duration_ms                  |
 | `cad_started`         | api (worker round-trip) | старт CAD-операції                   | template_slug                                           |
@@ -81,6 +81,12 @@ CREATE INDEX events_template_idx ON events (template_slug, ts DESC);
 
 - `export_requested` + `validation_rejected` → **воронка відмов** (скільки запитів гине на
   серверному gate і по якому constraint).
+- `validation_rejected` пише **одну подію на кожен унікальний `error_code`** однієї спроби
+  (issue #215) — одна спроба з N різними порушеннями дає N подій, а не 1 із `errors[0]`. Усі
+  події однієї спроби несуть спільний `params.attempt_id` (`crypto.randomUUID()` на запит, не
+  похідний від IP/`session_hash`) — лічильник **спроб** відмов рахує
+  `count(distinct params->>'attempt_id')`, а не `count(*)` подій; розподіл за `error_code`
+  (розділ 1 нижче) лишається `count(*)` по кожному коду.
 - `cad_started` / `cad_completed` → **чиста тривалість CAD** (без мережі/черги).
 - `export_completed.duration_ms − cad_completed.duration_ms` → **overhead pipeline** (черга +
   R2-upload + мережа).
@@ -116,6 +122,8 @@ const ExportRequestedPayload = EventBase.extend({
 
 const ValidationRejectedPayload = EventBase.extend({
   event_type: z.literal("validation_rejected"),
+  // params.attempt_id — crypto.randomUUID() на запит, спільний для всіх подій
+  // однієї спроби (issue #215); не похідний від IP/session_hash, колонки нема.
   params: z.record(z.unknown()),
   error_code: z.string(), // напр. "RADIUS_NOT_ALLOWED", "HOLES_OVERLAP"
 });
@@ -261,6 +269,10 @@ ADR-023 / CLAUDE.md §6). Ядро — pure-функція `build_digest(rows) �
 
 унікальних сесій: N · експортів: N (done/failed) · відхилень валідації: N
 ```
+
+«Відхилень валідації: N» (розділ 6) — відколи `validation_rejected` пише одну подію на
+унікальний `error_code` (issue #215), SQL рахує `count(distinct params->>'attempt_id')`
+(спроби, не події) — топ-5 кодів у розділі 1 лишається `count(*)` по кожному коду.
 
 **Правило процесу:** кожен пункт digest'а → **або GitHub-issue** (Conventional-Commits-заголовок,
 стиль `docs/15` C3), **або явно позначений «accepted noise»**. Це замикає self-improvement loop
