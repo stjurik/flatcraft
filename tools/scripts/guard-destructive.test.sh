@@ -61,7 +61,7 @@ expect() { # expect <блок|пропуск> <cwd> <команда>
 }
 
 # Форми з #216. Кожна — з cwd = ~/hart (блок), з cwd = постійний worktree (блок) і з
-# cwd = тимчасовий worktree (пропуск).
+# cwd = тимчасовий worktree (пропуск). Спільний стан репо (SHARED) — окремо: блок звідусіль.
 FORMS=(
   'git reset --hard'
   'git reset --hard HEAD~1'
@@ -71,9 +71,6 @@ FORMS=(
   'git checkout .'
   'git restore x'
   'git restore --staged --worktree .'
-  'git stash drop'
-  'git stash clear'
-  'git branch -D feat/x'
   'git worktree remove --force'
   'rm x'
   'rm -rf docs'
@@ -82,17 +79,36 @@ FORMS=(
   'true; rm -rf docs'
   'bash -c "git reset --hard"'
 )
+# stash і гілки спільні для всіх worktree одного репо: з tmp-* вони руйнують і ~/hart.
+SHARED=(
+  'git stash drop'
+  'git stash clear'
+  'git branch -D feat/x'
+  'git branch --delete --force feat/x'
+)
 
 # ─── 1. Форми з #216 у ~/hart — блок ───────────────────────────────────────
-for c in "${FORMS[@]}"; do expect блок "$HART" "$c"; done
+for c in "${FORMS[@]}" "${SHARED[@]}"; do expect блок "$HART" "$c"; done
 expect блок "$HART" 'cd ~/hart && git checkout -- x'
 
 # ─── 2. Постійний worktree ~/hart-wt/<гілка> — під тим самим захистом ─────
-for c in "${FORMS[@]}"; do expect блок "$PERM" "$c"; done
+for c in "${FORMS[@]}" "${SHARED[@]}"; do expect блок "$PERM" "$c"; done
 
 # ─── 3. Ті самі команди в тимчасовому worktree — пропуск ───────────────────
 for c in "${FORMS[@]}"; do expect пропуск "$TMPWT" "$c"; done
 expect пропуск "$TMPWT" 'cd ~/hart-wt/tmp-x && git checkout -- x'
+
+# ─── 3а. Спільний стан репо — блок і з тимчасового worktree ────────────────
+# Рішення yurii: «руйнівні в ~/hart — у будь-якій формі». Специфікація #216 дозволяла
+# це в tmp-*, але stash і гілки спільні — з tmp-* це та сама шкода для ~/hart.
+for c in "${SHARED[@]}"; do
+  expect блок "$TMPWT" "$c"
+  expect блок "$HART" "git -C ~/hart-wt/tmp-x ${c#git }"
+done
+expect блок "$TMPWT" 'git worktree remove ~/hart-wt/feat-y'
+expect блок "$TMPWT" 'git worktree remove ../feat-y'
+expect пропуск "$HART" 'git worktree remove ~/hart-wt/tmp-x'
+expect пропуск "$TMPWT" 'git worktree remove ~/hart-wt/tmp-x'
 
 # ─── 4. Ціль задано в самій команді: cwd нейтральний (scratch) ─────────────
 # Ці рядки читає й probe-profile-rules.sh: там HOME справжній, тож `~/hart` — це
@@ -106,6 +122,7 @@ done <<'EOF'
 блок|git -C ~/hart restore probe-no-such-file
 блок|git -C ~/hart stash clear
 блок|git -C ~/hart branch -D probe-no-such-branch
+блок|git -C ~/hart-wt/tmp-probe stash clear
 блок|cd ~/hart && git checkout -- probe-no-such-file
 блок|true; rm -rf ~/hart/probe-no-such-dir
 блок|bash -c "git -C ~/hart reset --hard"
@@ -117,9 +134,12 @@ done <<'EOF'
 EOF
 
 # ─── 5. `git -C ~/hart …` з будь-якого cwd — блок; `git -C tmp-x` з ~/hart — пропуск
-for c in "${FORMS[@]}"; do
+for c in "${FORMS[@]}" "${SHARED[@]}"; do
   [[ "$c" == git\ * ]] || continue
   expect блок "$TMPWT" "git -C ~/hart ${c#git }"
+done
+for c in "${FORMS[@]}"; do
+  [[ "$c" == git\ * ]] || continue
   expect пропуск "$HART" "git -C ~/hart-wt/tmp-x ${c#git }"
 done
 
@@ -168,6 +188,7 @@ mutant 'розбір ланцюжків && ; | вимкнено' 'if t and set(t
 mutant 'git -C не змінює ціль' 'cur = chdir(cur, args[i + 1])' 'pass'
 mutant 'bash -c не розбирається' 'check(script, cwds, depth + 1)' 'pass'
 mutant 'tmp-* не виняток (захищено все)' 'return not p[len(ROOTS[1]) + 1 :].split("/")[0].startswith("tmp-")' 'return True'
+mutant 'спільний стан дозволено з tmp-*' '    if shared:' '    if False:'
 mutant 'невизначена ціль — пропуск' $'        if p is None:\n            return True' $'        if p is None:\n            return False'
 if [[ -z "${GUARD_UNDER_TEST:-}" && "$fail" -eq 0 ]]; then
   M="$(mktemp -d)"

@@ -53,6 +53,8 @@ RULES=(
   'дозволи й безпека|tools/agy/*'
   'дозволи й безпека|tools/scripts/install-*'
   'дозволи й безпека|tools/scripts/log-permission-request*'
+  # Хук PreToolUse профілю оркестратора: руйнівні команди в ~/hart (#216).
+  'дозволи й безпека|tools/scripts/guard-destructive*'
   'дозволи й безпека|tools/scripts/check-forbidden-paths*'
   'дозволи й безпека|tools/scripts/check-deny-parity*'
   'дозволи й безпека|tools/scripts/check-agy-scope*'

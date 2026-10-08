@@ -13,8 +13,12 @@
 # `~/hart-wt/tmp-*` — НЕ захищені: там руйнівні команди дозволені.
 #   - git: `reset --hard`; `clean` (крім `-n`/`--dry-run`); `checkout` з `--`, `.`,
 #     `-f`, `-p`, шаблоном або наявним файлом серед аргументів; `restore` (крім лише
-#     `--staged`); `stash drop|clear`; `branch -D` (і `-d` з `-f`);
-#     `worktree remove --force` — ціль тут шлях worktree, а не тека виклику.
+#     `--staged`).
+#   - Спільний стан репо — блок ЗАВЖДИ, з будь-якої теки, зокрема з `tmp-*`: stash і
+#     гілки спільні для всіх worktree, тож `git stash drop|clear` і `git branch -D`
+#     (і `-d` з `-f`) у `tmp-*` руйнують і ~/hart (рішення yurii: «руйнівні в ~/hart —
+#     у будь-якій формі»). `git worktree remove` — блок, якщо worktree не `tmp-*`;
+#     ціль тут шлях worktree, а не тека виклику.
 #   - `rm` з будь-яким шляхом у захищеному дереві; `find … -delete` і `find … -exec rm`
 #     (ціль — початкові теки find); `xargs rm` (ціль — тека виклику: шляхи з stdin
 #     відносні до неї).
@@ -33,8 +37,6 @@
 #   - Скрипт-файл (`bash x.sh`), `git -c alias.x='!…'`, `$( … )` всередині подвійних
 #     лапок, `find -exec sh -c …`, `mv`/`cp` поверх файла, `>` перенаправлення,
 #     `unlink`, `shred`; шляхи, що приходять у `xargs rm` з stdin абсолютними.
-#   - Сховище stash і гілки спільні для всіх worktree одного репо: `git stash clear`
-#     чи `git branch -D` у `tmp-*` дозволені (так у #216), хоч зачіпають і ~/hart.
 #   - Автономний профіль A8 — інша межа (контейнер, #151), цей хук його не стосується.
 #
 # Протокол Claude Code: stdin — JSON події (`tool_name`, `tool_input.command`, `cwd`);
@@ -237,7 +239,7 @@ def git_check(args, cwds, env):
         return
     sub, rest = args[i], args[i + 1 :]
     sf, opts = short_flags(rest), set(rest)
-    what, targets = None, None
+    what, targets, shared = None, None, False
     if sub == "reset" and "--hard" in opts:
         what = "git reset --hard"
     elif sub == "clean" and not ("n" in sf or "--dry-run" in opts):
@@ -268,19 +270,20 @@ def git_check(args, cwds, env):
         if worktree or not staged:
             what = "git restore"
     elif sub == "stash" and rest and rest[0] in ("drop", "clear"):
-        what = f"git stash {rest[0]}"
+        what, shared = f"git stash {rest[0]}", True
     elif sub == "branch":
         if "D" in sf or (("d" in sf or "--delete" in opts) and ("f" in sf or "--force" in opts)):
-            what = "git branch -D"
+            what, shared = "git branch -D", True
     elif sub == "worktree" and rest and rest[0] == "remove":
         r = rest[1:]
-        if "f" in short_flags(r) or "--force" in r:
-            what = "git worktree remove --force"
-            paths = [a for a in r if not a.startswith("-")]
-            if paths:
-                targets = [(p, cur) for p in paths]
+        what = "git worktree remove"
+        paths = [a for a in r if not a.startswith("-")]
+        if paths:
+            targets = [(p, cur) for p in paths]
     if what is None:
         return
+    if shared:
+        raise Block(f"{what} — stash і гілки спільні для всіх worktree, це руйнує й ~/hart")
     if targets is None:
         targets = [(".", cur)]
     targets += [(e, cwds) for e in extra]
