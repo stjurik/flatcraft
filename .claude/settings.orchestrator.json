@@ -147,6 +147,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.flatcraft/hooks/guard-destructive.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
