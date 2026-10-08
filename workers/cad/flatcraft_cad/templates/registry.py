@@ -14,6 +14,7 @@ from typing import Any
 
 from flatcraft_cad.templates.base import Template
 from flatcraft_cad.templates.corner_angle import CornerAngleTemplate
+from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfTemplate
 from flatcraft_cad.templates.l_bracket import LBracketTemplate
 from flatcraft_cad.templates.perforated_panel import PerforatedPanelTemplate
 from flatcraft_cad.templates.wall_shelf import WallShelfTemplate
@@ -25,4 +26,5 @@ TEMPLATES: dict[str, type[Template[Any]]] = {
     "l_bracket": LBracketTemplate,
     "z_bracket": ZBracketTemplate,
     "wall_shelf": WallShelfTemplate,
+    "enclosed_shelf": EnclosedShelfTemplate,
 }

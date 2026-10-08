@@ -122,6 +122,24 @@ describe("render-gate: perforated_panel (RegistryTemplateViewport, Run 7 Ета�
   });
 });
 
+// enclosed_shelf — `def.validators` порожній (ADR-033): `validateProfile` НЕ
+// підтримує `templateSlug: "enclosed_shelf"`, те саме задокументоване рішення,
+// що вже лежить у `export-gate.ts` (`case "enclosed_shelf": return []`) і
+// `template-studio.tsx` (`SLUGS_WITH_PROFILE` без `enclosed_shelf`) — тож тут
+// нема "невалідні параметри → fallback" кейсу (нема validator'а, що міг би
+// його дати); лишається перевірка, що сцена рендериться на дефолтах.
+describe("render-gate: enclosed_shelf (RegistryTemplateViewport, Run 7 Етап 2)", () => {
+  const def = TEMPLATE_REGISTRY.enclosed_shelf;
+
+  it("валідні параметри → сцена (composed, dynamic loading), без fallback", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport def={def} parameters={def.defaults} thicknessMm={T} />,
+    );
+    expect(html).toContain(LOADING);
+    expect(html).not.toContain(FALLBACK);
+  });
+});
+
 describe("render-gate: corner_angle (RegistryTemplateViewport, Run 7 Етап 2)", () => {
   const def = TEMPLATE_REGISTRY.corner_angle;
 
