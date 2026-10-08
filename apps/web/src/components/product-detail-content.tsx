@@ -1,9 +1,7 @@
 import { TEMPLATE_REGISTRY, type TemplateSlug } from "@flatcraft/templates";
 import type { MaterialChoice, ProductDetail } from "@flatcraft/types";
-import { ENCLOSED_SHELF_DEFAULT_PARAMETERS, EnclosedShelfParametersSchema } from "@flatcraft/types";
 import Link from "next/link";
 
-import { EnclosedShelfStudio } from "./enclosed-shelf-studio";
 import { RegistryTemplateStudio } from "./registry-template-studio";
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
@@ -88,23 +86,6 @@ function ProductStudioSwitch({
       <RegistryTemplateStudio
         slug={product.baseTemplateSlug as TemplateSlug}
         initialParameters={parsed.success ? parsed.data : registryDef.defaults}
-        materials={materials}
-        product={{
-          name: product.name,
-          description: product.description,
-          fixedParameters: product.fixedParameters,
-          userEditableFields: product.userEditableFields,
-        }}
-      />
-    );
-  }
-
-  if (product.baseTemplateSlug === "enclosed_shelf") {
-    const merged = { ...baseDefaults, ...product.fixedParameters };
-    const parsed = EnclosedShelfParametersSchema.safeParse(merged);
-    return (
-      <EnclosedShelfStudio
-        initialParameters={parsed.success ? parsed.data : ENCLOSED_SHELF_DEFAULT_PARAMETERS}
         materials={materials}
         product={{
           name: product.name,
