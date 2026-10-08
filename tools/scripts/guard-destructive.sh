@@ -18,15 +18,18 @@
 #     гілки спільні для всіх worktree, тож `git stash drop|clear` і `git branch -D`
 #     (і `-d` з `-f`) у `tmp-*` руйнують і ~/hart (рішення yurii: «руйнівні в ~/hart —
 #     у будь-якій формі»). `git worktree remove` — блок, якщо worktree не `tmp-*`;
-#     ціль тут шлях worktree, а не тека виклику.
+#     ціль тут шлях worktree, а не тека виклику. Відносний аргумент git спершу читає
+#     як ім'я (останні компоненти шляху), тож він — невизначена ціль: дозволено лише
+#     абсолютний шлях чи `~/…`.
 #   - `rm` з будь-яким шляхом у захищеному дереві; `find … -delete` і `find … -exec rm`
 #     (ціль — початкові теки find); `xargs rm` (ціль — тека виклику: шляхи з stdin
 #     відносні до неї).
 #   - Ціль визначається за `cwd` події, `cd`/`pushd` у ланцюжку, `git -C`,
 #     `--git-dir`/`--work-tree`, `GIT_DIR=`/`GIT_WORK_TREE=` і явними шляхами `rm`/`find`.
-#   - Ланцюжки `&&`, `||`, `;`, `|`, `&`, перенос рядка, `( … )`, `$( … )`, зворотні
-#     лапки; `bash|sh|dash|zsh|ksh -c "…"` — розбирається рекурсивно; обгортки
-#     `env`, `command`, `exec`, `nohup`, `nice`, `timeout`, `time`, `xargs`, `VAR=…`.
+#   - Ланцюжки `&&`, `||`, `;`, `|`, `&`, перенос рядка, `( … )`, `$( … )` (і в слові:
+#     `VAR=$(…)`, `"$(…)"`), зворотні лапки; `bash|sh|dash|zsh|ksh -c "…"` і `env -S "…"`
+#     — розбираються рекурсивно; обгортки `env`, `command`, `exec`, `nohup`, `nice`,
+#     `timeout`, `time`, `xargs`, `VAR=…`. `cd` у конвеєрі чи фоні теку не змінює.
 #   - Невизначена ціль — захищена (fail closed): `$ЗМІННА`, `~user`, `{a,b}`, `cd -`,
 #     відносний шлях без `cwd`. Нерозібрана команда чи подія — теж блок.
 #
@@ -34,8 +37,7 @@
 #   - Інтерпретатори: `python -c "shutil.rmtree(…)"`, `perl -e unlink`, `node -e` хук
 #     не ловить — він читає рядок команди, а не дію. Повну межу дає лише пісочниця
 #     Claude Code (#216, варіант б, клас A — рішення yurii).
-#   - Скрипт-файл (`bash x.sh`), `git -c alias.x='!…'`, `$( … )` всередині подвійних
-#     лапок, `find -exec sh -c …`, `mv`/`cp` поверх файла, `>` перенаправлення,
+#   - Скрипт-файл (`bash x.sh`), `git -c alias.x='!…'`, `find -exec sh -c …`, `mv`/`cp` поверх файла, `>` перенаправлення,
 #     `unlink`, `shred`; шляхи, що приходять у `xargs rm` з stdin абсолютними.
 #   - Автономний профіль A8 — інша межа (контейнер, #151), цей хук його не стосується.
 #
@@ -130,11 +132,13 @@ def lex(cmd):
         sep = None
         if t and set(t) <= set(";&|\n`"):
             sep = t
-        elif t == "(" and (not cur or cur[-1] == "$"):
-            # `(` — роздільник лише на початку команди чи після `$`; інакше це
-            # аргумент (`find . \( … \)`).
-            if cur and cur[-1] == "$":
-                cur.pop()
+        elif t == "(" and (not cur or cur[-1].endswith("$")):
+            # `(` — роздільник лише на початку команди чи після `$` (і `VAR=$`, рецензія
+            # Flash #218, дефект 2); інакше це аргумент (`find . \( … \)`).
+            if cur and cur[-1].endswith("$"):
+                cur[-1] = cur[-1][:-1]
+                if not cur[-1]:
+                    cur.pop()
             depth += 1
             sep = t
         elif t == ")" and depth > 0:
@@ -147,6 +151,26 @@ def lex(cmd):
             cur.append(t)
     segs.append((cur, None))
     return [(s, sep) for s, sep in segs if s]
+
+
+def substitutions(word):
+    """Тексти `$( … )` і `` `…` `` усередині одного слова (лапки shlex уже зняв)."""
+    out, i = [], 0
+    while i < len(word):
+        if word.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < len(word) and depth:
+                depth += {"(": 1, ")": -1}.get(word[j], 0)
+                j += 1
+            out.append(word[i + 2 : j - 1] if depth == 0 else word[i + 2 :])
+            i = j
+        elif word[i] == "`":
+            j = word.find("`", i + 1)
+            out.append(word[i + 1 :] if j < 0 else word[i + 1 : j])
+            i = len(word) if j < 0 else j + 1
+        else:
+            i += 1
+    return out
 
 
 def drop_redirects(tokens):
@@ -179,12 +203,26 @@ def unwrap(tokens):
         elif base == "env":
             i += 1
             while i < len(tokens) and (tokens[i].startswith("-") or ASSIGN.match(tokens[i])):
-                if tokens[i] in ("-C", "--chdir"):
+                t = tokens[i]
+                if t in ("-C", "--chdir") or t.startswith("--chdir="):
                     raise Block("env -C: тека виконання невизначена")
-                if ASSIGN.match(tokens[i]):
-                    k, _, v = tokens[i].partition("=")
+                if t in ("-S", "--split-string") or t.startswith("-S") or t.startswith("--split-string="):
+                    # `env -S "<рядок>"` розбиває рядок на команду й аргументи
+                    # (рецензія Flash #218, дефект 3).
+                    if t in ("-S", "--split-string"):
+                        value, after = (tokens[i + 1] if i + 1 < len(tokens) else ""), i + 2
+                    else:
+                        value, after = (t.partition("=")[2] if t.startswith("--") else t[2:]), i + 1
+                    try:
+                        tokens = shlex.split(value) + tokens[after:]
+                    except ValueError:
+                        raise Block("env -S: рядок не розібрано")
+                    i = 0
+                    break
+                if ASSIGN.match(t):
+                    k, _, v = t.partition("=")
                     env[k] = v
-                i += 2 if tokens[i] in ("-u", "--unset", "-S") else 1
+                i += 2 if t in ("-u", "--unset") else 1
         elif base == "nice":
             i += 1
             if i < len(tokens) and tokens[i] == "-n":
@@ -279,7 +317,12 @@ def git_check(args, cwds, env):
         what = "git worktree remove"
         paths = [a for a in r if not a.startswith("-")]
         if paths:
-            targets = [(p, cur) for p in paths]
+            # git спершу шукає worktree за унікальним останнім компонентом шляху
+            # (`git help worktree`: «ghi or def/ghi is enough»), і лише потім — як
+            # шлях від теки виклику. Тож відносний аргумент — невизначена ціль
+            # (рецензія Flash #218, дефект 4); дозволено лише абсолютний шлях чи `~/…`.
+            targets = [(p, cur if os.path.isabs(p) or p == "~" or p.startswith("~/") else [None])
+                       for p in paths]
     if what is None:
         return
     if shared:
@@ -404,18 +447,26 @@ def segment(tokens, cwds, depth):
 def check(cmd, cwds, depth=0):
     if depth > 8:
         raise Block("занадто глибока вкладеність shell -c")
-    cur, fallback = list(cwds), []
+    cur, fallback, prev = list(cwds), [], None
     for tokens, sep in lex(cmd):
+        for t in tokens:
+            # `"$(…)"`, `a$(…)`, `"`…`"` — підстановка всередині слова: вкладена команда.
+            for inner in substitutions(t):
+                check(inner, cur, depth + 1)
         new = segment(tokens, cur, depth)
-        if new is not None:
-            if sep in ("&&", "|"):
+        # Команди конвеєра (`|`) і фонові (`&`) — окремі підпроцеси: `cd` у них теку
+        # для наступних команд не змінює (рецензія Flash #218, дефект 1).
+        subshell = sep in ("|", "|&", "&") or prev in ("|", "|&")
+        if new is not None and not subshell:
+            if sep == "&&":
                 # `cd X && …` — далі лише в X; але після `;`/`||` знов можлива стара тека.
                 fallback, cur = fallback + cur, new
             else:
                 cur = cur + new
-        if sep not in (None, "&&", "|", "(", ")"):
+        if sep not in (None, "&&", "|", "|&", "(", ")"):
             cur, fallback = cur + fallback, []
         cur = list(dict.fromkeys(cur))
+        prev = sep
 
 
 def main():

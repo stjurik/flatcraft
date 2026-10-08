@@ -180,6 +180,34 @@ HOME="$T" bash "$SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"x"}}
 [[ $rc == 0 ]] && ok "не-Bash подія — пропуск" || bad "не-Bash подія → rc=$rc"
 expect блок "$HART" 'echo "незакрита лапка'
 
+# ─── 10. Обходи з рецензії Flash на #218 (a1315f2) — кожен був пропуском ────
+# Рядок: очікування|тека (hart|tmp)|команда.
+while IFS='|' read -r want where cmd; do
+  [[ "$where" == hart ]] && d="$HART" || d="$TMPWT"
+  expect "$want" "$d" "$cmd"
+done <<'EOF2'
+блок|hart|cd /tmp | rm -rf docs
+блок|hart|cd ~/hart-wt/tmp-x | git reset --hard
+блок|hart|cd /tmp |& cat; true | rm -rf docs
+блок|hart|cd /tmp & rm -rf docs
+блок|hart|VAR=$(rm -rf docs)
+блок|hart|export A=$(git reset --hard)
+блок|hart|echo "$(rm -rf docs)"
+блок|hart|echo "x`git checkout -- x`y"
+блок|hart|env -S "git reset --hard"
+блок|hart|env -S"rm -rf docs"
+блок|hart|env --split-string="rm -rf docs"
+блок|tmp|git worktree remove feat-y
+блок|tmp|git worktree remove --force hart-wt/feat-y
+блок|tmp|git worktree remove tmp-x
+пропуск|hart|cd /tmp && echo ok | cat
+пропуск|tmp|cd /tmp | true; rm -rf docs
+пропуск|hart|A=$(git status)
+пропуск|hart|echo "$(git log -1)"
+пропуск|hart|env -S "git status"
+пропуск|tmp|git worktree remove ~/hart-wt/tmp-x
+EOF2
+
 # ─── Мутанти: кожен механізм розбору тримається тестом (#216) ──────────────
 mutant_names=() mutant_from=() mutant_to=()
 mutant() { mutant_names+=("$1") mutant_from+=("$2") mutant_to+=("$3"); }
@@ -189,6 +217,11 @@ mutant 'git -C не змінює ціль' 'cur = chdir(cur, args[i + 1])' 'pass
 mutant 'bash -c не розбирається' 'check(script, cwds, depth + 1)' 'pass'
 mutant 'tmp-* не виняток (захищено все)' 'return not p[len(ROOTS[1]) + 1 :].split("/")[0].startswith("tmp-")' 'return True'
 mutant 'спільний стан дозволено з tmp-*' '    if shared:' '    if False:'
+mutant 'cd у конвеєрі змінює теку (Flash #218, 1)' $'        if new is not None and not subshell:\n            if sep == "&&":' $'        if new is not None:\n            if sep in ("&&", "|"):'
+mutant 'VAR=$( — не підстановка (Flash #218, 2)' 'elif t == "(" and (not cur or cur[-1].endswith("$")):' 'elif t == "(" and (not cur or cur[-1] == "$"):'
+mutant '"$(…)" у слові не розбирається (Flash #218, 2)' 'for inner in substitutions(t):' 'for inner in []:'
+mutant 'env -S пропускає рядок (Flash #218, 3)' 'tokens = shlex.split(value) + tokens[after:]' 'tokens = tokens[after:]'
+mutant 'worktree remove <ім'"'"'я> — від теки виклику (Flash #218, 4)' 'cur if os.path.isabs(p) or p == "~" or p.startswith("~/") else [None]' 'cur'
 mutant 'невизначена ціль — пропуск' $'        if p is None:\n            return True' $'        if p is None:\n            return False'
 if [[ -z "${GUARD_UNDER_TEST:-}" && "$fail" -eq 0 ]]; then
   M="$(mktemp -d)"
