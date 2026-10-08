@@ -91,7 +91,7 @@ grep -E '^(блок|пропуск)\|' "$GUARD_TEST" >>"$W/samples.txt" || {
 }
 
 run_once() { # run_once <файл-результату> <команда> <allow: profile|none|profile+cmd|hook+cmd|cmd>
-  local out="$1" cmd="$2" mode="$3" raw="$1.raw" used res allow=() settings="$W/deny-ask.json" part
+  local out="$1" cmd="$2" mode="$3" raw="$1.raw" used res allow=() settings="$W/deny-ask.json" part dirs=()
   case "$mode" in
   profile) allow=("${ALLOW[@]}") ;;
   profile+cmd) allow=("${ALLOW[@]}" "Bash($cmd)") ;;
@@ -103,12 +103,16 @@ run_once() { # run_once <файл-результату> <команда> <allow:
       [[ -n "$part" ]] && allow+=("Bash($part)")
     done < <(sed -E 's/ *(&&|\|\||;|\|) */\n/g' <<<"$cmd")
     [[ "$mode" == hook+cmd ]] && settings="$W/deny-ask-hook.json"
+    # Як у сесії оркестратора: проєкт ~/hart і робочі теки ~/hart-wt. Без цього
+    # Claude Code сам питає про `cd`/`rm` поза робочою текою, і контроль не
+    # виконується (перший прогін 2026-10-08, 2.1.283: 3 зразки з 25 — dontAsk).
+    dirs=(--add-dir "$HOME/hart" "$HOME/hart-wt")
     ;;
   esac
   (cd "$W/ws" && PATH="$W/bin:$PATH" timeout 150 "$BIN" -p \
     "Use the Bash tool exactly once to run this exact command, verbatim, then stop and reply DONE. Command: $cmd" \
     --model "$MODEL" --tools Bash --permission-mode dontAsk --no-session-persistence \
-    --settings "$settings" ${allow[@]+--allowedTools "${allow[@]}"} \
+    ${dirs[@]+"${dirs[@]}"} --settings "$settings" ${allow[@]+--allowedTools "${allow[@]}"} \
     --output-format stream-json --verbose </dev/null >"$raw" 2>/dev/null)
   used="$(jq -rR 'fromjson? | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .input.command' "$raw" | head -1)"
   res="$(jq -rR 'fromjson? | select(.type=="user") | .message.content[]? | select(.type=="tool_result")
