@@ -7,7 +7,6 @@
  * t=5 (дозволено [4, 5]) → червоний банер; t=2 → зелений.
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
-import { WALL_SHELF_DEFAULT_PARAMETERS } from "@flatcraft/types";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -15,7 +14,6 @@ import { describe, expect, it } from "vitest";
 // нестабільно у node). Тестуємо ВЛАСНУ логіку редактора (матричний банер); форму
 // рендерить стаб-AutoForm (null).
 import { RegistryTemplateEditor } from "./registry-template-editor";
-import { WallShelfEditor } from "./wall-shelf-editor";
 
 const noop = () => {};
 const VALID_T = 2.0; // R=2.5 дозволено
@@ -62,11 +60,12 @@ const cases = [
       ),
   },
   {
-    name: "WallShelfEditor",
+    name: "RegistryTemplateEditor (wall_shelf)",
     render: (t: number) =>
       renderToString(
-        <WallShelfEditor
-          value={WALL_SHELF_DEFAULT_PARAMETERS}
+        <RegistryTemplateEditor
+          def={TEMPLATE_REGISTRY.wall_shelf}
+          value={TEMPLATE_REGISTRY.wall_shelf.defaults}
           onChange={noop}
           materialCode="cold_rolled_steel"
           thicknessMm={t}
