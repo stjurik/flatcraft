@@ -74,6 +74,10 @@ HOOK_FILES=(log-permission-request.sh guard-destructive.sh)
 hook_cmd() { # hook_cmd <файл> — єдина дозволена команда хука для цього файла
   # shellcheck disable=SC2016 # $HOME має розгорнути shell хука, а не цей скрипт
   printf 'bash "$HOME/.flatcraft/hooks/%s"' "$1"
+  # Охорона блокує лише кодом 2, а зникла чи зламана копія дає 127/126 — Claude Code
+  # пропустив би команду. `|| exit 2` робить будь-який збій блоком (контрприклади
+  # Sonnet #218, п.14).
+  [[ "$1" != guard-destructive.sh ]] || printf ' || exit 2'
 }
 
 # Дозвіл, що пропускає ДОВІЛЬНУ дію: будь-яку команду, будь-яку віддалену
@@ -246,13 +250,14 @@ fi
 # файл за справжнім SHA локально не можна.
 HOOK_WANT_DIR="$(mktemp -d)"
 trap 'rm -rf "$HOOK_WANT_DIR"' EXIT
-authentic_hook() { # authentic_hook <шлях у репо> <куди> — файл з origin/main; код 1 — не вдалося
+authentic_hook() { # authentic_hook <шлях у репо> <куди> — файл з origin/main
+  # код 1 — немає зв'язку з origin; 3 — зв'язок є, а файла на main ще немає (до merge).
   local sha
   sha="$(git -C "$ROOT" ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
   git -C "$ROOT" cat-file -e "$sha^{commit}" 2>/dev/null ||
     git -C "$ROOT" fetch -q origin main 2>/dev/null || return 1
-  git -C "$ROOT" show "$sha:$1" >"$2" 2>/dev/null
+  git -C "$ROOT" show "$sha:$1" >"$2" 2>/dev/null || return 3
 }
 
 current='{}'
@@ -302,12 +307,17 @@ same_as_sets() { # same_as_sets <json1> <json2>
 }
 # Стан хуків рахується ОДИН раз і до будь-якого запису: без origin нема з чим
 # звірити копію, і тоді не змінюємо нічого — ні налаштувань, ні копій.
-# hs: none (у профілі хуків немає) | noorigin | ok | bad (є missing чи drift).
-hs=none hooks_missing=() hooks_drift=()
+# hs: none (у профілі хуків немає) | noorigin | notonmain | ok | bad (є missing чи drift).
+hs=none hooks_missing=() hooks_drift=() notonmain=""
 for i in "${!HOOK_EVENTS[@]}"; do
   jq -e --arg e "${HOOK_EVENTS[$i]}" '(.hooks // {}) | has($e)' "$PROFILE" >/dev/null || continue
   f="${HOOK_FILES[$i]}"
-  if ! authentic_hook "tools/scripts/$f" "$HOOK_WANT_DIR/$f"; then
+  rc=0
+  authentic_hook "tools/scripts/$f" "$HOOK_WANT_DIR/$f" || rc=$?
+  if ((rc == 3)); then
+    hs=notonmain notonmain="$f"
+    break
+  elif ((rc != 0)); then
     hs=noorigin
     break
   fi
@@ -358,6 +368,7 @@ if [[ "$MODE" == --check ]]; then
   same_as_sets "$merged" "$current" ||
     echo "НЕ ВСТАНОВЛЕНО: у $LOCAL бракує частини профілю — запустіть без --check" >&2
   [[ "$hs" == noorigin ]] && echo "НЕ ПЕРЕВІРЕНО: немає зв'язку з origin — копію хука нема з чим звірити" >&2
+  [[ "$hs" == notonmain ]] && echo "НЕ ВСТАНОВЛЕНО: tools/scripts/$notonmain ще немає на main на origin — профіль ставиться після merge" >&2
   for f in ${hooks_missing[@]+"${hooks_missing[@]}"}; do
     echo "НЕ ВСТАНОВЛЕНО: немає копії хука $HOOKS_DIR/$f" >&2
   done
@@ -371,6 +382,10 @@ fi
 
 if [[ "$hs" == noorigin ]]; then
   echo "відмова: не вдалося взяти хуки з main на origin — нічого не змінено" >&2
+  exit 2
+fi
+if [[ "$hs" == notonmain ]]; then
+  echo "відмова: tools/scripts/$notonmain ще немає на main на origin — нічого не змінено; встановлення після merge" >&2
   exit 2
 fi
 for f in ${hooks_missing[@]+"${hooks_missing[@]}"} ${hooks_drift[@]+"${hooks_drift[@]}"}; do

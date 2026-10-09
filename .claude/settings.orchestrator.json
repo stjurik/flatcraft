@@ -154,7 +154,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$HOME/.flatcraft/hooks/guard-destructive.sh\"",
+            "command": "bash \"$HOME/.flatcraft/hooks/guard-destructive.sh\" || exit 2",
             "timeout": 10
           }
         ]

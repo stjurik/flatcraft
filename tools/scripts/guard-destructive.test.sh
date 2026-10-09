@@ -181,47 +181,137 @@ HOME="$T" bash "$SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"x"}}
 expect блок "$HART" 'echo "незакрита лапка'
 
 # ─── 10. Обходи з рецензії Flash на #218 (a1315f2) — кожен був пропуском ────
-# Рядок: очікування|тека (hart|tmp)|команда.
-while IFS='|' read -r want where cmd; do
+# Рядок: тека (hart|tmp)|очікування|команда — тека першою, щоб probe-profile-rules.sh
+# не брав ці рядки за зразки сценарію 4 (контрприклади Sonnet #218, п.19).
+while IFS='|' read -r where want cmd; do
   [[ "$where" == hart ]] && d="$HART" || d="$TMPWT"
   expect "$want" "$d" "$cmd"
 done <<'EOF2'
-блок|hart|cd /tmp | rm -rf docs
-блок|hart|cd ~/hart-wt/tmp-x | git reset --hard
-блок|hart|cd /tmp |& cat; true | rm -rf docs
-блок|hart|cd /tmp & rm -rf docs
-блок|hart|VAR=$(rm -rf docs)
-блок|hart|export A=$(git reset --hard)
-блок|hart|echo "$(rm -rf docs)"
-блок|hart|echo "x`git checkout -- x`y"
-блок|hart|env -S "git reset --hard"
-блок|hart|env -S"rm -rf docs"
-блок|hart|env --split-string="rm -rf docs"
-блок|tmp|git worktree remove feat-y
-блок|tmp|git worktree remove --force hart-wt/feat-y
-блок|tmp|git worktree remove tmp-x
-пропуск|hart|cd /tmp && echo ok | cat
-пропуск|tmp|cd /tmp | true; rm -rf docs
-пропуск|hart|A=$(git status)
-пропуск|hart|echo "$(git log -1)"
-пропуск|hart|env -S "git status"
-пропуск|tmp|git worktree remove ~/hart-wt/tmp-x
+hart|блок|cd /tmp | rm -rf docs
+hart|блок|cd ~/hart-wt/tmp-x | git reset --hard
+hart|блок|cd /tmp |& cat; true | rm -rf docs
+hart|блок|cd /tmp & rm -rf docs
+hart|блок|VAR=$(rm -rf docs)
+hart|блок|export A=$(git reset --hard)
+hart|блок|echo "$(rm -rf docs)"
+hart|блок|echo "x`git checkout -- x`y"
+hart|блок|env -S "git reset --hard"
+hart|блок|env -S"rm -rf docs"
+hart|блок|env --split-string="rm -rf docs"
+tmp|блок|git worktree remove feat-y
+tmp|блок|git worktree remove --force hart-wt/feat-y
+tmp|блок|git worktree remove tmp-x
+hart|пропуск|cd /tmp && echo ok | cat
+tmp|пропуск|cd /tmp | true; rm -rf docs
+hart|пропуск|A=$(git status)
+hart|пропуск|echo "$(git log -1)"
+hart|пропуск|env -S "git status"
+tmp|пропуск|git worktree remove ~/hart-wt/tmp-x
 EOF2
+
+# ─── 11. Обходи з контрприкладів Sonnet 5.5 на #218 (ddc0399) ──────────────
+# Рядок: тека|очікування|команда; у команді `\n` — перенос рядка, `\\` — зворотна
+# риска (printf %b). Тека: hart, tmp або scratch.
+while IFS='|' read -r where want raw; do
+  case "$where" in hart) d="$HART" ;; tmp) d="$TMPWT" ;; *) d="$SCRATCH" ;; esac
+  printf -v cmd '%b' "$raw"
+  expect "$want" "$d" "$cmd"
+done <<'EOF3'
+hart|блок|git reset \\\n  --hard
+hart|блок|rm -rf \\\n docs
+hart|блок|ls # note\nrm -rf docs
+hart|блок|[ $# -eq 0 ] && rm -rf docs
+hart|блок|echo a#b; rm -rf docs
+hart|блок|x=$(git rev-parse HEAD); git reset --hard "$x"
+hart|блок|echo $(date); rm -rf docs
+hart|блок|(true);rm -rf docs
+hart|блок|true&&(rm -rf docs)
+hart|блок|cat <(rm -rf docs)
+hart|блок|echo $(date)\nrm -rf docs
+hart|блок|(cd ~/hart-wt/tmp-x && pnpm test) && git reset --hard
+hart|блок|x=$(cd ~/hart-wt/tmp-x && pwd) ; git reset --hard
+hart|блок|x=rm; $x -rf docs
+hart|блок|s=reset; git $s --hard
+hart|блок|eval "$cmd"
+hart|блок|bash -c "$cmd"
+hart|блок|eval "$(echo rm -rf docs)"
+hart|блок|function f { rm -rf docs; }; f
+hart|блок|f(){ rm -rf docs; }; f
+hart|блок|case x in x) rm -rf docs;; esac
+hart|блок|git rm -rf docs
+hart|блок|git switch -f HEAD
+hart|блок|git switch --discard-changes HEAD
+hart|блок|git checkout-index -a -f
+hart|блок|git read-tree --reset -u HEAD
+tmp|блок|git reflog expire --expire=now --all
+hart|блок|printf x | xargs --max-procs 2 rm -f
+hart|блок|echo docs | xargs -l rm -rf
+hart|блок|nice --adjustment 5 rm -rf docs
+hart|блок|time -p rm -rf docs
+hart|блок|bash -O extglob -c 'rm -rf docs'
+hart|блок|exec -a x rm -rf docs
+hart|блок|setsid rm -rf docs
+hart|блок|ionice -c 3 rm -rf docs
+hart|блок|fish -c 'rm -rf docs'
+hart|блок|find . -maxdepth 0 -exec git reset --hard \\;
+scratch|блок|find -O3 ~/hart/docs -delete
+tmp|блок|export GIT_DIR=$HOME/hart/.git GIT_WORK_TREE=$HOME/hart; git reset --hard
+tmp|блок|export GIT_DIR=~/hart/.git; git reset --hard
+tmp|блок|git -c core.worktree=~/hart reset --hard
+scratch|блок|ln -s ~/hart ~/hart-wt/tmp-l && rm -rf ~/hart-wt/tmp-l/docs
+scratch|блок|mv ~/hart ~/hart-wt/tmp-m && rm -rf ~/hart-wt/tmp-m
+hart|блок|echo 'git reset --hard' | bash
+hart|блок|bash <<< 'rm -rf docs'
+scratch|блок|rm -f ~/.flatcraft/hooks/guard-destructive.sh
+hart|блок|git reset --har
+hart|блок|git branch --del --forc x
+hart|блок|git restore --staged --wor x
+hart|блок|cat <<EOF\n$(rm -rf docs)\nEOF
+hart|блок|echo "<<X"\nrm -rf docs\nX
+hart|пропуск|git commit -m "$(cat <<'EOF'\nfix: don't crash\nEOF\n)"
+hart|пропуск|gh pr create --title x --body "$(cat <<'EOF'\nit's ok; rm -rf docs\nEOF\n)"
+hart|пропуск|cat <<'EOF' > /tmp/x\nrm -rf docs\nEOF
+hart|пропуск|x=$(git rev-parse HEAD); git log "$x"
+hart|пропуск|(cd ~/hart-wt/tmp-x && git reset --hard)
+hart|пропуск|find . -name x -exec grep y {} \\;
+hart|пропуск|bash tools/scripts/x.test.sh
+hart|пропуск|nice -n 5 git status
+hart|пропуск|echo a#b
+hart|пропуск|printf x | xargs --max-procs 2 echo
+tmp|пропуск|ln -s ~/hart-wt/tmp-x/a ~/hart-wt/tmp-x/b && rm -f ~/hart-wt/tmp-x/c
+EOF3
 
 # ─── Мутанти: кожен механізм розбору тримається тестом (#216) ──────────────
 mutant_names=() mutant_from=() mutant_to=()
 mutant() { mutant_names+=("$1") mutant_from+=("$2") mutant_to+=("$3"); }
 mutant 'контроль: копія без змін' '' ''
-mutant 'розбір ланцюжків && ; | вимкнено' 'if t and set(t) <= set(";&|\n`"):' 'if False:'
+mutant 'розбір ланцюжків && ; | вимкнено' '        elif t in SEPS or t == ")":' '        elif False:'
 mutant 'git -C не змінює ціль' 'cur = chdir(cur, args[i + 1])' 'pass'
 mutant 'bash -c не розбирається' 'check(script, cwds, depth + 1)' 'pass'
-mutant 'tmp-* не виняток (захищено все)' 'return not p[len(ROOTS[1]) + 1 :].split("/")[0].startswith("tmp-")' 'return True'
+mutant 'tmp-* не виняток (захищено все)' 'return not p[len(WT) + 1 :].split("/")[0].startswith("tmp-")' 'return True'
 mutant 'спільний стан дозволено з tmp-*' '    if shared:' '    if False:'
 mutant 'cd у конвеєрі змінює теку (Flash #218, 1)' $'        if new is not None and not subshell:\n            if sep == "&&":' $'        if new is not None:\n            if sep in ("&&", "|"):'
-mutant 'VAR=$( — не підстановка (Flash #218, 2)' 'elif t == "(" and (not cur or cur[-1].endswith("$")):' 'elif t == "(" and (not cur or cur[-1] == "$"):'
+mutant 'VAR=$( — не підстановка (Flash #218, 2)' '(t == "(" and (not cur or cur[-1].endswith("$")))' '(t == "(" and (not cur or cur[-1] == "$"))'
 mutant '"$(…)" у слові не розбирається (Flash #218, 2)' 'for inner in substitutions(t):' 'for inner in []:'
 mutant 'env -S пропускає рядок (Flash #218, 3)' 'tokens = shlex.split(value) + tokens[after:]' 'tokens = tokens[after:]'
 mutant 'worktree remove <ім'"'"'я> — від теки виклику (Flash #218, 4)' 'cur if os.path.isabs(p) or p == "~" or p.startswith("~/") else [None]' 'cur'
+mutant '\\+перенос не склеюється (Sonnet #218, 1)' 'cmd.replace("\\\n", "")' 'cmd'
+mutant '# — коментар (Sonnet #218, 2)' '    lx.commenters = ""' '    pass'
+mutant 'склеєна пунктуація не розрізається (Sonnet #218, 3)' 'op = next(o for o in OPS + [t[i]] if t.startswith(o, i))' 'op = t[i:]'
+mutant 'cd у ( … ) діє назовні (Sonnet #218, 4)' '            run(g, cur, depth + 1)  # підоболонка: її cd назовні не діє' '            cur = cur'
+mutant 'невизначене слово команди — пропуск (Sonnet #218, 5)' $'    if not literal(tokens[0]):\n        undefined(' $'    if False:\n        undefined('
+mutant '{ } не роздільники (Sonnet #218, 6)' 'SEPS = {"&&", "||", ";;&", ";;", ";&", "|", "|&", ";", "&", "\n", "{", "}"}' 'SEPS = {"&&", "||", ";;&", ";;", ";&", "|", "|&", ";", "&", "\n"}'
+mutant 'git switch --discard-changes — пропуск (Sonnet #218, 7)' $'        what = "git switch --discard-changes"' $'        pass'
+mutant 'reflog expire — не спільний стан (Sonnet #218, 7)' '        what, shared = f"git reflog {rest[0]}", True' '        pass'
+mutant 'xargs --max-procs без значення (Sonnet #218, 8)' '                "--max-args", "--max-procs", "--max-chars", "--process-slot-var"}' '                "--max-args", "--max-chars", "--process-slot-var"}'
+mutant 'обгортки без опцій (Sonnet #218, 9)' '            i = skip_opts(tokens, i + 1, WRAPPERS[base])' '            i += 1'
+mutant 'find -exec <не rm> — пропуск (Sonnet #218, 10)' '            segment([t for t in cmd if t != "{}"], base, depth)' '            pass'
+mutant 'export GIT_DIR не відстежується (Sonnet #218, 11)' $'            if eq and k in ("GIT_DIR", "GIT_WORK_TREE"):\n                SHELL_ENV[k] = v' $'            if False:\n                SHELL_ENV[k] = v'
+mutant 'ln/mv у тій самій команді — без сліду (Sonnet #218, 12)' $'    if prog in ("ln", "mv"):\n        TAINT.extend(' $'    if False:\n        TAINT.extend('
+mutant 'оболонка зі stdin — пропуск (Sonnet #218, 13)' '            undefined(f"{prog} читає команду з stdin", [], cwds)' '            pass'
+mutant '~/.flatcraft не захищено (Sonnet #218, 14)' '    if under(p, HART) or under(p, FLAT):' '    if under(p, HART):'
+mutant 'тіла heredoc — як команди (Sonnet #218, 15)' '    cmd = strip_heredocs(cmd.replace("\\\n", ""))' '    cmd = cmd.replace("\\\n", "")'
+mutant 'скорочені довгі опції — пропуск' '    return any(a.startswith("--") and len(a) > 2 and name.startswith(a.split("=", 1)[0])' '    return any(a.split("=", 1)[0] == name'
 mutant 'невизначена ціль — пропуск' $'        if p is None:\n            return True' $'        if p is None:\n            return False'
 if [[ -z "${GUARD_UNDER_TEST:-}" && "$fail" -eq 0 ]]; then
   M="$(mktemp -d)"

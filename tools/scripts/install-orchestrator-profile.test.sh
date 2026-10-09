@@ -211,7 +211,7 @@ else
   bad "копія guard-destructive відсутня, інша або записувана: $(stat -c '%a %n' "$GUARD_COPY" 2>&1)"
 fi
 cmd="$(jq -r '.hooks.PreToolUse[0] | "\(.matcher)|\(.hooks[0].type)|\(.hooks[0].command)|\(.hooks[0].timeout)"' "$LOCAL")"
-if [[ "$cmd" == 'Bash|command|bash "$HOME/.flatcraft/hooks/guard-destructive.sh"|10' ]]; then
+if [[ "$cmd" == 'Bash|command|bash "$HOME/.flatcraft/hooks/guard-destructive.sh" || exit 2|10' ]]; then
   ok "хук PreToolUse (Bash) у локальних налаштуваннях: копія guard-destructive поза репо"
 else
   bad "хук PreToolUse у налаштуваннях неправильний: $cmd"
@@ -615,6 +615,22 @@ for drop in 'del(.hooks.PreToolUse)' '.hooks.PreToolUse[0].matcher = "Read"'; do
   rm -f "$p"
 done
 
+# ─── 36. guard-destructive ще немає на main (до merge) — чесне повідомлення ──
+# Контрприклади Sonnet #218, п.17: тоді --check казав «немає зв'язку з origin».
+setup
+"${GIT[@]}" rm -q --cached tools/scripts/guard-destructive.sh
+"${GIT[@]}" commit -qm "без guard"
+"${GIT[@]}" push -q -f origin HEAD:refs/heads/main
+out="$(run --check)"
+[[ $? == 1 && "$out" == *"ще немає на main"* && "$out" != *"немає зв'язку"* ]] &&
+  ok "--check до merge: «guard-destructive.sh ще немає на main», не «немає зв'язку»" ||
+  bad "--check до merge сказав інше: $out"
+out="$(run)"
+[[ $? == 2 && "$out" == *"ще немає на main"* && ! -f "$LOCAL" ]] &&
+  ok "встановлення до merge — відмова з поясненням, нічого не змінено" ||
+  bad "встановлення до merge: $out"
+teardown
+
 # ─── 27. Жодного `| grep -q` під pipefail ──────────────────────────────────
 # Регресія 2026-09-27: `printf … | grep -qxF` у danger_in зрідка казав «не знайдено»
 # на знайденому (grep -q виходить першим → SIGPIPE у printf → pipefail), і
@@ -653,6 +669,8 @@ mutant() { # mutant <назва> <було> <стало> — «було» мус
   mutant 'чужий хук проходить' 'select(.type != "command" or .command != $ok[$e] or has("args"))' 'select(false)'
   mutant 'хук не прив'"'"'язаний до події' 'select(.type != "command" or .command != $ok[$e] or has("args"))' 'select(.type != "command" or (.command as $x | [$ok[]] | index($x)) == null or has("args"))'
   mutant 'guard-destructive не обов'"'"'язковий' 'if ! jq -e --arg c "$(hook_cmd guard-destructive.sh)"' 'if false && jq -e --arg c "$(hook_cmd guard-destructive.sh)"'
+  mutant 'файла немає на main = немає зв'"'"'язку' 'git -C "$ROOT" show "$sha:$1" >"$2" 2>/dev/null || return 3' 'git -C "$ROOT" show "$sha:$1" >"$2" 2>/dev/null || return 1'
+  mutant 'guard без || exit 2' "  [[ \"\$1\" != guard-destructive.sh ]] || printf ' || exit 2'" ''
   mutant 'хук із робочого дерева' 'git -C "$ROOT" show "$sha:$1" >"$2"' 'cat "$ROOT/$1" >"$2"'
   mutant 'копія guard-destructive не звіряється' 'elif ! cmp -s "$HOOK_WANT_DIR/$f" "$HOOKS_DIR/$f"; then' 'elif [[ "$f" != guard-destructive.sh ]] && ! cmp -s "$HOOK_WANT_DIR/$f" "$HOOKS_DIR/$f"; then'
   mutant '--replace лишає одноразові allow' 'if $mode == "--replace" and (grants' 'if false and (grants'

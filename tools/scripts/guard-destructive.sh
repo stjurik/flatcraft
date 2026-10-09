@@ -8,43 +8,57 @@
 # того самого через `git checkout -- <файли>` і `rm`. Правило трьох (CLAUDE.md §0 п.6)
 # → механізм замість речення в інструкції (#216, рішення yurii 2026-10-08, варіант а).
 #
-# ЩО ЛОВИТЬ. Захищене дерево — `~/hart`, сама тека `~/hart-wt`, кожен постійний worktree
-# `~/hart-wt/<ім'я>` і будь-який їхній предок (`rm -rf ~`). Тимчасові worktree
-# `~/hart-wt/tmp-*` — НЕ захищені: там руйнівні команди дозволені.
+# ЩО ЛОВИТЬ. Захищені: `~/hart`, сама тека `~/hart-wt`, кожен постійний worktree
+# `~/hart-wt/<ім'я>`, `~/.flatcraft` (копія самого хука) і будь-який їхній предок
+# (`rm -rf ~`). Тимчасові worktree `~/hart-wt/tmp-*` — НЕ захищені.
 #   - git: `reset --hard`; `clean` (крім `-n`/`--dry-run`); `checkout` з `--`, `.`,
 #     `-f`, `-p`, шаблоном або наявним файлом серед аргументів; `restore` (крім лише
-#     `--staged`).
-#   - Спільний стан репо — блок ЗАВЖДИ, з будь-якої теки, зокрема з `tmp-*`: stash і
-#     гілки спільні для всіх worktree, тож `git stash drop|clear` і `git branch -D`
-#     (і `-d` з `-f`) у `tmp-*` руйнують і ~/hart (рішення yurii: «руйнівні в ~/hart —
-#     у будь-якій формі»). `git worktree remove` — блок, якщо worktree не `tmp-*`;
-#     ціль тут шлях worktree, а не тека виклику. Відносний аргумент git спершу читає
-#     як ім'я (останні компоненти шляху), тож він — невизначена ціль: дозволено лише
-#     абсолютний шлях чи `~/…`.
-#   - `rm` з будь-яким шляхом у захищеному дереві; `find … -delete` і `find … -exec rm`
-#     (ціль — початкові теки find); `xargs rm` (ціль — тека виклику: шляхи з stdin
-#     відносні до неї).
-#   - Ціль визначається за `cwd` події, `cd`/`pushd` у ланцюжку, `git -C`,
-#     `--git-dir`/`--work-tree`, `GIT_DIR=`/`GIT_WORK_TREE=` і явними шляхами `rm`/`find`.
-#   - Ланцюжки `&&`, `||`, `;`, `|`, `&`, перенос рядка, `( … )`, `$( … )` (і в слові:
-#     `VAR=$(…)`, `"$(…)"`), зворотні лапки; `bash|sh|dash|zsh|ksh -c "…"` і `env -S "…"`
-#     — розбираються рекурсивно; обгортки `env`, `command`, `exec`, `nohup`, `nice`,
-#     `timeout`, `time`, `xargs`, `VAR=…`. `cd` у конвеєрі чи фоні теку не змінює.
-#   - Невизначена ціль — захищена (fail closed): `$ЗМІННА`, `~user`, `{a,b}`, `cd -`,
-#     відносний шлях без `cwd`. Нерозібрана команда чи подія — теж блок.
+#     `--staged`); `switch -f|--discard-changes`; `rm -f`; `checkout-index -f`;
+#     `read-tree -u`. Довгі опції — і скорочені (`--har`), бо git їх приймає.
+#   - Спільний стан репо — блок ЗАВЖДИ, з будь-якої теки, зокрема з `tmp-*`: stash,
+#     гілки й reflog спільні для всіх worktree, тож `git stash drop|clear`,
+#     `git branch -D` (і `-d` з `-f`), `git reflog expire|delete` у `tmp-*` руйнують і
+#     ~/hart (рішення yurii: «руйнівні в ~/hart — у будь-якій формі»).
+#     `git worktree remove` — блок, якщо worktree не `tmp-*`; ціль тут шлях worktree.
+#     Відносний аргумент git спершу читає як ім'я (останні компоненти шляху), тож він —
+#     невизначена ціль: дозволено лише абсолютний шлях чи `~/…`.
+#   - `rm` з будь-яким шляхом у захищеному дереві; `find … -delete`, `find … -exec <будь-що>`
+#     (перевіряється як команда); `xargs <команда>` (ціль — тека виклику).
+#   - Ціль — за `cwd` події, `cd`/`pushd` у ланцюжку, `git -C`, `--git-dir`/`--work-tree`,
+#     `-c core.worktree=`, `GIT_DIR`/`GIT_WORK_TREE` (і через `export` раніше в команді)
+#     і явними шляхами `rm`/`find`. Шлях під щойно створеним у тій самій команді
+#     `ln`/`mv`/`git worktree move` — невизначений.
+#   - Розбір: ланцюжки `&& || ; | & ;;`, перенос рядка, `\`+перенос (склеювання),
+#     `{ … }`, `( … )`, `$( … )`, `<( … )`, зворотні лапки (і всередині слова: `VAR=$(…)`,
+#     `"$(…)"`); вміст `( … )` і `$( … )` — підоболонка, її `cd` теку назовні не змінює;
+#     `cd` у конвеєрі чи фоні — теж. Тіло heredoc з лапками в розділювачі (`<<'EOF'`) —
+#     дані, не команда; без лапок — лише його `$( … )`. `#` коментарем не вважається
+#     (у bash `a#b`, `$#` — не коментар): помилка в бік блоку.
+#   - `bash|sh|dash|zsh|ksh|fish -c "…"`, `eval "…"`, `env -S "…"` — рекурсивно; обгортки
+#     `env`, `command`, `builtin`, `exec`, `nohup`, `nice`, `timeout`, `time`, `setsid`,
+#     `ionice`, `stdbuf`, `xargs`, `VAR=…` — з їхніми опціями.
+#   - Невизначене — захищене (fail closed): ціль `$ЗМІННА`, `~user`, `{a,b}`, `cd -`,
+#     відносний шлях без `cwd`; слово команди чи підкоманда git зі `$`/підстановкою
+#     (`$x -rf`, `git $s --hard`, `eval "$cmd"`); оболонка, що читає команду з stdin
+#     (`… | bash`, `bash <<< …`), — блок, якщо ціль захищена. Нерозібрана команда чи
+#     подія — блок.
 #
 # ЧОГО НЕ ДОВОДИТЬ — чесно:
 #   - Інтерпретатори: `python -c "shutil.rmtree(…)"`, `perl -e unlink`, `node -e` хук
 #     не ловить — він читає рядок команди, а не дію. Повну межу дає лише пісочниця
 #     Claude Code (#216, варіант б, клас A — рішення yurii).
-#   - Скрипт-файл (`bash x.sh`), `git -c alias.x='!…'`, `find -exec sh -c …`, `mv`/`cp` поверх файла, `>` перенаправлення,
+#   - Скрипт-файл (`bash x.sh`), git-аліаси (`git -c alias.x='!…'`, свої аліаси yurii),
+#     функції, оголошені в ІНШОМУ виклику, `mv`/`cp` поверх файла, `>` перенаправлення,
 #     `unlink`, `shred`; шляхи, що приходять у `xargs rm` з stdin абсолютними.
+#   - Запис у копію хука перенаправленням (`> ~/.flatcraft/hooks/…`) — його тримає лише
+#     deny `Edit(~/.flatcraft/**)` і `--check`.
 #   - Автономний профіль A8 — інша межа (контейнер, #151), цей хук його не стосується.
 #
 # Протокол Claude Code: stdin — JSON події (`tool_name`, `tool_input.command`, `cwd`);
 # exit 2 + причина в stderr — виклик заблоковано; exit 0 — пропущено. Будь-який
 # ІНШИЙ код Claude Code вважає не-блокуючою помилкою й пропускає команду, тому
-# падіння самого хука (немає python3, виняток) перетворюється на exit 2, а не на 1.
+# падіння самого хука (немає python3, виняток) — exit 2, а команда хука в профілі
+# закінчується `|| exit 2`: зникла чи зламана копія (127, 126) теж блокує.
 #
 # Використання (як хук): bash ~/.flatcraft/hooks/guard-destructive.sh <подія.json
 # Ставить install-orchestrator-profile.sh; тест — guard-destructive.test.sh.
@@ -64,16 +78,40 @@ import shlex
 import sys
 
 HOME = os.path.realpath(os.path.expanduser("~"))
-HART = os.path.join(HOME, "hart")
-WT = os.path.join(HOME, "hart-wt")
-ROOTS = [os.path.realpath(HART), os.path.realpath(WT)]
-SHELLS = {"bash", "sh", "dash", "zsh", "ksh"}
-KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "time"}
+HART = os.path.realpath(os.path.join(HOME, "hart"))
+WT = os.path.realpath(os.path.join(HOME, "hart-wt"))
+FLAT = os.path.realpath(os.path.join(HOME, ".flatcraft"))
+SHELLS = {"bash", "sh", "dash", "zsh", "ksh", "fish"}
+KEYWORDS = {"!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until",
+            "function", "case", "esac", "for", "select", "in"}
 ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Операції shell: shlex склеює сусідню пунктуацію в один токен (`);`, `&&(`), тож
+# такий токен розрізається на відомі операції, найдовші першими.
+OPS = sorted(["&&", "||", ";;&", ";;", ";&", "|&", "&>>", "&>", "<<<", "<<-", "<<", ">>",
+              "<(", ">(", ">&", "<&", ">|", "(", ")", ";", "&", "|", "<", ">", "\n", "`"],
+             key=len, reverse=True)
+SEPS = {"&&", "||", ";;&", ";;", ";&", "|", "|&", ";", "&", "\n", "{", "}"}
+REDIRS = {"<", ">", ">>", "<<", "<<-", "<<<", ">&", "<&", "&>", "&>>", ">|"}
+# Обгортка → опції зі значенням окремим словом.
+WRAPPERS = {
+    "command": set(), "builtin": set(), "nohup": set(), "setsid": set(),
+    "exec": {"-a"},
+    "nice": {"-n", "--adjustment"},
+    "time": {"-f", "-o", "--format", "--output"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+}
+TAINT = []  # шляхи, створені чи переміщені `ln`/`mv` у цій самій команді
+SHELL_ENV = {}  # GIT_DIR / GIT_WORK_TREE, присвоєні будь-де в команді
 
 
 class Block(Exception):
     pass
+
+
+def literal(word):
+    return not any(c in word for c in "$`")
 
 
 def resolve(path, cwd):
@@ -91,15 +129,22 @@ def resolve(path, cwd):
     return os.path.normpath(path)
 
 
+def under(p, root):
+    return p == root or p.startswith(root.rstrip("/") + "/")
+
+
 def protected_abs(p):
-    p = os.path.realpath(p)
-    for root in ROOTS:
-        if p == root or root.startswith(p.rstrip("/") + "/"):
+    raw, p = p, os.path.realpath(p)
+    for t in TAINT:
+        if t is None or under(raw, t) or under(p, t):
+            return True
+    for root in (HART, WT, FLAT):
+        if under(root, p):
             return True  # сам корінь або його предок
-    if p.startswith(ROOTS[0] + "/"):
+    if under(p, HART) or under(p, FLAT):
         return True
-    if p.startswith(ROOTS[1] + "/"):
-        return not p[len(ROOTS[1]) + 1 :].split("/")[0].startswith("tmp-")
+    if p.startswith(WT + "/"):
+        return not p[len(WT) + 1 :].split("/")[0].startswith("tmp-")
     return False
 
 
@@ -118,39 +163,140 @@ def chdir(cwds, path):
     return [resolve(path, c) for c in cwds]
 
 
-def lex(cmd):
-    """Сегменти команди: [(токени, роздільник після)]."""
+def strip_heredocs(cmd):
+    """Прибирає тіла heredoc. Розділювач у лапках — тіло лише дані; без лапок — у тілі
+    лишаються тільки `$( … )` і `` `…` ``: їх bash виконує."""
+    out, i, n, stack, pending = [], 0, len(cmd), ["top"], []
+    while i < n:
+        c, ctx = cmd[i], stack[-1]
+        if c == "\\":
+            out.append(cmd[i : i + 2])
+            i += 2
+            continue
+        if ctx == "dq":
+            if c == '"':
+                stack.pop()
+            elif cmd.startswith("$(", i):
+                stack.append("sub")
+                out.append("$(")
+                i += 2
+                continue
+            out.append(c)
+            i += 1
+            continue
+        if c == "'":
+            j = cmd.find("'", i + 1)
+            j = n - 1 if j < 0 else j
+            out.append(cmd[i : j + 1])
+            i = j + 1
+            continue
+        if c == '"':
+            stack.append("dq")
+        elif cmd.startswith("$(", i):
+            stack.append("sub")
+            out.append("$(")
+            i += 2
+            continue
+        elif c == ")" and ctx == "sub":
+            stack.pop()
+        elif cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+            j = i + 2
+            tabs = j < n and cmd[j] == "-"
+            j += 1 if tabs else 0
+            while j < n and cmd[j] in " \t":
+                j += 1
+            k, word, quoted = j, "", False
+            while k < n and cmd[k] not in " \t\n;&|<>()":
+                ch = cmd[k]
+                if ch in "'\"":
+                    e = cmd.find(ch, k + 1)
+                    e = n if e < 0 else e
+                    word, quoted, k = word + cmd[k + 1 : e], True, e + 1
+                elif ch == "\\":
+                    word, quoted, k = word + cmd[k + 1 : k + 2], True, k + 2
+                else:
+                    word, k = word + ch, k + 1
+            if word:
+                pending.append((word, quoted, tabs))
+            out.append(cmd[i:k])
+            i = k
+            continue
+        elif c == "\n" and pending:
+            out.append("\n")
+            i += 1
+            for word, quoted, tabs in pending:
+                body = []
+                while i < n:
+                    e = cmd.find("\n", i)
+                    line, i = (cmd[i:], n) if e < 0 else (cmd[i:e], e + 1)
+                    if (line.lstrip("\t") if tabs else line) == word:
+                        break
+                    body.append(line)
+                if not quoted:
+                    out.extend(s + "\n" for s in substitutions("\n".join(body)))
+            pending = []
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def tokenize(cmd):
     lx = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()<>\n`")
     lx.whitespace = " \t\r"
     lx.whitespace_split = True
+    lx.commenters = ""  # `#` у bash коментар не скрізь (`a#b`, `$#`) — краще зайвий блок
     try:
-        tokens = list(lx)
+        raw = list(lx)
     except ValueError as e:
         raise Block(f"команду не розібрано ({e})")
-    segs, cur, depth = [], [], 0
-    for t in tokens:
-        sep = None
-        if t and set(t) <= set(";&|\n`"):
-            sep = t
-        elif t == "(" and (not cur or cur[-1].endswith("$")):
-            # `(` — роздільник лише на початку команди чи після `$` (і `VAR=$`, рецензія
-            # Flash #218, дефект 2); інакше це аргумент (`find . \( … \)`).
-            if cur and cur[-1].endswith("$"):
-                cur[-1] = cur[-1][:-1]
-                if not cur[-1]:
-                    cur.pop()
-            depth += 1
-            sep = t
-        elif t == ")" and depth > 0:
-            depth -= 1
-            sep = t
-        if sep is not None:
-            segs.append((cur, sep))
-            cur = []
+    tokens = []
+    for t in raw:
+        if t and set(t) <= set(";&|()<>\n`"):
+            i = 0
+            while i < len(t):
+                op = next(o for o in OPS + [t[i]] if t.startswith(o, i))
+                tokens.append(op)
+                i += len(op)
+        else:
+            tokens.append(t)
+    return tokens
+
+
+def parse(tokens, i=0, closer=None):
+    """Сегменти: [(токени, роздільник після, вкладені групи)]. Вкладена група —
+    `( … )`, `$( … )`, `<( … )`, `` `…` ``: перевіряється окремо, теку назовні не змінює."""
+    segs, cur, groups, argdepth = [], [], [], 0
+    while i < len(tokens):
+        t = tokens[i]
+        if closer == "`" and t == "`":
+            return segs + [(cur, None, groups)], i + 1
+        if closer == ")" and t == ")" and argdepth == 0:
+            return segs + [(cur, None, groups)], i + 1
+        if t == "`" or t in ("<(", ">(") or (t == "(" and (not cur or cur[-1].endswith("$"))):
+            # Підстановка (`$(`, `` ` ``, `<(`) дає слово з невідомим вмістом — «$(…)»;
+            # підоболонка `( … )` на місці команди — нічого, крім своєї групи.
+            word = "(…)" if t == "(" and not cur else "$(…)"
+            if t == "(" and cur:
+                word = cur.pop()[:-1] + word
+            inner, i = parse(tokens, i + 1, "`" if t == "`" else ")")
+            groups.append(inner)
+            cur.append(word)
+            continue
+        if t == "(":
+            argdepth += 1
+            cur.append(t)
+        elif t == ")" and argdepth:
+            argdepth -= 1
+            cur.append(t)
+        elif t in SEPS or t == ")":
+            # `)` поза групою — шаблон `case`; далі нова команда.
+            segs.append((cur, t, groups))
+            cur, groups = [], []
         else:
             cur.append(t)
-    segs.append((cur, None))
-    return [(s, sep) for s, sep in segs if s]
+        i += 1
+    return segs + [(cur, None, groups)], i
 
 
 def substitutions(word):
@@ -178,11 +324,19 @@ def drop_redirects(tokens):
     for t in tokens:
         if skip:
             skip = False
-        elif t and set(t) <= set("<>&|") and ("<" in t or ">" in t):
+        elif t in REDIRS:
             skip = True
         else:
             out.append(t)
     return out
+
+
+def skip_opts(tokens, i, valued):
+    while i < len(tokens) and tokens[i].startswith("-") and tokens[i] != "-":
+        if tokens[i] == "--":
+            return i + 1
+        i += 2 if tokens[i] in valued else 1
+    return i
 
 
 def unwrap(tokens):
@@ -196,10 +350,10 @@ def unwrap(tokens):
             k, _, v = t.partition("=")
             env[k] = v
             i += 1
-        elif base in ("command", "builtin", "exec", "nohup", "stdbuf"):
-            i += 1
-            while i < len(tokens) and tokens[i].startswith("-"):
-                i += 1
+        elif base in WRAPPERS:
+            i = skip_opts(tokens, i + 1, WRAPPERS[base])
+            if base == "timeout":
+                i += 1  # тривалість
         elif base == "env":
             i += 1
             while i < len(tokens) and (tokens[i].startswith("-") or ASSIGN.match(tokens[i])):
@@ -223,17 +377,6 @@ def unwrap(tokens):
                     k, _, v = t.partition("=")
                     env[k] = v
                 i += 2 if t in ("-u", "--unset") else 1
-        elif base == "nice":
-            i += 1
-            if i < len(tokens) and tokens[i] == "-n":
-                i += 2
-            elif i < len(tokens) and tokens[i].startswith("-"):
-                i += 1
-        elif base == "timeout":
-            i += 1
-            while i < len(tokens) and tokens[i].startswith("-"):
-                i += 2 if tokens[i] in ("-s", "-k", "--signal", "--kill-after") else 1
-            i += 1  # тривалість
         else:
             break
     return tokens[i:], env
@@ -247,11 +390,18 @@ def short_flags(args):
     return s
 
 
+def lopt(args, name):
+    """Є довга опція name — повна чи скорочена (git приймає однозначні скорочення)."""
+    return any(a.startswith("--") and len(a) > 2 and name.startswith(a.split("=", 1)[0])
+               for a in args)
+
+
 def git_check(args, cwds, env):
     cur, extra, i = list(cwds), [], 0
     for k in ("GIT_DIR", "GIT_WORK_TREE"):
-        if k in env:
-            extra.append(env[k])
+        for src in (env, SHELL_ENV):
+            if k in src:
+                extra.append(src[k])
     while i < len(args):
         a = args[i]
         if a == "-C" and i + 1 < len(args):
@@ -267,6 +417,8 @@ def git_check(args, cwds, env):
             i += 1
             continue
         if a in ("-c", "--namespace", "--exec-path", "--config-env") and i + 1 < len(args):
+            if a == "-c" and args[i + 1].lower().startswith("core.worktree="):
+                extra.append(args[i + 1].partition("=")[2])
             i += 2
             continue
         if a.startswith("-"):
@@ -278,9 +430,11 @@ def git_check(args, cwds, env):
     sub, rest = args[i], args[i + 1 :]
     sf, opts = short_flags(rest), set(rest)
     what, targets, shared = None, None, False
-    if sub == "reset" and "--hard" in opts:
+    if not literal(sub):
+        what = "git з невизначеною підкомандою"
+    elif sub == "reset" and lopt(rest, "--hard"):
         what = "git reset --hard"
-    elif sub == "clean" and not ("n" in sf or "--dry-run" in opts):
+    elif sub == "clean" and not ("n" in sf or lopt(rest, "--dry-run")):
         what = "git clean"
     elif sub == "checkout":
         pos, skip = [], False
@@ -297,21 +451,35 @@ def git_check(args, cwds, env):
         if (
             "--" in opts
             or {"f", "p"} & sf
-            or {"--force", "--patch"} & opts
+            or lopt(rest, "--force")
+            or lopt(rest, "--patch")
             or any(p == "." or p.startswith(":") or any(ch in p for ch in "*?[") for p in pos)
             or on_disk
         ):
             what = "git checkout (відкат файлів)"
+    elif sub == "switch" and ("f" in sf or lopt(rest, "--force") or lopt(rest, "--discard-changes")):
+        what = "git switch --discard-changes"
+    elif sub == "rm" and ("f" in sf or lopt(rest, "--force")):
+        what = "git rm -f"
+    elif sub == "checkout-index" and ("f" in sf or lopt(rest, "--force")):
+        what = "git checkout-index -f"
+    elif sub == "read-tree" and "u" in sf:
+        what = "git read-tree -u"
     elif sub == "restore":
-        staged = "S" in sf or "--staged" in opts
-        worktree = "W" in sf or "--worktree" in opts
+        staged = "S" in sf or lopt(rest, "--staged")
+        worktree = "W" in sf or lopt(rest, "--worktree")
         if worktree or not staged:
             what = "git restore"
     elif sub == "stash" and rest and rest[0] in ("drop", "clear"):
         what, shared = f"git stash {rest[0]}", True
+    elif sub == "reflog" and rest and rest[0] in ("expire", "delete"):
+        # stash — це reflog refs/stash: `reflog expire` знищує його записи.
+        what, shared = f"git reflog {rest[0]}", True
     elif sub == "branch":
-        if "D" in sf or (("d" in sf or "--delete" in opts) and ("f" in sf or "--force" in opts)):
+        if "D" in sf or (("d" in sf or lopt(rest, "--delete")) and ("f" in sf or lopt(rest, "--force"))):
             what, shared = "git branch -D", True
+    elif sub == "worktree" and rest and rest[0] in ("move", "mv"):
+        TAINT.extend(resolve(a, c) for a in rest[1:] if not a.startswith("-") for c in cur)
     elif sub == "worktree" and rest and rest[0] == "remove":
         r = rest[1:]
         what = "git worktree remove"
@@ -326,7 +494,7 @@ def git_check(args, cwds, env):
     if what is None:
         return
     if shared:
-        raise Block(f"{what} — stash і гілки спільні для всіх worktree, це руйнує й ~/hart")
+        raise Block(f"{what} — stash, гілки й reflog спільні для всіх worktree, це руйнує й ~/hart")
     if targets is None:
         targets = [(".", cur)]
     targets += [(e, cwds) for e in extra]
@@ -349,28 +517,45 @@ def rm_check(args, cwds, what="rm"):
             raise Block(f"{what} у захищеному дереві ({p})")
 
 
-def find_check(args, cwds):
+def find_check(args, cwds, depth):
     i = 0
-    while i < len(args) and args[i] in ("-H", "-L", "-P"):
-        i += 1
+    while i < len(args) and (args[i] in ("-H", "-L", "-P") or re.match(r"^-O\d*$", args[i])
+                             or args[i] == "-D"):
+        i += 2 if args[i] == "-D" else 1
     starts = []
     while i < len(args) and not (args[i].startswith("-") or args[i] in ("(", ")", "!", ",")):
         starts.append(args[i])
         i += 1
     expr = args[i:]
-    destructive = "-delete" in expr
-    for j, a in enumerate(expr[:-1]):
-        if a in ("-exec", "-execdir", "-ok", "-okdir") and os.path.basename(expr[j + 1]) == "rm":
-            destructive = True
-    if destructive:
-        rm_check(["--"] + (starts or ["."]), cwds, "find -delete / -exec rm")
+    if "-delete" in expr:
+        rm_check(["--"] + (starts or ["."]), cwds, "find -delete")
+    for j, a in enumerate(expr):
+        if a not in ("-exec", "-execdir", "-ok", "-okdir"):
+            continue
+        cmd = []
+        for t in expr[j + 1 :]:
+            if t in (";", "+"):
+                break
+            cmd.append(t)
+        if cmd and os.path.basename(cmd[0]) == "rm":
+            rm_check(["--"] + (starts or ["."]), cwds, "find -exec rm")
+        elif cmd:
+            # -exec — у теці виклику find; -execdir — у теці кожного знайденого файла.
+            base = cwds if a in ("-exec", "-ok") else [r for s in (starts or ["."]) for r in chdir(cwds, s)]
+            segment([t for t in cmd if t != "{}"], base, depth)
+
+
+XARGS_VALUED = {"-I", "-n", "-L", "-P", "-d", "-a", "-E", "-s", "--arg-file", "--delimiter",
+                "--max-args", "--max-procs", "--max-chars", "--process-slot-var"}
 
 
 def xargs_check(args, cwds, depth):
     i, ph = 0, None
-    valued = ("-I", "-n", "-L", "-P", "-d", "-a", "-E", "-s", "-l")
     while i < len(args) and args[i].startswith("-"):
         a = args[i]
+        if a == "--":
+            i += 1
+            break
         if a == "-I" and i + 1 < len(args):
             ph = args[i + 1]
             i += 2
@@ -380,7 +565,7 @@ def xargs_check(args, cwds, depth):
         elif a == "-i" or a.startswith("--replace"):
             ph = a.partition("=")[2] or "{}"
             i += 1
-        elif a in valued:
+        elif a in XARGS_VALUED:
             i += 2
         else:
             i += 1
@@ -393,11 +578,15 @@ def xargs_check(args, cwds, depth):
         segment(sub, cwds, depth)
 
 
+SHELL_VALUED = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+
 def shell_script(args):
-    found, i = False, 0
+    """('c', рядок) | ('file', шлях) | ('stdin', None)."""
+    found, stdin, i = False, False, 0
     while i < len(args):
         a = args[i]
-        if a in ("-o", "+o"):
+        if a in SHELL_VALUED:
             i += 2
             continue
         if a == "--":
@@ -406,20 +595,44 @@ def shell_script(args):
         if a.startswith("-") or a.startswith("+"):
             if not a.startswith("--") and "c" in a[1:]:
                 found = True
+            if not a.startswith("--") and "s" in a[1:]:
+                stdin = True
             i += 1
             continue
         break
-    if found and i < len(args):
-        return args[i]
-    return None
+    if found:
+        return ("c", args[i]) if i < len(args) else ("stdin", None)
+    if stdin or i >= len(args):
+        return ("stdin", None)
+    return ("file", args[i])
+
+
+def undefined(what, args, cwds):
+    """Невідома команда: блок, якщо захищена тека виклику чи будь-який шлях-аргумент."""
+    if any(protected(".", [c]) for c in cwds) or any(
+        protected(a, cwds) for a in args if not a.startswith("-")
+    ):
+        raise Block(f"{what} — що виконається, не визначено, а ціль захищена")
 
 
 def segment(tokens, cwds, depth):
     """Перевіряє одну просту команду; повертає нові теки, якщо це cd."""
     tokens, env = unwrap(drop_redirects(tokens))
+    for k in ("GIT_DIR", "GIT_WORK_TREE"):
+        if k in env and not tokens:
+            SHELL_ENV[k] = env[k]  # `GIT_DIR=…; git …` — присвоєння без команди
     if not tokens:
         return None
     prog, args = os.path.basename(tokens[0]), tokens[1:]
+    if not literal(tokens[0]):
+        undefined(f"команда «{tokens[0]}»", args, cwds)
+        return None
+    if prog in ("export", "declare", "typeset", "readonly", "local"):
+        for a in args:
+            k, eq, v = a.partition("=")
+            if eq and k in ("GIT_DIR", "GIT_WORK_TREE"):
+                SHELL_ENV[k] = v
+        return None
     if prog in ("cd", "pushd"):
         dest = [a for a in args if not a.startswith("-")]
         if not dest:
@@ -427,28 +640,34 @@ def segment(tokens, cwds, depth):
         return chdir(cwds, dest[0])
     if prog == "popd":
         return [None]
-    if prog in SHELLS:
-        script = shell_script(args)
-        if script is not None:
+    if prog in ("ln", "mv"):
+        TAINT.extend(resolve(a, c) for a in args if not a.startswith("-") for c in cwds)
+    elif prog in SHELLS:
+        kind, script = shell_script(args)
+        if kind == "c":
             check(script, cwds, depth + 1)
+        elif kind == "stdin":
+            undefined(f"{prog} читає команду з stdin", [], cwds)
     elif prog == "eval":
+        if not all(literal(a) for a in args):
+            undefined("eval з підстановкою", args, cwds)
         check(" ".join(args), cwds, depth + 1)
     elif prog == "git":
         git_check(args, cwds, env)
     elif prog == "rm":
         rm_check(args, cwds)
     elif prog == "find":
-        find_check(args, cwds)
+        find_check(args, cwds, depth)
     elif prog == "xargs":
         xargs_check(args, cwds, depth)
     return None
 
 
-def check(cmd, cwds, depth=0):
-    if depth > 8:
-        raise Block("занадто глибока вкладеність shell -c")
+def run(segs, cwds, depth):
     cur, fallback, prev = list(cwds), [], None
-    for tokens, sep in lex(cmd):
+    for tokens, sep, groups in segs:
+        for g in groups:
+            run(g, cur, depth + 1)  # підоболонка: її cd назовні не діє
         for t in tokens:
             # `"$(…)"`, `a$(…)`, `"`…`"` — підстановка всередині слова: вкладена команда.
             for inner in substitutions(t):
@@ -463,10 +682,18 @@ def check(cmd, cwds, depth=0):
                 fallback, cur = fallback + cur, new
             else:
                 cur = cur + new
-        if sep not in (None, "&&", "|", "|&", "(", ")"):
+        if sep not in (None, "&&", "|", "|&"):
             cur, fallback = cur + fallback, []
         cur = list(dict.fromkeys(cur))
         prev = sep
+
+
+def check(cmd, cwds, depth=0):
+    if depth > 8:
+        raise Block("занадто глибока вкладеність")
+    cmd = strip_heredocs(cmd.replace("\\\n", ""))
+    segs, _ = parse(tokenize(cmd))
+    run(segs, cwds, depth)
 
 
 def main():
