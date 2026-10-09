@@ -81,7 +81,7 @@ added_lines() {
 }
 
 staged_added() {
-  local mh tree parents=()
+  local mh tree c parents=()
   mh="$(git rev-parse --git-path MERGE_HEAD)" || return 1
   if [[ -f "$mh" ]]; then
     # Злиття: індекс записується в тимчасовий коміт з усіма батьками і читається тим
@@ -158,7 +158,7 @@ case "$mode" in
     [[ $# -eq 1 ]] || usage
     msg="$1"
     [[ "$msg" != -* ]] || die "файл повідомлення «$msg» схожий на прапорець або stdin — дай шлях"
-    staged_added >"$T/added" || die "git diff --cached не вдався"
+    staged_added >"$T/added" || die "не вдалося зібрати додані рядки індексу (git diff --cached; у злитті — git write-tree: чи розв'язано конфлікт?)"
     check "$msg" "$T/added"
     git commit -F "$msg"
     exit $?

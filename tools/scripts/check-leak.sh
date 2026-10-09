@@ -19,7 +19,9 @@
 #   4. Loopback — ПОПЕРЕДЖЕННЯ, не блок (рішення yurii 2026-10-09, #222; до того —
 #      блок за правилом 2): мережа 127/8 і IPv6 loopback (/128). Це не адреса машини, а її пишуть у
 #      тестах і вердиктах (зупинка #221). Loopback, записаний як IPv4-mapped IPv6,
-#      лишається блоком: рішенням названо лише ці два діапазони.
+#      лишається блоком: рішенням названо лише ці два діапазони. Тому IPv4 loopback
+#      одразу після двокрапки — теж блок: це може бути хвіст IPv6-запису, який
+#      `find_ipv6` не бачить (упритул після літери; контрприклад Sonnet 5.5, #225).
 #
 # Що ще ловить (рецензія #170, Flash і окрема сесія Claude): регістр і BOM у файлі
 # відомої адреси, адреси з «прикрашених» рядків (`# коментар`, `user@`, `:порт`,
@@ -100,6 +102,17 @@ def parse_ip(text):
     if len(parts) == 4 and all(re.fullmatch(r"[0-9]{1,3}", x) and int(x) <= 255 for x in parts):
         return ipaddress.ip_address(".".join(str(int(x)) for x in parts))
     return None
+
+
+def v4_after_colon(line):
+    """Тексти IPv4, що стоять одразу після двокрапки: можливий хвіст IPv6-запису
+    (IPv4-mapped чи IPv4-compatible). Loopback серед них — не попередження, а блок."""
+    out = set()
+    for m in DOTTED.finditer(line):
+        if m.start() > 0 and line[m.start() - 1] == ":":
+            parts = m.group(0).split(".")
+            out.add(".".join(parts[:4]))
+    return out
 
 
 def find_ipv4(line):
@@ -221,6 +234,7 @@ for f in files:
             scan = normalize(line)
             hit = any(p in scan.casefold() for p in known_fold)
             found = find_ipv4(scan) + find_ipv6(scan)
+            v6_tails = v4_after_colon(scan)
             if hit or any(forms(addr) & known_ips for _, addr in found):
                 # Решту адрес цього рядка теж не друкуємо: серед них може бути відома.
                 report(blocked, f, i, "збіг з файлом відомої адреси (вміст не друкується)")
@@ -229,7 +243,7 @@ for f in files:
                 rfc = doc_range(addr)
                 if rfc:
                     warned.append(f"{f}:{i}: {text} — документаційний діапазон ({rfc}), не блок")
-                elif any(addr in n for n in LOOPBACK_NETS):
+                elif any(addr in n for n in LOOPBACK_NETS) and text not in v6_tails:
                     warned.append(f"{f}:{i}: {text} — loopback, не блок")
                 else:
                     report(blocked, f, i, f"IPv{addr.version} {text}")

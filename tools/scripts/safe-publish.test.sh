@@ -261,6 +261,21 @@ run commit "$T/msg-clean"
 if [[ $rc == 1 && "$(git rev-parse HEAD)" == "$hm" ]]; then ok "злиття, що додає новий рядок з адресою, — exit 1, коміту немає"; else bad "злиття з новою адресою — rc=$rc: $out"; fi
 git merge --abort
 
+# Нерозв'язаний конфлікт злиття: write-tree відмовляє — exit 2, коміту немає (Flash, #225).
+git checkout -q -b k1 main
+printf 'k1\n' >conflict.md && git add conflict.md && git commit -qm "k1"
+git checkout -q -b k2 main
+printf 'k2\n' >conflict.md && git add conflict.md && git commit -qm "k2"
+git merge -q --no-edit k1 >/dev/null 2>&1
+hk="$(git rev-parse HEAD)"
+if [[ -n "$(git ls-files -u)" ]]; then
+  run commit "$T/msg-clean"
+  if [[ $rc == 2 && "$(git rev-parse HEAD)" == "$hk" && "$out" == *"write-tree"* ]]; then
+    ok "злиття з нерозв'язаним конфліктом — exit 2, коміту немає"
+  else bad "нерозв'язаний конфлікт — rc=$rc: $out"; fi
+else bad "нерозв'язаний конфлікт — сценарій не дав конфлікту"; fi
+git merge --abort
+
 run push немає
 if [[ $rc == 2 ]]; then ok "push у неіснуючий remote — exit 2"; else bad "push немає — rc=$rc: $out"; fi
 cd "$HERE" || exit 1

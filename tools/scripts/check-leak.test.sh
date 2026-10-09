@@ -100,6 +100,11 @@ expect "loopback з портом і в URL" 0 "http://$lo4:8080/health" "loopbac
 expect "loopback з портом через крапку (tcpdump)" 0 "IP $lo4.51234 > $lo6: UDP" "loopback" "чисто"
 expect "loopback з markdown-екрануванням і дефангом" 0 "${lo4//./\\.} і ${lo4//./[.]}" "loopback" "чисто"
 expect "IPv6 loopback — попередження" 0 "слухає $lo6" "$lo6 — loopback" "чисто"
+lo4map="$(printf '%s:%s:%s:%s' '' '' ffff "$lo4")"
+expect "IPv4-mapped loopback окремо — блок" 1 "адреса $lo4map" "блок" "!loopback, не блок"
+expect "IPv4-mapped loopback упритул після літери — блок (регресія #225)" 1 "адресаv$lo4map" "блок" "!loopback, не блок"
+expect "IPv4-compatible loopback упритул після літери — блок" 1 "$(printf 'r%s%s' '::' "$lo4")" "блок"
+expect "IPv4 loopback після мітки з двокрапкою — блок (у бік блоку)" 1 "host:$lo4" "блок"
 expect "IPv6 loopback повністю і в дужках з портом" 0 "$lo6full і [$lo6]:8080" "loopback" "чисто"
 lo4oct="$(printf '%s.%s.%s.%s' 0177 0 0 1)"
 lo4short="$(printf '%s.%s' 127 1)"
@@ -225,12 +230,13 @@ if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "документаційні діапазони блокують" 'warned.append(f"{f}:{i}: {text} — документаційний' 'blocked.append(f"{f}:{i}: {text} — документаційний'
   mutate "RFC 5737 — лише одна мережа" '("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")' '("192.0.2.0/24",)'
   mutate "документаційні — без RFC 3849" '"2001:db8::/32"' '"2001:db8::/128"'
-  mutate "loopback — блок (як до 2026-10-09)" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif False:'
+  mutate "loopback — блок (як до 2026-10-09)" 'elif any(addr in n for n in LOOPBACK_NETS)' 'elif False'
   mutate "усі адреси — попередження" 'report(blocked, f, i, f"IPv{addr.version} {text}")' 'warned.append(f"IPv{addr.version} {text}")'
   mutate "loopback IPv4 — лише одна адреса" 'IPv4Network((127 << 24, 8))' 'IPv4Network(((127 << 24) + 1, 32))'
-  mutate "loopback — увесь IPv4" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif addr.version == 4 or any(addr in n for n in LOOPBACK_NETS):'
+  mutate "loopback — увесь IPv4" 'elif any(addr in n for n in LOOPBACK_NETS)' 'elif (addr.version == 4 or any(addr in n for n in LOOPBACK_NETS))'
   mutate "IPv6 loopback — не loopback" 'IPv6Network((1, 128))' 'IPv6Network((2, 128))'
-  mutate "loopback — увесь IPv6" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif addr.version == 6 or any(addr in n for n in LOOPBACK_NETS):'
+  mutate "loopback — увесь IPv6" 'elif any(addr in n for n in LOOPBACK_NETS)' 'elif (addr.version == 6 or any(addr in n for n in LOOPBACK_NETS))'
+  mutate "loopback після двокрапки — попередження" 'and text not in v6_tails:' ':'
   mutate "IPv6 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv4(scan)'
   mutate "IPv4 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv6(scan)'
   mutate "IPv4 — лише перше вікно з чотирьох частин" '        for k in range(len(parts) - 3):' '        for k in range(min(1, len(parts) - 3)):'
