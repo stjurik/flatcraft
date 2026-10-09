@@ -162,8 +162,8 @@ if [[ -z "$reading" ]]; then
 fi
 
 if ((n >= limit)); then
-  echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"
+  echo "→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2 · за оцінкою квоту agy вичерпано — відповіді, найпевніше, не буде"
 else
   # Без назви моделі (рішення yurii 2026-10-04): модель визначає автор PR, таблиця §3.1.
-  echo "→ контрприклади ризикового PR: agy, модель, відмінна від автора PR (orchestrator-autonomy.md §3.1)"
+  echo "→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2"
 fi
