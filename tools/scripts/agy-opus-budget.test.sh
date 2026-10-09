@@ -66,14 +66,14 @@ rows=()
 for _ in $(seq 12); do rows+=("$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')"); done
 journal "$T/j" "${rows[@]}"
 out="$(run --today 2026-09-27 "$T/j")"
-[[ "$out" == *": 12, бюджет 13"* && "$out" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2" && "$out" != *"вичерпано"* ]] &&
+[[ "$out" == *": 12, бюджет 13"* && "$out" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2" && "$out" != *"витрачено не менше"* ]] &&
   ok "12 з 13 — ще agy Opus" || bad "12 з 13: $out"
 journal "$T/j" "${rows[@]}" "$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')"
 out="$(run --today 2026-09-27 "$T/j")"
-[[ "$out" == *": 13, бюджет 13"* && "$out" == *"квоту agy вичерпано"* ]] &&
+[[ "$out" == *": 13, бюджет 13"* && "$out" == *"витрачено не менше бюджету"* ]] &&
   ok "13 з 13 — окрема сесія Claude Code" || bad "13 з 13: $out"
 out="$(AGY_OPUS_BUDGET=20 run --today 2026-09-27 "$T/j")"
-[[ "$out" == *"бюджет 20"* && "$out" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2" && "$out" != *"вичерпано"* ]] &&
+[[ "$out" == *"бюджет 20"* && "$out" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2" && "$out" != *"витрачено не менше"* ]] &&
   ok "AGY_OPUS_BUDGET змінює поріг (перекалібрування)" || bad "AGY_OPUS_BUDGET не діє: $out"
 
 # ─── 4. `\|` у клітинці не зсуває колонки ──────────────────────────────────
@@ -107,9 +107,9 @@ QH='| Показ, UTC | Група | Залишок, % | Скидання, UTC |
 | --- | --- | --- | --- | --- |'
 quota() { { echo "$QH"; printf '%s\n' "$@"; } >"$T/agy-quota.md"; }
 # Рядок називає Sonnet 5.5 (рішення yurii 2026-10-09: контрприклади — Sonnet 5.5 незалежно
-# від автора; agy не відповів — окрема сесія), і без примітки «вичерпано».
-opus() { [[ "$1" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2"* && "$1" != *"вичерпано"* ]]; }
-solo() { [[ "$1" == *"квоту agy вичерпано"* ]]; }
+# від автора; agy не відповів — окрема сесія), і без примітки «витрачено не менше бюджету».
+opus() { [[ "$1" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2"* && "$1" != *"витрачено не менше"* ]]; }
+solo() { [[ "$1" == *"→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2"* && "$1" == *"витрачено не менше бюджету"* && "$1" != *"не буде"* ]]; }
 # 18 викликів Opus за 23…29.09 — як у справжньому журналі 29.09.
 rows=()
 for d in 23 24 25 26 27 28; do for _ in 1 2 3; do rows+=("$(row 2026-09-$d 'Claude Opus 4.6 (Thinking)')"); done; done
@@ -233,7 +233,7 @@ if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "будь-яка група" 'g == "Claude and GPT" &&' ''
     mutate "майбутній показ береться" 't <= now &&' ''
     mutate "зіпсований показ береться" 'END { if (bad) exit 3; print out }' 'END { print out }'
-    mutate "старий рядок 165 (окрема сесія замість контрприкладів, #198)" ' · за оцінкою квоту agy вичерпано — відповіді, найпевніше, не буде"' '"; echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"'
+    mutate "старий рядок 165 (окрема сесія замість контрприкладів, #198)" ' · за журналом витрачено не менше бюджету — лише інформація, контрприклади все одно спершу в agy"' '"; echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"'
     mutate "\\| не екранується" "sed 's/\\\\|/\\x1f/g'" "sed 's/x/x/'"
   }
 fi
