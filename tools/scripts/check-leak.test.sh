@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-leak.test.sh — оракул витоку: будь-яка адреса блокує, документаційні
-# діапазони — лише попередження, рядок із файла відомої адреси блокує завжди і
+# діапазони й loopback — лише попередження, рядок із файла відомої адреси блокує завжди і
 # ніде не друкується; мутації — кожне правило тримається тестом.
 # Справжній ~/.flatcraft тест не читає: файл відомої адреси — тимчасовий.
 # Запуск: tools/scripts/check-leak.test.sh
@@ -61,7 +61,6 @@ expect "приватна IPv4" 1 "сервер 10.1.2.3 відповідає" "1
 expect "публічна IPv4" 1 "DNS 8.8.8.8" "8.8.8.8"
 expect "IPv4 у URL з портом" 1 "http://10.0.0.5:8080/health" "10.0.0.5"
 expect "IPv4 у кінці речення" 1 "Адреса — 10.9.8.7." "10.9.8.7"
-expect "loopback — теж блок" 1 "слухає 127.0.0.1" "127.0.0.1"
 expect "IPv6 стиснена" 1 "вихід через 2a01:4f8:c0c:1::1" "2a01:4f8:c0c:1::1"
 expect "IPv6 повна" 1 "2a01:04f8:0c0c:0001:0000:0000:0000:0001" "блок"
 expect "документаційна поруч зі справжньою — блок" 1 "192.0.2.1 і 10.1.2.3" "10.1.2.3" "попередження"
@@ -76,7 +75,6 @@ expect "IPv4 з markdown-екрануванням крапок" 1 'сервер 
 expect "IPv6 у квадратних дужках з портом" 1 "https://[2a01:4f8:c0c:1::1]:443/" "блок"
 expect "C++, Rust і час — досі не адреси" 0 "std::vector, Foo::bar, std::io::Result, 12:00, 14:31:15" "чисто"
 expect "голе :: у прозі — не адреса, а ::1 — так" 0 "стиснення \`::\` на початку" "чисто"
-expect "::1 (loopback IPv6) — блок" 1 "слухає ::1" "блок"
 
 # ─── 3. (в) Документаційні діапазони — попередження, не блок ─────────────────
 expect "RFC 5737 192.0.2.0/24" 0 "приклад: 192.0.2.10" "попередження" "RFC 5737" "192.0.2.10"
@@ -85,6 +83,32 @@ expect "RFC 5737 203.0.113.0/24" 0 "приклад: 203.0.113.9" "поперед
 expect "RFC 3849 2001:db8::/32" 0 "приклад: 2001:db8::1" "попередження" "RFC 3849"
 expect "RFC 3849 великими, повна" 0 "2001:DB8:0:0:0:0:0:1" "попередження"
 expect "поруч із документаційним — сусід 192.0.3.1 не документаційний" 1 "192.0.3.1" "блок"
+
+# ─── 3а. Loopback — попередження (рішення yurii 2026-10-09, #222) ─────────────
+# Адреси loopback будуються з частин під час запуску (рішення yurii 2026-10-09): у
+# тексті файла літералу немає, тож тест публікується й чинним check-leak з main.
+lo4="$(printf '%s.%s.%s.%s' 127 0 0 1)"
+lo4lo="$(printf '%s.%s.%s.%s' 127 0 0 0)"
+lo4hi="$(printf '%s.%s.%s.%s' 127 255 255 254)"
+lo4z="$(printf '%s.%s.%s.%s' 127 000 000 001)"
+lo6="$(printf '%s%s' '::' 1)"
+lo6full="$(printf '%s:%s:%s:%s:%s:%s:%s:%s' 0 0 0 0 0 0 0 1)"
+expect "loopback IPv4 — попередження, не блок" 0 "слухає $lo4" "попередження" "$lo4 — loopback" "чисто"
+expect "loopback — увесь 127/8, нижній і верхній край" 0 "$lo4lo і $lo4hi" "$lo4lo — loopback" "$lo4hi — loopback"
+expect "loopback з провідними нулями" 0 "слухає $lo4z" "loopback" "чисто"
+expect "loopback з портом і в URL" 0 "http://$lo4:8080/health" "loopback"
+expect "loopback з портом через крапку (tcpdump)" 0 "IP $lo4.51234 > $lo6: UDP" "loopback" "чисто"
+expect "loopback з markdown-екрануванням і дефангом" 0 "${lo4//./\\.} і ${lo4//./[.]}" "loopback" "чисто"
+expect "IPv6 loopback — попередження" 0 "слухає $lo6" "$lo6 — loopback" "чисто"
+expect "IPv6 loopback повністю і в дужках з портом" 0 "$lo6full і [$lo6]:8080" "loopback" "чисто"
+lo4oct="$(printf '%s.%s.%s.%s' 0177 0 0 1)"
+lo4short="$(printf '%s.%s' 127 1)"
+expect "вісімковий loopback (частина з чотирьох цифр) — не розпізнається (межа шапки), чисто" 0 "адреса $lo4oct" "чисто"
+expect "скорочений loopback з двох частин — не розпізнається (межа шапки), чисто" 0 "адреса $lo4short" "чисто"
+# Сусідні діапазони, приватні й link-local — у тест не пишемо: тест публікується через
+# check-leak, а там вони блок. Приватні й публічні адреси як блок тримають розділ 2 і
+# мутант «усі адреси — попередження»; межі мереж loopback — мутанти нижче.
+expect "loopback поруч з відомою адресою — блок" 1 "$lo4 і 203.0.113.77" "файлом відомої адреси" "!203.0.113.77"
 
 # ─── 4. (б) Файл відомої адреси — блок завжди, вміст не друкується ──────────
 expect "відома адреса з документаційного діапазону — все одно блок" 1 \
@@ -198,9 +222,15 @@ if [[ -z "${CHECK_LEAK_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "LEAK_ORIGIN_FILE=none не вимикає правило" 'if known_path == "none":' 'if False:'
   mutate "IPv4-mapped і 6to4 не розпізнаються" '        for v4 in (addr.ipv4_mapped, addr.sixtofour):' '        for v4 in ():'
   mutate "NAT64 не розпізнається" 'if addr in NAT64 or (addr in V4_COMPAT and int(addr) > 1):' 'if False:'
-  mutate "документаційні діапазони блокують" 'warned.append' 'blocked.append'
+  mutate "документаційні діапазони блокують" 'warned.append(f"{f}:{i}: {text} — документаційний' 'blocked.append(f"{f}:{i}: {text} — документаційний'
   mutate "RFC 5737 — лише одна мережа" '("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")' '("192.0.2.0/24",)'
   mutate "документаційні — без RFC 3849" '"2001:db8::/32"' '"2001:db8::/128"'
+  mutate "loopback — блок (як до 2026-10-09)" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif False:'
+  mutate "усі адреси — попередження" 'report(blocked, f, i, f"IPv{addr.version} {text}")' 'warned.append(f"IPv{addr.version} {text}")'
+  mutate "loopback IPv4 — лише одна адреса" 'IPv4Network((127 << 24, 8))' 'IPv4Network(((127 << 24) + 1, 32))'
+  mutate "loopback — увесь IPv4" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif addr.version == 4 or any(addr in n for n in LOOPBACK_NETS):'
+  mutate "IPv6 loopback — не loopback" 'IPv6Network((1, 128))' 'IPv6Network((2, 128))'
+  mutate "loopback — увесь IPv6" 'elif any(addr in n for n in LOOPBACK_NETS):' 'elif addr.version == 6 or any(addr in n for n in LOOPBACK_NETS):'
   mutate "IPv6 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv4(scan)'
   mutate "IPv4 не шукається" '            found = find_ipv4(scan) + find_ipv6(scan)' '            found = find_ipv6(scan)'
   mutate "IPv4 — лише перше вікно з чотирьох частин" '        for k in range(len(parts) - 3):' '        for k in range(min(1, len(parts) - 3)):'

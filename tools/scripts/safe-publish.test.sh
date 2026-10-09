@@ -235,6 +235,32 @@ printf 'злий merge 203.0.113.77\n' >>p7.md && git add p7.md && git commit -q
 run push
 if [[ $rc == 1 ]] && ! remote_has p8; then ok "нова адреса в самому merge-коміті — exit 1"; else bad "злий merge — rc=$rc: $out"; fi
 
+# Злиття, що лише перевирівнює рядок з адресою, який уже є в main (зупинка #178, #222):
+# commit і push — 0. Злиття, що додає НОВИЙ рядок з адресою, — блок.
+git checkout -q main
+printf '|a|198.51.100.9|\n|x|y|\n' >table.md && git add table.md && git commit -qm "table" && git push -q origin main
+git checkout -q -b m1 main
+printf '|b|чисто|\n' >>table.md && git commit -qam "m1 рядок"
+git checkout -q main
+printf '| a | 198.51.100.9 |\n| x | y      |\n' >table.md && git commit -qam "prettier" && git push -q origin main
+git checkout -q m1
+git merge -q --no-commit --no-ff main >/dev/null 2>&1
+printf '| a | 198.51.100.9 |\n| x | y      |\n| b | чисто  |\n' >table.md && git add table.md
+hm="$(git rev-parse HEAD)"
+run commit "$T/msg-clean"
+if [[ $rc == 0 && "$(git rev-parse HEAD~1)" == "$hm" && "$(git rev-parse HEAD^2)" == "$(git rev-parse main)" ]]; then
+  ok "злиття: рядок з адресою з main лише перевирівняно — коміт злиття є"
+else bad "злиття з перевирівняним рядком main — rc=$rc: $out"; fi
+run push
+if [[ $rc == 0 ]] && remote_has m1; then ok "злиття: рядок з адресою з main лише перевирівняно — push є"; else bad "push злиття з перевирівняним рядком — rc=$rc: $out"; fi
+git checkout -q -b m2 m1~1
+git merge -q --no-commit --no-ff main >/dev/null 2>&1
+printf '| a | 198.51.100.9 |\n| x | y      |\n| b | чисто  |\n| c | 203.0.113.77 |\n' >table.md && git add table.md
+hm="$(git rev-parse HEAD)"
+run commit "$T/msg-clean"
+if [[ $rc == 1 && "$(git rev-parse HEAD)" == "$hm" ]]; then ok "злиття, що додає новий рядок з адресою, — exit 1, коміту немає"; else bad "злиття з новою адресою — rc=$rc: $out"; fi
+git merge --abort
+
 run push немає
 if [[ $rc == 2 ]]; then ok "push у неіснуючий remote — exit 2"; else bad "push немає — rc=$rc: $out"; fi
 cd "$HERE" || exit 1
@@ -285,8 +311,14 @@ if [[ -z "${SAFE_PUBLISH_UNDER_TEST:-}" && $fail == 0 ]]; then
     'staged_added >"$T/added"' 'git diff --cached --name-only -z | xargs -0 cat >"$T/added"'
   mutate "коміт: перевіряються й видалені рядки" 'pre ~ /-/ {if (np==1) gone[txt]++; next}' 'pre ~ /-/ {print txt; next}'
   mutate "коміт: дослівно перенесений рядок вважається новим" 'if (gone[txt] > 0) {gone[txt]--; next} ' ''
-  mutate "merge: перший батько замість combined diff" '--format= --cc' '--format= --diff-merges=first-parent'
-  mutate "merge: combined diff не читається" 'pre ~ /\+/ {' 'np == 1 && pre ~ /\+/ {'
+  mutate "merge: перший батько замість combined diff" '--format= --cc "$c" | added_lines || return 1' '--format= --diff-merges=first-parent "$c" | added_lines || return 1'
+  mutate "merge: combined diff не читається" 'pre ~ /^\++$/ {' 'np == 1 && pre ~ /^\++$/ {'
+  mutate "merge: рядок, що є в іншому батьку, — новий" 'pre ~ /^\++$/ {' 'pre ~ /\+/ {'
+  mutate "commit злиття: diff проти першого батька (вада #178)" 'if [[ -f "$mh" ]]; then' 'if false; then'
+  mutate "commit злиття: не перевіряється" '--cc "$c" | added_lines
+    return' '--cc "$c" >/dev/null
+    return'
+  mutate "commit злиття: батьки з MERGE_HEAD не беруться" '[[ -n "$c" ]] && parents+=(-p "$c")' 'true'
   mutate "push: назва гілки не перевіряється" 'git rev-parse --abbrev-ref HEAD >>"$T/messages"' 'true'
   mutate "gh: кластер коротких прапорців" '        -[!-]?*)' '        -[!-]?*-NEVER)'
   mutate "gh: --editor=… повз перелік" '-e | --editor* |' '-e | --editor |'
