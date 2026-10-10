@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# agy-opus-budget.sh — хто дає контрприклади ризиковому PR: Opus в agy чи окрема
-# сесія Claude Code (рішення yurii 2026-09-27, CLAUDE.md §0 п.2: «коли тижневий
-# залишок Opus в agy нижче 20%»).
+# agy-opus-budget.sh — лічильник витраченого в групі «Claude and GPT» agy. З рішення yurii
+# 2026-10-09 (CLAUDE.md §0 п.2) він НЕ вирішує, хто дає контрприклади: вони завжди — Claude
+# Sonnet 5.5, спершу agy, не відповів — окрема сесія; квоту наперед не рахують. Пороги
+# нижче (історія: рішення 2026-09-27, «залишок нижче 20%») лишились лише для інформації.
 #
 # ЧОМУ ЛІЧИЛЬНИК, А НЕ ЕКРАН КВОТ. Залишок ліміту показує лише інтерактивний екран
 # agy «Models & Quota», а інтерактивний agy оркестратору заборонений
@@ -162,8 +163,8 @@ if [[ -z "$reading" ]]; then
 fi
 
 if ((n >= limit)); then
-  echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"
+  echo "→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2 · за журналом витрачено не менше бюджету — лише інформація, контрприклади все одно спершу в agy"
 else
   # Без назви моделі (рішення yurii 2026-10-04): модель визначає автор PR, таблиця §3.1.
-  echo "→ контрприклади ризикового PR: agy, модель, відмінна від автора PR (orchestrator-autonomy.md §3.1)"
+  echo "→ контрприклади ризикового PR: Claude Sonnet 5.5 — спершу agy; не відповів — окрема сесія (bash tools/scripts/claude-review-session.sh), CLAUDE.md §0 п.2"
 fi
