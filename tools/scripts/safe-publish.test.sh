@@ -302,6 +302,47 @@ if [[ -n "$(git ls-files -u)" ]]; then
 else bad "нерозв'язаний конфлікт — сценарій не дав конфлікту"; fi
 git merge --abort
 
+# push --to (#222): явна цільова гілка для detached HEAD і локальної гілки з іншим ім'ям.
+addr_known="$(printf '%s.%s.%s.%s' 203 0 113 77)"
+git checkout -q main
+git checkout -q --detach
+printf 'чисто t1\n' >t1.md && git add t1.md && git commit -qm "t1"
+run push --to x
+if [[ $rc == 0 ]] && remote_has x && [[ "$(git --git-dir="$T/origin.git" rev-parse x)" == "$(git rev-parse HEAD)" ]] &&
+  ! git rev-parse -q --verify refs/heads/x >/dev/null; then
+  ok "detached + push --to x — push у x, локальної гілки x немає"
+else bad "detached --to x — rc=$rc: $out"; fi
+printf 'чисто t1b\n' >>t1.md && git commit -qam "t1b"
+run push
+if [[ $rc == 2 && "$out" == *"--to"* ]]; then ok "detached без --to — відмова з підказкою"; else bad "detached без --to — rc=$rc: $out"; fi
+git checkout -q -b y
+run push --to z
+if [[ $rc == 0 ]] && remote_has z && ! remote_has y && [[ -z "$(git config branch.y.remote)" ]]; then
+  ok "гілка y + push --to z — push у z, не в y, без -u"
+else bad "гілка y --to z — rc=$rc: $out"; fi
+printf 'чисто t2\n' >>t1.md && git commit -qam "t2"
+# backup ще не має історії main (у ній старі адреси) — кладемо її туди повз обгортку,
+# як уже публічну.
+git push -q backup main
+run push --to w backup
+if [[ $rc == 0 ]] && backup_has w && ! remote_has w; then ok "push --to w backup — у названий remote"; else bad "--to w backup — rc=$rc: $out"; fi
+mbefore="$(git --git-dir="$T/origin.git" rev-parse main)"
+run push --to main
+if [[ $rc == 2 && "$(git --git-dir="$T/origin.git" rev-parse main)" == "$mbefore" ]]; then ok "push --to main — відмова, main на remote не змінено"; else bad "--to main — rc=$rc: $out"; fi
+for name in "" "-f" "refs/heads/main" "a..b" "x:y" "a b" "@" "HEAD" "x.lock" "x@{1}"; do
+  run push --to "$name"
+  if [[ $rc == 2 ]]; then ok "push --to «$name» — відмова"; else bad "--to «$name» — rc=$rc: $out"; fi
+done
+run push --to
+if [[ $rc == 2 ]]; then ok "push --to без імені — відмова"; else bad "--to без імені — rc=$rc: $out"; fi
+run push --to "v-$addr_known"
+if [[ $rc == 1 ]] && ! remote_has "v-$addr_known"; then ok "адреса в імені цільової гілки — exit 1, push немає"; else bad "адреса в --to — rc=$rc: $out"; fi
+git checkout -q --detach
+printf 'адреса %s\n' "$addr_known" >>t1.md && git commit -qam "t3"
+run push --to x3
+if [[ $rc == 1 ]] && ! remote_has x3; then ok "detached + --to, адреса в неопублікованому коміті — exit 1, push немає"; else bad "--to з адресою в коміті — rc=$rc: $out"; fi
+git checkout -q main
+
 run push немає
 if [[ $rc == 2 ]]; then ok "push у неіснуючий remote — exit 2"; else bad "push немає — rc=$rc: $out"; fi
 cd "$HERE" || exit 1
@@ -361,7 +402,7 @@ if [[ -z "${SAFE_PUBLISH_UNDER_TEST:-}" && $fail == 0 ]]; then
     return' '--cc "$c" >/dev/null
     return'
   mutate "commit злиття: батьки з MERGE_HEAD не беруться" '[[ -n "$c" ]] && parents+=(-p "$c")' 'true'
-  mutate "push: назва гілки не перевіряється" 'git rev-parse --abbrev-ref HEAD >>"$T/messages"' 'true'
+  mutate "push: назва гілки не перевіряється" 'printf '"'"'%s\n'"'"' "${to:-$cur}" >>"$T/messages"' 'true'
   mutate "gh: кластер коротких прапорців" '        -[!-]?*)' '        -[!-]?*-NEVER)'
   mutate "gh: --editor=… повз перелік" '-e | --editor* |' '-e | --editor |'
   mutate "stdin замість файла" '[[ "$body" != -* ]] ||' 'true ||' '[[ "$msg" != -* ]] ||' 'true ||'
@@ -380,6 +421,12 @@ if [[ -z "${SAFE_PUBLISH_UNDER_TEST:-}" && $fail == 0 ]]; then
     'revs="$(git rev-list HEAD --not --remotes="$remote")"' 'revs="$(git rev-list HEAD --not --remotes)"' \
     'git rev-list HEAD --not --remotes="$remote" --format=%B' 'git rev-list HEAD --not --remotes --format=%B'
   mutate "push: завжди origin" 'remote="${1:-origin}"' 'remote="origin"'
+  mutate "push: --to ігнорується" 'git push "$remote" "HEAD:refs/heads/$to"' 'git push -u "$remote" HEAD'
+  mutate "push: --to main дозволено" '[[ "$to" != main ]] ||' 'true ||'
+  mutate "push: --to з -u" 'git push "$remote" "HEAD:refs/heads/$to"' 'git push -u "$remote" "HEAD:refs/heads/$to"'
+  mutate "push: ім'я --to без check-ref-format" 'git check-ref-format "refs/heads/$to" ||' 'true ||'
+  mutate "push: назва цільової гілки не перевіряється" 'printf '"'"'%s\n'"'"' "${to:-$cur}" >>"$T/messages"' 'printf '"'"'%s\n'"'"' "$cur" >>"$T/messages"'
+  mutate "push: detached без --to не відхиляється" '[[ -n "$to" || "$cur" != HEAD ]] ||' 'true ||'
   mutate "gh: create без заголовка" '[[ -n "$has_title" ]] ||' 'true ||'
   mutate "push: повідомлення не перевіряються" 'check "$T/messages" "$T/added"' 'check "$T/added"'
 fi
