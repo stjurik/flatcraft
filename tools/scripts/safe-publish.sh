@@ -19,22 +19,43 @@
 #       Коміт злиття (є MERGE_HEAD): перевіряються лише рядки, яких немає в ЖОДНОМУ з
 #       батьків (HEAD і кожен MERGE_HEAD) — combined diff, як у push. Diff проти HEAD
 #       робив «доданими» всі рядки main, які main перевирівняв (зупинка #178, #222).
-#   safe-publish.sh push [remote]
+#   safe-publish.sh push [--to <гілка>] [remote]
 #       Перевіряє все, що push зробить публічним: повідомлення й додані рядки кожного
-#       коміту з HEAD, якого ще немає на гілках ЦЬОГО remote (`HEAD --not
-#       --remotes=<remote>`): коміт, що є лише на іншому remote, для цього ще не
-#       публічний. Перевіряється й назва поточної гілки. Покомітно, а не сумарним diff: адреса, додана й потім видалена,
+#       коміту з HEAD, якого ще немає на гілках ЦЬОГО remote. Гілки remote — з самого
+#       remote (`git fetch` + `git ls-remote --heads`), а не з локальних
+#       refs/remotes: застаріла копія видаленої чи переписаної гілки виключала б коміт,
+#       якого на remote вже немає, а глоб `--remotes=team` захоплював би й remote
+#       `team/fork` (контрприклади Sonnet 5.5, #226). Коміт, що є лише на іншому
+#       remote, для цього ще не публічний. Перевіряється й назва гілки, яка з'явиться на remote. Покомітно, а не сумарним diff: адреса, додана й потім видалена,
 #       усе одно лишається в історії. Лише тоді git push -u <remote, дефолт origin> HEAD.
+#       --to <гілка> (#222): явна цільова гілка — для detached HEAD і для локальної
+#       гілки з іншим ім'ям (гілку з тим самим ім'ям тримає чужий worktree). Тоді
+#       git push <remote> HEAD:refs/heads/<гілка>, без -u (upstream чужої локальної
+#       гілки не змінюється); якщо поточна гілка має те саме ім'я — як без --to.
+#       --to main — відмова: main змінюється лише merge-ем PR. Ім'я має пройти
+#       `git check-ref-format refs/heads/<гілка>` не починатися з `-` чи `refs/`, не бути `@` чи `HEAD`. Force — ніколи:
+#       обгортка не передає --force, а refspec без `+`. Detached HEAD без --to — відмова
+#       з підказкою (git push HEAD з detached не має куди йти). Push з локальної main
+#       без --to — теж відмова (рішення диспетчера 2026-10-10, #226).
+#       Сам push — завжди `--no-follow-tags --no-recurse-submodules` і
+#       `-c remote.<remote>.mirror=false`: теги, submodule і mirror-конфіг публікували
+#       б те, чого перевірка не бачила.
 #
 # Вихід: код check-leak.sh як є (1 — блок, 2 — помилка виклику, 3 — не перевірено), і
-# тоді нічого не опубліковано; 2 — помилка виклику обгортки; інакше — код gh чи git.
+# тоді нічого не опубліковано; 2 — помилка виклику обгортки (зокрема fetch чи
+# ls-remote не вдалися — нічого не опубліковано); 5 — перевірка чиста, але git commit
+# чи git push відмовив (non-fast-forward, хук тощо; #226: раніше це був код git, тобто
+# теж 1, як блок); у режимі gh — код gh як є.
 #
 # ЧОГО НЕ ДОВОДИТЬ.
 #   - Механічно обгортку ніщо не вмикає: прямий `gh` чи `git push` її обходить.
 #   - Межі самого check-leak.sh (його шапка): лише адреси й файл відомої адреси.
 #   - Шляхи файлів у diff і бінарні файли не перевіряються — лише додані рядки тексту.
-#   - push перевіряє коміти відносно ЛОКАЛЬНИХ копій віддалених гілок: застарілий
-#     `git fetch` дає перевірку ширшу, а не вужчу.
+#   - push виключає коміти, досяжні з гілок remote у момент `ls-remote`; хтось може
+#     видалити гілку між перевіркою і push — тоді коміт не перевірено, хоч він і був
+#     публічним до того. Теги remote не враховуються (перевірка лише ширша).
+#   - Захист main прибито до імені `main` (дефолтна гілка цього репо), регістр
+#     враховується: `--to Main` — окрема гілка.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -45,7 +66,7 @@ die() {
   exit 2
 }
 usage() {
-  die "використання: safe-publish.sh gh <файл> <pr|issue> <create|edit|comment> [аргументи] | commit <файл> | push [remote]"
+  die "використання: safe-publish.sh gh <файл> <pr|issue> <create|edit|comment> [аргументи] | commit <файл> | push [--to <гілка>] [remote]"
 }
 
 T="$(mktemp -d)"
@@ -108,9 +129,16 @@ staged_added() {
 # батьків. Батьки, яких ще немає на remote, перевіряються самі; ті, що вже є, — уже
 # публічні, і merge `origin/main` у гілку не блокується старим рядком main
 # (контрприклад Claude Sonnet 5.5, #188).
+# Гілки, що є на remote зараз, — як `^<sha>` для `git rev-list --stdin`.
+public_heads() {
+  git fetch --quiet "$remote" || return 1
+  git ls-remote --heads "$remote" >"$T/heads" || return 1
+  awk '{print "^" $1}' "$T/heads"
+}
+
 unpushed_added() {
   local c revs
-  revs="$(git rev-list HEAD --not --remotes="$remote")" || return 1
+  revs="$(git rev-list --stdin HEAD <"$T/public")" || return 1
   for c in $revs; do
     git show --no-color --no-ext-diff --no-textconv -U0 --format= --cc "$c" | added_lines || return 1
   done
@@ -163,19 +191,45 @@ case "$mode" in
     staged_added >"$T/added" || die "не вдалося зібрати додані рядки індексу (git diff --cached; у злитті — git write-tree: чи розв'язано конфлікт?)"
     check "$msg" "$T/added"
     git commit -F "$msg"
-    exit $?
+    rc=$?
+    [[ $rc == 0 ]] || { echo "safe-publish: перевірка чиста, але git commit відмовив (код $rc)" >&2; exit 5; }
+    exit 0
     ;;
   push)
+    to=""
+    if [[ "${1:-}" == --to ]]; then
+      [[ $# -ge 2 ]] || die "--to без імені гілки"
+      to="$2"
+      shift 2
+      # `@` і `HEAD` формально допустимі як refs/heads/…, але в git означають HEAD.
+      [[ -n "$to" && "$to" != -* && "$to" != refs/* && "$to" != @ && "$to" != HEAD ]] || die "--to «$to» — не ім'я гілки"
+      # Не --branch: той розгортає `@` і `@{-1}` у поточну гілку, а не перевіряє ім'я.
+      git check-ref-format "refs/heads/$to" || die "--to «$to» — не ім'я гілки (git check-ref-format)"
+      [[ "$to" != main ]] || die "--to main — заборонено: main змінюється лише merge-ем PR"
+    fi
     [[ $# -le 1 ]] || usage
     remote="${1:-origin}"
+    [[ "$remote" != -* ]] || usage
     git remote get-url "$remote" >/dev/null 2>&1 || die "немає remote «$remote»"
-    git rev-list HEAD --not --remotes="$remote" --format=%B >"$T/messages" || die "git rev-list не вдався"
-    # Назва гілки теж стає публічною (контрприклад Claude Sonnet 5.5, #188).
-    git rev-parse --abbrev-ref HEAD >>"$T/messages" || die "git rev-parse не вдався"
+    cur="$(git rev-parse --abbrev-ref HEAD)" || die "git rev-parse не вдався"
+    [[ -n "$to" || "$cur" != HEAD ]] || die "detached HEAD — назви цільову гілку: push --to <гілка>"
+    [[ -n "$to" || "$cur" != main ]] || die "push з локальної main — заборонено: main змінюється лише merge-ем PR"
+    public_heads >"$T/public" || die "git fetch чи ls-remote «$remote» не вдався — гілок remote не знаю, нічого не опубліковано"
+    git rev-list --stdin HEAD --format=%B <"$T/public" >"$T/messages" || die "git rev-list не вдався"
+    # Назва гілки теж стає публічною (контрприклад Claude Sonnet 5.5, #188): з --to —
+    # цільова, інакше — поточна.
+    printf '%s\n' "${to:-$cur}" >>"$T/messages"
     unpushed_added >"$T/added" || die "git show не вдався"
     check "$T/messages" "$T/added"
-    git push -u "$remote" HEAD
-    exit $?
+    nopush=(-c "remote.$remote.mirror=false" push --no-follow-tags --no-recurse-submodules)
+    if [[ -n "$to" && "$to" != "$cur" ]]; then
+      git "${nopush[@]}" "$remote" "HEAD:refs/heads/$to"
+    else
+      git "${nopush[@]}" -u "$remote" HEAD
+    fi
+    rc=$?
+    [[ $rc == 0 ]] || { echo "safe-publish: перевірка чиста, але git push відмовив (код $rc)" >&2; exit 5; }
+    exit 0
     ;;
   *) usage ;;
 esac
