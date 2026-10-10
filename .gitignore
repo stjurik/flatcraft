@@ -108,3 +108,7 @@ logs/
 # командами + session lock) — не для публічного репо.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Вхідні yurii з приватного hart-inbox (tools/scripts/inbox-pull.sh): фото й тексти
+# приватного репозиторію в публічний не потрапляють. Скрипт без цього рядка писати відмовляється.
+docs/promts/inputs/_inbox/

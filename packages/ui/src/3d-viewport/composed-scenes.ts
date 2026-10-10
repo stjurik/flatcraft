@@ -13,6 +13,7 @@ import type { ComponentType } from "react";
 
 import { CornerAngleScene } from "./corner-angle-scene.js";
 import { PerforatedPanelScene } from "./perforated-panel-scene.js";
+import { WallShelfScene } from "./wall-shelf-scene.js";
 
 export interface ComposedSceneProps {
   readonly parameters: unknown;
@@ -31,4 +32,8 @@ export const COMPOSED_SCENES: Partial<Record<string, ComposedSceneComponent>> = 
   // (наближене прев'ю); "composed", не "extrude" — docs/12 §1, коментар у
   // `packages/templates/src/corner-angle/index.ts`.
   corner_angle: CornerAngleScene as ComposedSceneComponent,
+  // wall_shelf — U-channel extrude (back + shelf + optional lip) + mount-hole
+  // grid cylinders overlay; той самий підхід, що й corner_angle (наближене
+  // прев'ю, точні координати — лише у DXF/PDF).
+  wall_shelf: WallShelfScene as ComposedSceneComponent,
 };

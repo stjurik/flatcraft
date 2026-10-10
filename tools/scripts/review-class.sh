@@ -53,16 +53,22 @@ RULES=(
   'дозволи й безпека|tools/agy/*'
   'дозволи й безпека|tools/scripts/install-*'
   'дозволи й безпека|tools/scripts/log-permission-request*'
+  # Хук PreToolUse профілю оркестратора: руйнівні команди в ~/hart (#216).
+  'дозволи й безпека|tools/scripts/guard-destructive*'
   'дозволи й безпека|tools/scripts/check-forbidden-paths*'
   'дозволи й безпека|tools/scripts/check-deny-parity*'
   'дозволи й безпека|tools/scripts/check-agy-scope*'
   'дозволи й безпека|tools/scripts/check-leak*'
+  'дозволи й безпека|tools/scripts/safe-publish*'
   'дозволи й безпека|tools/scripts/agy-permissions-probe*'
   'дозволи й безпека|tools/scripts/measure-deny*'
   'дозволи й безпека|tools/scripts/measure-trust*'
   'дозволи й безпека|tools/scripts/trust-worktree*'
   'дозволи й безпека|tools/scripts/claude-review-session*'
   'дозволи й безпека|tools/scripts/probe-profile-rules*'
+  # Межа «приватні вхідні yurii → публічний репозиторій» і запис у hart-inbox (рішення
+  # yurii 2026-10-04, orchestrator-autonomy.md §7).
+  'дозволи й безпека|tools/scripts/inbox-*'
   # Сам механізм рецензії: PR, що його послаблює, не має проходити з однією рецензією.
   'дозволи й безпека|tools/scripts/review-class*'
   'дозволи й безпека|tools/scripts/journal-rules*'

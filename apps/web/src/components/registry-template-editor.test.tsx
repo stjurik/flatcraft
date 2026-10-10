@@ -72,3 +72,33 @@ describe("RegistryTemplateEditor — perforated_panel форма отвору", 
     expect(html).toMatch(/Grid:\s*9×7\s*=\s*63 отворів/);
   });
 });
+
+// Рецензія Gemini 3.8 Flash (#154, 961d93e): заміна `def.schema.safeParse` на
+// розгорнуту `objectSchema.safeParse` (без refine) лишала весь набір зеленим.
+// wall_shelf — перший шаблон із refined-схемою (front_lip_mm: 0 або ≥5).
+describe("RegistryTemplateEditor — wall_shelf, refine повної схеми", () => {
+  const wallShelf = TEMPLATE_REGISTRY.wall_shelf;
+  const REFINE_MSG = "front_lip_mm має бути 0 (без lip) або ≥5 мм";
+
+  function renderShelf(frontLipMm: number): string {
+    const html = renderToString(
+      <RegistryTemplateEditor
+        def={wallShelf}
+        value={{ ...wallShelf.defaults, front_lip_mm: frontLipMm }}
+        onChange={noop}
+        thicknessMm={2}
+      />,
+    );
+    return html.replace(/<!-- -->/g, "");
+  }
+
+  it("front_lip_mm = 3 → банер з повідомленням refine", () => {
+    const html = renderShelf(3);
+    expect(html).toContain('data-testid="validation-errors"');
+    expect(html).toContain(REFINE_MSG);
+  });
+
+  it.each([0, 5])("front_lip_mm = %i → повідомлення refine немає", (lip) => {
+    expect(renderShelf(lip)).not.toContain(REFINE_MSG);
+  });
+});
