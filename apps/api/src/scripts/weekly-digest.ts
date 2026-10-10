@@ -87,7 +87,10 @@ async function collectDigestData(db: Db, now: Date = new Date()): Promise<Digest
       uniqueSessions: sql<number>`(count(distinct ${schema.events.sessionHash}) filter (where ${schema.events.eventType} = 'export_requested'))::int`,
       exportsDone: sql<number>`(count(*) filter (where ${schema.events.eventType} = 'export_completed'))::int`,
       exportsFailed: sql<number>`(count(*) filter (where ${schema.events.eventType} = 'export_failed'))::int`,
-      validationRejections: sql<number>`(count(*) filter (where ${schema.events.eventType} = 'validation_rejected'))::int`,
+      // Issue #215: validation_rejected пише одну подію на унікальний error_code,
+      // тож count(*) рахує коди, не спроби — лічильник спроб = distinct attempt_id
+      // (params JSONB). Топ-кодів (validationErrors вище) лишається count(*).
+      validationRejections: sql<number>`(count(distinct (${schema.events.params}->>'attempt_id')) filter (where ${schema.events.eventType} = 'validation_rejected'))::int`,
     })
     .from(schema.events)
     .where(gte(schema.events.ts, since));
