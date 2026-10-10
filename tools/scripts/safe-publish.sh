@@ -16,6 +16,9 @@
 #       Перевіряє повідомлення і ДОДАНІ рядки індексу (`git diff --cached`), лише тоді
 #       git commit -F <файл-повідомлення>. Рядок, що вже був у файлі до коміту, не
 #       перевіряється: він уже в історії, і блок на ньому зупиняв би кожен коміт.
+#       Коміт злиття (є MERGE_HEAD): перевіряються лише рядки, яких немає в ЖОДНОМУ з
+#       батьків (HEAD і кожен MERGE_HEAD) — combined diff, як у push. Diff проти HEAD
+#       робив «доданими» всі рядки main, які main перевирівняв (зупинка #178, #222).
 #   safe-publish.sh push [remote]
 #       Перевіряє все, що push зробить публічним: повідомлення й додані рядки кожного
 #       коміту з HEAD, якого ще немає на гілках ЦЬОГО remote (`HEAD --not
@@ -63,19 +66,40 @@ check() {
 # Стан hunk-а скидається на кожному `diff --git`, тож `+++ b/…` наступного файла не
 # потрапляє в текст. Рядок, що в тому самому hunk-у видалено й додано дослівно, — не
 # новий: так git показує останній рядок без `\n`, до якого дописали (контрприклад
-# Claude Sonnet 5.5, #188). Combined diff merge-коміту (`@@@`, по колонці на батька):
-# рядок новий, якщо в його колонках є `+` і немає `-`.
+# Claude Sonnet 5.5, #188). У злитті так само: `-` у будь-якій колонці означає, що
+# рядок є в тому батьку, тож той самий текст з `+` у кожній колонці — не новий
+# (`--` і `++` для рядка без `\n` в обох батьках; контрприклад Sonnet 5.5, #225). Combined diff merge-коміту (`@@@`, по колонці на батька):
+# рядок новий, лише якщо `+` стоїть у КОЖНІЙ колонці, тобто його немає в жодному з
+# батьків. Рядок з `+` лише в частині колонок уже є в іншому батьку (#222): гілка
+# свого батька перевіряє його власним комітом, а main уже публічний.
 added_lines() {
   awk '
     /^diff (--git|--cc|--combined) /{h=0; next}
     /^@@/{h=1; match($0, /^@+/); np=RLENGTH-1; delete gone; next}
     !h{next}
     {pre=substr($0, 1, np); txt=substr($0, np+1)}
-    pre ~ /-/ {if (np==1) gone[txt]++; next}
-    pre ~ /\+/ {if (gone[txt] > 0) {gone[txt]--; next} print txt}'
+    pre ~ /-/ {gone[txt]++; next}
+    pre ~ /^\++$/ {if (gone[txt] > 0) {gone[txt]--; next} print txt}'
 }
 
 staged_added() {
+  local mh tree c parents=()
+  mh="$(git rev-parse --git-path MERGE_HEAD)" || return 1
+  if [[ -f "$mh" ]]; then
+    # Злиття: індекс записується в тимчасовий коміт з усіма батьками і читається тим
+    # самим combined diff, що й у push. Коміт не потрапляє в жодну гілку — лише
+    # висячий об'єкт, який прибере git gc. Нерозв'язаний конфлікт — write-tree
+    # відмовить, і git commit відмовив би так само.
+    tree="$(git write-tree)" || return 1
+    parents=(-p HEAD)
+    while read -r c; do
+      [[ -n "$c" ]] && parents+=(-p "$c")
+    done <"$mh"
+    c="$(GIT_AUTHOR_NAME=safe-publish GIT_AUTHOR_EMAIL=none GIT_COMMITTER_NAME=safe-publish \
+      GIT_COMMITTER_EMAIL=none git commit-tree "$tree" "${parents[@]}" -m probe)" || return 1
+    git show --no-color --no-ext-diff --no-textconv -U0 --format= --cc "$c" | added_lines
+    return
+  fi
   git diff --cached --no-color --no-ext-diff --no-textconv -U0 | added_lines
 }
 
@@ -136,7 +160,7 @@ case "$mode" in
     [[ $# -eq 1 ]] || usage
     msg="$1"
     [[ "$msg" != -* ]] || die "файл повідомлення «$msg» схожий на прапорець або stdin — дай шлях"
-    staged_added >"$T/added" || die "git diff --cached не вдався"
+    staged_added >"$T/added" || die "не вдалося зібрати додані рядки індексу (git diff --cached; у злитті — git write-tree: чи розв'язано конфлікт?)"
     check "$msg" "$T/added"
     git commit -F "$msg"
     exit $?
