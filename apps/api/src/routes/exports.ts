@@ -17,6 +17,7 @@ import {
   ExportResponseSchema,
 } from "@flatcraft/types";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { env } from "../env.js";
@@ -211,14 +212,25 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
         const templateSlug = req.body.template_slug;
         const params = req.body.parameters as Record<string, unknown>;
         if (errors.length > 0) {
-          await telemetry.writeEvent({
-            event_type: "validation_rejected",
-            template_slug: templateSlug,
-            process: DEFAULT_PROCESS,
-            session_hash: sh,
-            params,
-            error_code: errors[0]?.code ?? "VALIDATION_ERROR",
-          });
+          // Issue #215: одна подія на кожен УНІКАЛЬНИЙ код (не лише errors[0]) —
+          // інакше digest/топ-кодів бачить тільки першу знайдену причину, а не
+          // всі. attempt_id — спільний для цих подій ідентифікатор спроби;
+          // crypto.randomUUID() на запит, НЕ похідний від IP/session_hash
+          // (яких і не можна відновити назад з UUID) — колонку не додаємо,
+          // живе лише в params (JSONB), поруч із геометрією.
+          const attemptId = randomUUID();
+          const rejectedParams = { ...params, attempt_id: attemptId };
+          const uniqueCodes = [...new Set(errors.map((e) => e.code))];
+          for (const code of uniqueCodes) {
+            await telemetry.writeEvent({
+              event_type: "validation_rejected",
+              template_slug: templateSlug,
+              process: DEFAULT_PROCESS,
+              session_hash: sh,
+              params: rejectedParams,
+              error_code: code,
+            });
+          }
           return reply.code(422).send(buildProblem(errors, "/exports"));
         }
         const job = store.create();
