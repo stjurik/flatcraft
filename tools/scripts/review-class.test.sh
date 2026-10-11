@@ -256,6 +256,8 @@ dbranch() { # dbranch <назва> <команда над робочим дер�
 dbranch d-append "printf '%s\n' '| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |' >>$D/feat-a.md"
 dbranch d-new "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' >$D/feat-b.md"
 dbranch d-new-prose "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' 'Виклики Sonnet до 10.10 не рахувати.' >$D/feat-b.md"
+dbranch d-new-foreign-head "printf '%s\n' '| Дата | Модель agy | Задача | Вигадок |' '| ---- | ---------- | ------ | ------- |' '| 2026-10-11 | Gemini 3.8 Flash (High) | рецензія #9 | **0** |' >$D/feat-b.md"
+dbranch d-new-nosep "printf '%s\n' '| Дата | Задача | Модель agy | Вигадок |' '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' >$D/feat-b.md"
 dbranch d-new-pipe-rule "printf '%s\n' \"\$TH\" '| Правило: виклики Sonnet не рахувати |' >$D/feat-b.md"
 dbranch d-edit "perl -pi -e 's/\*\*1\*\*/**0**/' $D/feat-a.md"
 dbranch d-head "perl -pi -e 's/\| Вигадок \|/| Вигадок (будь-які) |/' $D/feat-a.md"
@@ -273,6 +275,8 @@ dir_case() { # dir_case <назва> <гілка> <очікуваний клас
 dir_case "дописано рядок у файл із бази" d-append звичайний
 dir_case "новий файл лише з таблиці" d-new звичайний
 dir_case "новий файл з абзацом-правилом" d-new-prose ризиковий "$D/feat-b.md"
+dir_case "новий файл з чужою шапкою (колонки переставлено)" d-new-foreign-head ризиковий "$D/feat-b.md"
+dir_case "новий файл без роздільника таблиці" d-new-nosep ризиковий "$D/feat-b.md"
 dir_case "новий файл з рядком-правилом з |" d-new-pipe-rule ризиковий "$D/feat-b.md"
 dir_case "змінено вигадки в старому рядку" d-edit ризиковий "$D/feat-a.md"
 dir_case "змінено шапку" d-head ризиковий "$D/feat-a.md"
@@ -380,7 +384,9 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "спільна бібліотека журналу не ризикова" "  'дозволи й безпека|tools/scripts/journal-rules*'" ''
   mutate "check-journals не ризиковий" "  'CI|tools/scripts/check-journals*'" ''
   mutate "тека журналу не перевіряється" '    journal_dir_file_violated "$f" &&' '    false &&'
-  mutate "новий файл теки — будь-який зміст" 'grep -Ev -- "$JOURNAL_ROW_RE|^\|Дата\|"' 'grep -Ev -- "."' lib
+  mutate "новий файл теки — будь-який зміст після шапки" '[[ -z "$(journal_norm <<<"$rest" | grep -Ev -- "$JOURNAL_ROW_RE")" ]] && return 1' 'return 1' lib
+  mutate "шапку нового файла теки не звіряти" '[[ "$(journal_norm <<<"$first")" == "$want" ]] || return 0' 'true' lib
+  mutate "роздільник нового файла теки не звіряти" '[[ "$second" =~ $sep_re ]] || return 0' 'true' lib
   mutate "файл теки поза верхнім рівнем чи не .md — як звичайний" \
     '[[ "$file" == "$JOURNAL_DIR"/*.md && "${file#"$JOURNAL_DIR"/}" != */* ]] || return 0' \
     '[[ "$file" == "$JOURNAL_DIR"/*.md && "${file#"$JOURNAL_DIR"/}" != */* ]] || true' lib

@@ -143,6 +143,20 @@ mk d-cyr-edit dir-base "$D/гілка-б.md" 's/\*\*2\*\*/**0**/'
 "${GIT[@]}" switch -q -c d-rm dir-base && "${GIT[@]}" rm -q "$D/feat-a.md" && "${GIT[@]}" commit -qm d-rm
 "${GIT[@]}" switch -q -c d-new dir-base && printf '%s\n' "$DH" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' >"$G/$D/feat-c.md" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-new
+# Нові файли теки, які підрахунок не прийме (рецензія Flash #230): чужа шапка — після
+# merge лічильник іспиту виходив би з 3 для всіх; без роздільника; з абзацом; у підтеці.
+newfile() { # newfile <гілка> <шлях> <рядок>... — гілка від dir-base з одним новим файлом
+  local b="$1" p="$2"
+  shift 2
+  "${GIT[@]}" switch -q -c "$b" dir-base && mkdir -p "$(dirname "$G/$p")" && printf '%s\n' "$@" >"$G/$p" &&
+    "${GIT[@]}" add -A && "${GIT[@]}" commit -qm "$b"
+}
+ROW9='| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |'
+newfile d-new-foreign "$D/feat-f.md" '| Дата | Модель agy | Задача | Вигадок |' '| ---- | ---------- | ------ | ------- |' '| 2026-10-11 | Gemini 3.8 Flash (High) | рецензія #9 | **0** |'
+newfile d-new-nosep "$D/feat-f.md" '| Дата | Задача | Модель agy | Вигадок |' "$ROW9"
+newfile d-new-prose "$D/feat-f.md" "$DH" "$ROW9" 'Виклики Sonnet до 10.10 не рахувати.'
+newfile d-new-sub "$D/sub/feat-f.md" "$DH" "$ROW9"
+newfile d-new-ok "$D/feat-f.md" "$DH" "$ROW9" '| 2026-10-11 | рецензія #10 \| diff | Claude Sonnet 5.5 (High) | **1** |'
 # Перший файл теки з'являється в гілці, у базі теки ще немає (перехід з архіву).
 "${GIT[@]}" switch -q -c d-first base && mkdir -p "$G/$D" && printf '%s\n' "$DH" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | **0** |' >"$G/$D/feat-a.md" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-first
@@ -177,6 +191,11 @@ run "обидва журнали зіпсовано — два блоки в о�
 run "тека: дописано рядок у файл із бази — чисто" dir-base d-append 0 "журнали цілі"
 run "тека: новий файл — чисто" dir-base d-new 0
 run "тека: перший файл теки, у базі теки немає — чисто" base d-first 0
+run "тека: новий файл, шапка як в архіві + рядки — чисто" dir-base d-new-ok 0 "журнали цілі"
+run "тека: новий файл з чужою шапкою — блок з іменем" dir-base d-new-foreign 1 "БЛОК" "$D/feat-f.md: новий файл журналу"
+run "тека: новий файл без роздільника — блок" dir-base d-new-nosep 1 "$D/feat-f.md"
+run "тека: новий файл з абзацом після таблиці — блок" dir-base d-new-prose 1 "$D/feat-f.md"
+run "тека: новий файл у підтеці — блок" dir-base d-new-sub 1 "$D/sub/feat-f.md"
 run "тека: змінено старий рядок — блок з іменем файла" dir-base d-edit 1 "БЛОК" "$D/feat-a.md"
 run "тека: переставлено старі рядки — блок" dir-base d-reorder 1 "$D/feat-a.md"
 run "тека: змінено шапку — блок" dir-base d-head 1 "$D/feat-a.md"
@@ -280,6 +299,9 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "тека — з кінчика гілки, а не з бази" 'git ls-tree -r -z --name-only "$mb"' 'git ls-tree -r -z --name-only "$HEAD_REF"'
   mutate "файл теки — без -z (кирилиця в лапках)" 'while IFS= read -r -d '"''"' f; do' 'while IFS= read -r f; do'
   mutate "видалений файл теки — без окремого блоку" 'if ! git cat-file -e "$HEAD_REF:$f" 2>/dev/null; then' 'if false; then'
+  mutate "нові файли теки не перевіряються" 'done < <(git ls-tree -r -z --name-only "$HEAD_REF" -- "$JOURNAL_DIR/")' 'done </dev/null'
+  mutate "шапку нового файла теки не звіряти" '[[ "$(journal_norm <<<"$first")" == "$want" ]] || return 0' 'true' lib
+  mutate "новий файл теки — будь-що після шапки" '[[ -z "$(journal_norm <<<"$rest" | grep -Ev -- "$JOURNAL_ROW_RE")" ]] && return 1' 'return 1' lib
   mutate "зміна файла теки — не блок" '  elif append_only_violated "$f" "$JOURNAL_ROW_RE"; then' '  elif false; then'
   mutate "заголовок — будь-який ##, не лише другого рівня" "headings() { grep -E '^## ' || true; }" "headings() { grep -E '^##' || true; }"
 fi

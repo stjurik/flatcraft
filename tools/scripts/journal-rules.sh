@@ -55,11 +55,12 @@ append_only_violated() {
   return 0
 }
 
-# journal_dir_file_violated <файл теки> — правило для файла в $JOURNAL_DIR (review-class.sh).
+# journal_dir_file_violated <файл теки> — правило для файла в $JOURNAL_DIR (review-class.sh і,
+# для нових файлів, check-journals.sh).
 # 0 — ризиково: файл не верхнього рівня чи не .md (підрахунок такого не читає, тож рядок у
 # ньому мовчки випав би з іспиту); файл був у базі, і його старий зміст змінено (те саме
-# append_only_violated); новий файл, у якому є щось, крім шапки таблиці, роздільника й
-# рядків викликів — правило «такі виклики не рахуються» можна не переписати, а покласти
+# append_only_violated); новий файл, у якому шапка не та, що в архіві, або є щось, крім
+# шапки, роздільника й рядків викликів (new_journal_file_violated) — правило «такі виклики не рахуються» можна не переписати, а покласти
 # новим файлом; звірити не вдалося. 1 — лише дописано рядки (чи новий файл лише з таблиці).
 journal_dir_file_violated() {
   local file="$1" fork body
@@ -69,8 +70,31 @@ journal_dir_file_violated() {
     append_only_violated "$file" "$JOURNAL_ROW_RE"
     return
   fi
+  new_journal_file_violated "$file"
+}
+
+# new_journal_file_violated <файл> — новий файл теки в HEAD_REF. 1 (чисто) — лише якщо
+# перший рядок — шапка таблиці, що після journal_norm слово в слово збігається з шапкою
+# архіву в HEAD_REF, другий — роздільник таблиці, а решта — лише рядки викликів
+# (JOURNAL_ROW_RE). Інакше 0. ЧОМУ звіряти шапку: підрахунок (journal_rows) відмовляється
+# від файла з чужою шапкою, і тоді agy-stats-summary.sh та agy-opus-budget.sh виходять з
+# 3 для ВСІХ наступних PR (знахідка Flash, рецензія #230). Правило одне на review-class.sh
+# і check-journals.sh: перший лише класифікував би, а CI пропустив би.
+new_journal_file_violated() {
+  local file="$1" body want first second rest sep_re=$'^\\|[ \t:-]*-[ \t:|-]*$'
   body="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0
-  [[ -z "$(journal_norm <<<"$body" | grep -Ev -- "$JOURNAL_ROW_RE|^\|Дата\|")" ]] && return 1
+  # Без пайпа в grep -m1: під pipefail ранній вихід grep дав би SIGPIPE awk-у на журналі в
+  # 300 КБ — і «відмову» на правильному файлі.
+  want="$(git show "$HEAD_REF:$JOURNAL" 2>/dev/null)" || return 0
+  want="$(journal_norm <<<"$want")"
+  want="$(grep -E '^\|Дата\|' <<<"$want" | head -n 1 || true)"
+  [[ -n "$want" ]] || return 0
+  first="$(sed -n 1p <<<"$body")"
+  second="$(sed -n 2p <<<"$body")"
+  rest="$(tail -n +3 <<<"$body")"
+  [[ "$(journal_norm <<<"$first")" == "$want" ]] || return 0
+  [[ "$second" =~ $sep_re ]] || return 0
+  [[ -z "$(journal_norm <<<"$rest" | grep -Ev -- "$JOURNAL_ROW_RE")" ]] && return 1
   return 0
 }
 
