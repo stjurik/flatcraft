@@ -7,16 +7,20 @@
 # клітинки (на ньому 2026-09-23 розбився ручний підрахунок — колонки зсунулись),
 # виклики до початку вікна, виклики з позначкою «не зараховано».
 #
+# Тека журналу (файл на PR, рішення yurii 2026-10-11, #228) — розділ «Архів і тека»:
+# кожна фікстура там лежить у власному каталозі, бо тека — це agy-stats/ ПОРУЧ з архівом.
+#
 # Запуск: tools/scripts/agy-stats-summary.test.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$HERE/agy-stats-summary.sh"
+SCRIPT="${AGY_STATS_SUMMARY_UNDER_TEST:-$HERE/agy-stats-summary.sh}"
 fail=0
 ok() { echo "✓ $1"; }
 bad() {
   echo "✗ $1"
   fail=1
+  [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" ]] || exit 1
 }
 
 T="$(mktemp -d)"
@@ -334,6 +338,181 @@ if [[ -n "$a" && "$plain" == "$a" ]]; then
   ok "контроль: з \`\\|\` і без нього рядок Model A однаковий"
 else
   bad "контроль: \`\\|\` змінює результат — '$a' проти '$plain'"
+fi
+
+# ─── Архів і тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
+# Фікстури — кожна у своєму каталозі: тека читається поруч з архівом.
+H8ROW() { echo "| $1 | $2 | $3 | ok | так | 1/0 | $4 | $5 |"; }
+
+# Числа з архіву й двох файлів теки = числа з одного злитого файла, де рядки стоять у
+# порядку правила (ключ — найпізніша дата від початку файла; рівні — архів, далі файли
+# теки за іменем). Без теки Model V мала б 2 виклики, а не 3.
+mkdir -p "$T/split/agy-stats" "$T/merged"
+{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1; H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'; } >"$T/split/agy-stats.md"
+{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'; H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'; } >"$T/split/agy-stats/feat-a.md"
+{ echo "$H8"; H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1; } >"$T/split/agy-stats/feat-b.md"
+{
+  echo "$H8"
+  H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1
+  H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'
+  H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'
+  H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'
+  H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1
+} >"$T/merged/agy-stats.md"
+split_out="$(bash "$SCRIPT" "$T/split/agy-stats.md" 2>&1)"
+merged_out="$(bash "$SCRIPT" "$T/merged/agy-stats.md" 2>&1)"
+v="$(grep -F '| Model V |' <<<"$split_out")"
+w="$(grep -F '| Model W |' <<<"$split_out")"
+if [[ "$v" == *"| 3 | 3 | 2 | 67% | 2 | 3 |"* && "$w" == *"| 2 | 2 | 1 | 50% | 2 | 1 |"* ]]; then
+  ok "архів + два файли теки: V — 3 виклики, 2 з вигадками, 3 знахідки; W — 2, 1, 1"
+else
+  bad "архів + тека пораховано неправильно: V '$v', W '$w'"
+fi
+if [[ -n "$v" && "$split_out" == "$merged_out" ]]; then
+  ok "два файли теки + архів = один злитий файл (таблиця слово в слово)"
+else
+  bad "розбиття на файли змінило числа: розбито:\n$split_out\nзлито:\n$merged_out"
+fi
+
+# Порядок іспиту через файли. Model Y: перший рядок архіву — 2026-10-09 з вигадкою, далі
+# 10 чистих від 2026-10-01: в архіві він ПЕРШИЙ і в іспиті (сортування за самою датою
+# витиснуло б його за десятку — переписало б старий вердикт). Model Z: 9 чистих в архіві,
+# потім два файли теки з тією самою датою, що й ключ архіву: архів раніше за теку, a.md
+# раніше за b.md — до іспиту йде чистий a.md, b.md з вигадкою — поза іспитом.
+mkdir -p "$T/order/agy-stats"
+{
+  echo "$H8"
+  H8ROW 2026-10-09 y0 'Model Y' '**1** — x' '—'
+  for i in $(seq 10); do H8ROW 2026-10-01 "y$i" 'Model Y' '**0** — x' '—'; done
+  for i in $(seq 9); do H8ROW "2026-10-0$i" "z$i" 'Model Z' '**0** — x' '—'; done
+} >"$T/order/agy-stats.md"
+{ echo "$H8"; H8ROW 2026-10-09 za 'Model Z' '**0** — x' '—'; } >"$T/order/agy-stats/a.md"
+{ echo "$H8"; H8ROW 2026-10-09 zb 'Model Z' '**1** — x' '—'; } >"$T/order/agy-stats/b.md"
+order_out="$(bash "$SCRIPT" "$T/order/agy-stats.md" 2>&1)"
+y="$(grep -F '| Model Y |' <<<"$order_out")"
+z="$(grep -F '| Model Z |' <<<"$order_out")"
+if [[ "$y" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$y" == *"поза іспитом: 1"* ]]; then
+  ok "порядок архіву лишається: рядок 2026-10-09 на початку архіву — в іспиті"
+else
+  bad "порядок архіву змінено — старий вердикт переписано: '$y'"
+fi
+if [[ "$z" == *"| 11 | 10 | 0 | 0% | 0 |"* && "$z" == *"поза іспитом: 1"* ]]; then
+  ok "рівні ключі: архів раніше за теку, a.md раніше за b.md — b.md поза іспитом"
+else
+  bad "рівні ключі впорядковано не так: '$z'"
+fi
+
+# Шапка файла теки — та сама, що в архіві: колонки читаються за місцем, тож переставлені
+# колонки мовчки дали б чужі числа. Відмова, а не число.
+mkdir -p "$T/head/agy-stats"
+{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**0** — x' '—'; } >"$T/head/agy-stats.md"
+{
+  echo '| Дата | Модель agy | Задача | Результат | Вердикт | Кейси | Вигадки | Справжніх знахідок |'
+  echo '| - | - | - | - | - | - | - | - |'
+  echo '| 2026-10-02 | Model V | b1 | ok | так | 1/0 | **1** — x | — |'
+} >"$T/head/agy-stats/feat-a.md"
+if head_out="$(bash "$SCRIPT" "$T/head/agy-stats.md" 2>&1)"; then
+  bad "файл теки з іншою шапкою прийнято: $head_out"
+elif [[ "$head_out" == *"шапка"*"feat-a.md"* || "$head_out" == *"feat-a.md"*"шапка"* ]] && ! grep -qF '| b1 |' <<<"$head_out"; then
+  ok "файл теки з іншою шапкою — відмова з іменем файла"
+else
+  bad "відмова без пояснення чи файла: $head_out"
+fi
+
+# Рядок у файлі теки до шапки — клітинки не звірити: відмова.
+mkdir -p "$T/nohead/agy-stats"
+cp "$T/head/agy-stats.md" "$T/nohead/agy-stats.md"
+H8ROW 2026-10-02 b1 'Model V' '**1** — x' '—' >"$T/nohead/agy-stats/feat-a.md"
+if nohead_out="$(bash "$SCRIPT" "$T/nohead/agy-stats.md" 2>&1)"; then
+  bad "рядок теки без шапки прийнято: $nohead_out"
+elif [[ "$nohead_out" == *"до шапки"* ]]; then
+  ok "рядок у файлі теки до шапки — відмова"
+else
+  bad "відмова без пояснення: $nohead_out"
+fi
+
+# Неекранований «|» у файлі теки — відмова з іменем файла (так само, як в архіві).
+mkdir -p "$T/shift2/agy-stats"
+cp "$T/head/agy-stats.md" "$T/shift2/agy-stats.md"
+{ echo "$H8"; echo '| 2026-10-02 | b1 зламаний | текст | Model V | ok | так | 1/0 | **0** — x | — |'; } >"$T/shift2/agy-stats/feat-a.md"
+if shift2_out="$(bash "$SCRIPT" "$T/shift2/agy-stats.md" 2>&1)"; then
+  bad "зсунутий рядок у теці прийнято: $shift2_out"
+elif [[ "$shift2_out" == *"feat-a.md"*"клітинок"* ]]; then
+  ok "зсунутий рядок у файлі теки — відмова з іменем файла"
+else
+  bad "відмова без імені файла: $shift2_out"
+fi
+
+# Читаються лише *.md верхнього рівня теки (review-class.sh робить інші файли там
+# ризиковими — рядок у них мовчки випав би з іспиту).
+mkdir -p "$T/only/agy-stats/sub"
+cp "$T/head/agy-stats.md" "$T/only/agy-stats.md"
+{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '—'; } >"$T/only/agy-stats/feat-a.md"
+cp "$T/only/agy-stats/feat-a.md" "$T/only/agy-stats/notes.txt"
+cp "$T/only/agy-stats/feat-a.md" "$T/only/agy-stats/sub/feat-b.md"
+only="$(bash "$SCRIPT" "$T/only/agy-stats.md" 2>&1 | grep -F '| Model V |')"
+if [[ "$only" == *"| 2 | 2 | 1 | 50% |"* ]]; then
+  ok "читаються лише *.md верхнього рівня теки"
+else
+  bad "прочитано зайве чи не те: '$only'"
+fi
+
+# Без спільної бібліотеки — відмова, а не підрахунок самого архіву.
+X="$(mktemp -d)"
+cp "$SCRIPT" "$X/agy-stats-summary.sh"
+lib_out="$(bash "$X/agy-stats-summary.sh" "$T/split/agy-stats.md" 2>&1)"
+lib_rc=$?
+rm -rf "$X"
+if [[ $lib_rc == 2 && "$lib_out" == *"journal-rules.sh"* ]]; then
+  ok "без journal-rules.sh — відмова, exit 2"
+else
+  bad "без journal-rules.sh — очікував exit 2, отримав $lib_rc: $lib_out"
+fi
+
+# ─── Мутації: правила архіву й теки тримаються тестом ──────────────────────
+if [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" && $fail == 0 ]]; then
+  M="$(mktemp -d)"
+  src="$(<"$SCRIPT")"
+  lib="$HERE/journal-rules.sh"
+  libsrc="$(<"$lib")"
+  n=0
+  mutate() { # mutate <назва> <було> <стало> [lib] — «було» мусить стояти рівно раз
+    local name="$1" from="$2" to="$3" which="${4:-script}" body rest d="$M/$((++n))"
+    body="$src"
+    [[ "$which" == lib ]] && body="$libsrc"
+    rest="${body#*"$from"}"
+    if [[ "$rest" == "$body" || "$rest" == *"$from"* ]]; then
+      bad "мутант «$name»: текст не знайдено рівно один раз — мутація застаріла"
+      return
+    fi
+    mkdir -p "$d"
+    cp "$SCRIPT" "$d/agy-stats-summary.sh"
+    cp "$lib" "$d/journal-rules.sh"
+    if [[ "$which" == lib ]]; then
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
+    else
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/agy-stats-summary.sh"
+    fi
+    if AGY_STATS_SUMMARY_UNDER_TEST="$d/agy-stats-summary.sh" bash "$HERE/$(basename "$0")" >"$d/out" 2>&1; then
+      bad "мутант ВИЖИВ: $name"
+    else
+      ok "мутанта вбито: $name"
+    fi
+  }
+  # shellcheck disable=SC2016 # дослівний текст скрипта
+  {
+    mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
+    mutate "файли теки у зворотному порядку" "-name '*.md' | LC_ALL=C sort" "-name '*.md' | LC_ALL=C sort -r" lib
+    mutate "ключ — сама дата (старий порядок архіву переставляється)" 'if (d > maxd) maxd = d' 'maxd = d' lib
+    mutate "рівні ключі — тека раніше за архів" '-k1,1 -k2,2n -k3,3n' '-k1,1 -k2,2nr -k3,3n' lib
+    mutate "шапка теки не звіряється" 'else if (cellsof() != canon) {' 'else if (0) {' lib
+    mutate "рядок теки до шапки приймається" 'if (fi > 1 && !cells) {' 'if (0) {' lib
+    mutate "зсунутий рядок рахується" 'END { if (bad) exit 3 }' 'END { }' lib
+    mutate "\\| не екранується" '{ gsub(/\\\|/, "\037") }' '{ }' lib
+    mutate "читаються будь-які файли теки" "-maxdepth 1 -type f -name '*.md'" "-type f" lib
+    mutate "лише архів, без journal_rows" 'journal_rows "$FILE" | awk' "sed 's/\\\\|/\\x1f/g' \"\$FILE\" | awk"
+  }
+  rm -rf "$M"
 fi
 
 if ((fail)); then

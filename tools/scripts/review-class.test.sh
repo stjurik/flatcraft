@@ -35,8 +35,10 @@ expect() {
 }
 
 # ─── 1. По справжньому файлу з кожної категорії — ризиковий ─────────────────
+# Кожен файл — разом зі звичайним файлом коду: файли правил поодинці дають виняток
+# «правила-текст» (розділ 5f), а тут перевіряється, що категорія з RULES діє.
 while IFS='|' read -r cat path; do
-  expect "$cat: $path" 0 "$path"$'\n' "клас: ризиковий" "$cat: $path"
+  expect "$cat: $path" 0 "$path"$'\napps/web/src/x.tsx\n' "клас: ризиковий" "$cat: $path"
 done <<'EOF'
 дозволи й безпека|.claude/settings.orchestrator.json
 дозволи й безпека|tools/agy/permissions.json
@@ -235,6 +237,72 @@ expect "кирилиця без лапок — як є" 0 $'infra/ansible/roles/
 expect "кирилиця в лапках у docs — звичайний" 0 $'"docs/\\320\\277.md"\n' "клас: звичайний"
 expect "інше екранування в лапках — не розпізнано, ризиковий" 0 $'"docs/a\\"b.md"\n' "шлях не розпізнано"
 
+# ─── 5e. Тека журналу agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
+D=docs/promts/inputs/agy-stats
+G="$(mktemp -d)"
+git -C "$G" init -q
+GIT=(git -C "$G" -c user.name=t -c user.email=t@t)
+mkdir -p "$G/$D"
+TH='| Дата | Задача | Модель agy | Вигадок |
+| ---- | ------ | ---------- | ------- |'
+printf '%s\n' "$TH" '| 2026-10-10 | рецензія #1 | Gemini 3.8 Flash (High) | **0** |' '| 2026-10-10 | рецензія #2 | Claude Sonnet 5.5 (High) | **1** |' >"$G/$D/feat-a.md"
+printf '%s\n' '# журнал' '' "$TH" '| 2026-09-24 | рецензія #0 | Gemini 3.8 Flash (High) | **0** |' >"$G/$J"
+"${GIT[@]}" add -A && "${GIT[@]}" commit -qm base && "${GIT[@]}" branch -q base
+dbranch() { # dbranch <назва> <команда над робочим деревом> — гілка від base з однією зміною
+  "${GIT[@]}" switch -q -c "$1" base
+  (cd "$G" && eval "$2")
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm "$1"
+}
+dbranch d-append "printf '%s\n' '| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |' >>$D/feat-a.md"
+dbranch d-new "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' >$D/feat-b.md"
+dbranch d-new-prose "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' 'Виклики Sonnet до 10.10 не рахувати.' >$D/feat-b.md"
+dbranch d-new-pipe-rule "printf '%s\n' \"\$TH\" '| Правило: виклики Sonnet не рахувати |' >$D/feat-b.md"
+dbranch d-edit "perl -pi -e 's/\*\*1\*\*/**0**/' $D/feat-a.md"
+dbranch d-head "perl -pi -e 's/\| Вигадок \|/| Вигадок (будь-які) |/' $D/feat-a.md"
+dbranch d-rm "git rm -q $D/feat-a.md"
+dbranch d-reorder "perl -0pi -e 's/(\| 2026-10-10 \| рецензія #1[^\n]*\n)(\| 2026-10-10 \| рецензія #2[^\n]*\n)/\$2\$1/' $D/feat-a.md"
+dbranch d-nested "mkdir -p $D/sub && printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | **0** |' >$D/sub/feat-c.md"
+dbranch d-txt "printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | **0** |' >$D/feat-c.txt"
+dbranch t-claude-append "echo 'нове правило' >>CLAUDE.md && printf '%s\n' '| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |' >>$D/feat-a.md"
+dbranch t-claude-edit "echo 'нове правило' >>CLAUDE.md && perl -pi -e 's/\*\*1\*\*/**0**/' $D/feat-a.md"
+dir_case() { # dir_case <назва> <гілка> <очікуваний клас> [підрядок]
+  local out
+  out="$(cd "$G" && "${GIT[@]}" diff --name-only --no-renames base..."$2" | REVIEW_CLASS_BASE=base REVIEW_CLASS_HEAD="$2" bash "$SCRIPT" 2>&1)"
+  if [[ "$out" == "клас: $3"* && "$out" == *"${4:-}"* ]]; then ok "тека журналу: $1 — $3"; else bad "тека журналу: $1 — очікував «$3» ${4:+і «$4»}: $out"; fi
+}
+dir_case "дописано рядок у файл із бази" d-append звичайний
+dir_case "новий файл лише з таблиці" d-new звичайний
+dir_case "новий файл з абзацом-правилом" d-new-prose ризиковий "$D/feat-b.md"
+dir_case "новий файл з рядком-правилом з |" d-new-pipe-rule ризиковий "$D/feat-b.md"
+dir_case "змінено вигадки в старому рядку" d-edit ризиковий "$D/feat-a.md"
+dir_case "змінено шапку" d-head ризиковий "$D/feat-a.md"
+dir_case "файл видалено" d-rm ризиковий "$D/feat-a.md"
+dir_case "переставлено старі рядки" d-reorder ризиковий "$D/feat-a.md"
+dir_case "файл у підтеці (підрахунок не читає)" d-nested ризиковий "$D/sub/feat-c.md"
+dir_case "файл не .md (підрахунок не читає)" d-txt ризиковий "$D/feat-c.txt"
+out="$(cd "$G" && printf '%s\n' "$D/feat-b.md" | REVIEW_CLASS_BASE=немає-такої-гілки REVIEW_CLASS_HEAD=d-new bash "$SCRIPT" 2>&1)"
+[[ "$out" == "клас: ризиковий"* ]] && ok "тека журналу: без бази — ризиковий" || bad "тека журналу: без бази — очікував ризиковий: $out"
+
+# ─── 5f. Лише текст правил — клас «правила-текст» (рішення yurii 2026-10-11) ──
+expect "лише CLAUDE.md — правила-текст" 0 $'CLAUDE.md\n' "клас: правила-текст" "без контрприкладів" "текст правил: CLAUDE.md"
+expect "CLAUDE.md, ADR, процес, docs/15–17, docs/20 — правила-текст" 0 \
+  $'CLAUDE.md\ndocs/03_DECISIONS.md\ndocs/promts/orchestrator-autonomy.md\ndocs/promts/ai-review-local.md\ndocs/15_LLM_PROMPTS.md\ndocs/16_AUTONOMOUS_RUNS.md\ndocs/17_AI_BUGFIX_FLOW.md\ndocs/20_OPEN_DECISIONS.md\n' \
+  "клас: правила-текст" "текст правил: docs/16_AUTONOMOUS_RUNS.md" "текст правил: docs/promts/ai-review-local.md"
+expect "лише docs/16 (поза RULES) — теж правила-текст" 0 $'docs/16_AUTONOMOUS_RUNS.md\n' "клас: правила-текст"
+expect "CLAUDE.md + код — ризиковий" 0 $'CLAUDE.md\napps/web/src/x.tsx\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + тест — ризиковий" 0 $'CLAUDE.md\nworkers/cad/tests/test_x.py\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + tools/ — ризиковий" 0 $'CLAUDE.md\ntools/scripts/a8-report.sh\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + .github/ — ризиковий" 0 $'CLAUDE.md\n.github/workflows/ci.yml\n' "клас: ризиковий" "CI: .github/workflows/ci.yml" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + infra/ — ризиковий" 0 $'CLAUDE.md\ninfra/compose/Caddyfile\n' "клас: ризиковий" "інфраструктура: infra/compose/Caddyfile"
+expect "CLAUDE.md + .claude/ — ризиковий" 0 $'CLAUDE.md\n.claude/settings.json\n' "клас: ризиковий" "дозволи й безпека: .claude/settings.json"
+expect "CLAUDE.md + docs/promts/inputs/ (дані, не правила) — ризиковий" 0 $'CLAUDE.md\ndocs/promts/inputs/notes.md\n' "клас: ризиковий"
+expect "CLAUDE.md + підтека docs/promts/ — ризиковий" 0 $'CLAUDE.md\ndocs/promts/sub/x.md\n' "клас: ризиковий"
+expect "CLAUDE.md + README — ризиковий" 0 $'CLAUDE.md\nREADME.md\n' "клас: ризиковий"
+expect "docs/16 + README — звичайний (як і раніше)" 0 $'docs/16_AUTONOMOUS_RUNS.md\nREADME.md\n' "клас: звичайний"
+dir_case "CLAUDE.md + дописаний рядок журналу теки — правила-текст" t-claude-append правила-текст "текст правил: CLAUDE.md"
+dir_case "CLAUDE.md + змінений старий рядок журналу — ризиковий" t-claude-edit ризиковий "правила й контракт: CLAUDE.md"
+rm -rf "$G"
+
 # ─── 6. Порожній вхід — відмова, а не «звичайний» ──────────────────────────
 expect "порожній вхід — exit 2" 2 "" "порожній список"
 expect "лише порожні рядки — exit 2" 2 $'\n\n' "порожній список"
@@ -311,6 +379,19 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 1' lib
   mutate "спільна бібліотека журналу не ризикова" "  'дозволи й безпека|tools/scripts/journal-rules*'" ''
   mutate "check-journals не ризиковий" "  'CI|tools/scripts/check-journals*'" ''
+  mutate "тека журналу не перевіряється" '    journal_dir_file_violated "$f" &&' '    false &&'
+  mutate "новий файл теки — будь-який зміст" 'grep -Ev -- "$JOURNAL_ROW_RE|^\|Дата\|"' 'grep -Ev -- "."' lib
+  mutate "файл теки поза верхнім рівнем чи не .md — як звичайний" \
+    '[[ "$file" == "$JOURNAL_DIR"/*.md && "${file#"$JOURNAL_DIR"/}" != */* ]] || return 0' \
+    '[[ "$file" == "$JOURNAL_DIR"/*.md && "${file#"$JOURNAL_DIR"/}" != */* ]] || true' lib
+  mutate "зміна файла теки з бази — не звіряється" '    append_only_violated "$file" "$JOURNAL_ROW_RE"
+    return' '    return 1' lib
+  mutate "тека журналу без бази — «звичайний»" 'fork="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'fork="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1' lib
+  mutate "виняток правил діє і в змішаному PR" '${#texts[@]} && !other))' '${#texts[@]}))'
+  mutate "inputs/ — теж текст правил" "  '^docs/promts/[^/]+\\.md\$'" "  '^docs/promts/.+\\.md\$'"
+  mutate "docs/16 не текст правил" "  '^docs/1[5-7]_[^/]+\\.md\$'" "  '^docs/1[57]_[^/]+\\.md\$'"
+  mutate "CLAUDE.md не текст правил" "  '^CLAUDE\\.md\$'" ''
+  mutate "правила-текст замість ризикового, коли журнал зіпсовано" '((!${#hits[@]} && ' '(('
   mutate "бібліотеки немає — не відмова" '  exit 2
 }
 # shellcheck source' '  exit 0

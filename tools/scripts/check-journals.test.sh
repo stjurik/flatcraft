@@ -126,6 +126,27 @@ mk sub-drop sub-base "$L" 's/\n### B\.1 — деталь\n\nдеталь\n//'
 mk both-bad base "$J" 's/\*\*1\*\*/**0**/'
 perl -0pi -e 's/## C — третій запис \(2026-09-03\)\n\nтекст C\n\n//' "$G/$L" && "${GIT[@]}" commit -qam "both-bad: docs/13"
 
+# Тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228). Окрема база з двома
+# файлами теки, один — з кириличним іменем (git ls-tree без -z узяв би його в лапки).
+D=docs/promts/inputs/agy-stats
+DH='| Дата | Задача | Модель agy | Вигадок |
+| ---- | ------ | ---------- | ------- |'
+"${GIT[@]}" switch -q -c dir-base base && mkdir -p "$G/$D" &&
+  printf '%s\n' "$DH" '| 2026-10-10 | рецензія #1 | Gemini 3.8 Flash (High) | **0** |' '| 2026-10-10 | рецензія #2 | Claude Sonnet 5.5 (High) | **1** |' >"$G/$D/feat-a.md" &&
+  printf '%s\n' "$DH" '| 2026-10-10 | рецензія #5 | Gemini 3.8 Flash (High) | **2** |' >"$G/$D/гілка-б.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm dir-base
+mk d-append dir-base "$D/feat-a.md" 's/\z/| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |\n/'
+mk d-edit dir-base "$D/feat-a.md" 's/\*\*1\*\*/**0**/'
+mk d-reorder dir-base "$D/feat-a.md" 's/(\| 2026-10-10 \| рецензія #1[^\n]*\n)(\| 2026-10-10 \| рецензія #2[^\n]*\n)/$2$1/'
+mk d-head dir-base "$D/feat-a.md" 's/\| Вигадок \|/| Вигадок (будь-які) |/'
+mk d-cyr-edit dir-base "$D/гілка-б.md" 's/\*\*2\*\*/**0**/'
+"${GIT[@]}" switch -q -c d-rm dir-base && "${GIT[@]}" rm -q "$D/feat-a.md" && "${GIT[@]}" commit -qm d-rm
+"${GIT[@]}" switch -q -c d-new dir-base && printf '%s\n' "$DH" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | **0** |' >"$G/$D/feat-c.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-new
+# Перший файл теки з'являється в гілці, у базі теки ще немає (перехід з архіву).
+"${GIT[@]}" switch -q -c d-first base && mkdir -p "$G/$D" && printf '%s\n' "$DH" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | **0** |' >"$G/$D/feat-a.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-first
+
 # ─── 1. docs/13: заголовки з бази лишаються ────────────────────────────────
 run "docs/13: новий запис нагорі — чисто" base add-top 0 "журнали цілі"
 run "docs/13: зник найстарший заголовок — блок з назвою" base drop-oldest 1 "БЛОК" "## A — перший запис (2026-09-01)"
@@ -151,6 +172,16 @@ run "agy-stats: рядок без | у кінці, змінено останню
 run "agy-stats: до рядка дописано замикаючий | — чисто" st-nopipe-base st-nopipe-pipe 0
 run "docs/13: зник підзаголовок ### — не блок (рахуються лише ##)" sub-base sub-drop 0
 run "обидва журнали зіпсовано — два блоки в одному виводі" base both-bad 1 "agy-stats.md" "## C — третій запис" "порушень — 2"
+
+# ─── 2b. Тека agy-stats/: файли з бази лише дописуються ───────────────────
+run "тека: дописано рядок у файл із бази — чисто" dir-base d-append 0 "журнали цілі"
+run "тека: новий файл — чисто" dir-base d-new 0
+run "тека: перший файл теки, у базі теки немає — чисто" base d-first 0
+run "тека: змінено старий рядок — блок з іменем файла" dir-base d-edit 1 "БЛОК" "$D/feat-a.md"
+run "тека: переставлено старі рядки — блок" dir-base d-reorder 1 "$D/feat-a.md"
+run "тека: змінено шапку — блок" dir-base d-head 1 "$D/feat-a.md"
+run "тека: файл видалено — блок «видалено»" dir-base d-rm 1 "$D/feat-a.md: файл журналу видалено"
+run "тека: кириличне ім'я, змінено рядок — блок з іменем як є" dir-base d-cyr-edit 1 "$D/гілка-б.md" "порушень — 1"
 
 # ─── 3. Помилки виклику — «не звірено», а не «чисто» ───────────────────────
 run "бази немає — exit 2" немає-такої-бази add-top 2 "немає спільного предка"
@@ -245,6 +276,11 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
     '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0' lib
   mutate "вирівнювання таблиці — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' '' lib
   mutate "остання клітинка без | губиться" 'last = ($NF ~ /^[ \t]*$/) ? NF - 1 : NF;' 'last = NF - 1;' lib
+  mutate "тека не перевіряється" 'done < <(git ls-tree -r -z --name-only "$mb" -- "$JOURNAL_DIR/")' 'done </dev/null'
+  mutate "тека — з кінчика гілки, а не з бази" 'git ls-tree -r -z --name-only "$mb"' 'git ls-tree -r -z --name-only "$HEAD_REF"'
+  mutate "файл теки — без -z (кирилиця в лапках)" 'while IFS= read -r -d '"''"' f; do' 'while IFS= read -r f; do'
+  mutate "видалений файл теки — без окремого блоку" 'if ! git cat-file -e "$HEAD_REF:$f" 2>/dev/null; then' 'if false; then'
+  mutate "зміна файла теки — не блок" '  elif append_only_violated "$f" "$JOURNAL_ROW_RE"; then' '  elif false; then'
   mutate "заголовок — будь-який ##, не лише другого рівня" "headings() { grep -E '^## ' || true; }" "headings() { grep -E '^##' || true; }"
 fi
 

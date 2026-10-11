@@ -102,6 +102,27 @@ out="$(run --today 2026-09-27 "$REAL")"
 [[ $? == 0 && "$out" == *"→ контрприклади"* ]] && ok "справжній agy-stats.md розбирається: ${out%%$'\n'*}" ||
   bad "справжній журнал не розібрано: $out"
 
+# ─── 7b. Архів і тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
+# Окремий каталог: тека — це agy-stats/ поруч з архівом.
+mkdir -p "$T/s/agy-stats"
+journal "$T/s/agy-stats.md" "$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')"
+{ echo "$HEAD"; row 2026-09-27 'Claude Sonnet 5.5 (High)'; row 2026-09-26 'Gemini 3.8 Flash (High)'; } >"$T/s/agy-stats/feat-a.md"
+{ echo "$HEAD"; row 2026-09-25 'Claude Opus 5.5 (High)'; row 2026-09-25 'claude-sonnet-5-5 (окрема сесія)'; } >"$T/s/agy-stats/feat-b.md"
+out="$(run --today 2026-09-27 "$T/s/agy-stats.md")"
+[[ $? == 0 && "$out" == *": 3, бюджет"* ]] &&
+  ok "архів + два файли теки: рахуються виклики з усіх (3: Opus 4.6, Sonnet 5.5, Opus 5.5)" || bad "тека не врахована: $out"
+{ echo "$HEAD"; echo '| 2026-09-27 | grep a | b | Claude Opus 4.6 (Thinking) | ok | так | n-a | **0** | **0** |'; } >"$T/s/agy-stats/feat-c.md"
+out="$(run --today 2026-09-27 "$T/s/agy-stats.md")"
+[[ $? == 2 && "$out" == *"feat-c.md"* && "$out" != *"→"* ]] && ok "зсунутий рядок у файлі теки — відмова з іменем файла (exit 2)" ||
+  bad "зсунутий рядок у теці дав рішення: $out"
+rm -f "$T/s/agy-stats/feat-c.md"
+X="$(mktemp -d)"
+cp "$SCRIPT" "$X/agy-opus-budget.sh"
+out="$(bash "$X/agy-opus-budget.sh" --today 2026-09-27 "$T/s/agy-stats.md" 2>&1)"
+[[ $? == 2 && "$out" == *"journal-rules.sh"* && "$out" != *"→"* ]] && ok "без journal-rules.sh — відмова, exit 2" ||
+  bad "без journal-rules.sh рішення дано: $out"
+rm -rf "$X"
+
 # ─── 9. Покази екрана yurii (agy-quota.md) ─────────────────────────────────
 QH='| Показ, UTC | Група | Залишок, % | Скидання, UTC | Джерело |
 | --- | --- | --- | --- | --- |'
@@ -202,15 +223,29 @@ rm -f "$T/agy-quota.md"
 # ─── 8. Мутації ─────────────────────────────────────────────────────────────
 if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
   src="$(<"$SCRIPT")"
+  # Розбір рядків журналу живе в journal-rules.sh (спільний з agy-stats-summary.sh), який
+  # скрипт підключає поруч із собою: мутант — тека з копією обох, де змінено ОДИН.
+  lib="$HERE/journal-rules.sh"
+  libsrc="$(<"$lib")"
   n=0
-  mutate() { # mutate <назва> <було> <стало> — «було» мусить стояти в скрипті рівно раз
-    local name="$1" from="$2" to="$3" rest m="$T/mut$((++n)).sh"
-    rest="${src#*"$from"}"
-    if [[ "$rest" == "$src" || "$rest" == *"$from"* ]]; then
+  mutate() { # mutate <назва> <було> <стало> [lib] — «було» мусить стояти рівно раз
+    local name="$1" from="$2" to="$3" which="${4:-script}" body rest d="$T/mut$((++n))" m
+    body="$src"
+    [[ "$which" == lib ]] && body="$libsrc"
+    rest="${body#*"$from"}"
+    if [[ "$rest" == "$body" || "$rest" == *"$from"* ]]; then
       bad "мутант «$name»: текст не знайдено рівно один раз — мутація застаріла"
       return
     fi
-    printf '%s\n' "${src/"$from"/"$to"}" >"$m"
+    mkdir -p "$d"
+    m="$d/agy-opus-budget.sh"
+    cp "$SCRIPT" "$m"
+    cp "$lib" "$d/journal-rules.sh"
+    if [[ "$which" == lib ]]; then
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
+    else
+      printf '%s\n' "${body/"$from"/"$to"}" >"$m"
+    fi
     if OPUS_BUDGET_UNDER_TEST="$m" bash "$HERE/$(basename "$0")" >"$m.out" 2>&1; then
       bad "мутант ВИЖИВ: $name"
     else
@@ -223,7 +258,9 @@ if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "рахується лише Opus" 'm ~ /Claude|GPT/ &&' 'm ~ /^Claude Opus/ &&'
     mutate "окрема сесія їсть ліміт agy" ' && m !~ /окрема сесія/' ''
     mutate "поріг «більше», а не «не менше»" '((n >= limit))' '((n > limit))'
-    mutate "зсунутий рядок рахується" 'END { if (bad) exit 3; print c + 0 }' 'END { print c + 0 }'
+    mutate "зсунутий рядок рахується" 'END { if (bad) exit 3 }' 'END { }' lib
+    mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
+    mutate "лише архів, без journal_rows" 'journal_rows "$FILE" | awk' "sed 's/\\\\|/\\x1f/g' \"\$FILE\" | awk"
     mutate "покази екрана не читаються" 'if [[ -f "$QUOTA" ]]; then' 'if false; then'
     mutate "після скидання — все ще 7 днів поспіль" 'n="$(calls_since "${reset%% *}")"' 'n="$(calls_since "$from")"'
     mutate "залишок без запасу 20%" 'a = (r - 20) * b / 80;' 'a = r * b / 80;'
@@ -234,7 +271,7 @@ if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "майбутній показ береться" 't <= now &&' ''
     mutate "зіпсований показ береться" 'END { if (bad) exit 3; print out }' 'END { print out }'
     mutate "старий рядок 165 (окрема сесія замість контрприкладів, #198)" ' · за журналом витрачено не менше бюджету — лише інформація, контрприклади все одно спершу в agy"' '"; echo "→ контрприклади ризикового PR: окрема сесія Claude Code — bash tools/scripts/claude-review-session.sh"'
-    mutate "\\| не екранується" "sed 's/\\\\|/\\x1f/g'" "sed 's/x/x/'"
+    mutate "\\| не екранується" '{ gsub(/\\\|/, "\037") }' '{ }' lib
   }
 fi
 
