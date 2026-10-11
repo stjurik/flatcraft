@@ -344,29 +344,40 @@ fi
 # Фікстури — кожна у своєму каталозі: тека читається поруч з архівом.
 H8ROW() { echo "| $1 | $2 | $3 | ok | так | 1/0 | $4 | $5 |"; }
 
+# Порядок файлів теки — з історії git (коміт першого батька, що додав файл), тож
+# фікстури з ≥2 файлами — тимчасові git-репо. repo <тека> — порожнє репо з гілкою main.
+repo() { git init -q -b main "$1" && mkdir -p "$1/agy-stats"; }
+commit() { git -C "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false add -A &&
+  git -C "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "$2"; }
+
 # Числа з архіву й двох файлів теки = числа з одного злитого файла, де рядки стоять у
-# порядку правила (ключ — найпізніша дата від початку файла; рівні — архів, далі файли
-# теки за іменем). Без теки Model V мала б 2 виклики, а не 3.
-mkdir -p "$T/split/agy-stats" "$T/merged"
-{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1; H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'; } >"$T/split/agy-stats.md"
-{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'; H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'; } >"$T/split/agy-stats/feat-a.md"
-{ echo "$H8"; H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1; } >"$T/split/agy-stats/feat-b.md"
+# порядку потрапляння в main: архів, feat-b.md (доданий раніше), feat-a.md. Без теки
+# Model V мала б 2 виклики, а не 3.
+R="$T/split"
+repo "$R"
+{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1; H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1; } >"$R/agy-stats/feat-b.md"
+commit "$R" feat-b
+{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'; H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'; } >"$R/agy-stats/feat-a.md"
+commit "$R" feat-a
+mkdir -p "$T/merged"
 {
   echo "$H8"
   H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1
-  H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'
-  H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'
   H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'
   H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1
+  H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'
+  H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'
 } >"$T/merged/agy-stats.md"
-split_out="$(bash "$SCRIPT" "$T/split/agy-stats.md" 2>&1)"
+split_out="$(bash "$SCRIPT" "$R/agy-stats.md" 2>&1)"
 merged_out="$(bash "$SCRIPT" "$T/merged/agy-stats.md" 2>&1)"
 v="$(grep -F '| Model V |' <<<"$split_out")"
 w="$(grep -F '| Model W |' <<<"$split_out")"
 if [[ "$v" == *"| 3 | 3 | 2 | 67% | 2 | 3 |"* && "$w" == *"| 2 | 2 | 1 | 50% | 2 | 1 |"* ]]; then
   ok "архів + два файли теки: V — 3 виклики, 2 з вигадками, 3 знахідки; W — 2, 1, 1"
 else
-  bad "архів + тека пораховано неправильно: V '$v', W '$w'"
+  bad "архів + тека пораховано неправильно: V '$v', W '$w' ($split_out)"
 fi
 if [[ -n "$v" && "$split_out" == "$merged_out" ]]; then
   ok "два файли теки + архів = один злитий файл (таблиця слово в слово)"
@@ -374,32 +385,83 @@ else
   bad "розбиття на файли змінило числа: розбито:\n$split_out\nзлито:\n$merged_out"
 fi
 
-# Порядок іспиту через файли. Model Y: перший рядок архіву — 2026-10-09 з вигадкою, далі
-# 10 чистих від 2026-10-01: в архіві він ПЕРШИЙ і в іспиті (сортування за самою датою
-# витиснуло б його за десятку — переписало б старий вердикт). Model Z: 9 чистих в архіві,
-# потім два файли теки з тією самою датою, що й ключ архіву: архів раніше за теку, a.md
-# раніше за b.md — до іспиту йде чистий a.md, b.md з вигадкою — поза іспитом.
-mkdir -p "$T/order/agy-stats"
-{
-  echo "$H8"
-  H8ROW 2026-10-09 y0 'Model Y' '**1** — x' '—'
-  for i in $(seq 10); do H8ROW 2026-10-01 "y$i" 'Model Y' '**0** — x' '—'; done
-  for i in $(seq 9); do H8ROW "2026-10-0$i" "z$i" 'Model Z' '**0** — x' '—'; done
-} >"$T/order/agy-stats.md"
-{ echo "$H8"; H8ROW 2026-10-09 za 'Model Z' '**0** — x' '—'; } >"$T/order/agy-stats/a.md"
-{ echo "$H8"; H8ROW 2026-10-09 zb 'Model Z' '**1** — x' '—'; } >"$T/order/agy-stats/b.md"
-order_out="$(bash "$SCRIPT" "$T/order/agy-stats.md" 2>&1)"
-y="$(grep -F '| Model Y |' <<<"$order_out")"
-z="$(grep -F '| Model Z |' <<<"$order_out")"
-if [[ "$y" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$y" == *"поза іспитом: 1"* ]]; then
-  ok "порядок архіву лишається: рядок 2026-10-09 на початку архіву — в іспиті"
+# Контрприклад п.4 (#230): в архіві 10 викликів Model M, рядки 6–10 з вигадкою — 50%,
+# «іде з ролі». Новий PR додає файл теки з чистим викликом M, датованим 2026-10-02. Ключ
+# за датою ставив його в десятку (40%, «тримається»); тепер він після всього, що є в базі.
+R="$T/exam4"
+repo "$R"
+{ echo "$H8"; for i in $(seq 10); do H8ROW "2026-10-$(printf %02d "$i")" "m$i" 'Model M' "**$((i > 5 ? 1 : 0))** — x" '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-02 late 'Model M' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" pr
+m4="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model M |')"
+if [[ "$m4" == *"| 11 | 10 | 5 | 50% |"* && "$m4" == *"іде з ролі"* && "$m4" == *"поза іспитом: 1"* ]]; then
+  ok "п.4: новий файл з ранньою датою не змінює вердикт, винесений на архіві"
 else
-  bad "порядок архіву змінено — старий вердикт переписано: '$y'"
+  bad "п.4: новий файл переписав вердикт архіву: '$m4'"
 fi
-if [[ "$z" == *"| 11 | 10 | 0 | 0% | 0 |"* && "$z" == *"поза іспитом: 1"* ]]; then
-  ok "рівні ключі: архів раніше за теку, a.md раніше за b.md — b.md поза іспитом"
+
+# Порядок файлів — порядок потрапляння в main, а не ім'я і не дата: b.md доданий раніше
+# за a.md, тож в іспит іде b.md (з вигадкою), a.md — поза іспитом. Файл гілки, якого
+# в базі ще немає (0.md), — після всіх, хоч ім'я й дата в нього найраніші.
+R="$T/arrival"
+repo "$R"
+{ echo "$H8"; for i in $(seq 9); do H8ROW "2026-10-0$i" "z$i" 'Model Z' '**0** — x' '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-20 zb 'Model Z' '**1** — x' '—'; } >"$R/agy-stats/b.md"
+commit "$R" b
+{ echo "$H8"; H8ROW 2026-10-05 za 'Model Z' '**0** — x' '—'; } >"$R/agy-stats/a.md"
+commit "$R" a
+z="$(cd "$R" && bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Z |')"
+if [[ "$z" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$z" == *"поза іспитом: 1"* ]]; then
+  ok "порядок файлів — за комітом, що додав файл: b.md раніше за a.md, хоч ім'я й дата пізніші"
 else
-  bad "рівні ключі впорядковано не так: '$z'"
+  bad "порядок файлів не за потраплянням у main: '$z'"
+fi
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-01 z0 'Model Z' '**0** — x' '—'; } >"$R/agy-stats/0.md"
+commit "$R" pr
+z0="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Z |')"
+if [[ "$z0" == *"| 12 | 10 | 1 | 10% | 1 |"* && "$z0" == *"поза іспитом: 2"* ]]; then
+  ok "файл гілки, якого в базі немає, — після всіх файлів бази"
+else
+  bad "файл гілки став не в кінці: '$z0'"
+fi
+
+# Мілкий клон: коміту, що додав файл, в історії немає — відмова з причиною, а не тихо
+# інший порядок. Тека поза git при ≥2 файлах — так само.
+git clone -q --depth 1 "file://$T/arrival" "$T/shallow" 2>/dev/null
+git -C "$T/shallow" switch -q main 2>/dev/null
+sh_out="$(cd "$T/shallow" && bash "$SCRIPT" "$T/shallow/agy-stats.md" 2>&1)"
+sh_rc=$?
+if [[ $sh_rc == 2 && "$sh_out" == *"мілкий клон"* && "$sh_out" != *"| Model Z |"* ]]; then
+  ok "мілкий клон з ≥2 файлами теки — відмова (exit 2) з причиною, без таблиці"
+else
+  bad "мілкий клон: очікував exit 2 і «мілкий клон», отримав $sh_rc: $sh_out"
+fi
+mkdir -p "$T/nogit/agy-stats"
+cp "$T/arrival/agy-stats.md" "$T/nogit/"
+cp "$T/arrival/agy-stats/a.md" "$T/arrival/agy-stats/b.md" "$T/nogit/agy-stats/"
+ng_out="$(bash "$SCRIPT" "$T/nogit/agy-stats.md" 2>&1)"
+ng_rc=$?
+if [[ $ng_rc == 2 && "$ng_out" == *"не в git"* ]]; then
+  ok "тека поза git з ≥2 файлами — відмова (exit 2)"
+else
+  bad "тека поза git: очікував exit 2, отримав $ng_rc: $ng_out"
+fi
+
+# Контрприклад 3д: ім'я файла теки — лише [A-Za-z0-9._-]+.md (перевід рядка, пробіл,
+# кирилиця розірвали б перелік). Відмова, а не тихий пропуск.
+mkdir -p "$T/name/agy-stats"
+cp "$T/arrival/agy-stats.md" "$T/name/"
+cp "$T/arrival/agy-stats/a.md" "$T/name/agy-stats/feat"$'\n'"x.md"
+nm_out="$(bash "$SCRIPT" "$T/name/agy-stats.md" 2>&1)"
+nm_rc=$?
+if [[ $nm_rc == 2 && "$nm_out" == *"ім'я файла теки"* ]]; then
+  ok "ім'я файла теки з переводом рядка — відмова (exit 2)"
+else
+  bad "ім'я з переводом рядка: очікував exit 2, отримав $nm_rc: $nm_out"
 fi
 
 # Шапка файла теки — та сама, що в архіві: колонки читаються за місцем, тож переставлені
@@ -502,9 +564,10 @@ if [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" && $fail == 0 ]]; then
   # shellcheck disable=SC2016 # дослівний текст скрипта
   {
     mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
-    mutate "файли теки у зворотному порядку" "-name '*.md' | LC_ALL=C sort" "-name '*.md' | LC_ALL=C sort -r" lib
-    mutate "ключ — сама дата (старий порядок архіву переставляється)" 'if (d > maxd) maxd = d' 'maxd = d' lib
-    mutate "рівні ключі — тека раніше за архів" '-k1,1 -k2,2n -k3,3n' '-k1,1 -k2,2nr -k3,3n' lib
+    mutate "порядок файлів — за іменем, а не за потраплянням у main" 'sorted="$(journal_order "$dir" "${names[@]}")" || return 2' 'sorted="$(printf '"'"'%s\n'"'"' "${names[@]}" | LC_ALL=C sort)"' lib
+    mutate "файли гілки — не в кінці" "printf '1\\t0\\t%s\\n' \"\$n\"" "printf '0\\t0\\t%s\\n' \"\$n\"" lib
+    mutate "мілкий клон — не відмова" '[[ "$(git -C "$repo" rev-parse --is-shallow-repository 2>/dev/null)" == false ]] || {' 'true || {' lib
+    mutate "ім'я файла теки не звіряється" '    [[ "$f" =~ $JOURNAL_NAME_RE ]] || {' '    true || {' lib
     mutate "шапка теки не звіряється" 'else if (cellsof() != canon) {' 'else if (0) {' lib
     mutate "рядок теки до шапки приймається" 'if (fi > 1 && !cells) {' 'if (0) {' lib
     mutate "зсунутий рядок рахується" 'END { if (bad) exit 3 }' 'END { }' lib

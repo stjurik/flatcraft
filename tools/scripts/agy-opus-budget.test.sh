@@ -103,7 +103,9 @@ out="$(run --today 2026-09-27 "$REAL")"
   bad "справжній журнал не розібрано: $out"
 
 # ─── 7b. Архів і тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
-# Окремий каталог: тека — це agy-stats/ поруч з архівом.
+# Окремий каталог: тека — це agy-stats/ поруч з архівом. Каталог поза git, а файлів
+# теки два: порядок іспиту лічильнику не потрібен (unordered), тож і історія git — теж
+# (тест на справжньому журналі йде в мілкому клоні job «Guard-скрипти»).
 mkdir -p "$T/s/agy-stats"
 journal "$T/s/agy-stats.md" "$(row 2026-09-27 'Claude Opus 4.6 (Thinking)')"
 { echo "$HEAD"; row 2026-09-27 'Claude Sonnet 5.5 (High)'; row 2026-09-26 'Gemini 3.8 Flash (High)'; } >"$T/s/agy-stats/feat-a.md"
@@ -260,7 +262,8 @@ if [[ -z "${OPUS_BUDGET_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "поріг «більше», а не «не менше»" '((n >= limit))' '((n > limit))'
     mutate "зсунутий рядок рахується" 'END { if (bad) exit 3 }' 'END { }' lib
     mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
-    mutate "лише архів, без journal_rows" 'journal_rows "$FILE" | awk' "sed 's/\\\\|/\\x1f/g' \"\$FILE\" | awk"
+    mutate "порядок іспиту — з git (тека поза git чи мілкий клон — відмова)" 'journal_rows "$FILE" unordered | awk' 'journal_rows "$FILE" | awk'
+    mutate "лише архів, без journal_rows" 'journal_rows "$FILE" unordered | awk' "sed 's/\\\\|/\\x1f/g' \"\$FILE\" | awk"
     mutate "покази екрана не читаються" 'if [[ -f "$QUOTA" ]]; then' 'if false; then'
     mutate "після скидання — все ще 7 днів поспіль" 'n="$(calls_since "${reset%% *}")"' 'n="$(calls_since "$from")"'
     mutate "залишок без запасу 20%" 'a = (r - 20) * b / 80;' 'a = r * b / 80;'
