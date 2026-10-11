@@ -6,7 +6,7 @@
 #
 # ЧОМУ ЛІЧИЛЬНИК, А НЕ ЕКРАН КВОТ. Залишок ліміту показує лише інтерактивний екран
 # agy «Models & Quota», а інтерактивний agy оркестратору заборонений
-# (orchestrator-autonomy.md §3.2). Тому поріг рахується з журналу agy-stats.md, де
+# (orchestrator-autonomy.md §3.2). Тому поріг рахується з журналу (архів agy-stats.md і тека), де
 # кожен виклик — рядок із датою й моделлю.
 #
 # КАЛІБРУВАННЯ — з одного скріншота, тож це оцінка. 2026-09-27: залишок 15.53%,
@@ -47,11 +47,25 @@
 # Рядки окремої сесії Claude («… (окрема сесія)», рішення yurii 2026-09-29) — НЕ
 # рахуються: вони йдуть з ліміту підписки Claude, а не з ліміту agy.
 #
-# Використання: tools/scripts/agy-opus-budget.sh [--now 'РРРР-ММ-ДД ГГ:ХХ' | --today РРРР-ММ-ДД] [журнал]
-# Час — UTC; --today Д означає «Д 23:59». Покази — agy-quota.md у теці журналу
+# ЖУРНАЛ — АРХІВ agy-stats.md І ТЕКА agy-stats/ поруч з ним, файл на PR (рішення yurii
+# 2026-10-11, #228). Рядки обох — з journal_rows у journal-rules.sh, спільного з
+# agy-stats-summary.sh: які файли читати, вирішено в одному місці. Тут — `unordered`:
+# виклики рахуються за датою, порядок іспиту не потрібен, тож і історія git (у мілкому
+# клоні job «Guard-скрипти» тест на справжньому журналі працює).
+#
+# Використання: tools/scripts/agy-opus-budget.sh [--now 'РРРР-ММ-ДД ГГ:ХХ' | --today РРРР-ММ-ДД] [архів]
+# Час — UTC; --today Д означає «Д 23:59». Покази — agy-quota.md у теці архіву
 # (або AGY_QUOTA_FILE); немає файла — лише оцінка.
 # exit 0 — рішення надруковано; exit 2 — журнал чи покази не читаються або поганий аргумент.
 set -euo pipefail
+
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/journal-rules.sh"
+[[ -r "$LIB" ]] || {
+  echo "відмова: немає $LIB — не знаю, які файли журналу читати" >&2
+  exit 2
+}
+# shellcheck source=tools/scripts/journal-rules.sh
+source "$LIB"
 
 BUDGET="${AGY_OPUS_BUDGET:-13}"
 NOW="$(date -u '+%F %H:%M')"
@@ -74,7 +88,7 @@ while (($#)); do
     ;;
   esac
 done
-FILE="${FILE:-$(git rev-parse --show-toplevel)/docs/promts/inputs/agy-stats.md}"
+FILE="${FILE:-$(git rev-parse --show-toplevel)/$JOURNAL}"
 QUOTA="${AGY_QUOTA_FILE:-$(dirname "$FILE")/agy-quota.md}"
 TIME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
 epoch() { [[ "$1" =~ $TIME_RE ]] && date -u -d "$1" +%s 2>/dev/null; }
@@ -92,24 +106,17 @@ TODAY="${NOW%% *}"
   exit 2
 }
 
-# Виклики групи «Claude and GPT» в agy з дати $1 по $TODAY включно.
-# `\|` — символ усередині клітинки, не межа колонки (так само, як agy-stats-summary.sh).
-# Рядок із неекранованим «|» зсуває колонки — модель читалась би з чужого місця,
-# тож такий рядок — відмова, а не число.
+# Виклики групи «Claude and GPT» в agy з дати $1 по $TODAY включно, з архіву й теки.
+# `\|` у клітинці і рядок із неекранованим «|» (зсуває колонки — модель читалась би з
+# чужого місця) розбирає journal_rows: такий рядок — відмова (вихід 3), а не число.
 calls_since() {
-  sed 's/\\|/\x1f/g' "$FILE" | awk -F'|' -v from="$1" -v to="$TODAY" '
+  journal_rows "$FILE" unordered | awk -F'|' -v from="$1" -v to="$TODAY" '
     function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    /^\| Дата / { cells = NF; next }
     /^\| [0-9]{4}-[0-9]{2}-[0-9]{2} / {
-      if (cells && NF != cells) {
-        printf "відмова: %s — у рядку %d клітинок замість %d (неекранований «|»?)\n", trim($2), NF - 2, cells - 2 > "/dev/stderr"
-        bad = 1
-        next
-      }
       d = trim($2); m = trim($4)
       if (d >= from && d <= to && m ~ /Claude|GPT/ && m !~ /окрема сесія/) c++
     }
-    END { if (bad) exit 3; print c + 0 }'
+    END { print c + 0 }'
 }
 
 # Останній показ групи «Claude and GPT», не пізніший за NOW: «показ|залишок|скидання».

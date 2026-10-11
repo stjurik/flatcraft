@@ -35,8 +35,10 @@ expect() {
 }
 
 # ─── 1. По справжньому файлу з кожної категорії — ризиковий ─────────────────
+# Кожен файл — разом зі звичайним файлом коду: файли правил поодинці дають виняток
+# «правила-текст» (розділ 5f), а тут перевіряється, що категорія з RULES діє.
 while IFS='|' read -r cat path; do
-  expect "$cat: $path" 0 "$path"$'\n' "клас: ризиковий" "$cat: $path"
+  expect "$cat: $path" 0 "$path"$'\napps/web/src/x.tsx\n' "клас: ризиковий" "$cat: $path"
 done <<'EOF'
 дозволи й безпека|.claude/settings.orchestrator.json
 дозволи й безпека|tools/agy/permissions.json
@@ -135,10 +137,10 @@ cat >"$G/$J" <<'JEOF'
 
 > Вердикт: частка викликів із вигадкою **не нижче 50%** — модель іде з ролі.
 
-| Дата | Задача | Модель agy | Вигадок |
-| ---- | ------ | ---------- | ------- |
-| 2026-09-24 | рецензія #1 \| diff | Gemini 3.8 Flash (High) | **0** |
-| 2026-09-25 | рецензія #2 | Claude Opus 4.6 (Thinking) | **1** |
+| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |
+| ---- | ------ | ---------- | ----- | ----- | ----- | ------- | ----- |
+| 2026-09-24 | рецензія #1 \| diff | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |
+| 2026-09-25 | рецензія #2 | Claude Opus 4.6 (Thinking) | ok | так | n-a | **1** | — |
 JEOF
 "${GIT[@]}" add -A && "${GIT[@]}" commit -qm base && "${GIT[@]}" branch -q base
 branch() { # branch <назва> <perl-вираз над журналом> | branch <назва> --rm
@@ -146,8 +148,11 @@ branch() { # branch <назва> <perl-вираз над журналом> | bra
   if [[ "$2" == --rm ]]; then "${GIT[@]}" rm -q "$J"; else perl -0pi -e "$2" "$G/$J"; fi
   "${GIT[@]}" commit -qam "$1"
 }
-branch append 's/\z/| 2026-09-29 | рецензія #3 | claude-sonnet-5-5 (окрема сесія) | **0** |\n/'
-branch realign 's/\| 2026-09-24 \|/|   2026-09-24   |/; s/\| Дата \|/|   Дата   |/; s/\z/| 2026-09-29 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |\n/'
+# Контрприклад 3а (#230) для архіву: дописаний рядок без пробілу після «|» append-only
+# пропускає (після нормалізації — рядок виклику), а лічильник мовчки не читає.
+branch append-3a 's/\z/|2026-09-29|рецензія #3|Gemini 3.8 Flash (High)|ok|так|n-a|**0**|—|\n/'
+branch append 's/\z/| 2026-09-29 | рецензія #3 | claude-sonnet-5-5 (окрема сесія) | ok | так | n-a | **0** | — |\n/'
+branch realign 's/\| 2026-09-24 \|/| 2026-09-24   |/; s/\| Дата \|/| Дата   |/; s/\z/| 2026-09-29 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |\n/'
 branch edit-row 's/\*\*1\*\*/**0**/'
 branch edit-rule 's/не нижче 50%/не нижче 80%/'
 branch edit-escaped 's/рецензія #1 \\\| diff/рецензія #1 \\| інше/'
@@ -159,19 +164,19 @@ branch add-note 's/\z/\nПримітка: рецензію #2 не рахува�
 # викликів за порядком у файлі, тож переставлення змінює іспит, хоча жоден рядок не
 # зник; рядок-правило з `|` у шапці і новий рядок над старими — теж.
 branch reorder 's/(\| 2026-09-24 [^\n]*\n)(\| 2026-09-25 [^\n]*\n)/$2$1/'
-branch insert-above 's/(\| 2026-09-24 )/| 2026-09-23 | вставлено над старими | Gemini 3.8 Flash (High) | **0** |\n$1/'
+branch insert-above 's/(\| 2026-09-24 )/| 2026-09-23 | вставлено над старими | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |\n$1/'
 branch pipe-rule 's/(> Вердикт[^\n]*\n)/$1| Правило: виклики «пробний» у вікно не йдуть |\n/'
 branch pipe-tail 's/\z/| Правило: рецензію #2 не рахувати |\n/'
 branch second-table 's/\z/\n| Модель | Поріг |\n| --- | --- |\n| Flash | 80% |\n/'
-"${GIT[@]}" switch -q --orphan fresh && mkdir -p "$G/docs/promts/inputs" && echo "| 2026-09-29 | x | y | **0** |" >"$G/$J" &&
+"${GIT[@]}" switch -q --orphan fresh && mkdir -p "$G/docs/promts/inputs" && echo "| 2026-09-29 | x | y | ok | так | n-a | **0** | — |" >"$G/$J" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm fresh
 # Журнал лише з рядків викликів, без шапки: переставлення тут ловить саме звірка
 # порядку — без неї «дописаним» став би весь файл, а він цілком із рядків викликів.
 "${GIT[@]}" switch -q --orphan rows-only && mkdir -p "$G/docs/promts/inputs" &&
-  printf '%s\n' '| 2026-09-24 | a | Flash | **0** |' '| 2026-09-25 | b | Opus | **1** |' >"$G/$J" &&
+  printf '%s\n' '| 2026-09-24 | a | Flash | ok | так | n-a | **0** | — |' '| 2026-09-25 | b | Opus | ok | так | n-a | **1** | — |' >"$G/$J" &&
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm rows-only
 "${GIT[@]}" switch -q -c rows-swapped rows-only &&
-  printf '%s\n' '| 2026-09-25 | b | Opus | **1** |' '| 2026-09-24 | a | Flash | **0** |' >"$G/$J" &&
+  printf '%s\n' '| 2026-09-25 | b | Opus | ok | так | n-a | **1** | — |' '| 2026-09-24 | a | Flash | ok | так | n-a | **0** | — |' >"$G/$J" &&
   "${GIT[@]}" commit -qam rows-swapped
 journal_case() { # journal_case <назва> <гілка> <база> <очікуваний клас>
   local out
@@ -179,6 +184,7 @@ journal_case() { # journal_case <назва> <гілка> <база> <очіку
   [[ "$out" == "клас: $4"* ]] && ok "журнал: $1 — $4" || bad "журнал: $1 — очікував «$4»: $out"
 }
 journal_case "дописано рядок" append base звичайний
+journal_case "3а: дописано рядок без пробілу після | (лічильник його не прочитає)" append-3a base ризиковий
 journal_case "дописано рядок і перевирівняно старі" realign base звичайний
 journal_case "змінено вигадки в старому рядку" edit-row base ризиковий
 journal_case "змінено правило в шапці (50% → 80%)" edit-rule base ризиковий
@@ -224,6 +230,10 @@ quota_case() { # quota_case <назва> <гілка> <очікуваний кл
 quota_case "дописано новий показ" q-append звичайний
 quota_case "змінено старий показ (0% → 100%)" q-edit ризиковий
 quota_case "дописано примітку" q-note ризиковий
+"${GIT[@]}" switch -q -c q-rm base && "${GIT[@]}" rm -q "$Q" && "${GIT[@]}" commit -qm q-rm
+quota_case "покази видалено" q-rm ризиковий
+out="$(cd "$G" && printf '%s\n' "$Q" | REVIEW_CLASS_BASE=немає-такої-гілки REVIEW_CLASS_HEAD=q-append bash "$SCRIPT" 2>&1)"
+[[ "$out" == "клас: ризиковий"* ]] && ok "покази: базу не знайдено — ризиковий" || bad "покази: без бази — очікував ризиковий: $out"
 rm -rf "$G"
 
 # ─── 5d. Шлях з кирилицею: git без core.quotePath=false бере його в лапки ───
@@ -234,6 +244,91 @@ expect "кирилиця в лапках (вісімкові коди) — ро�
 expect "кирилиця без лапок — як є" 0 $'infra/ansible/roles/a8/файл.yml\n' "роль і демон A8: infra/ansible/roles/a8/файл.yml"
 expect "кирилиця в лапках у docs — звичайний" 0 $'"docs/\\320\\277.md"\n' "клас: звичайний"
 expect "інше екранування в лапках — не розпізнано, ризиковий" 0 $'"docs/a\\"b.md"\n' "шлях не розпізнано"
+
+# ─── 5e. Тека журналу agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
+D=docs/promts/inputs/agy-stats
+G="$(mktemp -d)"
+git -C "$G" init -q
+GIT=(git -C "$G" -c user.name=t -c user.email=t@t)
+mkdir -p "$G/$D"
+TH='| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |
+| ---- | ------ | ---------- | ----- | ----- | ----- | ------- | ----- |'
+printf '%s\n' "$TH" '| 2026-10-10 | рецензія #1 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' '| 2026-10-10 | рецензія #2 | Claude Sonnet 5.5 (High) | ok | так | n-a | **1** | — |' >"$G/$D/feat-a.md"
+printf '%s\n' '# журнал' '' "$TH" '| 2026-09-24 | рецензія #0 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >"$G/$J"
+"${GIT[@]}" add -A && "${GIT[@]}" commit -qm base && "${GIT[@]}" branch -q base
+dbranch() { # dbranch <назва> <команда над робочим деревом> — гілка від base з однією зміною
+  "${GIT[@]}" switch -q -c "$1" base
+  (cd "$G" && eval "$2")
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm "$1"
+}
+dbranch d-append "printf '%s\n' '| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >>$D/feat-a.md"
+dbranch d-new "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-b.md"
+dbranch d-new-prose "printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' 'Виклики Sonnet до 10.10 не рахувати.' >$D/feat-b.md"
+dbranch d-new-foreign-head "printf '%s\n' '| Дата | Модель agy | Задача | Результат | Вердикт | Кейси | Вигадок | Знахідок |' '| ---- | ---------- | ------ | ----- | ----- | ----- | ------- | ----- |' '| 2026-10-11 | Gemini 3.8 Flash (High) | рецензія #9 | ok | так | n-a | **0** | — |' >$D/feat-b.md"
+dbranch d-new-nosep "printf '%s\n' '| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |' '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-b.md"
+dbranch d-new-pipe-rule "printf '%s\n' \"\$TH\" '| Правило: виклики Sonnet не рахувати |' >$D/feat-b.md"
+dbranch d-edit "perl -pi -e 's/\*\*1\*\*/**0**/' $D/feat-a.md"
+dbranch d-head "perl -pi -e 's/\| Вигадок \|/| Вигадок (будь-які) |/' $D/feat-a.md"
+dbranch d-rm "git rm -q $D/feat-a.md"
+dbranch d-reorder "perl -0pi -e 's/(\| 2026-10-10 \| рецензія #1[^\n]*\n)(\| 2026-10-10 \| рецензія #2[^\n]*\n)/\$2\$1/' $D/feat-a.md"
+dbranch d-nested "mkdir -p $D/sub && printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/sub/feat-c.md"
+dbranch d-txt "printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-c.txt"
+dbranch t-claude-append "echo 'нове правило' >>CLAUDE.md && printf '%s\n' \"\$TH\" '| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-c.md"
+dbranch t-claude-edit "echo 'нове правило' >>CLAUDE.md && perl -pi -e 's/\*\*1\*\*/**0**/' $D/feat-a.md"
+dir_case() { # dir_case <назва> <гілка> <очікуваний клас> [підрядок]
+  local out
+  out="$(cd "$G" && "${GIT[@]}" diff --name-only --no-renames base..."$2" | REVIEW_CLASS_BASE=base REVIEW_CLASS_HEAD="$2" bash "$SCRIPT" 2>&1)"
+  if [[ "$out" == "клас: $3"* && "$out" == *"${4:-}"* ]]; then ok "тека журналу: $1 — $3"; else bad "тека журналу: $1 — очікував «$3» ${4:+і «$4»}: $out"; fi
+}
+# Контрприклади окремої сесії (#230): 3а–3д і архів, змінений при теці в базі.
+dbranch d-3a "printf '%s\n' \"\$TH\" '|2026-10-11|x|Gemini 3.8 Flash (High)|ok|так|n-a|**0**|—|' >$D/feat-b.md"
+dbranch d-3b "printf '%s\n' '| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок' \"\${TH#*\$'\n'}\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-b.md"
+dbranch d-3c "printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | — | — |' >$D/feat-b.md"
+dbranch d-3g "printf '%s\n' \"\$TH\" '| 2026-10-11 | x grep a | b | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >$D/feat-b.md"
+dbranch d-3d "printf '%s\n' \"\$TH\" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >'$D/feat b.md'"
+dbranch d-arch "printf '%s\n' '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >>$J"
+dir_case "3а: новий файл, рядок без пробілу після |" d-3a ризиковий "$D/feat-b.md"
+dir_case "3б: шапка без | у кінці" d-3b ризиковий "$D/feat-b.md"
+dir_case "3в: рядок без числа вигадок — лічильник відмовить" d-3c ризиковий "agy-stats-summary.sh"
+dir_case "3г: неекранований |" d-3g ризиковий "клітинок"
+dir_case "3д: пробіл в імені файла" d-3d ризиковий "$D/feat b.md"
+dir_case "п.4: архів змінено, коли в базі вже є тека" d-arch ризиковий "$J"
+dir_case "дописано рядок у файл із бази (порядок іспиту = порядок потрапляння в main)" d-append ризиковий "$D/feat-a.md"
+dir_case "новий файл лише з таблиці" d-new звичайний
+dir_case "новий файл з абзацом-правилом" d-new-prose ризиковий "$D/feat-b.md"
+dir_case "новий файл з чужою шапкою (колонки переставлено)" d-new-foreign-head ризиковий "$D/feat-b.md"
+dir_case "новий файл без роздільника таблиці" d-new-nosep ризиковий "$D/feat-b.md"
+dir_case "новий файл з рядком-правилом з |" d-new-pipe-rule ризиковий "$D/feat-b.md"
+dir_case "змінено вигадки в старому рядку" d-edit ризиковий "$D/feat-a.md"
+dir_case "змінено шапку" d-head ризиковий "$D/feat-a.md"
+dir_case "файл видалено" d-rm ризиковий "$D/feat-a.md"
+dir_case "переставлено старі рядки" d-reorder ризиковий "$D/feat-a.md"
+dir_case "файл у підтеці (підрахунок не читає)" d-nested ризиковий "$D/sub/feat-c.md"
+dir_case "файл не .md (підрахунок не читає)" d-txt ризиковий "$D/feat-c.txt"
+out="$(cd "$G" && printf '%s\n' "$D/feat-b.md" | REVIEW_CLASS_BASE=немає-такої-гілки REVIEW_CLASS_HEAD=d-new bash "$SCRIPT" 2>&1)"
+[[ "$out" == "клас: ризиковий"* ]] && ok "тека журналу: без бази — ризиковий" || bad "тека журналу: без бази — очікував ризиковий: $out"
+
+# ─── 5f. Лише текст правил — клас «правила-текст» (рішення yurii 2026-10-11) ──
+expect "лише CLAUDE.md — правила-текст" 0 $'CLAUDE.md\n' "клас: правила-текст" "без контрприкладів" "текст правил: CLAUDE.md"
+expect "CLAUDE.md, ADR, процес, docs/15–17, docs/20 — правила-текст" 0 \
+  $'CLAUDE.md\ndocs/03_DECISIONS.md\ndocs/promts/orchestrator-autonomy.md\ndocs/promts/ai-review-local.md\ndocs/15_LLM_PROMPTS.md\ndocs/16_AUTONOMOUS_RUNS.md\ndocs/17_AI_BUGFIX_FLOW.md\ndocs/20_OPEN_DECISIONS.md\n' \
+  "клас: правила-текст" "текст правил: docs/16_AUTONOMOUS_RUNS.md" "текст правил: docs/promts/ai-review-local.md"
+expect "agy-inbox.md (вхідні дані agy) — не текст правил" 0 $'docs/promts/agy-inbox.md\n' "клас: звичайний"
+expect "CLAUDE.md + agy-inbox.md — ризиковий" 0 $'CLAUDE.md\ndocs/promts/agy-inbox.md\n' "клас: ризиковий"
+expect "лише docs/16 (поза RULES) — теж правила-текст" 0 $'docs/16_AUTONOMOUS_RUNS.md\n' "клас: правила-текст"
+expect "CLAUDE.md + код — ризиковий" 0 $'CLAUDE.md\napps/web/src/x.tsx\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + тест — ризиковий" 0 $'CLAUDE.md\nworkers/cad/tests/test_x.py\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + tools/ — ризиковий" 0 $'CLAUDE.md\ntools/scripts/a8-report.sh\n' "клас: ризиковий" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + .github/ — ризиковий" 0 $'CLAUDE.md\n.github/workflows/ci.yml\n' "клас: ризиковий" "CI: .github/workflows/ci.yml" "правила й контракт: CLAUDE.md"
+expect "CLAUDE.md + infra/ — ризиковий" 0 $'CLAUDE.md\ninfra/compose/Caddyfile\n' "клас: ризиковий" "інфраструктура: infra/compose/Caddyfile"
+expect "CLAUDE.md + .claude/ — ризиковий" 0 $'CLAUDE.md\n.claude/settings.json\n' "клас: ризиковий" "дозволи й безпека: .claude/settings.json"
+expect "CLAUDE.md + docs/promts/inputs/ (дані, не правила) — ризиковий" 0 $'CLAUDE.md\ndocs/promts/inputs/notes.md\n' "клас: ризиковий"
+expect "CLAUDE.md + підтека docs/promts/ — ризиковий" 0 $'CLAUDE.md\ndocs/promts/sub/x.md\n' "клас: ризиковий"
+expect "CLAUDE.md + README — ризиковий" 0 $'CLAUDE.md\nREADME.md\n' "клас: ризиковий"
+expect "docs/16 + README — звичайний (як і раніше)" 0 $'docs/16_AUTONOMOUS_RUNS.md\nREADME.md\n' "клас: звичайний"
+dir_case "CLAUDE.md + новий файл журналу теки — правила-текст" t-claude-append правила-текст "текст правил: CLAUDE.md"
+dir_case "CLAUDE.md + змінений старий рядок журналу — ризиковий" t-claude-edit ризиковий "правила й контракт: CLAUDE.md"
+rm -rf "$G"
 
 # ─── 6. Порожній вхід — відмова, а не «звичайний» ──────────────────────────
 expect "порожній вхід — exit 2" 2 "" "порожній список"
@@ -273,6 +368,8 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
     mkdir -p "$d"
     cp "$SCRIPT" "$d/review-class.sh"
     cp "$lib" "$d/journal-rules.sh"
+    # Лічильники, які бібліотека проганяє на журналі HEAD (journal_unreadable_at).
+    cp "$HERE/agy-stats-summary.sh" "$HERE/agy-opus-budget.sh" "$d/"
     if [[ "$which" == lib ]]; then
       printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
     else
@@ -296,7 +393,9 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "шаблон як рядок, а не glob" '[[ "$f" == ${r#*|} ]]' '[[ "$f" == "${r#*|}" ]]'
   mutate "infra/** не ризикова" "  'інфраструктура|infra/*'" ''
   mutate "CLAUDE.md не ризиковий" "  'правила й контракт|CLAUDE.md'" ''
-  mutate "журнал не перевіряється" '    append_only_violated "$f" "$re" &&' '    false &&'
+  mutate "журнал не перевіряється" '    journal_archive_violated &&' '    false &&'
+  mutate "лічильники на журналі HEAD не проганяються" 'if ((journal_touched)) && why=' 'if false && why='
+  mutate "agy-inbox — теж текст правил" "  '^docs/promts/agy-inbox\\.md\$'" ''
   mutate "без бази — «звичайний»" 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'mb="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1' lib
   mutate "вирівнювання — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' '' lib
   mutate "дописане поза рядками викликів — «звичайний»" '[[ -z "$(grep -Ev -- "$row_re" <<<"$rest")" ]] && return 1' 'return 1' lib
@@ -304,13 +403,32 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
     '[[ "$(head -n "$n" <<<"$new")" == "$old" ]] || return 0' \
     '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0' lib
   mutate "рядок виклику — будь-який рядок з |" "JOURNAL_ROW_RE='^\\|[0-9]{4}-[0-9]{2}-[0-9]{2}\\|'" "JOURNAL_ROW_RE='^\\|'" lib
-  mutate "покази квоти не перевіряються" '[[ "$f" == "$JOURNAL" || "$f" == "$QUOTA" ]]' '[[ "$f" == "$JOURNAL" ]]'
+  mutate "покази квоти не перевіряються" '  if [[ "$f" == "$QUOTA" ]]; then' '  if false; then'
   mutate "docs/20 не ризиковий" "  'правила й контракт|docs/20_OPEN_DECISIONS.md'" ''
   mutate "шлях у лапках не розкодовується" 'if [[ "$f" == \"*\" ]]; then' 'if false; then'
   mutate "agy-stats-summary не ризиковий" "  'правила й контракт|tools/scripts/agy-stats-summary*'" ''
   mutate "видалений журнал — «звичайний»" 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 0' 'new="$(git show "$HEAD_REF:$file" 2>/dev/null)" || return 1' lib
   mutate "спільна бібліотека журналу не ризикова" "  'дозволи й безпека|tools/scripts/journal-rules*'" ''
   mutate "check-journals не ризиковий" "  'CI|tools/scripts/check-journals*'" ''
+  mutate "тека журналу не перевіряється" '    journal_dir_file_violated "$f" &&' '    false &&'
+  mutate "новий файл теки — будь-який зміст після шапки" '[[ "$line" =~ ^\|\ [0-9]{4}-[0-9]{2}-[0-9]{2}\  ]] || return 0' 'true' lib
+  mutate "сира шапка нового файла не звіряється" '[[ "$first" =~ ^\|\ Дата\  && "$first" =~ \|[[:space:]]*$ ]] || return 0' 'true' lib
+  mutate "кількість прочитаних рядків не звіряється" '((loose == got)) || why+=' 'true || why+=' lib
+  mutate "архів можна змінювати, коли в базі вже є тека" '[[ -n "$(git ls-tree -r --name-only "$archbase" -- "$JOURNAL_DIR/" 2>/dev/null)" ]] || return 1' 'return 1' lib
+  mutate "шапку нового файла теки не звіряти" '[[ "$(journal_norm <<<"$first")" == "$want" ]] || return 0' 'true' lib
+  mutate "роздільник нового файла теки не звіряти" '[[ "$second" =~ $sep_re ]] || return 0' 'true' lib
+  mutate "файл теки поза верхнім рівнем, не .md чи з чужим іменем — як звичайний" \
+    '"${file#"$JOURNAL_DIR"/}" =~ $JOURNAL_NAME_RE ]] || return 0' \
+    '"${file#"$JOURNAL_DIR"/}" =~ $JOURNAL_NAME_RE ]] || true' lib
+  mutate "файл теки з бази можна дописувати" '    [[ "$(journal_norm <<<"$was")" == "$(journal_norm <<<"$now")" ]] && return 1
+    return 0' '    append_only_violated "$file" "$JOURNAL_ROW_RE"
+    return' lib
+  mutate "тека журналу без бази — «звичайний»" 'fork="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 0' 'fork="$(git merge-base "$BASE" "$HEAD_REF" 2>/dev/null)" || return 1' lib
+  mutate "виняток правил діє і в змішаному PR" '${#texts[@]} && !other))' '${#texts[@]}))'
+  mutate "inputs/ — теж текст правил" "  '^docs/promts/[^/]+\\.md\$'" "  '^docs/promts/.+\\.md\$'"
+  mutate "docs/16 не текст правил" "  '^docs/1[5-7]_[^/]+\\.md\$'" "  '^docs/1[57]_[^/]+\\.md\$'"
+  mutate "CLAUDE.md не текст правил" "  '^CLAUDE\\.md\$'" ''
+  mutate "правила-текст замість ризикового, коли журнал зіпсовано" '((!${#hits[@]} && ' '(('
   mutate "бібліотеки немає — не відмова" '  exit 2
 }
 # shellcheck source' '  exit 0

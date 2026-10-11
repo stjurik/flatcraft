@@ -7,16 +7,20 @@
 # клітинки (на ньому 2026-09-23 розбився ручний підрахунок — колонки зсунулись),
 # виклики до початку вікна, виклики з позначкою «не зараховано».
 #
+# Тека журналу (файл на PR, рішення yurii 2026-10-11, #228) — розділ «Архів і тека»:
+# кожна фікстура там лежить у власному каталозі, бо тека — це agy-stats/ ПОРУЧ з архівом.
+#
 # Запуск: tools/scripts/agy-stats-summary.test.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$HERE/agy-stats-summary.sh"
+SCRIPT="${AGY_STATS_SUMMARY_UNDER_TEST:-$HERE/agy-stats-summary.sh}"
 fail=0
 ok() { echo "✓ $1"; }
 bad() {
   echo "✗ $1"
   fail=1
+  [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" ]] || exit 1
 }
 
 T="$(mktemp -d)"
@@ -334,6 +338,279 @@ if [[ -n "$a" && "$plain" == "$a" ]]; then
   ok "контроль: з \`\\|\` і без нього рядок Model A однаковий"
 else
   bad "контроль: \`\\|\` змінює результат — '$a' проти '$plain'"
+fi
+
+# ─── Архів і тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228) ─
+# Фікстури — кожна у своєму каталозі: тека читається поруч з архівом.
+H8ROW() { echo "| $1 | $2 | $3 | ok | так | 1/0 | $4 | $5 |"; }
+
+# Порядок файлів теки — з історії git (коміт першого батька, що додав файл), тож
+# фікстури з ≥2 файлами — тимчасові git-репо. repo <тека> — порожнє репо з гілкою main.
+repo() { git init -q -b main "$1" && mkdir -p "$1/agy-stats"; }
+commit() { git -C "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false add -A &&
+  git -C "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "$2"; }
+
+# Числа з архіву й двох файлів теки = числа з одного злитого файла, де рядки стоять у
+# порядку потрапляння в main: архів, feat-b.md (доданий раніше), feat-a.md. Без теки
+# Model V мала б 2 виклики, а не 3.
+R="$T/split"
+repo "$R"
+{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1; H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1; } >"$R/agy-stats/feat-b.md"
+commit "$R" feat-b
+{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'; H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'; } >"$R/agy-stats/feat-a.md"
+commit "$R" feat-a
+mkdir -p "$T/merged"
+{
+  echo "$H8"
+  H8ROW 2026-10-01 a1 'Model V' '**1** — x' 1
+  H8ROW 2026-10-03 a2 'Model V' '**0** — x' '—'
+  H8ROW 2026-10-04 c1 'Model W' '**2** — x' 1
+  H8ROW 2026-10-02 b1 'Model V' '**1** — x' '**2** — дві'
+  H8ROW 2026-10-02 b2 'Model W' '**0** — x' '—'
+} >"$T/merged/agy-stats.md"
+split_out="$(bash "$SCRIPT" "$R/agy-stats.md" 2>&1)"
+merged_out="$(bash "$SCRIPT" "$T/merged/agy-stats.md" 2>&1)"
+v="$(grep -F '| Model V |' <<<"$split_out")"
+w="$(grep -F '| Model W |' <<<"$split_out")"
+if [[ "$v" == *"| 3 | 3 | 2 | 67% | 2 | 3 |"* && "$w" == *"| 2 | 2 | 1 | 50% | 2 | 1 |"* ]]; then
+  ok "архів + два файли теки: V — 3 виклики, 2 з вигадками, 3 знахідки; W — 2, 1, 1"
+else
+  bad "архів + тека пораховано неправильно: V '$v', W '$w' ($split_out)"
+fi
+if [[ -n "$v" && "$split_out" == "$merged_out" ]]; then
+  ok "два файли теки + архів = один злитий файл (таблиця слово в слово)"
+else
+  bad "розбиття на файли змінило числа: розбито:\n$split_out\nзлито:\n$merged_out"
+fi
+
+# Контрприклад п.4 (#230): в архіві 10 викликів Model M, рядки 6–10 з вигадкою — 50%,
+# «іде з ролі». Новий PR додає файл теки з чистим викликом M, датованим 2026-10-02. Ключ
+# за датою ставив його в десятку (40%, «тримається»); тепер він після всього, що є в базі.
+R="$T/exam4"
+repo "$R"
+{ echo "$H8"; for i in $(seq 10); do H8ROW "2026-10-$(printf %02d "$i")" "m$i" 'Model M' "**$((i > 5 ? 1 : 0))** — x" '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-02 late 'Model M' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" pr
+m4="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model M |')"
+if [[ "$m4" == *"| 11 | 10 | 5 | 50% |"* && "$m4" == *"іде з ролі"* && "$m4" == *"поза іспитом: 1"* ]]; then
+  ok "п.4: новий файл з ранньою датою не змінює вердикт, винесений на архіві"
+else
+  bad "п.4: новий файл переписав вердикт архіву: '$m4'"
+fi
+
+# Порядок файлів — порядок потрапляння в main, а не ім'я і не дата: b.md доданий раніше
+# за a.md, тож в іспит іде b.md (з вигадкою), a.md — поза іспитом. Файл гілки, якого
+# в базі ще немає (0.md), — після всіх, хоч ім'я й дата в нього найраніші.
+R="$T/arrival"
+repo "$R"
+{ echo "$H8"; for i in $(seq 9); do H8ROW "2026-10-0$i" "z$i" 'Model Z' '**0** — x' '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-20 zb 'Model Z' '**1** — x' '—'; } >"$R/agy-stats/b.md"
+commit "$R" b
+{ echo "$H8"; H8ROW 2026-10-05 za 'Model Z' '**0** — x' '—'; } >"$R/agy-stats/a.md"
+commit "$R" a
+z="$(cd "$R" && bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Z |')"
+if [[ "$z" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$z" == *"поза іспитом: 1"* ]]; then
+  ok "порядок файлів — за комітом, що додав файл: b.md раніше за a.md, хоч ім'я й дата пізніші"
+else
+  bad "порядок файлів не за потраплянням у main: '$z'"
+fi
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-01 z0 'Model Z' '**0** — x' '—'; } >"$R/agy-stats/0.md"
+commit "$R" pr
+z0="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Z |')"
+if [[ "$z0" == *"| 12 | 10 | 1 | 10% | 1 |"* && "$z0" == *"поза іспитом: 2"* ]]; then
+  ok "файл гілки, якого в базі немає, — після всіх файлів бази"
+else
+  bad "файл гілки став не в кінці: '$z0'"
+fi
+
+# Ім'я, колись додане й видалене в історії бази (рецензія Flash, #230): новий файл PR з
+# тим самим іменем — у кінці, а не на місці старого додавання. І навпаки: файл бази,
+# видалений і доданий знову, — за останнім додаванням.
+R="$T/readd"
+repo "$R"
+{ echo "$H8"; for i in $(seq 9); do H8ROW "2026-10-0$i" "q$i" 'Model Q' '**0** — x' '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-10 old 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" add-x
+git -C "$R" rm -q agy-stats/feat-x.md
+commit "$R" rm-x
+mkdir -p "$R/agy-stats" # git rm прибрав порожню теку
+{ echo "$H8"; H8ROW 2026-10-11 qb 'Model Q' '**1** — x' '—'; } >"$R/agy-stats/feat-y.md"
+commit "$R" add-y
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-12 qx 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" pr
+q="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Q |')"
+if [[ "$q" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$q" == *"поза іспитом: 1"* ]]; then
+  ok "новий файл з іменем колись видаленого файла бази — у кінці, а не на місці старого"
+else
+  bad "новий файл зайняв місце старого додавання: '$q'"
+fi
+git -C "$R" switch -q main
+{ echo "$H8"; H8ROW 2026-10-12 qx 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" readd-x
+q2="$(cd "$R" && bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Q |')"
+if [[ "$q2" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$q2" == *"поза іспитом: 1"* ]]; then
+  ok "файл бази, видалений і доданий знову, — за останнім додаванням"
+else
+  bad "повторно доданий файл став за першим додаванням: '$q2'"
+fi
+
+# Мілкий клон: коміту, що додав файл, в історії немає — відмова з причиною, а не тихо
+# інший порядок. Тека поза git при ≥2 файлах — так само.
+git clone -q --depth 1 "file://$T/arrival" "$T/shallow" 2>/dev/null
+git -C "$T/shallow" switch -q main 2>/dev/null
+sh_out="$(cd "$T/shallow" && bash "$SCRIPT" "$T/shallow/agy-stats.md" 2>&1)"
+sh_rc=$?
+if [[ $sh_rc == 2 && "$sh_out" == *"мілкий клон"* && "$sh_out" != *"| Model Z |"* ]]; then
+  ok "мілкий клон з ≥2 файлами теки — відмова (exit 2) з причиною, без таблиці"
+else
+  bad "мілкий клон: очікував exit 2 і «мілкий клон», отримав $sh_rc: $sh_out"
+fi
+mkdir -p "$T/nogit/agy-stats"
+cp "$T/arrival/agy-stats.md" "$T/nogit/"
+cp "$T/arrival/agy-stats/a.md" "$T/arrival/agy-stats/b.md" "$T/nogit/agy-stats/"
+ng_out="$(bash "$SCRIPT" "$T/nogit/agy-stats.md" 2>&1)"
+ng_rc=$?
+if [[ $ng_rc == 2 && "$ng_out" == *"не в git"* ]]; then
+  ok "тека поза git з ≥2 файлами — відмова (exit 2)"
+else
+  bad "тека поза git: очікував exit 2, отримав $ng_rc: $ng_out"
+fi
+
+# Контрприклад 3д: ім'я файла теки — лише [A-Za-z0-9._-]+.md (перевід рядка, пробіл,
+# кирилиця розірвали б перелік). Відмова, а не тихий пропуск.
+mkdir -p "$T/name/agy-stats"
+cp "$T/arrival/agy-stats.md" "$T/name/"
+cp "$T/arrival/agy-stats/a.md" "$T/name/agy-stats/feat"$'\n'"x.md"
+nm_out="$(bash "$SCRIPT" "$T/name/agy-stats.md" 2>&1)"
+nm_rc=$?
+if [[ $nm_rc == 2 && "$nm_out" == *"ім'я файла теки"* ]]; then
+  ok "ім'я файла теки з переводом рядка — відмова (exit 2)"
+else
+  bad "ім'я з переводом рядка: очікував exit 2, отримав $nm_rc: $nm_out"
+fi
+
+# Шапка файла теки — та сама, що в архіві: колонки читаються за місцем, тож переставлені
+# колонки мовчки дали б чужі числа. Відмова, а не число.
+mkdir -p "$T/head/agy-stats"
+{ echo "$H8"; H8ROW 2026-10-01 a1 'Model V' '**0** — x' '—'; } >"$T/head/agy-stats.md"
+{
+  echo '| Дата | Модель agy | Задача | Результат | Вердикт | Кейси | Вигадки | Справжніх знахідок |'
+  echo '| - | - | - | - | - | - | - | - |'
+  echo '| 2026-10-02 | Model V | b1 | ok | так | 1/0 | **1** — x | — |'
+} >"$T/head/agy-stats/feat-a.md"
+if head_out="$(bash "$SCRIPT" "$T/head/agy-stats.md" 2>&1)"; then
+  bad "файл теки з іншою шапкою прийнято: $head_out"
+elif [[ "$head_out" == *"шапка"*"feat-a.md"* || "$head_out" == *"feat-a.md"*"шапка"* ]] && ! grep -qF '| b1 |' <<<"$head_out"; then
+  ok "файл теки з іншою шапкою — відмова з іменем файла"
+else
+  bad "відмова без пояснення чи файла: $head_out"
+fi
+
+# Рядок у файлі теки до шапки — клітинки не звірити: відмова.
+mkdir -p "$T/nohead/agy-stats"
+cp "$T/head/agy-stats.md" "$T/nohead/agy-stats.md"
+H8ROW 2026-10-02 b1 'Model V' '**1** — x' '—' >"$T/nohead/agy-stats/feat-a.md"
+if nohead_out="$(bash "$SCRIPT" "$T/nohead/agy-stats.md" 2>&1)"; then
+  bad "рядок теки без шапки прийнято: $nohead_out"
+elif [[ "$nohead_out" == *"до шапки"* ]]; then
+  ok "рядок у файлі теки до шапки — відмова"
+else
+  bad "відмова без пояснення: $nohead_out"
+fi
+
+# Неекранований «|» у файлі теки — відмова з іменем файла (так само, як в архіві).
+mkdir -p "$T/shift2/agy-stats"
+cp "$T/head/agy-stats.md" "$T/shift2/agy-stats.md"
+{ echo "$H8"; echo '| 2026-10-02 | b1 зламаний | текст | Model V | ok | так | 1/0 | **0** — x | — |'; } >"$T/shift2/agy-stats/feat-a.md"
+if shift2_out="$(bash "$SCRIPT" "$T/shift2/agy-stats.md" 2>&1)"; then
+  bad "зсунутий рядок у теці прийнято: $shift2_out"
+elif [[ "$shift2_out" == *"feat-a.md"*"клітинок"* ]]; then
+  ok "зсунутий рядок у файлі теки — відмова з іменем файла"
+else
+  bad "відмова без імені файла: $shift2_out"
+fi
+
+# Читаються лише *.md верхнього рівня теки (review-class.sh робить інші файли там
+# ризиковими — рядок у них мовчки випав би з іспиту).
+mkdir -p "$T/only/agy-stats/sub"
+cp "$T/head/agy-stats.md" "$T/only/agy-stats.md"
+{ echo "$H8"; H8ROW 2026-10-02 b1 'Model V' '**1** — x' '—'; } >"$T/only/agy-stats/feat-a.md"
+cp "$T/only/agy-stats/feat-a.md" "$T/only/agy-stats/notes.txt"
+cp "$T/only/agy-stats/feat-a.md" "$T/only/agy-stats/sub/feat-b.md"
+only="$(bash "$SCRIPT" "$T/only/agy-stats.md" 2>&1 | grep -F '| Model V |')"
+if [[ "$only" == *"| 2 | 2 | 1 | 50% |"* ]]; then
+  ok "читаються лише *.md верхнього рівня теки"
+else
+  bad "прочитано зайве чи не те: '$only'"
+fi
+
+# Без спільної бібліотеки — відмова, а не підрахунок самого архіву.
+X="$(mktemp -d)"
+cp "$SCRIPT" "$X/agy-stats-summary.sh"
+lib_out="$(bash "$X/agy-stats-summary.sh" "$T/split/agy-stats.md" 2>&1)"
+lib_rc=$?
+rm -rf "$X"
+if [[ $lib_rc == 2 && "$lib_out" == *"journal-rules.sh"* ]]; then
+  ok "без journal-rules.sh — відмова, exit 2"
+else
+  bad "без journal-rules.sh — очікував exit 2, отримав $lib_rc: $lib_out"
+fi
+
+# ─── Мутації: правила архіву й теки тримаються тестом ──────────────────────
+if [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" && $fail == 0 ]]; then
+  M="$(mktemp -d)"
+  src="$(<"$SCRIPT")"
+  lib="$HERE/journal-rules.sh"
+  libsrc="$(<"$lib")"
+  n=0
+  mutate() { # mutate <назва> <було> <стало> [lib] — «було» мусить стояти рівно раз
+    local name="$1" from="$2" to="$3" which="${4:-script}" body rest d="$M/$((++n))"
+    body="$src"
+    [[ "$which" == lib ]] && body="$libsrc"
+    rest="${body#*"$from"}"
+    if [[ "$rest" == "$body" || "$rest" == *"$from"* ]]; then
+      bad "мутант «$name»: текст не знайдено рівно один раз — мутація застаріла"
+      return
+    fi
+    mkdir -p "$d"
+    cp "$SCRIPT" "$d/agy-stats-summary.sh"
+    cp "$lib" "$d/journal-rules.sh"
+    if [[ "$which" == lib ]]; then
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
+    else
+      printf '%s\n' "${body/"$from"/"$to"}" >"$d/agy-stats-summary.sh"
+    fi
+    if AGY_STATS_SUMMARY_UNDER_TEST="$d/agy-stats-summary.sh" bash "$HERE/$(basename "$0")" >"$d/out" 2>&1; then
+      bad "мутант ВИЖИВ: $name"
+    else
+      ok "мутанта вбито: $name"
+    fi
+  }
+  # shellcheck disable=SC2016 # дослівний текст скрипта
+  {
+    mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
+    mutate "порядок файлів — за іменем, а не за потраплянням у main" 'sorted="$(journal_order "$dir" "${names[@]}")" || return 2' 'sorted="$(printf '"'"'%s\n'"'"' "${names[@]}" | LC_ALL=C sort)"' lib
+    mutate "файли гілки — не в кінці" "printf '1\\t0\\t%s\\n' \"\$n\"" "printf '0\\t0\\t%s\\n' \"\$n\"" lib
+    mutate "спершу історія додавань, потім — чи є файл у базі (старий порядок умов)" '    if ! git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then' '    if [[ -z "${arrived[$n]:-}" ]] && ! git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then' lib
+    mutate "повторне додавання — за першим" '    arrived[$n]="$c"' '    [[ -n "${arrived[$n]:-}" ]] || arrived[$n]="$c"' lib
+    mutate "мілкий клон — не відмова" '[[ "$(git -C "$repo" rev-parse --is-shallow-repository 2>/dev/null)" == false ]] || {' 'true || {' lib
+    mutate "ім'я файла теки не звіряється" '    [[ "$f" =~ $JOURNAL_NAME_RE ]] || {' '    true || {' lib
+    mutate "шапка теки не звіряється" 'else if (cellsof() != canon) {' 'else if (0) {' lib
+    mutate "рядок теки до шапки приймається" 'if (fi > 1 && !cells) {' 'if (0) {' lib
+    mutate "зсунутий рядок рахується" 'END { if (bad) exit 3 }' 'END { }' lib
+    mutate "\\| не екранується" '{ gsub(/\\\|/, "\037") }' '{ }' lib
+    mutate "читаються будь-які файли теки" "-maxdepth 1 -type f -name '*.md'" "-type f" lib
+    mutate "лише архів, без journal_rows" 'journal_rows "$FILE" | awk' "sed 's/\\\\|/\\x1f/g' \"\$FILE\" | awk"
+  }
+  rm -rf "$M"
 fi
 
 if ((fail)); then

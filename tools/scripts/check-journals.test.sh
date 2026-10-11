@@ -66,10 +66,10 @@ cat >"$G/$J" <<'EOF'
 
 > Вердикт: частка викликів із вигадкою **не нижче 50%** — модель іде з ролі.
 
-| Дата | Задача | Модель agy | Вигадок |
-| ---- | ------ | ---------- | ------- |
-| 2026-09-24 | рецензія #1 | Gemini 3.8 Flash (High) | **0** |
-| 2026-09-25 | рецензія #2 | Claude Opus 4.6 (Thinking) | **1** |
+| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |
+| ---- | ------ | ---------- | ----- | ----- | ----- | ------- | ----- |
+| 2026-09-24 | рецензія #1 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |
+| 2026-09-25 | рецензія #2 | Claude Opus 4.6 (Thinking) | ok | так | n-a | **1** | — |
 EOF
 "${GIT[@]}" add -A && "${GIT[@]}" commit -qm base
 
@@ -109,14 +109,14 @@ echo "інше" >"$G/other.txt" && "${GIT[@]}" add -A && "${GIT[@]}" commit -qm 
   "${GIT[@]}" add -A && "${GIT[@]}" commit -qm nofile-add
 
 # agy-stats.md
-mk st-append base "$J" 's/\z/| 2026-09-29 | рецензія #3 | claude-sonnet-5-5 (окрема сесія) | **0** |\n/'
-mk st-realign base "$J" 's/\| 2026-09-24 \|/|   2026-09-24   |/; s/\| Дата \|/|   Дата   |/; s/\z/| 2026-09-29 | рецензія #3 | Gemini 3.8 Flash (High) | **0** |\n/'
+mk st-append base "$J" 's/\z/| 2026-09-29 | рецензія #3 | claude-sonnet-5-5 (окрема сесія) | ok | так | n-a | **0** | — |\n/'
+mk st-realign base "$J" 's/\| 2026-09-24 \|/| 2026-09-24   |/; s/\| Дата \|/| Дата   |/; s/\z/| 2026-09-29 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |\n/'
 mk st-edit base "$J" 's/\*\*1\*\*/**0**/'
 mk st-del-row base "$J" 's/\| 2026-09-24 [^\n]*\n//'
 mk st-reorder base "$J" 's/(\| 2026-09-24 [^\n]*\n)(\| 2026-09-25 [^\n]*\n)/$2$1/'
 "${GIT[@]}" switch -q -c st-rm base && "${GIT[@]}" rm -q "$J" && "${GIT[@]}" commit -qm st-rm
 # Рядок без замикаючого `|`: зміна останньої клітинки — теж зміна.
-mk st-nopipe-base base "$J" 's/\z/| 2026-09-26 | рецензія #3 | Gemini 3.8 Flash (High) | **1**\n/'
+mk st-nopipe-base base "$J" 's/\z/| 2026-09-26 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | **1**\n/'
 mk st-nopipe-edit st-nopipe-base "$J" 's/\| \*\*1\*\*\n\z/| **0**\n/'
 mk st-nopipe-pipe st-nopipe-base "$J" 's/(\| \*\*1\*\*)\n\z/$1 |\n/'
 # Підзаголовок третього рівня — не запис журналу (межа перевірки).
@@ -125,6 +125,56 @@ mk sub-drop sub-base "$L" 's/\n### B\.1 — деталь\n\nдеталь\n//'
 # Обидва журнали зіпсовано одразу.
 mk both-bad base "$J" 's/\*\*1\*\*/**0**/'
 perl -0pi -e 's/## C — третій запис \(2026-09-03\)\n\nтекст C\n\n//' "$G/$L" && "${GIT[@]}" commit -qam "both-bad: docs/13"
+
+# Тека agy-stats/ — файл на PR (рішення yurii 2026-10-11, #228). Окрема база з двома
+# файлами теки.
+D=docs/promts/inputs/agy-stats
+DH='| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |
+| ---- | ------ | ---------- | ----- | ----- | ----- | ------- | ----- |'
+"${GIT[@]}" switch -q -c dir-base base && mkdir -p "$G/$D" &&
+  printf '%s\n' "$DH" '| 2026-10-10 | рецензія #1 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' '| 2026-10-10 | рецензія #2 | Claude Sonnet 5.5 (High) | ok | так | n-a | **1** | — |' >"$G/$D/feat-a.md" &&
+  printf '%s\n' "$DH" '| 2026-10-10 | рецензія #5 | Gemini 3.8 Flash (High) | ok | так | n-a | **2** | — |' >"$G/$D/feat-b.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm dir-base
+mk d-append dir-base "$D/feat-a.md" 's/\z/| 2026-10-11 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |\n/'
+mk d-edit dir-base "$D/feat-a.md" 's/\*\*1\*\*/**0**/'
+mk d-reorder dir-base "$D/feat-a.md" 's/(\| 2026-10-10 \| рецензія #1[^\n]*\n)(\| 2026-10-10 \| рецензія #2[^\n]*\n)/$2$1/'
+mk d-head dir-base "$D/feat-a.md" 's/\| Вигадок \|/| Вигадок (будь-які) |/'
+mk d-b-edit dir-base "$D/feat-b.md" 's/\*\*2\*\*/**0**/'
+"${GIT[@]}" switch -q -c d-rm dir-base && "${GIT[@]}" rm -q "$D/feat-a.md" && "${GIT[@]}" commit -qm d-rm
+"${GIT[@]}" switch -q -c d-new dir-base && printf '%s\n' "$DH" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >"$G/$D/feat-c.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-new
+# Нові файли теки, які підрахунок не прийме (рецензія Flash #230): чужа шапка — після
+# merge лічильник іспиту виходив би з 3 для всіх; без роздільника; з абзацом; у підтеці.
+newfile() { # newfile <гілка> <шлях> <рядок>... — гілка від dir-base з одним новим файлом
+  local b="$1" p="$2"
+  shift 2
+  "${GIT[@]}" switch -q -c "$b" dir-base && mkdir -p "$(dirname "$G/$p")" && printf '%s\n' "$@" >"$G/$p" &&
+    "${GIT[@]}" add -A && "${GIT[@]}" commit -qm "$b"
+}
+ROW9='| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |'
+newfile d-new-foreign "$D/feat-f.md" '| Дата | Модель agy | Задача | Результат | Вердикт | Кейси | Вигадок | Знахідок |' '| ---- | ---------- | ------ | ----- | ----- | ----- | ------- | ----- |' '| 2026-10-11 | Gemini 3.8 Flash (High) | рецензія #9 | ok | так | n-a | **0** | — |'
+newfile d-new-nosep "$D/feat-f.md" '| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |' "$ROW9"
+newfile d-new-prose "$D/feat-f.md" "$DH" "$ROW9" 'Виклики Sonnet до 10.10 не рахувати.'
+newfile d-new-sub "$D/sub/feat-f.md" "$DH" "$ROW9"
+# Контрприклади окремої сесії (#230): формат, який перевірка за нормалізованим зразком
+# пропускала, а лічильник — ні. 3а: рядок без пробілу після «|» читач мовчки пропускає;
+# 3б: шапка без «|» у кінці чи з двома пробілами; 3в: рядок без числа вигадок;
+# 3г: неекранований «|»; 3д: ім'я файла поза [A-Za-z0-9._-]+.md.
+newfile d-3a "$D/feat-f.md" "$DH" '|2026-10-11|рецензія #9|Gemini 3.8 Flash (High)|ok|так|n-a|**0**|—|'
+newfile d-3b-tail "$D/feat-f.md" '| Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок' "${DH#*$'\n'}" "$ROW9"
+newfile d-3b-spaces "$D/feat-f.md" '|  Дата | Задача | Модель agy | Результат | Вердикт | Кейси | Вигадок | Знахідок |' "${DH#*$'\n'}" "$ROW9"
+newfile d-3c "$D/feat-f.md" "$DH" '| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | — | — |'
+newfile d-3g "$D/feat-f.md" "$DH" '| 2026-10-11 | рецензія #9 grep a | b | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |'
+newfile d-3d-space "$D/feat f.md" "$DH" "$ROW9"
+newfile d-3d-cyr "$D/гілка-б.md" "$DH" "$ROW9"
+# Архів: те саме для дописаного рядка, і архів не змінюється, щойно в базі є тека.
+mk st-3a base "$J" 's/\z/|2026-09-29|рецензія #3|Gemini 3.8 Flash (High)|ok|так|n-a|**0**|—|\n/'
+mk st-3c base "$J" 's/\z/| 2026-09-29 | рецензія #3 | Gemini 3.8 Flash (High) | ok | так | n-a | вигадок не рахували | — |\n/'
+mk d-arch-append dir-base "$J" 's/\z/| 2026-10-11 | рецензія #9 | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |\n/'
+newfile d-new-ok "$D/feat-f.md" "$DH" "$ROW9" '| 2026-10-11 | рецензія #10 \| diff | Claude Sonnet 5.5 (High) | ok | так | n-a | **1** | — |'
+# Перший файл теки з'являється в гілці, у базі теки ще немає (перехід з архіву).
+"${GIT[@]}" switch -q -c d-first base && mkdir -p "$G/$D" && printf '%s\n' "$DH" '| 2026-10-11 | x | Gemini 3.8 Flash (High) | ok | так | n-a | **0** | — |' >"$G/$D/feat-a.md" &&
+  "${GIT[@]}" add -A && "${GIT[@]}" commit -qm d-first
 
 # ─── 1. docs/13: заголовки з бази лишаються ────────────────────────────────
 run "docs/13: новий запис нагорі — чисто" base add-top 0 "журнали цілі"
@@ -151,6 +201,31 @@ run "agy-stats: рядок без | у кінці, змінено останню
 run "agy-stats: до рядка дописано замикаючий | — чисто" st-nopipe-base st-nopipe-pipe 0
 run "docs/13: зник підзаголовок ### — не блок (рахуються лише ##)" sub-base sub-drop 0
 run "обидва журнали зіпсовано — два блоки в одному виводі" base both-bad 1 "agy-stats.md" "## C — третій запис" "порушень — 2"
+
+# ─── 2b. Тека agy-stats/: файли з бази лише дописуються ───────────────────
+run "тека: дописано рядок у файл із бази — блок (порядок іспиту = порядок потрапляння в main)" dir-base d-append 1 "$D/feat-a.md: файл журналу з бази змінено"
+run "тека: новий файл — чисто" dir-base d-new 0
+run "тека: перший файл теки, у базі теки немає — чисто" base d-first 0
+run "тека: новий файл, шапка як в архіві + рядки — чисто" dir-base d-new-ok 0 "журнали цілі"
+run "тека: новий файл з чужою шапкою — блок з іменем" dir-base d-new-foreign 1 "БЛОК" "$D/feat-f.md: новий файл журналу"
+run "тека: новий файл без роздільника — блок" dir-base d-new-nosep 1 "$D/feat-f.md"
+run "тека: новий файл з абзацом після таблиці — блок" dir-base d-new-prose 1 "$D/feat-f.md"
+run "тека: новий файл у підтеці — блок" dir-base d-new-sub 1 "$D/sub/feat-f.md"
+run "тека: змінено старий рядок — блок з іменем файла" dir-base d-edit 1 "БЛОК" "$D/feat-a.md"
+run "тека: переставлено старі рядки — блок" dir-base d-reorder 1 "$D/feat-a.md"
+run "тека: змінено шапку — блок" dir-base d-head 1 "$D/feat-a.md"
+run "тека: файл видалено — блок «видалено»" dir-base d-rm 1 "$D/feat-a.md: файл журналу видалено"
+run "тека: змінено файл із бази — блок лише для нього" dir-base d-b-edit 1 "$D/feat-b.md" "порушень — 1"
+run "3а: новий файл, рядок «|2026-…|» без пробілу — блок" dir-base d-3a 1 "$D/feat-f.md"
+run "3а: в архів дописано рядок без пробілу — блок (рядків більше, ніж прочитано)" base st-3a 1 "прочитано"
+run "3б: шапка без | у кінці — блок" dir-base d-3b-tail 1 "$D/feat-f.md"
+run "3б: шапка з двома пробілами перед «Дата» — блок" dir-base d-3b-spaces 1 "$D/feat-f.md"
+run "3в: рядок без числа вигадок у новому файлі — блок (лічильник відмовив)" dir-base d-3c 1 "agy-stats-summary.sh"
+run "3в: в архів дописано рядок без числа вигадок — блок" base st-3c 1 "agy-stats-summary.sh"
+run "3г: неекранований | у новому файлі — блок" dir-base d-3g 1 "клітинок"
+run "3д: пробіл в імені файла теки — блок" dir-base d-3d-space 1 "$D/feat f.md"
+run "3д: кирилиця в імені файла теки — блок" dir-base d-3d-cyr 1 "$D/гілка-б.md"
+run "п.4: архів змінено, коли в базі вже є файли теки — блок" dir-base d-arch-append 1 "архів змінено"
 
 # ─── 3. Помилки виклику — «не звірено», а не «чисто» ───────────────────────
 run "бази немає — exit 2" немає-такої-бази add-top 2 "немає спільного предка"
@@ -199,6 +274,8 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
     mkdir -p "$d"
     cp "$SCRIPT" "$d/check-journals.sh"
     cp "$lib" "$d/journal-rules.sh"
+    # Лічильники, які бібліотека проганяє на журналі HEAD (journal_unreadable_at).
+    cp "$HERE/agy-stats-summary.sh" "$HERE/agy-opus-budget.sh" "$d/"
     if [[ "$which" == lib ]]; then
       printf '%s\n' "${body/"$from"/"$to"}" >"$d/journal-rules.sh"
     else
@@ -230,7 +307,7 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
     'new="$(git show "$HEAD_REF:$PROGRESS_LOG" 2>/dev/null)" || new=""' \
     'new="$(git show "$HEAD_REF:$PROGRESS_LOG" 2>/dev/null)" || new="$old"'
   mutate "docs/13 не перевіряється" 'if old="$(git show "$mb:$PROGRESS_LOG" 2>/dev/null)"; then' 'if false; then'
-  mutate "agy-stats не перевіряється" 'if append_only_violated "$JOURNAL" "$JOURNAL_ROW_RE"; then' 'if false; then'
+  mutate "agy-stats не перевіряється" 'if journal_archive_violated; then' 'if false; then'
   mutate "порушення — вихід 0" 'журнал лише доповнюється"
   exit 1' 'журнал лише доповнюється"
   exit 0'
@@ -245,6 +322,22 @@ if [[ -z "${CHECK_JOURNALS_UNDER_TEST:-}" && $fail == 0 ]]; then
     '[[ -z "$(LC_ALL=C comm -23 <(sort <<<"$old") <(sort <<<"$new"))" ]] || return 0' lib
   mutate "вирівнювання таблиці — теж зміна" 'gsub(/^[ \t]+|[ \t]+$/, "", f); ' '' lib
   mutate "остання клітинка без | губиться" 'last = ($NF ~ /^[ \t]*$/) ? NF - 1 : NF;' 'last = NF - 1;' lib
+  mutate "тека не перевіряється" 'done < <(git ls-tree -r -z --name-only "$mb" -- "$JOURNAL_DIR/")' 'done </dev/null'
+  mutate "тека — з кінчика гілки, а не з бази" 'git ls-tree -r -z --name-only "$mb"' 'git ls-tree -r -z --name-only "$HEAD_REF"'
+  mutate "файл теки — без -z (кирилиця в лапках)" 'while IFS= read -r -d '"''"' f; do' 'while IFS= read -r f; do'
+  mutate "видалений файл теки — без окремого блоку" 'if ! git cat-file -e "$HEAD_REF:$f" 2>/dev/null; then' 'if false; then'
+  mutate "нові файли теки не перевіряються" 'done < <(git ls-tree -r -z --name-only "$HEAD_REF" -- "$JOURNAL_DIR/")' 'done </dev/null'
+  mutate "шапку нового файла теки не звіряти" '[[ "$(journal_norm <<<"$first")" == "$want" ]] || return 0' 'true' lib
+  mutate "новий файл теки — будь-що після шапки" '[[ "$line" =~ ^\|\ [0-9]{4}-[0-9]{2}-[0-9]{2}\  ]] || return 0' 'true' lib
+  mutate "зміна файла теки — не блок" '  elif journal_dir_file_violated "$f"; then' '  elif false; then'
+  mutate "лічильники на журналі HEAD не проганяються" '  why="$(journal_unreadable_at "$HEAD_REF")"; then' '  false; then'
+  mutate "кількість прочитаних рядків не звіряється" '((loose == got)) || why+=' 'true || why+=' lib
+  mutate "сира шапка нового файла не звіряється" '[[ "$first" =~ ^\|\ Дата\  && "$first" =~ \|[[:space:]]*$ ]] || return 0' 'true' lib
+  mutate "файл теки з бази можна дописувати" '    [[ "$(journal_norm <<<"$was")" == "$(journal_norm <<<"$now")" ]] && return 1
+    return 0' '    append_only_violated "$file" "$JOURNAL_ROW_RE"
+    return' lib
+  mutate "архів можна змінювати, коли в базі вже є тека" '[[ -n "$(git ls-tree -r --name-only "$archbase" -- "$JOURNAL_DIR/" 2>/dev/null)" ]] || return 1' 'return 1' lib
+  mutate "ім'я файла теки не звіряється" '"${file#"$JOURNAL_DIR"/}" =~ $JOURNAL_NAME_RE ]] || return 0' '"${file#"$JOURNAL_DIR"/}" =~ $JOURNAL_NAME_RE ]] || true' lib
   mutate "заголовок — будь-який ##, не лише другого рівня" "headings() { grep -E '^## ' || true; }" "headings() { grep -E '^##' || true; }"
 fi
 
