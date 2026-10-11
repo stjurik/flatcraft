@@ -429,6 +429,39 @@ else
   bad "файл гілки став не в кінці: '$z0'"
 fi
 
+# Ім'я, колись додане й видалене в історії бази (рецензія Flash, #230): новий файл PR з
+# тим самим іменем — у кінці, а не на місці старого додавання. І навпаки: файл бази,
+# видалений і доданий знову, — за останнім додаванням.
+R="$T/readd"
+repo "$R"
+{ echo "$H8"; for i in $(seq 9); do H8ROW "2026-10-0$i" "q$i" 'Model Q' '**0** — x' '—'; done; } >"$R/agy-stats.md"
+commit "$R" archive
+{ echo "$H8"; H8ROW 2026-10-10 old 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" add-x
+git -C "$R" rm -q agy-stats/feat-x.md
+commit "$R" rm-x
+mkdir -p "$R/agy-stats" # git rm прибрав порожню теку
+{ echo "$H8"; H8ROW 2026-10-11 qb 'Model Q' '**1** — x' '—'; } >"$R/agy-stats/feat-y.md"
+commit "$R" add-y
+git -C "$R" switch -q -c pr
+{ echo "$H8"; H8ROW 2026-10-12 qx 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" pr
+q="$(cd "$R" && JOURNAL_BASE=main bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Q |')"
+if [[ "$q" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$q" == *"поза іспитом: 1"* ]]; then
+  ok "новий файл з іменем колись видаленого файла бази — у кінці, а не на місці старого"
+else
+  bad "новий файл зайняв місце старого додавання: '$q'"
+fi
+git -C "$R" switch -q main
+{ echo "$H8"; H8ROW 2026-10-12 qx 'Model Q' '**0** — x' '—'; } >"$R/agy-stats/feat-x.md"
+commit "$R" readd-x
+q2="$(cd "$R" && bash "$SCRIPT" "$R/agy-stats.md" 2>&1 | grep -F '| Model Q |')"
+if [[ "$q2" == *"| 11 | 10 | 1 | 10% | 1 |"* && "$q2" == *"поза іспитом: 1"* ]]; then
+  ok "файл бази, видалений і доданий знову, — за останнім додаванням"
+else
+  bad "повторно доданий файл став за першим додаванням: '$q2'"
+fi
+
 # Мілкий клон: коміту, що додав файл, в історії немає — відмова з причиною, а не тихо
 # інший порядок. Тека поза git при ≥2 файлах — так само.
 git clone -q --depth 1 "file://$T/arrival" "$T/shallow" 2>/dev/null
@@ -566,6 +599,8 @@ if [[ -z "${AGY_STATS_SUMMARY_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "тека не читається" '[[ -d "$dir" ]] || return 0' 'return 0' lib
     mutate "порядок файлів — за іменем, а не за потраплянням у main" 'sorted="$(journal_order "$dir" "${names[@]}")" || return 2' 'sorted="$(printf '"'"'%s\n'"'"' "${names[@]}" | LC_ALL=C sort)"' lib
     mutate "файли гілки — не в кінці" "printf '1\\t0\\t%s\\n' \"\$n\"" "printf '0\\t0\\t%s\\n' \"\$n\"" lib
+    mutate "спершу історія додавань, потім — чи є файл у базі (старий порядок умов)" '    if ! git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then' '    if [[ -z "${arrived[$n]:-}" ]] && ! git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then' lib
+    mutate "повторне додавання — за першим" '    arrived[$n]="$c"' '    [[ -n "${arrived[$n]:-}" ]] || arrived[$n]="$c"' lib
     mutate "мілкий клон — не відмова" '[[ "$(git -C "$repo" rev-parse --is-shallow-repository 2>/dev/null)" == false ]] || {' 'true || {' lib
     mutate "ім'я файла теки не звіряється" '    [[ "$f" =~ $JOURNAL_NAME_RE ]] || {' '    true || {' lib
     mutate "шапка теки не звіряється" 'else if (cellsof() != canon) {' 'else if (0) {' lib

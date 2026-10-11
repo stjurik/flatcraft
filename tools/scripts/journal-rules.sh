@@ -204,20 +204,23 @@ journal_order() {
     _jo_refuse "немає спільного предка $base і $rev"
     return 2
   }
-  # Коміти першого батька від найстаршого; для злиття — diff з першим батьком.
+  # Коміти першого батька від найстаршого; для злиття — diff з першим батьком. Ім'я, додане
+  # кілька разів (видалено й додано знову), — за ОСТАННІМ додаванням: файл у базі прийшов тоді.
   while IFS=$'\t' read -r c n; do
-    [[ -n "${arrived[$n]:-}" ]] || arrived[$n]="$c"
+    arrived[$n]="$c"
   done < <(git -C "$repo" log --first-parent --reverse --diff-merges=first-parent --no-renames \
     --diff-filter=A --name-only --format='%x01' "$fork" -- "$rel/" |
     awk -v rel="$rel/" '$0 == "\001" { c++; next } index($0, rel) == 1 { n = substr($0, length(rel) + 1); if (n !~ /\//) print c "\t" n }')
+  # Спершу — чи є файл у базі: ім'я, колись додане й видалене, в історії є, але новий файл
+  # PR з тим самим іменем мусить стати в кінець, а не на місце старого (рецензія Flash, #230).
   for n in "$@"; do
-    if [[ -n "${arrived[$n]:-}" ]]; then
+    if ! git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then
+      printf '1\t0\t%s\n' "$n"
+    elif [[ -n "${arrived[$n]:-}" ]]; then
       printf '0\t%010d\t%s\n' "${arrived[$n]}" "$n"
-    elif git -C "$repo" cat-file -e "$fork:$rel/$n" 2>/dev/null; then
+    else
       _jo_refuse "$n є в базі, але коміту, що його додав, в історії першого батька немає"
       return 2
-    else
-      printf '1\t0\t%s\n' "$n"
     fi
   done | LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3 | cut -f3
 }
