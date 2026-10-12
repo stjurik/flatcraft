@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+# Стан таймера — змінна a8_docker_prune_timer_enabled, а не `systemctl enable`
+# руками: конфігурація, якої немає в git, не існує (CLAUDE.md §0 п.5).
+[Unit]
+Description=Weekly docker prune ({{ a8_docker_prune_on_calendar }})
+
+[Timer]
+OnCalendar={{ a8_docker_prune_on_calendar }}
+# A8 буває приспаною (11.10 не відповідала по ssh). Без Persistent прибирання,
+# що випало на сон, пропускається до наступної неділі; з ним — іде після
+# пробудження. Образ агента воно однаково не чіпає (мітка hart.keep=true).
+Persistent=true
+
+[Install]
+WantedBy=timers.target

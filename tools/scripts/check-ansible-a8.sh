@@ -821,6 +821,104 @@ else
   done
 fi
 
+# Інваріант 14 — prune docker не видаляє образ агента.
+#
+# ЧОМУ. 2026-10-11 ручний `docker-prune.service` (поза git, issue #117) виконав
+# `docker system prune -af --filter until=168h` і видалив образ агента:
+# контейнер агента живе лише під час задачі (`--rm`), тож між задачами образ
+# «не використовується», і prune прибрав його, щойно тому виповнився тиждень.
+# Три задачі поспіль стали `failed`, черга — на паузі.
+#
+# Захист має дві половини, і жодна не працює без другої:
+#   а) таймер prune ставить РОЛЬ (шаблони docker-prune.service/.timer і задача,
+#      що їх ставить), а не рука на машині;
+#   б) кожна команда prune образів у ролі має `--filter label!=hart.keep=true`;
+#   в) образ агента несе `LABEL hart.keep=true` у фінальній стадії Dockerfile.
+# Живий стан на A8 (мітка на образі, команда юніта, таймер) — V21 у verify.yml.
+#
+# ЧОГО НЕ ДОВОДИТЬ (межа статичної перевірки, контрприклади Sonnet 5.5, PR #232):
+#   - читає ТЕКСТ шаблонів, а не рендер: фільтр під `{% if … %}` зарахується,
+#     навіть якщо при рендері його не буде;
+#   - бачить prune лише рядком `docker system|image prune`: argv-форма задачі
+#     (`argv: [docker, system, prune, …]`), модуль community.docker.docker_prune
+#     і `docker rmi` йому невидимі;
+#   - не зважає на `when:`/`tags:` задачі встановлення юнітів: `when: false`
+#     лишив би на A8 старий ручний юніт.
+# Усе це на живій машині ловить V21 (команди юніта, що бачить systemd).
+PRUNE_SVC="$ROLE/templates/docker-prune.service.j2"
+PRUNE_TMR="$ROLE/templates/docker-prune.timer.j2"
+# Коментарі — тим самим strip_comments, що в інваріанті 11: і цілі рядки, і
+# хвостові ` # …` поза лапками. Перша редакція відкидала лише рядки, що
+# починаються з `#`, і фільтр у хвостовому коментарі (`prune -af # --filter
+# "label!=hart.keep=true"`) проходив інваріант, хоча до docker не доходить
+# (рецензія Flash, PR #232). Префікс рядка — ім'я файла: порушення має називати,
+# де шукати.
+uncommented() { # uncommented <файл> — «файл:N:текст» без коментарів
+  local f="$1"
+  strip_comments "$f" | awk -v f="$f" -F '\t' '{ n = $1; sub(/^[^\t]*\t/, ""); if ($0 ~ /[^ \t]/) print f ":" n ":" $0 }'
+}
+if [[ ! -f "$PRUNE_SVC" || ! -f "$PRUNE_TMR" ]]; then
+  violations+=("немає шаблону $PRUNE_SVC або $PRUNE_TMR — таймер prune не з роллю, а лише на машині (issue #117)")
+fi
+# «Ставить» = задача `template` з dest у /etc/systemd/system, у тілі якої є ім'я
+# юніта. Згадка деінде не рахується: V21 у verify.yml теж називає юніт
+# (`systemctl cat …`), але лише ПЕРЕВІРЯЄ його — без задачі встановлення таймер
+# знову жив би лише на машині (спіймано мутацією 37).
+prune_tasks=""
+if [[ -d "$TASKS" ]]; then
+  mapfile -t ptask_files < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+  for f in "${ptask_files[@]}"; do
+    prune_tasks+="$(strip_comments "$f" | cut -f2- | awk '
+      function flush() { if (blk ~ /template:/ && blk ~ /\/etc\/systemd\/system/) printf "%s\036", blk; blk = "" }
+      /^- / { flush() }
+      { blk = blk $0 "\n" }
+      END { flush() }')"
+  done
+fi
+for unit in docker-prune.service docker-prune.timer; do
+  grep -qF -- "$unit" <<<"$prune_tasks" ||
+    violations+=("жодна задача ролі не ставить $unit — таймер prune не з роллю, а лише на машині (issue #117)")
+done
+# Кожна команда, що чистить образи: `docker system prune` чи `docker image prune`,
+# у будь-якому файлі ролі. Лапки знімаємо: `"label!=hart.keep=true"` — те саме.
+prune_files=()
+for d in "$ROLE/templates" "$ROLE/files" "$TASKS" "$ROLE/handlers"; do
+  [[ -d "$d" ]] && while IFS= read -r f; do prune_files+=("$f"); done < <(find "$d" -type f | sort)
+done
+prune_cmds=""
+for f in "${prune_files[@]}"; do
+  prune_cmds+="$(uncommented "$f" | grep -E 'docker[[:space:]]+(system|image)[[:space:]]+prune' || true)"$'\n'
+done
+prune_cmds="$(grep -v '^$' <<<"$prune_cmds" || true)"
+if [[ -z "$prune_cmds" ]]; then
+  violations+=("у ролі немає жодної команди docker system/image prune — не видно, чим чиститься docker і чи пощадить він образ агента")
+fi
+# Кожен prune у рядку — окремо, до межі команди (`;`, `&`, `|`): у
+# `prune --filter … && docker image prune -af` фільтр першого не рятує образ
+# від другого (контрприклад 1.1, PR #232).
+while IFS= read -r cmd; do
+  [[ -z "$cmd" ]] && continue
+  bare="${cmd//\"/}"
+  bare="${bare//\'/}"
+  while IFS= read -r seg; do
+    seg="${seg%%[;&|]*}"
+    [[ "$seg" =~ --filter[[:space:]=]+label!=hart\.keep=true([[:space:]]|$) ]] && continue
+    violations+=("prune без --filter \"label!=hart.keep=true\" — видалить образ агента, щойно тому виповниться тиждень (issue #117): ${cmd#"$ROOT"/}")
+    break
+  done < <(sed -E 's/docker[[:space:]]+(system|image)[[:space:]]+prune/\n&/g' <<<"$bare" | grep -E '^docker[[:space:]]+(system|image)[[:space:]]+prune')
+done <<<"$prune_cmds"
+# Мітка — у ФІНАЛЬНІЙ стадії: LABEL у стадії `uv` до образу агента не доходить.
+# Діє ОСТАННЄ значення ключа: `LABEL hart.keep=true`, а нижче
+# `LABEL hart.keep=false` — образ без захисту (контрприклад 4.2, PR #232).
+if [[ -f "$AGENT_DOCKERFILE" ]]; then
+  final_labels="$(strip_comments "$AGENT_DOCKERFILE" | cut -f2- |
+    awk '/^FROM / { buf = ""; next } { buf = buf $0 "\n" } END { printf "%s", buf }' |
+    grep -E '^[[:space:]]*LABEL[[:space:]]' | tr -d "\"'" || true)"
+  last_keep="$(tr -s ' \t' '\n\n' <<<"$final_labels" | sed -n 's/^hart\.keep=//p' | tail -n 1)"
+  [[ "$last_keep" == true ]] ||
+    violations+=("у фінальній стадії $AGENT_DOCKERFILE немає LABEL hart.keep=true — prune таймера видалить образ агента (issue #117)")
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -831,4 +929,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile)"

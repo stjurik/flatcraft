@@ -48,6 +48,7 @@ A8_WORKTREES_DIR=$ROOT/wt
 A8_TASK_TIMEOUT=${TASK_TIMEOUT:-20}
 A8_ORACLE_TIMEOUT=${ORACLE_TIMEOUT:-20}
 A8_MAX_TURNS=10
+A8_CONTAINER_IMAGE=hart-agent:test
 A8_DEFAULT_MODEL=sonnet
 A8_CLAUDE_TOKEN_FILE=$ROOT/token
 A8_PUSH_CREDENTIAL_KIND=${PUSH_KIND:-none}
@@ -90,6 +91,11 @@ exec 9>&-
 # би на демоні, який на останній задачі дня валить власний оракул кодом 11.
 "$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
+# IMAGE_MISSING: образу немає — справжній `docker run` падає одразу (125).
+if [[ -n "${IMAGE_MISSING:-}" ]]; then
+  echo "Unable to find image 'hart-agent:test' locally" >&2
+  exit 125
+fi
 # «Контейнер» — цей процес. PID за ім'ям контейнера: заглушка docker на
 # `kill <ім'я>` убиває саме його, як справжній `docker kill` — свій контейнер.
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && echo $$ >"$PIDS/pid-$A8_CONTAINER_NAME"
@@ -201,6 +207,27 @@ echo "docker \$*" >>"$LOGS/docker-calls"
 # DOCKER_KILL_FAIL_ONCE: перший kill б'є в порожнечу — контейнера ще немає.
 if [[ "\$1" == kill && -n "\${DOCKER_KILL_FAIL_ONCE:-}" && ! -e "$LOGS/kill-failed-once" ]]; then
   : >"$LOGS/kill-failed-once"
+  exit 1
+fi
+# IMAGE_MISSING: образу немає (issue #117) — так відповідає \`docker image inspect\`
+# (виміряно на docker 29.8.2: rc=1, текст нижче).
+# DOCKER_DOWN: демон не відповідає (текст виміряно в цій сесії, docker CLI 29.8.2
+# без демона). IMAGE_HANG: inspect висить.
+if [[ "\$1" == image && "\$2" == inspect && -n "\${DOCKER_DOWN:-}" ]]; then
+  echo "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running" >&2
+  exit 1
+fi
+if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_HANG:-}" ]]; then
+  exec sleep 30
+fi
+# STOP_DURING=inspect: людина створює STOP на ДРУГОМУ inspect тіку (крок 2a,
+# уже після запобіжників); перший — рання проба серії.
+if [[ "\$1" == image && "\$2" == inspect && "\${STOP_DURING:-}" == inspect ]] &&
+  (( \$(grep -c 'image inspect' "$LOGS/docker-calls") >= 2 )); then
+  echo "причина людини" >"$ROOT/STOP"
+fi
+if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
+  echo "Error response from daemon: No such image: \$3" >&2
   exit 1
 fi
 if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
@@ -833,6 +860,129 @@ EOF
       bad "тік отримав $sig → лишились процеси тіку: $(tick_procs)"
     teardown
   done
+
+  # 21. Образу агента немає (issue #117: 2026-10-11 docker-prune видалив його, і
+  # три задачі поспіль стали failed — пауза черги). Тепер задачу не беруть: вона
+  # лишається в черзі, у журналі env_broken image_missing, а лічильник падінь і
+  # денний ліміт не ростуть. Тіки без образу нижче порогу (3) — не пауза: щойно
+  # образ є, та сама задача виконується наступним тіком.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  [[ ! -e "$ROOT/STOP" ]] && ok "два тіки без образу (нижче порогу) → STOP не поставлено" ||
+    bad "STOP нижче порогу: $(cat "$ROOT/STOP")"
+  [[ "$(jl .event)" == env_broken && "$(jl .detail)" == "image_missing: hart-agent:test"* ]] &&
+    ok "образу немає → event env_broken, detail «image_missing: <образ>»" || bad "image_missing: $(last)"
+  [[ -e "$QD/001-a.json" && -z "$(find "$QD/running" "$QD/failed" "$QD/done" -name '*.json')" ]] &&
+    ok "образу немає → задача лишається в черзі (не running/, не failed/)" ||
+    bad "image_missing: задача не в черзі: $(find "$QD" -name '*.json')"
+  [[ ! -s "$LOGS/runner-calls" ]] && ok "образу немає → обгортку не запущено жодного разу" ||
+    bad "image_missing: обгортку запущено: $(cat "$LOGS/runner-calls")"
+  cnt="$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null || echo 0)"
+  ! grep -q failed "$LOGS/last-results" 2>/dev/null && [[ "${cnt:-0}" == 0 ]] &&
+    ok "тіки без образу → лічильник failed і денний ліміт не зросли" ||
+    bad "image_missing: last-results «$(cat "$LOGS/last-results" 2>/dev/null)», лічильник «$cnt»"
+  [[ "$(grep -c '"event":"env_broken"' "$LOGS/runs.log")" == 2 ]] &&
+    ok "кожен тік без образу пише env_broken (2 з 2)" || bad "env_broken: $(cat "$LOGS/runs.log")"
+  grep -qx 'docker image inspect hart-agent:test' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "перевіряється образ із конфігу (A8_CONTAINER_IMAGE)" ||
+    bad "перевірка образу: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  tick
+  [[ "$(jl .task)" == a && "$(jl .result)" == no-credential && -e "$QD/done/001-a.json" ]] &&
+    ok "образ з'явився → та сама задача виконується наступним тіком (паузи немає)" || bad "після образу: $(last)"
+  [[ ! -e "$LOGS/env-broken-streak" ]] && ok "тік з образом скинув серію env_broken" ||
+    bad "серію не скинуто: $(cat "$LOGS/env-broken-streak")"
+  teardown
+
+  # 21b. Сигнал людині: подія в журналі нікого не кличе (рецензія Flash, PR #232).
+  # На A8_CONSECUTIVE_FAILURE_LIMIT-му тіку поспіль без образу тік пише kill
+  # switch із причиною і ліками; далі черга стоїть як при 401, задача — в черзі.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2 3; do IMAGE_MISSING=1 tick; done
+  [[ -e "$ROOT/STOP" ]] && grep -q 'hart-agent:test' "$ROOT/STOP" && grep -q 'ansible-playbook' "$ROOT/STOP" &&
+    ok "третій тік поспіль без образу → STOP з образом і ліками" || bad "STOP після 3: $(cat "$ROOT/STOP" 2>/dev/null || echo немає)"
+  IMAGE_MISSING=1 tick
+  [[ "$(jl .event)" == kill_switch && -e "$QD/001-a.json" ]] &&
+    ok "після STOP тік зупиняється запобіжником, задача ціла в черзі" || bad "після STOP: $(last)"
+  ! grep -q failed "$LOGS/last-results" 2>/dev/null && ok "STOP за образом — не падіння (last-results без failed)" ||
+    bad "last-results: $(cat "$LOGS/last-results")"
+  teardown
+
+  # 21c. Серію рахуємо ПОСПІЛЬ: тік з образом між збоями її скидає, тож два
+  # окремі збої docker (рестарт) STOP не ставлять.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  tick
+  enqueue 002-b "$(valid b)"
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  [[ ! -e "$ROOT/STOP" && "$(cat "$LOGS/env-broken-streak" 2>/dev/null)" == 2 ]] &&
+    ok "2 збої + тік з образом + 2 збої → серія 2, STOP немає" ||
+    bad "серія не поспіль: STOP=$([[ -e "$ROOT/STOP" ]] && echo є || echo немає), серія=$(cat "$LOGS/env-broken-streak" 2>/dev/null)"
+  teardown
+
+  # 21d. Серію скидає будь-який тік, що бачить образ, — і з порожньою чергою, і
+  # під STOP (контрприклад 3.1, PR #232). Інакше стара серія переживала ліки, і
+  # перший разовий збій docker одразу ставив STOP.
+  setup
+  echo 2 >"$LOGS/env-broken-streak"
+  tick
+  [[ ! -e "$LOGS/env-broken-streak" ]] && ok "порожня черга, образ є → стару серію скинуто" ||
+    bad "серія при порожній черзі: $(cat "$LOGS/env-broken-streak")"
+  echo 2 >"$LOGS/env-broken-streak"
+  touch "$ROOT/STOP"
+  enqueue 001-a "$(valid a)"
+  tick
+  [[ ! -e "$LOGS/env-broken-streak" && "$(jl .event)" == kill_switch ]] &&
+    ok "під STOP, образ є → серію скинуто (до запобіжників)" || bad "серія під STOP: $(cat "$LOGS/env-broken-streak" 2>/dev/null); $(last)"
+  rm -f "$ROOT/STOP"
+  IMAGE_MISSING=1 tick
+  [[ ! -e "$ROOT/STOP" && "$(cat "$LOGS/env-broken-streak")" == 1 ]] &&
+    ok "після скидання разовий збій → серія 1, STOP немає" || bad "після скидання: серія $(cat "$LOGS/env-broken-streak" 2>/dev/null)"
+  teardown
+
+  # 21e. docker не відповідає — STOP не бреше, що образу немає (контрприклад 2.3).
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2 3; do DOCKER_DOWN=1 tick; done
+  [[ "$(jl .detail)" == "docker_unavailable: hart-agent:test — failed to connect to the docker API"* ]] &&
+    ok "docker не відповідає → env_broken docker_unavailable з першим рядком stderr" || bad "docker_unavailable: $(last)"
+  stop_txt="$(cat "$ROOT/STOP" 2>/dev/null)"
+  [[ "$stop_txt" == *"failed to connect to the docker API"* && "$stop_txt" == *"systemctl status docker"* && "$stop_txt" != *"Образу агента"* ]] &&
+    ok "STOP: справжня причина й ліки docker, без «образу немає»" || bad "STOP docker_unavailable: ${stop_txt:-немає}"
+  teardown
+
+  # 21f. inspect висить — тік не тримає flock безкінечно, це теж збій середовища
+  # (контрприклад 2.2).
+  setup
+  enqueue 001-a "$(valid a)"
+  t0="$(date +%s)"
+  IMAGE_HANG=1 A8_INSPECT_TIMEOUT_S=1 tick
+  dt=$(($(date +%s) - t0))
+  [[ "$(jl .detail)" == "docker_unavailable:"*"не відповів за 1 с"* && "$(cat "$LOGS/env-broken-streak")" == 1 ]] && ((dt < 10)) &&
+    ok "завислий inspect → таймаут за ${dt} с, env_broken, серія 1" || bad "завислий inspect: ${dt} с; $(last)"
+  pkill -f "sleep 30" 2>/dev/null
+  teardown
+
+  # 21g. Серію не записати (повний диск) — вести лічбу нічим, тож STOP одразу,
+  # а не серія, що застрягла на 1 (контрприклад 3.3).
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir "$LOGS/env-broken-streak.tmp"
+  IMAGE_MISSING=1 tick
+  [[ -e "$ROOT/STOP" ]] && ok "серію не записати → STOP з першого збою" || bad "збій запису серії: STOP немає"
+  teardown
+
+  # 21h. Людина створила STOP із власною причиною, поки тік питав docker (після
+  # запобіжників): тік не затирає її своїм текстом (noclobber, контрприклад 2.5).
+  setup
+  enqueue 001-a "$(valid a)"
+  echo 2 >"$LOGS/env-broken-streak"
+  STOP_DURING=inspect IMAGE_MISSING=1 tick
+  [[ "$(cat "$ROOT/STOP" 2>/dev/null)" == "причина людини" && "$(jl .event)" == env_broken ]] &&
+    ok "STOP людини під час inspect не затерто" || bad "STOP затерто: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
 }
 
 run_scenarios
@@ -941,6 +1091,17 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "без перевірки STOP перед агентом" 's/if stop_requested; then stop_task "перед агентом"; fi\n//'
   mutate "контейнер оракула сироти не вбито" 's/"a8-\$oid" "a8-\$oid-oracle"/"a8-\$oid"/'
   mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
+  # Образ агента (сценарій 21, issue #117).
+  mutate "тік стартує задачу без перевірки образу" 's/^if ! image_probe; then/if false; then/m'
+  mutate "без образу тік іде далі" 's/(\) 2>\/dev\/null\n  fi\n)  exit 0\n/$1/'
+  mutate "без образу STOP не ставиться" 's/  if \(\(streak >= A8_CONSECUTIVE_FAILURE_LIMIT\)\); then/  if false; then/'
+  mutate "серія env_broken не скидається" 's/if \[\[ -e "\$streak_file" \]\] && image_probe; then\n  rm -f "\$streak_file"\nfi\n//'
+  mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
+  mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
+  mutate "STOP людини затирається" 's/      set -o noclobber\n//'
+  mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
+  mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
+  mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
   wait
   for i in $(seq 1 "$n"); do

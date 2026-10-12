@@ -488,8 +488,18 @@
     mode: "0644"
   register: a8_dockerfile
 
-- name: Check whether the agent image exists
-  ansible.builtin.command: "docker image inspect --format '{{ '{{' }}.Id{{ '}}' }}' {{ a8_agent_image }}"
+- name: Check whether the agent image exists and carries the keep label
+  # Друкує значення мітки hart.keep. Образ, зібраний до мітки (issue #117),
+  # існує під тим самим тегом, але prune його не пощадить — тому «є, але без
+  # мітки» теж причина перезбирати, а не лише «немає».
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - --format
+      - '{{ "{{" }} index .Config.Labels "hart.keep" {{ "}}" }}'
+      - "{{ a8_agent_image }}"
   register: a8_image_inspect
   changed_when: false
   failed_when: false
@@ -515,8 +525,37 @@
     -t {{ a8_agent_image }} {{ a8_config_dir }}/image
   when:
     - not ansible_check_mode
-    - (a8_image_inspect.rc | default(1)) != 0 or a8_dockerfile.changed
+    - >-
+      (a8_image_inspect.rc | default(1)) != 0
+      or (a8_image_inspect.stdout | default('') | trim) != 'true'
+      or a8_dockerfile.changed
   changed_when: true
+
+# ─── 11a. Прибирання docker, яке не чіпає образ агента ─────────────────────
+# Був ручний юніт поза git (issue #117); 2026-10-11 він видалив образ агента,
+# і черга стала на паузу після трьох `failed`. Тепер юніт — з ролі, з фільтром
+# `label!=hart.keep=true`; мітку ставить files/agent.Dockerfile. Ідуть ПІСЛЯ
+# збірки образу: таймер вмикається, коли образ уже з міткою. Ті самі імена, що
+# в ручного юніта, — роль перезаписує його, а не ставить другий поруч.
+- name: Install docker prune service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - docker-prune.service
+    - docker-prune.timer
+  notify: Reload systemd
+
+- name: Set docker prune timer state from a8_docker_prune_timer_enabled
+  ansible.builtin.systemd_service:
+    name: docker-prune.timer
+    enabled: "{{ a8_docker_prune_timer_enabled | bool }}"
+    state: "{{ 'started' if a8_docker_prune_timer_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: not ansible_check_mode
 
 # ─── 12. Демон черги ───────────────────────────────────────────────────────
 - name: Create a8 library directory

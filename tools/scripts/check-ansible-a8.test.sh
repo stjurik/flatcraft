@@ -29,7 +29,7 @@ make_tree() {
     '    libgl1 \' '    && rm -rf /var/lib/apt/lists/*' >"$dir/infra/docker/cad-worker.Dockerfile"
   printf '%s\n' 'FROM node:22' 'RUN apt-get update \' \
     ' && apt-get install -y --no-install-recommends libgl1 \' \
-    ' && rm -rf /var/lib/apt/lists/*' >"$dir/infra/ansible/roles/a8/files/agent.Dockerfile"
+    ' && rm -rf /var/lib/apt/lists/*' 'LABEL hart.keep=true' >"$dir/infra/ansible/roles/a8/files/agent.Dockerfile"
   # Мінімальна пара для інваріанта 10: збірка з мережею хоста й обгортка без
   # --network. Без них він червоніє (fail closed), як і інваріант 9.
   mkdir -p "$dir/infra/ansible/roles/a8/templates" "$dir/infra/ansible/roles/a8/defaults"
@@ -45,6 +45,33 @@ make_tree() {
   mkdir -p "$dir/.github/workflows"
   printf '%s\n' "$CI_OK" >"$dir/.github/workflows/ci.yml"
   printf '%s\n' "$DEPS_OK" >"$dir/infra/ansible/roles/a8/tasks/deps.yml"
+  # Мінімальна трійка для інваріанта 14: юніти prune з ролі, фільтр мітки, задача.
+  printf '%s\n' "$PRUNE_SVC_OK" >"$dir/infra/ansible/roles/a8/templates/docker-prune.service.j2"
+  printf '%s\n' '[Timer]' 'OnCalendar=Sun *-*-* 04:00:00' >"$dir/infra/ansible/roles/a8/templates/docker-prune.timer.j2"
+  printf '%s\n' "$PRUNE_TASK_OK" >"$dir/infra/ansible/roles/a8/tasks/prune.yml"
+}
+
+PRUNE_SVC_OK='[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker system prune -af --filter "until=168h" --filter "label!=hart.keep=true"'
+
+PRUNE_TASK_OK='---
+- name: Install docker prune service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+  loop:
+    - docker-prune.service
+    - docker-prune.timer'
+
+# Дерево для інваріанта 14: здорова роль, у якій замінено юніт prune ($2),
+# Dockerfile агента ($3) і/або задачу prune ($4). Порожній аргумент — лишити здоровим.
+make_prune_tree() {
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  [[ -n "${2:-}" ]] && printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/templates/docker-prune.service.j2"
+  [[ -n "${3:-}" ]] && printf '%s\n' "$3" >"$1/infra/ansible/roles/a8/files/agent.Dockerfile"
+  [[ -n "${4:-}" ]] && printf '%s\n' "$4" >"$1/infra/ansible/roles/a8/tasks/prune.yml"
+  return 0
 }
 
 CI_OK='jobs:
@@ -939,6 +966,155 @@ make_tree "$tmproot/k14" "$PLAY_OK" "$TASKS_OK"
 sed -i 's/^a8_egress_probe_host: deb.debian.org$/a8_egress_probe_host: "{{ a8_egress_domains | last }}"/' "$tmproot/k14/$DEF"
 assert_exit "13: ціль проби через Jinja → 1" 1 "$tmproot/k14" "не буквальне ім'я хоста"
 
+# ─── Інваріант 14: prune docker не видаляє образ агента ─────────────────────
+# Реальна вада 2026-10-11 (issue #117): ручний prune без фільтра мітки видалив
+# образ агента — три failed поспіль, пауза черги.
+SVC_HEAD='[Service]
+Type=oneshot'
+make_prune_tree "$tmproot/p1" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af --filter \"until=168h\""
+assert_exit "інв.14: prune без фільтра мітки → 1" 1 "$tmproot/p1" "prune без --filter"
+
+make_prune_tree "$tmproot/p2" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af --filter 'until=168h' --filter 'label!=hart.keep=true'"
+assert_exit "інв.14: фільтр в одинарних лапках → 0" 0 "$tmproot/p2"
+
+make_prune_tree "$tmproot/p3" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af --filter=label!=hart.keep=true"
+assert_exit "інв.14: форма --filter=label!=… → 0" 0 "$tmproot/p3"
+
+# Фільтр лише в коментарі — до docker не доходить.
+make_prune_tree "$tmproot/p4" "$SVC_HEAD
+# --filter \"label!=hart.keep=true\"
+ExecStart=/usr/bin/docker system prune -af"
+assert_exit "інв.14: фільтр лише в коментарі → 1" 1 "$tmproot/p4" "prune без --filter"
+
+# Фільтр у ХВОСТОВОМУ коментарі — теж не доходить до docker (рецензія Flash, PR #232).
+make_prune_tree "$tmproot/p4b" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af # --filter \"label!=hart.keep=true\""
+assert_exit "інв.14: фільтр у хвостовому коментарі → 1" 1 "$tmproot/p4b" "prune без --filter"
+
+# ` #` усередині лапок — не коментар: фільтр після нього діє.
+make_prune_tree "$tmproot/p4c" "$SVC_HEAD
+ExecStart=/bin/sh -c \"echo ' #'; /usr/bin/docker system prune -af --filter label!=hart.keep=true\""
+assert_exit "інв.14: ' #' у лапках не зрізає фільтр → 0" 0 "$tmproot/p4c"
+
+# Два prune в одному рядку: фільтр першого не рятує від другого (контрприклад 1.1).
+make_prune_tree "$tmproot/p4d" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker system prune -af --filter label!=hart.keep=true && docker image prune -af\""
+assert_exit "інв.14: другий prune у рядку без фільтра → 1" 1 "$tmproot/p4d" "prune без --filter"
+
+make_prune_tree "$tmproot/p4e" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker system prune -af --filter label!=hart.keep=true; docker image prune -f --filter label!=hart.keep=true\""
+assert_exit "інв.14: два prune у рядку, обидва з фільтром → 0" 0 "$tmproot/p4e"
+
+# Фільтр після межі команди належить іншій команді.
+make_prune_tree "$tmproot/p4f" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker image prune -af; echo --filter label!=hart.keep=true\""
+assert_exit "інв.14: фільтр після ; — у чужій команді → 1" 1 "$tmproot/p4f" "prune без --filter"
+
+# Продовження рядка: фільтр на наступному рядку — та сама команда.
+make_prune_tree "$tmproot/p5" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af \\
+  --filter \"label!=hart.keep=true\""
+assert_exit "інв.14: фільтр після продовження \\ → 0" 0 "$tmproot/p5"
+
+# Інша мітка чи інше значення — не наша.
+make_prune_tree "$tmproot/p6" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af --filter \"label!=hart.keep=false\""
+assert_exit "інв.14: label!=hart.keep=false → 1" 1 "$tmproot/p6" "prune без --filter"
+
+# Друга команда без фільтра деінде в ролі — теж видалить образ.
+make_prune_tree "$tmproot/p7"
+printf '%s\n' '---' '- name: extra prune' '  ansible.builtin.command: docker image prune -af' \
+  >"$tmproot/p7/infra/ansible/roles/a8/tasks/extra.yml"
+assert_exit "інв.14: друга команда docker image prune без фільтра → 1" 1 "$tmproot/p7" "prune без --filter"
+
+# Команди prune немає зовсім — не «все гаразд», а «не перевірено».
+make_prune_tree "$tmproot/p8" "$SVC_HEAD
+ExecStart=/bin/true"
+assert_exit "інв.14: жодної команди prune → 1" 1 "$tmproot/p8" "немає жодної команди docker system/image prune"
+
+# Юніти є, але жодна задача їх не ставить — живуть лише на машині.
+make_prune_tree "$tmproot/p9" "" "" '---
+# - docker-prune.service
+# - docker-prune.timer
+- name: nothing
+  ansible.builtin.debug:
+    msg: hi'
+assert_exit "інв.14: юніти prune згадано лише в коментарі задач → 1" 1 "$tmproot/p9"
+grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" &&
+  grep -qF "жодна задача ролі не ставить docker-prune.timer" "$tmproot/out" ||
+  { echo "✗ інв.14: очікував порушення для обох юнітів"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+# Юніт названо лише в задачі ПЕРЕВІРКИ (як V21 у verify.yml) — вона його не
+# ставить. Саме так перша редакція інваріанта пропускала мутацію 37.
+make_prune_tree "$tmproot/p9b" "" "" '---
+- name: V21a — inspect prune unit
+  ansible.builtin.shell: |
+    systemctl cat docker-prune.service
+    systemctl is-enabled docker-prune.timer
+  changed_when: false'
+assert_exit "інв.14: юніти prune лише в задачі перевірки (systemctl cat) → 1" 1 "$tmproot/p9b"
+grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" ||
+  { echo "✗ інв.14: перевірка без встановлення зарахована як встановлення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+make_prune_tree "$tmproot/p10"
+rm "$tmproot/p10/infra/ansible/roles/a8/templates/docker-prune.timer.j2"
+assert_exit "інв.14: шаблону таймера немає → 1" 1 "$tmproot/p10" "немає шаблону"
+
+DF_HEAD='FROM node:22
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 \
+ && rm -rf /var/lib/apt/lists/*'
+make_prune_tree "$tmproot/p11" "" "$DF_HEAD"
+assert_exit "інв.14: Dockerfile без LABEL → 1" 1 "$tmproot/p11" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p12" "" "$DF_HEAD
+LABEL org.example=1 hart.keep=\"true\""
+assert_exit "інв.14: LABEL з лапками серед інших міток → 0" 0 "$tmproot/p12"
+
+make_prune_tree "$tmproot/p13" "" "$DF_HEAD
+# LABEL hart.keep=true"
+assert_exit "інв.14: LABEL лише в коментарі → 1" 1 "$tmproot/p13" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p13b" "" "$DF_HEAD
+LABEL org.example=1 # hart.keep=true"
+assert_exit "інв.14: LABEL hart.keep лише в хвостовому коментарі → 1" 1 "$tmproot/p13b" "немає LABEL hart.keep=true"
+
+# Юніт prune згадано лише в хвостовому коментарі задачі template — не ставиться.
+make_prune_tree "$tmproot/p13c" "" "" '---
+- name: Install units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+  loop:
+    - a8-tick.service # docker-prune.service docker-prune.timer'
+assert_exit "інв.14: юніти prune лише в хвостовому коментарі задачі → 1" 1 "$tmproot/p13c"
+grep -qF "жодна задача ролі не ставить docker-prune.timer" "$tmproot/out" ||
+  { echo "✗ інв.14: хвостовий коментар задачі зараховано як встановлення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+# Діє останнє значення ключа (контрприклад 4.2).
+make_prune_tree "$tmproot/p13d" "" "$DF_HEAD
+LABEL hart.keep=true
+LABEL hart.keep=false"
+assert_exit "інв.14: hart.keep=true, а нижче hart.keep=false → 1" 1 "$tmproot/p13d" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p13e" "" "$DF_HEAD
+LABEL hart.keep=false
+LABEL a=1 hart.keep=true"
+assert_exit "інв.14: false, а нижче true → 0" 0 "$tmproot/p13e"
+
+# Мітка в проміжній стадії до фінального образу не доходить.
+make_prune_tree "$tmproot/p14" "" "FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
+LABEL hart.keep=true
+$DF_HEAD"
+assert_exit "інв.14: LABEL лише в проміжній стадії → 1" 1 "$tmproot/p14" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p15" "" "$DF_HEAD
+LABEL hart.keep=truer"
+assert_exit "інв.14: hart.keep=truer — не та мітка → 1" 1 "$tmproot/p15" "немає LABEL hart.keep=true"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -1412,6 +1588,50 @@ open(p, "w").write(s)
 PY2
 assert_exit "мутація 34: V20b резолвить ціль сам → 1" 1 "$mut" "іде не на адресу, яку пробував агент"
 cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
+
+# Мутації 35–37 — інваріант 14, prune docker не чіпає образ агента (issue #117).
+PRUNE_T="infra/ansible/roles/a8/templates/docker-prune.service.j2"
+AGENT_DF="infra/ansible/roles/a8/files/agent.Dockerfile"
+TASKS_M="infra/ansible/roles/a8/tasks/main.yml"
+
+# 35: prune знову без фільтра мітки — рівно ручний юніт, що 2026-10-11 видалив образ.
+python3 - "$mut/$PRUNE_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = ' --filter "label!=hart.keep=true"'
+assert s.count(anchor) == 1, "фікстура застаріла: ExecStart docker-prune виглядає інакше"
+s = s.replace(anchor, "", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 35: prune без фільтра мітки → 1" 1 "$mut" "prune без --filter"
+cp "$REPO/$PRUNE_T" "$mut/$PRUNE_T"
+
+# 36: Dockerfile без мітки — prune не відрізнить образ агента від сміття.
+python3 - "$mut/$AGENT_DF" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "\nLABEL hart.keep=true\n"
+assert s.count(anchor) == 1, "фікстура застаріла: LABEL в agent.Dockerfile виглядає інакше"
+s = s.replace(anchor, "\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 36: agent.Dockerfile без LABEL hart.keep=true → 1" 1 "$mut" "немає LABEL hart.keep=true"
+cp "$REPO/$AGENT_DF" "$mut/$AGENT_DF"
+
+# 37: роль більше не ставить юніти prune — таймер знову живе лише на машині.
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "    - docker-prune.service\n    - docker-prune.timer\n"
+assert s.count(anchor) == 1, "фікстура застаріла: задача юнітів prune виглядає інакше"
+s = s.replace(anchor, "    - a8-tick.service\n", 1)
+s = s.replace("name: docker-prune.timer", "name: a8-tick.timer")
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 37: роль не ставить юніти prune → 1" 1 "$mut"
+grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" ||
+  { echo "✗ мутація 37: немає порушення «жодна задача ролі не ставить docker-prune.service»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
