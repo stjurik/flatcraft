@@ -4,7 +4,10 @@
 # час/дата/хеш — не хибні спрацювання; невалідна обгортка — error; відмова писати в
 # ~/.flatcraft/ чи в репо; атомарний запис (mv, не пряме перезаписування); реальні
 # збирачі хвилі 1 без DASH_COLLECTORS_DIR проходять dash-schema.sh validate; git
-# status репо не змінюється.
+# status репо не змінюється; той самий сценарій реальних збирачів — зелений і в
+# клоні --depth 1 без origin/main (умова CI, job «Guard-скрипти»; dash-trend.sh за
+# замовчуванням читає REF=origin/main — без клону-з-ref сценарій був би зелений
+# лише там, де origin/main уже є локально).
 #
 # Мутації в кінці ламають dash-collect.sh по одному правилу — набір мусить
 # почервоніти; мутант, що вижив, — привід дописати сценарій, а не довіряти
@@ -220,32 +223,87 @@ else
 fi
 
 # ─── 13–14. лише top-level (не для мутантів): реальні збирачі й git status ──
+#
+# ЧОМУ КЛОН. dash-trend.sh за замовчуванням читає REF="origin/main" (сам рахує
+# REPO як $HERE/../.. — теку, де лежить виконуваний файл скрипта) і відмовляється
+# (exit 2 → розділ error), якщо цього ref немає в REPO. actions/checkout у CI
+# (fetch-depth: 1 за дефолтом) кладе робоче дерево з одним комітом без
+# refs/remotes/origin/main; локальний клон розробника цей ref зазвичай має — тому
+# раніше сценарій був зелений локально й червоний у CI (job «Guard-скрипти»),
+# хоча збирач і колектор поводились правильно. Щоб сценарій не залежав від
+# середовища, де origin/main немає — готуємо тимчасовий клон репозиторію й
+# виставляємо в ньому refs/remotes/origin/main на HEAD, і запускаємо справжні
+# скрипти (dash-collect.sh, dash-t5.sh, dash-trend.sh) САМЕ з цього клону: підміна
+# ref працює лише в тій самій копії репо, де лежать самі скрипти, — передати
+# --ref в dash-trend.sh через dash-collect.sh неможливо (той викликає збирачів
+# лише з --now). git status перевіряємо на тому репо, де фактично запускали
+# (клон або оригінал) — не на оригінальному дереві, яке в разі клону взагалі не
+# торкається.
 if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" ]]; then
   REPO_ROOT="$(cd "$HERE/../.." && pwd)"
   if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    BEFORE="$(git -C "$REPO_ROOT" status --porcelain)"
-    O="$T/o-real"
-    out_combined="$(env HOME="$HOME_T" timeout 20 bash "$SCRIPT" --out "$O" --now "$NOW" 2>&1)"
-    rc=$?
-    AFTER="$(git -C "$REPO_ROOT" status --porcelain)"
-    if [[ $rc -eq 0 ]] && [[ "$BEFORE" == "$AFTER" ]]; then
-      ok "git status репо не змінюється після збору справжніми збирачами"
-    else
-      bad "git status змінився після збору (rc=$rc): до=«$BEFORE» після=«$AFTER»; $out_combined"
-    fi
-    for s in t5 trend; do
-      env_file="$T/real-$s.json"
-      sec "$O" "$s" >"$env_file"
-      vout="$(bash "$HERE/dash-schema.sh" validate "$env_file" 2>&1)"
-      status="$(jq -r .status <"$env_file" 2>/dev/null)"
-      if [[ "$vout" == ok && "$status" != error ]]; then
-        ok "реальний збирач «$s» — обгортка проходить validate, status не error"
-      else
-        bad "реальний збирач «$s» — validate=«$vout» status=«$status»: $(cat "$env_file")"
+    RUN_REPO="$REPO_ROOT"
+    if ! git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null; then
+      RUN_REPO="$T/real-collectors-clone"
+      if ! { git clone -q -- "$REPO_ROOT" "$RUN_REPO" 2>/dev/null &&
+        git -C "$RUN_REPO" update-ref refs/remotes/origin/main HEAD; }; then
+        echo "пропуск сценарію 13–14: не вдалося підготувати клон із origin/main" >&2
+        RUN_REPO=""
       fi
-    done
+    fi
+    if [[ -n "$RUN_REPO" ]]; then
+      BEFORE="$(git -C "$RUN_REPO" status --porcelain)"
+      O="$T/o-real"
+      out_combined="$(env HOME="$HOME_T" timeout 20 bash "$RUN_REPO/tools/scripts/dash-collect.sh" --out "$O" --now "$NOW" 2>&1)"
+      rc=$?
+      AFTER="$(git -C "$RUN_REPO" status --porcelain)"
+      if [[ $rc -eq 0 ]] && [[ "$BEFORE" == "$AFTER" ]]; then
+        ok "git status репо не змінюється після збору справжніми збирачами"
+      else
+        bad "git status змінився після збору (rc=$rc): до=«$BEFORE» після=«$AFTER»; $out_combined"
+      fi
+      for s in t5 trend; do
+        env_file="$T/real-$s.json"
+        sec "$O" "$s" >"$env_file"
+        vout="$(bash "$HERE/dash-schema.sh" validate "$env_file" 2>&1)"
+        status="$(jq -r .status <"$env_file" 2>/dev/null)"
+        if [[ "$vout" == ok && "$status" != error ]]; then
+          ok "реальний збирач «$s» — обгортка проходить validate, status не error"
+        else
+          bad "реальний збирач «$s» — validate=«$vout» status=«$status»: $(cat "$env_file")"
+        fi
+      done
+    fi
   else
     echo "пропуск сценарію 13–14: «$REPO_ROOT» не git-репозиторій" >&2
+  fi
+fi
+
+# ─── 16. самоперевірка: сценарій 13–14 зелений у клоні --depth 1 без origin/main
+# (точне відтворення умови CI, job «Guard-скрипти») — без цього можна знову
+# полагодити лише для «origin/main є» і не помітити, що actions/checkout його не
+# дає. DASH_COLLECT_TEST_CI_SELFCHECK_DONE боронить від рекурсії: вкладений запуск
+# цього ж тестового скрипта має свою секцію 16, яка без прапорця знову клонувала
+# б і знову запускала б себе — до виснаження диска.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_CI_SELFCHECK_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    CI_CLONE="$T/ci-shallow-clone"
+    if git clone -q --depth 1 -- "file://$REPO_ROOT" "$CI_CLONE" 2>/dev/null; then
+      if git -C "$CI_CLONE" rev-parse --verify -q origin/main >/dev/null 2>&1; then
+        bad "самоперевірка CI-умови: клон --depth 1 має origin/main — умова CI не відтворена"
+      else
+        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+        ci_rc=$?
+        if [[ $ci_rc -eq 0 ]]; then
+          ok "самоперевірка CI-умови: dash-collect.test.sh зелений у клоні --depth 1 без origin/main"
+        else
+          bad "самоперевірка CI-умови: dash-collect.test.sh у клоні --depth 1 впав (rc=$ci_rc): $ci_out"
+        fi
+      fi
+    else
+      echo "пропуск самоперевірки CI-умови: git clone --depth 1 не вдався" >&2
+    fi
   fi
 fi
 
