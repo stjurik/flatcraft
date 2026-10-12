@@ -835,6 +835,16 @@ fi
 #   б) кожна команда prune образів у ролі має `--filter label!=hart.keep=true`;
 #   в) образ агента несе `LABEL hart.keep=true` у фінальній стадії Dockerfile.
 # Живий стан на A8 (мітка на образі, команда юніта, таймер) — V21 у verify.yml.
+#
+# ЧОГО НЕ ДОВОДИТЬ (межа статичної перевірки, контрприклади Sonnet 5.5, PR #232):
+#   - читає ТЕКСТ шаблонів, а не рендер: фільтр під `{% if … %}` зарахується,
+#     навіть якщо при рендері його не буде;
+#   - бачить prune лише рядком `docker system|image prune`: argv-форма задачі
+#     (`argv: [docker, system, prune, …]`), модуль community.docker.docker_prune
+#     і `docker rmi` йому невидимі;
+#   - не зважає на `when:`/`tags:` задачі встановлення юнітів: `when: false`
+#     лишив би на A8 старий ручний юніт.
+# Усе це на живій машині ловить V21 (команди юніта, що бачить systemd).
 PRUNE_SVC="$ROLE/templates/docker-prune.service.j2"
 PRUNE_TMR="$ROLE/templates/docker-prune.timer.j2"
 # Коментарі — тим самим strip_comments, що в інваріанті 11: і цілі рядки, і
@@ -883,19 +893,29 @@ prune_cmds="$(grep -v '^$' <<<"$prune_cmds" || true)"
 if [[ -z "$prune_cmds" ]]; then
   violations+=("у ролі немає жодної команди docker system/image prune — не видно, чим чиститься docker і чи пощадить він образ агента")
 fi
+# Кожен prune у рядку — окремо, до межі команди (`;`, `&`, `|`): у
+# `prune --filter … && docker image prune -af` фільтр першого не рятує образ
+# від другого (контрприклад 1.1, PR #232).
 while IFS= read -r cmd; do
   [[ -z "$cmd" ]] && continue
   bare="${cmd//\"/}"
   bare="${bare//\'/}"
-  [[ "$bare" =~ --filter[[:space:]=]+label!=hart\.keep=true([[:space:]]|$) ]] ||
+  while IFS= read -r seg; do
+    seg="${seg%%[;&|]*}"
+    [[ "$seg" =~ --filter[[:space:]=]+label!=hart\.keep=true([[:space:]]|$) ]] && continue
     violations+=("prune без --filter \"label!=hart.keep=true\" — видалить образ агента, щойно тому виповниться тиждень (issue #117): ${cmd#"$ROOT"/}")
+    break
+  done < <(sed -E 's/docker[[:space:]]+(system|image)[[:space:]]+prune/\n&/g' <<<"$bare" | grep -E '^docker[[:space:]]+(system|image)[[:space:]]+prune')
 done <<<"$prune_cmds"
 # Мітка — у ФІНАЛЬНІЙ стадії: LABEL у стадії `uv` до образу агента не доходить.
+# Діє ОСТАННЄ значення ключа: `LABEL hart.keep=true`, а нижче
+# `LABEL hart.keep=false` — образ без захисту (контрприклад 4.2, PR #232).
 if [[ -f "$AGENT_DOCKERFILE" ]]; then
   final_labels="$(strip_comments "$AGENT_DOCKERFILE" | cut -f2- |
     awk '/^FROM / { buf = ""; next } { buf = buf $0 "\n" } END { printf "%s", buf }' |
     grep -E '^[[:space:]]*LABEL[[:space:]]' | tr -d "\"'" || true)"
-  [[ "$final_labels" =~ (^|[[:space:]])hart\.keep=true([[:space:]]|$) ]] ||
+  last_keep="$(tr -s ' \t' '\n\n' <<<"$final_labels" | sed -n 's/^hart\.keep=//p' | tail -n 1)"
+  [[ "$last_keep" == true ]] ||
     violations+=("у фінальній стадії $AGENT_DOCKERFILE немає LABEL hart.keep=true — prune таймера видалить образ агента (issue #117)")
 fi
 

@@ -999,6 +999,20 @@ make_prune_tree "$tmproot/p4c" "$SVC_HEAD
 ExecStart=/bin/sh -c \"echo ' #'; /usr/bin/docker system prune -af --filter label!=hart.keep=true\""
 assert_exit "інв.14: ' #' у лапках не зрізає фільтр → 0" 0 "$tmproot/p4c"
 
+# Два prune в одному рядку: фільтр першого не рятує від другого (контрприклад 1.1).
+make_prune_tree "$tmproot/p4d" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker system prune -af --filter label!=hart.keep=true && docker image prune -af\""
+assert_exit "інв.14: другий prune у рядку без фільтра → 1" 1 "$tmproot/p4d" "prune без --filter"
+
+make_prune_tree "$tmproot/p4e" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker system prune -af --filter label!=hart.keep=true; docker image prune -f --filter label!=hart.keep=true\""
+assert_exit "інв.14: два prune у рядку, обидва з фільтром → 0" 0 "$tmproot/p4e"
+
+# Фільтр після межі команди належить іншій команді.
+make_prune_tree "$tmproot/p4f" "$SVC_HEAD
+ExecStart=/bin/sh -c \"docker image prune -af; echo --filter label!=hart.keep=true\""
+assert_exit "інв.14: фільтр після ; — у чужій команді → 1" 1 "$tmproot/p4f" "prune без --filter"
+
 # Продовження рядка: фільтр на наступному рядку — та сама команда.
 make_prune_tree "$tmproot/p5" "$SVC_HEAD
 ExecStart=/usr/bin/docker system prune -af \\
@@ -1079,6 +1093,17 @@ make_prune_tree "$tmproot/p13c" "" "" '---
 assert_exit "інв.14: юніти prune лише в хвостовому коментарі задачі → 1" 1 "$tmproot/p13c"
 grep -qF "жодна задача ролі не ставить docker-prune.timer" "$tmproot/out" ||
   { echo "✗ інв.14: хвостовий коментар задачі зараховано як встановлення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+# Діє останнє значення ключа (контрприклад 4.2).
+make_prune_tree "$tmproot/p13d" "" "$DF_HEAD
+LABEL hart.keep=true
+LABEL hart.keep=false"
+assert_exit "інв.14: hart.keep=true, а нижче hart.keep=false → 1" 1 "$tmproot/p13d" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p13e" "" "$DF_HEAD
+LABEL hart.keep=false
+LABEL a=1 hart.keep=true"
+assert_exit "інв.14: false, а нижче true → 0" 0 "$tmproot/p13e"
 
 # Мітка в проміжній стадії до фінального образу не доходить.
 make_prune_tree "$tmproot/p14" "" "FROM ghcr.io/astral-sh/uv:0.12.17 AS uv

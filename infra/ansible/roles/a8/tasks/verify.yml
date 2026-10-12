@@ -802,6 +802,8 @@
     quiet: true
 
 # ─── V21. Prune docker з ролі не чіпає образ агента (issue #117) ───────────
+# Рядки — УСІ `Exec*=` (ExecStartPre/Post теж, і з відступом, який systemd
+# приймає): `^ExecStart=` пропускав би prune у drop-in'і (контрприклад 1.5, PR #232).
 # Статичний бік (шаблон, фільтр мітки, LABEL у Dockerfile) тримає інваріант 14 у
 # tools/scripts/check-ansible-a8.sh. Тут — те, що справді стоїть на машині: юніт,
 # який бачить systemd (разом із drop-in'ами, якщо їх хтось додав руками), стан
@@ -810,7 +812,8 @@
 - name: V21a — the prune unit systemd runs, its timer and the keep label on the agent image
   ansible.builtin.shell: |
     set -o pipefail
-    systemctl cat docker-prune.service 2>/dev/null | grep -E '^ExecStart=' || echo NO_PRUNE_UNIT
+    systemctl cat docker-prune.service >/dev/null 2>&1 || echo NO_PRUNE_UNIT
+    systemctl cat docker-prune.service 2>/dev/null | grep -E '^[[:space:]]*Exec[A-Za-z]*=' | sed -E 's/^[[:space:]]+//' || true
     printf 'TIMER='; systemctl is-enabled docker-prune.timer 2>/dev/null || true
     printf 'LABEL='
     docker image inspect --format '{{ '{{' }} index .Config.Labels "hart.keep" {{ '}}' }}' \
@@ -822,13 +825,15 @@
   ansible.builtin.assert:
     that:
       - "'NO_PRUNE_UNIT' not in a8_v_prune.stdout"
-      - a8_v_prune.stdout_lines | select('match', '^ExecStart=') | list | length > 0
-      - a8_v_prune.stdout_lines | select('match', '^ExecStart=') | reject('search', 'label!=hart.keep=true') | list | length == 0
+      - a8_v_prune.stdout_lines | select('match', '^Exec[A-Za-z]*=') | select('search', 'prune') | list | length > 0
+      - >-
+        a8_v_prune.stdout_lines | select('match', '^Exec[A-Za-z]*=') | select('search', 'prune')
+        | reject('search', 'label!=hart.keep=true') | list | length == 0
       - "('TIMER=enabled' in a8_v_prune.stdout_lines) == (a8_docker_prune_timer_enabled | bool)"
       - "'LABEL=true' in a8_v_prune.stdout_lines"
     fail_msg: >-
       docker-prune: {{ a8_v_prune.stdout | replace('\n', ' ') }};
-      очікувано: кожен ExecStart з label!=hart.keep=true, таймер enabled={{ a8_docker_prune_timer_enabled }},
+      очікувано: кожен Exec*= з prune (зокрема з drop-in'ів) має label!=hart.keep=true, таймер enabled={{ a8_docker_prune_timer_enabled }},
       LABEL=true на {{ a8_container_image }}
     success_msg: "prune пропускає образи з hart.keep=true, таймер як у змінній, образ агента з міткою"
     quiet: true

@@ -211,6 +211,21 @@ if [[ "\$1" == kill && -n "\${DOCKER_KILL_FAIL_ONCE:-}" && ! -e "$LOGS/kill-fail
 fi
 # IMAGE_MISSING: образу немає (issue #117) — так відповідає \`docker image inspect\`
 # (виміряно на docker 29.8.2: rc=1, текст нижче).
+# DOCKER_DOWN: демон не відповідає (текст виміряно в цій сесії, docker CLI 29.8.2
+# без демона). IMAGE_HANG: inspect висить.
+if [[ "\$1" == image && "\$2" == inspect && -n "\${DOCKER_DOWN:-}" ]]; then
+  echo "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running" >&2
+  exit 1
+fi
+if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_HANG:-}" ]]; then
+  exec sleep 30
+fi
+# STOP_DURING=inspect: людина створює STOP на ДРУГОМУ inspect тіку (крок 2a,
+# уже після запобіжників); перший — рання проба серії.
+if [[ "\$1" == image && "\$2" == inspect && "\${STOP_DURING:-}" == inspect ]] &&
+  (( \$(grep -c 'image inspect' "$LOGS/docker-calls") >= 2 )); then
+  echo "причина людини" >"$ROOT/STOP"
+fi
 if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
   echo "Error response from daemon: No such image: \$3" >&2
   exit 1
@@ -906,6 +921,68 @@ EOF
     ok "2 збої + тік з образом + 2 збої → серія 2, STOP немає" ||
     bad "серія не поспіль: STOP=$([[ -e "$ROOT/STOP" ]] && echo є || echo немає), серія=$(cat "$LOGS/env-broken-streak" 2>/dev/null)"
   teardown
+
+  # 21d. Серію скидає будь-який тік, що бачить образ, — і з порожньою чергою, і
+  # під STOP (контрприклад 3.1, PR #232). Інакше стара серія переживала ліки, і
+  # перший разовий збій docker одразу ставив STOP.
+  setup
+  echo 2 >"$LOGS/env-broken-streak"
+  tick
+  [[ ! -e "$LOGS/env-broken-streak" ]] && ok "порожня черга, образ є → стару серію скинуто" ||
+    bad "серія при порожній черзі: $(cat "$LOGS/env-broken-streak")"
+  echo 2 >"$LOGS/env-broken-streak"
+  touch "$ROOT/STOP"
+  enqueue 001-a "$(valid a)"
+  tick
+  [[ ! -e "$LOGS/env-broken-streak" && "$(jl .event)" == kill_switch ]] &&
+    ok "під STOP, образ є → серію скинуто (до запобіжників)" || bad "серія під STOP: $(cat "$LOGS/env-broken-streak" 2>/dev/null); $(last)"
+  rm -f "$ROOT/STOP"
+  IMAGE_MISSING=1 tick
+  [[ ! -e "$ROOT/STOP" && "$(cat "$LOGS/env-broken-streak")" == 1 ]] &&
+    ok "після скидання разовий збій → серія 1, STOP немає" || bad "після скидання: серія $(cat "$LOGS/env-broken-streak" 2>/dev/null)"
+  teardown
+
+  # 21e. docker не відповідає — STOP не бреше, що образу немає (контрприклад 2.3).
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2 3; do DOCKER_DOWN=1 tick; done
+  [[ "$(jl .detail)" == "docker_unavailable: hart-agent:test — failed to connect to the docker API"* ]] &&
+    ok "docker не відповідає → env_broken docker_unavailable з першим рядком stderr" || bad "docker_unavailable: $(last)"
+  stop_txt="$(cat "$ROOT/STOP" 2>/dev/null)"
+  [[ "$stop_txt" == *"failed to connect to the docker API"* && "$stop_txt" == *"systemctl status docker"* && "$stop_txt" != *"Образу агента"* ]] &&
+    ok "STOP: справжня причина й ліки docker, без «образу немає»" || bad "STOP docker_unavailable: ${stop_txt:-немає}"
+  teardown
+
+  # 21f. inspect висить — тік не тримає flock безкінечно, це теж збій середовища
+  # (контрприклад 2.2).
+  setup
+  enqueue 001-a "$(valid a)"
+  t0="$(date +%s)"
+  IMAGE_HANG=1 A8_INSPECT_TIMEOUT_S=1 tick
+  dt=$(($(date +%s) - t0))
+  [[ "$(jl .detail)" == "docker_unavailable:"*"не відповів за 1 с"* && "$(cat "$LOGS/env-broken-streak")" == 1 ]] && ((dt < 10)) &&
+    ok "завислий inspect → таймаут за ${dt} с, env_broken, серія 1" || bad "завислий inspect: ${dt} с; $(last)"
+  pkill -f "sleep 30" 2>/dev/null
+  teardown
+
+  # 21g. Серію не записати (повний диск) — вести лічбу нічим, тож STOP одразу,
+  # а не серія, що застрягла на 1 (контрприклад 3.3).
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir "$LOGS/env-broken-streak.tmp"
+  IMAGE_MISSING=1 tick
+  [[ -e "$ROOT/STOP" ]] && ok "серію не записати → STOP з першого збою" || bad "збій запису серії: STOP немає"
+  teardown
+
+  # 21h. Людина створила STOP із власною причиною, поки тік питав docker (після
+  # запобіжників): тік не затирає її своїм текстом (noclobber, контрприклад 2.5).
+  setup
+  enqueue 001-a "$(valid a)"
+  echo 2 >"$LOGS/env-broken-streak"
+  STOP_DURING=inspect IMAGE_MISSING=1 tick
+  [[ "$(cat "$ROOT/STOP" 2>/dev/null)" == "причина людини" && "$(jl .event)" == env_broken ]] &&
+    ok "STOP людини під час inspect не затерто" || bad "STOP затерто: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
 }
 
 run_scenarios
@@ -1015,10 +1092,14 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "контейнер оракула сироти не вбито" 's/"a8-\$oid" "a8-\$oid-oracle"/"a8-\$oid"/'
   mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
   # Образ агента (сценарій 21, issue #117).
-  mutate "тік стартує задачу без перевірки образу" 's/if ! imsg=/if false \&\& ! imsg=/'
-  mutate "без образу тік іде далі" 's/(>"\$A8_KILL_SWITCH"\n  fi\n)  exit 0\n/$1/'
+  mutate "тік стартує задачу без перевірки образу" 's/^if ! image_probe; then/if false; then/m'
+  mutate "без образу тік іде далі" 's/(\) 2>\/dev\/null\n  fi\n)  exit 0\n/$1/'
   mutate "без образу STOP не ставиться" 's/  if \(\(streak >= A8_CONSECUTIVE_FAILURE_LIMIT\)\); then/  if false; then/'
-  mutate "серія env_broken не скидається" 's/\nrm -f "\$streak_file"\n/\n/'
+  mutate "серія env_broken не скидається" 's/if \[\[ -e "\$streak_file" \]\] && image_probe; then\n  rm -f "\$streak_file"\nfi\n//'
+  mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
+  mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
+  mutate "STOP людини затирається" 's/      set -o noclobber\n//'
+  mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
   mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'

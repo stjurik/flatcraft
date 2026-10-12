@@ -68,6 +68,29 @@ logic() { bash "$LOGIC" "$@"; }
 field() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$2"; }
 now() { date +%s; }
 
+# ─── Образ агента: проба і серія env_broken (крок 2a нижче) ───────────────
+# image_probe → 0, якщо образ є; інакше в $imsg — перший рядок причини.
+# `timeout`, бо завислий docker інакше тримав би flock тіку без кінця: наступні
+# тіки писали б `busy`, серія не росла б, і STOP не з'явився б ніколи
+# (контрприклад 2.2, PR #232). Таймаут — теж зламане середовище.
+INSPECT_S="${A8_INSPECT_TIMEOUT_S:-60}"
+streak_file="$A8_LOGS_DIR/env-broken-streak"
+image_probe() {
+  local rc=0
+  imsg="$(timeout "$INSPECT_S" "$DOCKER" image inspect "$A8_CONTAINER_IMAGE" 2>&1 >/dev/null)" || rc=$?
+  ((rc == 124)) && imsg="docker image inspect не відповів за ${INSPECT_S} с"
+  imsg="${imsg%%$'\n'*}"
+  return "$rc"
+}
+# Серію скидає БУДЬ-ЯКИЙ тік, що бачить образ, — до запобіжників і до черги.
+# Інакше її скидав лише тік із задачею, що дійшов до 2a: після ліків при
+# порожній черзі, паузі чи STOP стара серія жила далі, і перший разовий збій
+# docker одразу ставив STOP (контрприклад 3.1, PR #232). Проба — лише коли серія
+# є, тож звичайний тік docker зайвий раз не питає.
+if [[ -e "$streak_file" ]] && image_probe; then
+  rm -f "$streak_file"
+fi
+
 # ─── 0. Сирота з попереднього тіку ─────────────────────────────────────────
 # Файл у running/ при вільному lock означає: попередній тік помер посеред
 # задачі (OOM, ребут, kill). Що встиг зробити агент — невідомо, тому це failed,
@@ -123,32 +146,53 @@ done < <(find "$Q" -maxdepth 1 -type f -name '*.json' | sort)
 # не винні.
 #
 # Тому: задачу не беремо (вона лишається в черзі, у running/ не переходить),
-# пишемо подію env_broken з деталлю image_missing і виходимо. Ні `record
+# пишемо подію env_broken (image_missing чи docker_unavailable) і виходимо. Ні `record
 # failed`, ні `count`: лічильник падінь і денний ліміт не ростуть. Наступний
 # тік перевірить знову; ліки — застосувати роль, вона збирає образ.
 #
-# Ненульовий код `image inspect` при недоступному docker теж іде сюди: це так
-# само зламане середовище, а перший рядок stderr у деталі називає справжню
-# причину — окремих сигнатур не вигадуємо (CLAUDE.md §0 п.3).
+# Причина — з виміряного: «No such image» (docker 29.8.2, 2026-10-12) — образу
+# немає, ліки — роль. Будь-що інше (docker не відповідає, немає доступу, таймаут)
+# — docker_unavailable: образ, можливо, на місці, і STOP не має брехати, що його
+# немає (контрприклад 2.3, PR #232). Перший рядок stderr іде і в журнал, і в STOP.
 #
 # СИГНАЛ ЛЮДИНІ. Сама подія в журналі нікого не кличе: тік мовчки виходив би з 0
 # кожні 10 хв (рецензія Flash, PR #232). Тому після A8_CONSECUTIVE_FAILURE_LIMIT
-# тіків поспіль без образу тік пише kill switch із причиною й ліками — той самий
-# механізм, що при 401: STOP видно в пульті й a8-report, а зняти його — рішення
-# людини. Одиничний збій (docker саме перезапускається) STOP не ставить:
-# лічильник серії скидається першим же тіком, що побачив образ.
-streak_file="$A8_LOGS_DIR/env-broken-streak"
-if ! imsg="$("$DOCKER" image inspect "$A8_CONTAINER_IMAGE" 2>&1 >/dev/null)"; then
-  "$JOURNAL" event env_broken "image_missing: $A8_CONTAINER_IMAGE — ${imsg%%$'\n'*}"
-  streak=$(($(cat "$streak_file" 2>/dev/null || echo 0) + 1))
-  echo "$streak" >"$streak_file"
+# тіків поспіль тік пише kill switch із причиною й ліками — той самий механізм,
+# що при 401: STOP видно в пульті й a8-report, а зняти його — рішення людини.
+# Одиничний збій (docker саме перезапускається) STOP не ставить.
+#
+# Серія пишеться атомарно (tmp + mv). `echo >` на повному диску усікав би файл,
+# серія застрягала б на 1 і STOP не з'явився б ніколи (контрприклад 3.3). Якщо
+# записати серію не вдалось — вести лічбу нічим, тож сигнал одразу.
+# STOP пишеться з noclobber: причину, яку людина встигла вписати сама, не затираємо.
+if ! image_probe; then
+  case "$imsg" in
+    *"No such image"*) kind=image_missing ;;
+    *) kind=docker_unavailable ;;
+  esac
+  "$JOURNAL" event env_broken "$kind: $A8_CONTAINER_IMAGE — $imsg"
+  prev="$(cat "$streak_file" 2>/dev/null)"
+  [[ "$prev" =~ ^[0-9]+$ ]] || prev=0
+  streak=$((prev + 1))
+  if ! { printf '%s\n' "$streak" >"$streak_file.tmp" && mv -f "$streak_file.tmp" "$streak_file"; } 2>/dev/null; then
+    streak="$A8_CONSECUTIVE_FAILURE_LIMIT"
+  fi
   if ((streak >= A8_CONSECUTIVE_FAILURE_LIMIT)); then
-    printf 'Образу агента %s немає %s тіків поспіль (останній — %s). Ліки: ansible-playbook a8.yml -i inventory.a8.ini (збирає образ), потім rm %s.\n' \
-      "$A8_CONTAINER_IMAGE" "$streak" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    if [[ "$kind" == image_missing ]]; then
+      why="Образу агента $A8_CONTAINER_IMAGE немає $streak тіків поспіль"
+      cure="ansible-playbook a8.yml -i inventory.a8.ini (збирає образ)"
+    else
+      why="docker не дав перевірити образ $A8_CONTAINER_IMAGE $streak тіків поспіль: $imsg"
+      cure="перевірити docker на A8 (systemctl status docker; agent у групі docker)"
+    fi
+    (
+      set -o noclobber
+      printf '%s (останній — %s). Ліки: %s, потім rm %s.\n' \
+        "$why" "$(date -u +%FT%TZ)" "$cure" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    ) 2>/dev/null
   fi
   exit 0
 fi
-rm -f "$streak_file"
 
 id="$(field id "$task")"
 src="$(field source "$task")"
