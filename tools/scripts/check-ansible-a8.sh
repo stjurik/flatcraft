@@ -852,10 +852,20 @@ no_comments() {
 if [[ ! -f "$PRUNE_SVC" || ! -f "$PRUNE_TMR" ]]; then
   violations+=("немає шаблону $PRUNE_SVC або $PRUNE_TMR — таймер prune не з роллю, а лише на машині (issue #117)")
 fi
+# «Ставить» = задача `template` з dest у /etc/systemd/system, у тілі якої є ім'я
+# юніта. Згадка деінде не рахується: V21 у verify.yml теж називає юніт
+# (`systemctl cat …`), але лише ПЕРЕВІРЯЄ його — без задачі встановлення таймер
+# знову жив би лише на машині (спіймано мутацією 37).
 prune_tasks=""
 if [[ -d "$TASKS" ]]; then
   mapfile -t ptask_files < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
-  [[ ${#ptask_files[@]} -gt 0 ]] && prune_tasks="$(no_comments "${ptask_files[@]}")"
+  [[ ${#ptask_files[@]} -gt 0 ]] && prune_tasks="$(awk '
+    function flush() { if (blk ~ /template:/ && blk ~ /\/etc\/systemd\/system/) printf "%s\036", blk; blk = "" }
+    FNR == 1 { flush() }
+    /^[ \t]*#/ { next }
+    /^- / { flush() }
+    { blk = blk $0 "\n" }
+    END { flush() }' "${ptask_files[@]}")"
 fi
 for unit in docker-prune.service docker-prune.timer; do
   grep -qF -- "$unit" <<<"$prune_tasks" ||

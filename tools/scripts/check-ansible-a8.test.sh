@@ -1023,6 +1023,18 @@ grep -qF "жодна задача ролі не ставить docker-prune.serv
   grep -qF "жодна задача ролі не ставить docker-prune.timer" "$tmproot/out" ||
   { echo "✗ інв.14: очікував порушення для обох юнітів"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 
+# Юніт названо лише в задачі ПЕРЕВІРКИ (як V21 у verify.yml) — вона його не
+# ставить. Саме так перша редакція інваріанта пропускала мутацію 37.
+make_prune_tree "$tmproot/p9b" "" "" '---
+- name: V21a — inspect prune unit
+  ansible.builtin.shell: |
+    systemctl cat docker-prune.service
+    systemctl is-enabled docker-prune.timer
+  changed_when: false'
+assert_exit "інв.14: юніти prune лише в задачі перевірки (systemctl cat) → 1" 1 "$tmproot/p9b"
+grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" ||
+  { echo "✗ інв.14: перевірка без встановлення зарахована як встановлення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
 make_prune_tree "$tmproot/p10"
 rm "$tmproot/p10/infra/ansible/roles/a8/templates/docker-prune.timer.j2"
 assert_exit "інв.14: шаблону таймера немає → 1" 1 "$tmproot/p10" "немає шаблону"
