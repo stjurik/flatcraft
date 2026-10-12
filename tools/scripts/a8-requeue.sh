@@ -18,8 +18,9 @@
 #   4. гілка ai/<id>, якщо є: 0 комітів понад origin/main, не заблокована
 #      і не відкрита в іншому worktree;
 #   5. worktree, якщо тека є: зареєстрований у головному клоні, лежить
-#      усередині A8_WORKTREES_DIR (не симлінк), `git status --porcelain`
-#      порожній, 0 комітів понад origin/main (відокремлений HEAD теж).
+#      усередині A8_WORKTREES_DIR (не симлінк), HEAD на ai/<id> або відокремлений
+#      (інша гілка в теці — чиясь робота), `git status --porcelain` порожній,
+#      0 комітів понад origin/main (відокремлений HEAD теж).
 # Тоді: worktree remove --force, прибрати залишок теки, worktree prune, branch -D,
 # файл задачі з failed/ у корінь черги, подія журналу `requeue`. Перевірка не
 # пройшла — для цього id нічого не змінено, рядок `SKIP <id>: <причина>`.
@@ -36,12 +37,19 @@
 # працює (або інший requeue) — вихід 3, нічого не змінено. Lock тримається до
 # кінця: тік не візьме задачу, яку ми щойно повернули, посеред наших дій.
 #
-# --reset-pause. Кожне падіння записане в last-results рядком `failed`; три в кінці
-# ставлять паузу (a8-guard check → 12). Повернута задача більше не «падіння», тому
-# з КІНЦЯ файла прибирається не більше K рядків `failed`, K = скільки задач
-# повернуто. Рядок `ok` чи початок файла зупиняє, тож чужі падіння не стираються.
-# Копія — last-results.bak-<UTC-час>. Далі друкується результат `a8-guard check`.
-# Без прапорця last-results не чіпається. Пауза лікується прибраним ОБЛІКОМ, не
+# --reset-pause. Кожне падіння записане в last-results рядком `failed`, а в runs.log —
+# рядком event=run з task і result=failed; три `failed` в кінці ставлять паузу
+# (a8-guard check → 12). Знімаються ЛИШЕ ті кінцеві `failed`, які runs.log приписує
+# задачам, повернутим у ЦЬОМУ запуску: від кінця runs.log (тільки event=run) рахуються
+# запуски result=failed поспіль, поки task серед повернутих; перший інший запуск (ok,
+# stopped, чужа задача) зупиняє лік. З кінця last-results прибирається
+# min(лік, кінцевих `failed`) рядків. Тож повернення старої задачі X не знімає паузу,
+# яку дали свіжі падіння A, B, C. Наслідок, який треба знати: повернеш лише C —
+# знято один рядок, лишилось два, `a8-guard check` дає OK (2 < 3), але ще одне
+# падіння знову ставить паузу. Немає runs.log чи рядок, на якому лік упирається,
+# не розібрано — не знімається нічого, причина друкується. Копія —
+# last-results.bak-<UTC-час>. Далі друкується результат `a8-guard check`. Без
+# прапорця last-results не чіпається. Пауза лікується прибраним ОБЛІКОМ, не
 # причиною: якщо задача впаде знову, лічильник порахує її знову.
 #
 # --dry-run: усі перевірки, жодних змін (`WOULD <id>`). Єдиний побічний ефект —
@@ -54,6 +62,9 @@
 # від SKIP за кодом не відрізнити, тому дивись вивід.
 #
 # ЧОГО НЕ ДОВОДИТЬ. Перевірка комітів — відносно origin/main на момент fetch.
+# --reset-pause спирається на припущення, що тік пише last-results і runs.log парою
+# (fail_task: record failed + finish failed); ротований runs.log.*.gz не читається —
+# тоді знімається менше, ніколи не більше.
 # Роботу, яку агент не закомітив і не лишив у worktree (нічого в статусі), не
 # побачить ніхто. Лише текст id: скрипт не знає, ЧОМУ задача впала.
 #
@@ -123,7 +134,7 @@ for id in "${ids[@]}"; do
     die "id '$id' не схожий на id задачі (A-Za-z0-9._- , як у a8-tick-logic.sh)"
   fi
   # Двічі той самий id: другий SKIP-ував би «немає в failed/», а в --dry-run обидва
-  # дали б WOULD і подвоїли K.
+  # дали б WOULD і подвоїли б лік повернених.
   if [[ -z "${seen[$id]:-}" ]]; then
     seen[$id]=1
     uniq_ids+=("$id")
@@ -148,9 +159,12 @@ if [[ -n "$remote" ]]; then
 
   # Унікальна назва: передбачувана в загальній /tmp дозволила б підкласти файл,
   # який agent виконає. mktemp дає 0600 — agent (інший користувач) не прочитав би.
-  made="$(ssh "$remote" 'f=$(mktemp /tmp/a8-requeue.XXXXXX) && chmod 644 "$f" && printf "%s\n" "$f"')" ||
+  # Банер чи рядок із ~/.bashrc на хості попадає в stdout перед відповіддю, тож береться
+  # ОСТАННІЙ рядок, що схожий на назву (printf у віддаленій команді — останній).
+  made_out="$(ssh "$remote" 'f=$(mktemp /tmp/a8-requeue.XXXXXX) && chmod 644 "$f" && printf "%s\n" "$f"')" ||
     die "не вдалося створити тимчасовий файл на $remote"
-  [[ "$made" =~ ^/tmp/a8-requeue\.[A-Za-z0-9]{6}$ ]] || die "хост відповів дивною назвою файла: '$made'"
+  made="$(printf '%s\n' "$made_out" | tr -d '\r' | grep -E '^/tmp/a8-requeue\.[A-Za-z0-9]{6}$' | tail -n 1 || true)"
+  [[ -n "$made" ]] || die "хост не повернув назви тимчасового файла, схожої на /tmp/a8-requeue.XXXXXX: '$made_out'"
   rf="$made"
   scp -q -- "$self" "$remote:$rf" || die "scp на $remote не вдався"
 
@@ -259,7 +273,7 @@ inspect_worktrees() {
 process_id() {
   local id="$1" branch="ai/$1" bref="refs/heads/ai/$1"
   local wt="$A8_WORKTREES_DIR/$1" wtr wdr taskfile destfile
-  local has_branch=0 has_wt=0 rc n st top removed=""
+  local has_branch=0 has_wt=0 rc n st top head_ref removed=""
   skip() {
     printf 'SKIP %s: %s\n' "$id" "$*"
     return 1
@@ -378,6 +392,23 @@ process_id() {
       skip "брудний worktree: $(grep -c '' <<<"$st") змін у git status --porcelain"
       return 1
     fi
+    # У теці задачі чекаутили іншу гілку — це не залишок падіння, а чиясь робота.
+    # `symbolic-ref -q`: 0 — HEAD на гілці, 1 — відокремлений, інше — помилка.
+    rc=0
+    head_ref="$(wtgit symbolic-ref -q HEAD 2>/dev/null)" || rc=$?
+    case "$rc" in
+      0)
+        if [[ "$head_ref" != "$bref" ]]; then
+          skip "у $wt відкрита інша гілка ($head_ref), а не $branch — не чіпаю"
+          return 1
+        fi
+        ;;
+      1) ;; # відокремлений HEAD: коміти на ньому ловить перевірка нижче
+      *)
+        skip "git symbolic-ref HEAD у $wt не вдався (код $rc)"
+        return 1
+        ;;
+    esac
     # Коміт на відокремленому HEAD не видно ні в статусі, ні на гілці.
     n="$(wtgit rev-list --count refs/remotes/origin/main..HEAD 2>/dev/null)" ||
       {
@@ -445,52 +476,100 @@ process_id() {
 }
 
 # ─── --reset-pause ──────────────────────────────────────────────────────────
-# reset_pause <K> — прибрати з кінця last-results не більше K рядків `failed`.
-# Нормалізація — як в a8-guard: пробіли й \r у кінці рядка ([[:space:]]), порожні
-# рядки не рахуються (інакше рядок «failed\r» гвардія вважала б падінням, а ми — ні).
+# attributed_failures <id>... → ATTR: скільки останніх запусків поспіль (за runs.log, з
+# кінця, лише event=run) — result=failed повернених id; ATTR_WHY — чому порахувати не
+# вдалося (тоді ATTR=0 і нічого не знімається). Лік зупиняє перший інший запуск.
+ATTR=0
+ATTR_WHY=""
+attributed_failures() {
+  ATTR=0
+  ATTR_WHY=""
+  local runs="$A8_LOGS_DIR/runs.log" ids_json res bad
+  if [[ ! -r "$runs" ]]; then
+    ATTR_WHY="немає $runs — не знаю, чиї це падіння"
+    return 0
+  fi
+  ids_json="$(printf '%s\n' "$@" | jq -R . | jq -s .)" || {
+    ATTR_WHY="jq не склав список id"
+    return 0
+  }
+  res="$(jq -R -s --argjson ids "$ids_json" '
+    (split("\n") | map(select(length > 0)) | reverse) as $lines
+    | reduce $lines[] as $l ({c: 0, done: false, bad: false};
+        if .done then .
+        else ($l | try fromjson catch null) as $o
+          | if ($o | type) != "object" then .done = true | .bad = true
+            elif ($o.event // "") != "run" then .
+            elif ($o.result // "") == "failed" and (($o.task // "") as $t | $ids | any(. == $t)) then .c += 1
+            else .done = true
+            end
+        end)' "$runs" 2>/dev/null)" || {
+    ATTR_WHY="jq не розібрав $runs"
+    return 0
+  }
+  bad="$(jq -r .bad <<<"$res")"
+  if [[ "$bad" == true ]]; then
+    ATTR_WHY="у кінці $runs є рядок, який не розібрано як JSON — не знаю, чиї це падіння"
+    return 0
+  fi
+  ATTR="$(jq -r .c <<<"$res")"
+  return 0
+}
+
+# reset_pause <id>... — прибрати з кінця last-results кінцеві `failed`, які runs.log
+# приписує поверненим id (див. шапку). Нормалізація — як в a8-guard: пробіли й \r у
+# кінці рядка ([[:space:]]), порожні рядки не рахуються (інакше рядок «failed\r»
+# гвардія вважала б падінням, а ми — ні).
 reset_pause() {
-  local k="$1" tmp removed bak
-  if ((k == 0)); then
+  local tmp removed bak
+  if (($# == 0)); then
     echo "reset-pause: жодної задачі не повернуто — last-results не чіпаю"
   elif [[ ! -f "$STATE" ]]; then
     echo "reset-pause: немає $STATE — прибирати нічого"
   else
-    tmp="$(mktemp "$A8_LOGS_DIR/.last-results.XXXXXX")"
-    removed="$(awk -v k="$k" -v out="$tmp" '
-      { lines[NR] = $0 }
-      END {
-        i = NR; r = 0
-        while (i >= 1) {
-          s = lines[i]; sub(/[[:space:]]+$/, "", s)
-          if (s == "") { drop[i] = 1; i--; continue }
-          if (s == "failed" && r < k) { drop[i] = 1; r++; i--; continue }
-          break
-        }
-        for (j = 1; j <= NR; j++) if (!(j in drop)) print lines[j] > out
-        print r
-      }' "$STATE")" || {
-      rm -f -- "$tmp"
-      die "не вдалося обробити $STATE"
-    }
-    if ((removed == 0)); then
-      rm -f -- "$tmp"
-      echo "reset-pause: у кінці last-results немає рядків failed — файл не чіпаю"
-    elif ((dry)); then
-      rm -f -- "$tmp"
-      echo "WOULD reset-pause: прибрав би $removed з $k рядків failed з кінця last-results (копія була б last-results.bak-<UTC>)"
+    attributed_failures "$@"
+    if [[ -n "$ATTR_WHY" ]]; then
+      echo "reset-pause: $ATTR_WHY — last-results не чіпаю"
+    elif ((ATTR == 0)); then
+      echo "reset-pause: runs.log не приписує поверненим задачам жодного з останніх падінь — last-results не чіпаю"
     else
-      bak="$STATE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
-      if [[ -e "$bak" ]]; then
+      tmp="$(mktemp "$A8_LOGS_DIR/.last-results.XXXXXX")"
+      removed="$(awk -v k="$ATTR" -v out="$tmp" '
+        { lines[NR] = $0 }
+        END {
+          i = NR; r = 0
+          while (i >= 1) {
+            s = lines[i]; sub(/[[:space:]]+$/, "", s)
+            if (s == "") { drop[i] = 1; i--; continue }
+            if (s == "failed" && r < k) { drop[i] = 1; r++; i--; continue }
+            break
+          }
+          for (j = 1; j <= NR; j++) if (!(j in drop)) print lines[j] > out
+          print r
+        }' "$STATE")" || {
         rm -f -- "$tmp"
-        die "копія $bak вже існує — last-results не змінено"
-      fi
-      cp -p -- "$STATE" "$bak" || {
-        rm -f -- "$tmp"
-        die "не вдалося зробити копію $bak — last-results не змінено"
+        die "не вдалося обробити $STATE"
       }
-      chmod --reference="$STATE" -- "$tmp" 2>/dev/null || true
-      mv -f -- "$tmp" "$STATE"
-      echo "reset-pause: прибрано $removed з $k рядків failed з кінця last-results (копія: $bak)"
+      if ((removed == 0)); then
+        rm -f -- "$tmp"
+        echo "reset-pause: у кінці last-results немає рядків failed — файл не чіпаю"
+      elif ((dry)); then
+        rm -f -- "$tmp"
+        echo "WOULD reset-pause: runs.log приписує поверненим $ATTR останніх падінь; прибрав би $removed з $ATTR рядків failed з кінця last-results (копія була б last-results.bak-<UTC>)"
+      else
+        bak="$STATE.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+        if [[ -e "$bak" ]]; then
+          rm -f -- "$tmp"
+          die "копія $bak вже існує — last-results не змінено"
+        fi
+        cp -p -- "$STATE" "$bak" || {
+          rm -f -- "$tmp"
+          die "не вдалося зробити копію $bak — last-results не змінено"
+        }
+        chmod --reference="$STATE" -- "$tmp" 2>/dev/null || true
+        mv -f -- "$tmp" "$STATE"
+        echo "reset-pause: runs.log приписує поверненим $ATTR останніх падінь; прибрано $removed з $ATTR рядків failed з кінця last-results (копія: $bak)"
+      fi
     fi
   fi
   local grc=0 gout
@@ -506,16 +585,18 @@ reset_pause() {
 good=0
 skipped=0
 journal_failed=0
+returned=()
 for id in "${uniq_ids[@]}"; do
   if process_id "$id"; then
     good=$((good + 1))
+    returned+=("$id")
   else
     skipped=$((skipped + 1))
   fi
 done
 
 if ((reset)); then
-  reset_pause "$good"
+  reset_pause "${returned[@]}"
 fi
 
 if ((dry)); then

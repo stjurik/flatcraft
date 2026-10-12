@@ -84,6 +84,14 @@ mkbranch() { # mkbranch <id> — гілка ai/<id> і worktree від origin/ma
   git -C "$REPO" worktree add -q -b "ai/$1" "$WT/$1" origin/main
 }
 commit_in() { gitc -C "$WT/$1" commit -q --allow-empty -m work; }
+mkrun() { # mkrun <id> <result> — запис запуску в runs.log, як пише a8-journal append
+  jq -nc --arg t "$1" --arg r "$2" '{ts:"2026-10-12T10:00:00Z", event:"run", task:$t, source:"human", result:$r, duration_s:1, model:"sonnet", note:""}' \
+    >>"$LOGS/runs.log"
+}
+noop_journal() { # журнал-заглушка, що нічого не пише (runs.log лишається таким, яким його підготував тест)
+  printf '#!/bin/sh\nexit 0\n' >"$BIN/noop-journal"
+  chmod +x "$BIN/noop-journal"
+}
 branch_exists() { git -C "$REPO" show-ref --verify --quiet "refs/heads/ai/$1"; }
 registered() { git -C "$REPO" worktree list --porcelain | grep -qx "worktree $WT/$1"; }
 run_rq() { OUT="$(bash "$SCRIPT" "$@" 2>&1)"; RC=$?; }
@@ -367,28 +375,35 @@ STUB
   mkfailed b
   mkbranch b
   echo dirty >"$WT/b/x"
+  mkrun b failed
+  mkrun a failed
   printf '%s\n' ok failed failed >"$LOGS/last-results"
   fp="$(fingerprint)"
   run_rq --dry-run --reset-pause a b
-  [[ $RC -eq 1 && "$OUT" == *"WOULD a:"* && "$OUT" == *"SKIP b:"* && "$OUT" == *"WOULD reset-pause: прибрав би 1 з 1"* ]] &&
+  [[ $RC -eq 1 && "$OUT" == *"WOULD a:"* && "$OUT" == *"SKIP b:"* && "$OUT" == *"WOULD reset-pause:"* && "$OUT" == *"прибрав би 1 з 1"* ]] &&
     ok "--dry-run: WOULD для придатної, SKIP для брудної, WOULD reset-pause" || bad "dry-run: rc=$RC $OUT"
   [[ "$(fingerprint)" == "$fp" ]] && ok "--dry-run нічого не змінив (черга, гілки, worktree, last-results, журнал)" || bad "dry-run змінив стан"
   run_rq --dry-run a
-  [[ $RC -eq 0 && ! -e "$LOGS/runs.log" ]] && ok "--dry-run без SKIP → код 0, подій немає" || bad "dry-run чистий: rc=$RC"
+  [[ $RC -eq 0 ]] && ! grep -q '"event":"requeue"' "$LOGS/runs.log" && ok "--dry-run без SKIP → код 0, подій requeue немає" || bad "dry-run чистий: rc=$RC"
   teardown
 
-  # 8. --reset-pause. (а) спек: `ok failed failed failed`, K=2 → `ok failed`.
+  # 8. --reset-pause. Знімаються лише падіння, які runs.log приписує ПОВЕРНЕНИМ задачам.
+  # (а) `ok failed failed failed`, повернуто a і b (їхні падіння — два останні) → `ok failed`.
   setup
   mkfailed a
   mkbranch a
   mkfailed b
   mkbranch b
+  mkrun o ok
+  mkrun z failed
+  mkrun a failed
+  mkrun b failed
   printf '%s\n' ok failed failed failed >"$LOGS/last-results"
   cp "$LOGS/last-results" "$ROOT/lr.orig"
   [[ "$(guard_rc)" == 12 ]] && ok "передумова: три failed в кінці → a8-guard check дає 12 (пауза)" || bad "передумова паузи: $(guard_rc)"
   run_rq --reset-pause a b
   [[ $RC -eq 0 && "$(tr '\n' ' ' <"$LOGS/last-results")" == "ok failed " ]] &&
-    ok "K=2 при «ok failed failed failed» → лишається «ok failed»" || bad "reset (а): rc=$RC $(cat "$LOGS/last-results")"
+    ok "повернуто a і b → з «ok failed failed failed» лишається «ok failed»" || bad "reset (а): rc=$RC $(cat "$LOGS/last-results")"
   baks=("$LOGS"/last-results.bak-*)
   [[ ${#baks[@]} -eq 1 && -f "${baks[0]}" ]] && cmp -s "${baks[0]}" "$ROOT/lr.orig" &&
     ok "копія last-results.bak-<час> з початковим вмістом" || bad "копія: ${baks[*]}"
@@ -396,37 +411,73 @@ STUB
     ok "друкує, скільки прибрано, і результат a8-guard check (пауза знята)" || bad "вивід reset: $OUT"
   teardown
 
-  # (б) `failed ok failed`, K=2 → `ok` зупиняє: прибрано лише 1.
+  # (б) `failed ok failed`: лік зупиняє ok у runs.log → прибрано лише 1.
   setup
   mkfailed a
   mkfailed b
+  mkrun a failed
+  mkrun o ok
+  mkrun b failed
   printf '%s\n' failed ok failed >"$LOGS/last-results"
   run_rq --reset-pause a b
-  [[ "$(tr '\n' ' ' <"$LOGS/last-results")" == "failed ok " && "$OUT" == *"прибрано 1 з 2"* ]] &&
-    ok "«failed ok failed», K=2 → прибрано лише 1 (ok зупиняє)" || bad "reset (б): $(cat "$LOGS/last-results") / $OUT"
+  [[ "$(tr '\n' ' ' <"$LOGS/last-results")" == "failed ok " && "$OUT" == *"прибрано 1 з 1"* ]] &&
+    ok "«failed ok failed»: ok у runs.log зупиняє лік → прибрано лише 1" || bad "reset (б): $(cat "$LOGS/last-results") / $OUT"
   teardown
 
-  # (в) три падіння, три задачі → файл порожній, пауза знята; початок файла зупиняє.
+  # (в) паузу дали a, b, c; повернуто всі три → прибрано 3, пауза знята.
   setup
   mkfailed a
   mkfailed b
   mkfailed c
+  mkrun a failed
+  mkrun b failed
+  mkrun c failed
   printf '%s\n' failed failed failed >"$LOGS/last-results"
   run_rq --reset-pause a b c
-  [[ ! -s "$LOGS/last-results" && "$(guard_rc)" == 0 ]] &&
-    ok "три failed, K=3 → last-results порожній, a8-guard check знову 0" || bad "reset (в): $(cat "$LOGS/last-results")"
+  [[ ! -s "$LOGS/last-results" && "$(guard_rc)" == 0 && "$OUT" == *"прибрано 3 з 3"* ]] &&
+    ok "повернуто a, b, c (усі три падіння) → прибрано 3, a8-guard check знову 0" || bad "reset (в): $(cat "$LOGS/last-results") / $OUT"
   teardown
 
-  # (г) K рахує лише повернуті: одна OK + одна SKIP → прибрано 1 з «failed failed».
+  # (в-1) паузу дали a, b, c; повертаємо СТАРУ задачу x → нічого не знято, пауза лишається.
+  setup
+  mkfailed x
+  mkrun x failed
+  mkrun o ok
+  mkrun a failed
+  mkrun b failed
+  mkrun c failed
+  printf '%s\n' failed ok failed failed failed >"$LOGS/last-results"
+  cp "$LOGS/last-results" "$ROOT/lr.orig"
+  run_rq --reset-pause x
+  cmp -s "$LOGS/last-results" "$ROOT/lr.orig" && [[ -z "$(ls "$LOGS" | grep 'bak-')" && "$(guard_rc)" == 12 && "$OUT" == *"не приписує"* ]] &&
+    ok "повернуто стару x, паузу дали a, b, c → last-results не чіпається, пауза лишається" || bad "reset (в-1): $(cat "$LOGS/last-results") / $OUT"
+  teardown
+
+  # (в-2) те саме, повернуто лише c → знято 1, лишаються два (пауза знята, 2 < 3).
+  setup
+  mkfailed c
+  mkrun o ok
+  mkrun a failed
+  mkrun b failed
+  mkrun c failed
+  printf '%s\n' ok failed failed failed >"$LOGS/last-results"
+  run_rq --reset-pause c
+  [[ "$(tr '\n' ' ' <"$LOGS/last-results")" == "ok failed failed " && "$OUT" == *"прибрано 1 з 1"* && "$(guard_rc)" == 0 ]] &&
+    ok "повернуто лише c → знято 1 (лишились a і b), a8-guard check 0" || bad "reset (в-2): $(cat "$LOGS/last-results") / $OUT"
+  teardown
+
+  # (г) K рахує лише повернуті: a повернуто, b (з комітом) — SKIP, його падіння не знімається.
   setup
   mkfailed a
   mkfailed b
   mkbranch b
   commit_in b
+  mkrun b failed
+  mkrun a failed
   printf '%s\n' failed failed >"$LOGS/last-results"
   run_rq --reset-pause a b
   [[ $RC -eq 1 && "$(tr '\n' ' ' <"$LOGS/last-results")" == "failed " && "$OUT" == *"прибрано 1 з 1"* ]] &&
-    ok "SKIP не збільшує K: OK + SKIP → прибрано один рядок failed" || bad "reset (г): rc=$RC $(cat "$LOGS/last-results") / $OUT"
+    ok "SKIP не рахується: повернуто лише a → прибрано один рядок failed" || bad "reset (г): rc=$RC $(cat "$LOGS/last-results") / $OUT"
   teardown
 
   # (д) нічого не повернуто → last-results не чіпається, копії немає.
@@ -436,12 +487,13 @@ STUB
   run_rq --reset-pause nothere
   [[ $RC -eq 1 ]] && cmp -s "$LOGS/last-results" "$ROOT/lr.orig" && [[ -z "$(ls "$LOGS" | grep 'bak-')" ]] &&
     [[ "$OUT" == *"жодної задачі не повернуто"* ]] &&
-    ok "K=0 → last-results і копії не існує" || bad "reset (д): $OUT"
+    ok "нічого не повернуто → last-results і копії не існує" || bad "reset (д): $OUT"
   teardown
 
-  # (е) без прапорця при поверненій задачі last-results не чіпається (сценарій 1), тут — із failed у кінці.
+  # (е) без прапорця при поверненій задачі last-results не чіпається, хоч runs.log її падіння знає.
   setup
   mkfailed a
+  mkrun a failed
   printf '%s\n' ok failed failed >"$LOGS/last-results"
   cp "$LOGS/last-results" "$ROOT/lr.orig"
   run_rq a
@@ -453,6 +505,8 @@ STUB
   setup
   mkfailed a
   mkfailed b
+  mkrun a failed
+  mkrun b failed
   printf 'ok\r\nfailed\r\nfailed \r\n\n' >"$LOGS/last-results"
   run_rq --reset-pause a b
   [[ "$(tr -d '\r' <"$LOGS/last-results" | tr '\n' ' ')" == "ok " && "$OUT" == *"прибрано 2 з 2"* ]] &&
@@ -465,6 +519,41 @@ STUB
   run_rq --reset-pause a
   [[ $RC -eq 0 && "$OUT" == *"прибирати нічого"* && ! -e "$LOGS/last-results" ]] &&
     ok "без last-results --reset-pause нічого не вигадує" || bad "reset (ж): rc=$RC $OUT"
+  teardown
+
+  # (з) runs.log немає: невідомо, чиї падіння, — не знімається нічого.
+  setup
+  mkfailed a
+  noop_journal
+  printf '%s\n' failed failed failed >"$LOGS/last-results"
+  cp "$LOGS/last-results" "$ROOT/lr.orig"
+  A8_JOURNAL="$BIN/noop-journal" run_rq --reset-pause a
+  cmp -s "$LOGS/last-results" "$ROOT/lr.orig" && [[ "$OUT" == *"runs.log — не знаю"* && -z "$(ls "$LOGS" | grep 'bak-')" ]] &&
+    ok "немає runs.log → last-results не чіпається, причину названо" || bad "reset (з): $OUT"
+  teardown
+
+  # (и) нерозбірний рядок у кінці runs.log — на ньому лік упирається: нічого не знімається.
+  setup
+  mkfailed a
+  mkrun a failed
+  echo '{не json' >>"$LOGS/runs.log"
+  printf '%s\n' failed failed failed >"$LOGS/last-results"
+  cp "$LOGS/last-results" "$ROOT/lr.orig"
+  run_rq --reset-pause a
+  cmp -s "$LOGS/last-results" "$ROOT/lr.orig" && [[ "$OUT" == *"не розібрано"* ]] &&
+    ok "нерозбірний рядок у runs.log → last-results не чіпається, причину названо" || bad "reset (и): $OUT"
+  teardown
+
+  # (к) runs.log знає більше падінь, ніж лишилось у кінці last-results: знімається min(лік, кінцевих failed).
+  setup
+  mkfailed a
+  mkfailed b
+  mkrun a failed
+  mkrun b failed
+  printf '%s\n' failed ok failed >"$LOGS/last-results"
+  run_rq --reset-pause a b
+  [[ "$(tr '\n' ' ' <"$LOGS/last-results")" == "failed ok " && "$OUT" == *"прибрано 1 з 2"* ]] &&
+    ok "лік 2, а в кінці last-results один failed → прибрано 1, ok зупиняє" || bad "reset (к): $(cat "$LOGS/last-results") / $OUT"
   teardown
 
   # 9. fetch не вдався → 2, нічого не змінено.
@@ -538,6 +627,26 @@ STUB
     ok "гілка відкрита деінде → SKIP, нічого не прибрано" || bad "гілка деінде: rc=$RC $OUT"
   teardown
 
+  # (д) у теці задачі чекаутили іншу гілку (без комітів понад origin/main).
+  setup
+  mkfailed w
+  mkbranch w
+  git -C "$WT/w" checkout -q -b other
+  fp="$(fingerprint)"
+  run_rq w
+  [[ $RC -eq 1 && "$OUT" == *"SKIP w:"* && "$OUT" == *"інша гілка"* && "$(fingerprint)" == "$fp" ]] &&
+    ok "у worktree відкрита чужа гілка → SKIP, нічого не прибрано" || bad "чужа гілка в worktree: rc=$RC $OUT"
+  teardown
+  # (е) відокремлений HEAD без комітів — це залишок, не робота.
+  setup
+  mkfailed v
+  mkbranch v
+  git -C "$WT/v" checkout -q --detach
+  run_rq v
+  [[ $RC -eq 0 && "$OUT" == *"OK v:"* && ! -e "$WT/v" ]] &&
+    ok "відокремлений HEAD без комітів → OK" || bad "відокремлений HEAD без комітів: rc=$RC $OUT"
+  teardown
+
   # 12. Змішаний запуск і дублікати id.
   setup
   mkfailed a
@@ -575,7 +684,14 @@ STUB
   cat >>"$STUB/ssh" <<'STUB'
 echo "ssh $*" >>"$CALLS"
 case "$*" in
-  *mktemp*) echo "${STUB_TMPNAME:-/tmp/a8-requeue.Ab12Cd}" ;;
+  *mktemp*)
+    # STUB_BANNER: банер і рядок із ~/.bashrc перед відповіддю, зокрема схожий на назву.
+    if [[ -n "${STUB_BANNER:-}" ]]; then
+      echo "Welcome to the host"
+      echo "/tmp/a8-requeue.DECOY1"
+      echo "Last login: yesterday"
+    fi
+    echo "${STUB_TMPNAME:-/tmp/a8-requeue.Ab12Cd}" ;;
   *sudo*) exit "${STUB_RUN_RC:-0}" ;;
   *"rm -f"*) exit "${STUB_RM_RC:-0}" ;;
 esac
@@ -615,6 +731,11 @@ STUB
   STUB_TMPNAME='/tmp/a8-requeue.x; rm -rf /' rrun bash "$SCRIPT" --remote a8-ts a
   [[ $RC -eq 2 && "$(grep -c '^scp' "$CALLS")" -eq 0 && "$(grep -c 'rm -f' "$CALLS")" -eq 0 ]] &&
     ok "--remote: дивна назва файла від хоста → відмова до scp, rm не викликається" || bad "дивна назва: rc=$RC $(cat "$CALLS")"
+  : >"$CALLS"
+  STUB_BANNER=1 rrun bash "$SCRIPT" --remote a8-ts a
+  [[ $RC -eq 0 ]] && grep -qx "scp -q -- $self a8-ts:/tmp/a8-requeue.Ab12Cd" "$CALLS" &&
+    [[ "$(tail -n 1 "$CALLS")" == "ssh a8-ts rm -f -- /tmp/a8-requeue.Ab12Cd" ]] &&
+    ok "--remote: банер у відповіді ssh не ламає розбір — береться останній рядок-назва" || bad "банер: rc=$RC $(cat "$CALLS")"
   : >"$CALLS"
   rrun bash "$SCRIPT" --remote -oProxyCommand=x a
   [[ $RC -eq 2 && ! -s "$CALLS" ]] && ok "--remote: хост з «-» на початку відхилено, ssh не викликано" || bad "хост з дефісом: rc=$RC $(cat "$CALLS")"
@@ -662,7 +783,13 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   }
   mutate "перевірку комітів гілки прибрано" 's/if \(\(n != 0\)\); then\n      skip "на гілці/if false; then\n      skip "на гілці/'
   mutate "перевірку брудного worktree прибрано" 's/if \[\[ -n "\$st" \]\]; then/if false; then/'
-  mutate "reset прибирає всі failed, а не K" 's/ && r < k\)/)/'
+  mutate "reset прибирає всі кінцеві failed" 's/ && r < k\)/)/'
+  mutate "reset: старий алгоритм (K = скільки повернуто)" 's/  ATTR="\$\(jq -r \.c <<<"\$res"\)"/  ATTR=\$#/'
+  mutate "reset: лік не зупиняє ok чи чужа задача" 's/            else \.done = true\n            end/            else .\n            end/'
+  mutate "reset: не-run події зупиняють лік" 's/elif \(\$o\.event \/\/ ""\) != "run" then \./elif false then ./'
+  mutate "reset: нерозбірний рядок ігнорується" 's/\.done = true \| \.bad = true/./'
+  mutate "reset: немає runs.log не перевіряється" 's/  if \[\[ ! -r "\$runs" \]\]; then/  if false; then/'
+  mutate "reset: runs.log нуль падінь теж знімає" 's/    elif \(\(ATTR == 0\)\); then/    elif false; then/'
   mutate "reset не зупиняється на ok" 's/          break\n/          i--; continue\n/'
   mutate "без flock" 's/if ! flock -n 9; then/if false; then/'
   mutate "fetch не виконується" 's/if ! timeout 120 git -C "\$A8_REPO_DIR" fetch --quiet origin main 9>&-; then/if false; then/'
@@ -673,7 +800,7 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   mutate "два файли з id не відсіюються" 's/if \(\(\$\{#MATCHES\[@\]\} > 1\)\); then/if false; then/'
   mutate "--dry-run змінює стан" 's/  if \(\(dry\)\); then\n    printf .WOULD/  if false; then\n    printf \x27WOULD/'
   mutate "reset без копії" 's/cp -p -- "\$STATE" "\$bak" \|\|/true ||/'
-  mutate "reset у --dry-run пише файл" 's/    elif \(\(dry\)\); then\n      rm -f -- "\$tmp"\n/    elif false; then\n      rm -f -- "\$tmp"\n/'
+  mutate "reset у --dry-run пише файл" 's/      elif \(\(dry\)\); then\n        rm -f -- "\$tmp"\n/      elif false; then\n        rm -f -- "\$tmp"\n/'
   mutate "reset: пробіли й \\r не нормалізуються" 's/; sub\(\/\[\[:space:\]\]\+\$\/, "", s\)//'
   mutate "подія requeue не пишеться" 's/if ! "\$JOURNAL" event requeue "\$id"; then/if ! true; then/'
   mutate "збій журналу мовчить" 's/    journal_failed=1/    journal_failed=0/'
@@ -690,13 +817,17 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   mutate "id у черзі не перевіряється" 's/  scan_dir "\$Q" "\$id"\n  if \(\(\$\{#MATCHES\[@\]\} > 0\)\); then/  scan_dir "\$Q" "\$id"\n  if false; then/'
   mutate "помилка rev-list = 0 комітів" 's/(n="\$\(repo rev-list --count "refs\/remotes\/origin\/main\.\.\$bref" 2>\/dev\/null\)" \|\|)\n\s+\{\n\s+skip[^\n]*\n\s+return 1\n\s+\}/$1 n=0/'
   mutate "помилка show-ref = гілки немає" 's/    \*\)\n      skip "git show-ref не вдався[^\n]*\n      return 1\n      ;;/    *) ;;/'
-  mutate "K = усі id, а не повернуті" 's/reset_pause "\$good"/reset_pause "\${#uniq_ids[@]}"/'
+  mutate "reset рахує всі id, а не повернуті" 's/reset_pause "\$\{returned\[@\]\}"/reset_pause "\${uniq_ids[@]}"/'
   mutate "SKIP не дає код 1" 's/\(\(skipped == 0 && journal_failed == 0\)\) \|\| exit 1/true || exit 1/'
   mutate "дублікати id не прибираються" 's/  if \[\[ -z "\$\{seen\[\$id\]:-\}" \]\]; then/  if true; then/'
   mutate "ssh -t без термінала" 's/ssh -t "\$remote"/ssh "\$remote"/'
   mutate "--remote не прибирає файл" 's/  trap cleanup_remote EXIT\n//'
-  mutate "назва файла від хоста не перевіряється" 's/  \[\[ "\$made" =~ [^\n]*\n//'
+  mutate "назва файла від хоста не перевіряється" 's/  \[\[ -n "\$made" \]\] \|\| die[^\n]*\n//'
   mutate "хост з дефісом дозволено" 's/  \[\[ "\$remote" =~ \^\[A-Za-z0-9\][^\n]*\n//'
+  mutate "чужа гілка в worktree не відсіюється" 's/        if \[\[ "\$head_ref" != "\$bref" \]\]; then/        if false; then/'
+  mutate "відокремлений HEAD вважається чужою гілкою" 's/      1\) ;; # відокремлений HEAD[^\n]*\n/      1)\n        skip "x"\n        return 1\n        ;;\n/'
+  mutate "банер: береться перший збіг" 's/tail -n 1 \|\| true/head -n 1 || true/'
+  mutate "банер: уся відповідь як назва" 's/ \| grep -E \x27[^\x27]*\x27 \| tail -n 1 \|\| true//'
   mutate "код 255 від ssh не змінюється" 's/  \(\(rc == 255\)\) && die[^\n]*\n//'
   wait
   for i in $(seq 1 "$n"); do
