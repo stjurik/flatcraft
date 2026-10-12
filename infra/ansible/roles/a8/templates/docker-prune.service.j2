@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+#
+# Щотижневе прибирання docker. До 2026-10-12 цей юніт жив на A8 лише руками
+# (issue #117) — і саме він 2026-10-11 видалив образ агента: контейнер агента
+# живе тільки під час задачі (`--rm`), тож між задачами образ «не
+# використовується», і `prune -a` прибрав його, щойно тому виповнився тиждень.
+#
+# Фільтр мітки — не прикраса. `label!=hart.keep=true` пропускає все, що
+# files/agent.Dockerfile позначив `LABEL hart.keep=true`. Без фільтра або без
+# мітки повертається рівно та вада. Обидві половини тримає інваріант 14 у
+# tools/scripts/check-ansible-a8.sh, живий стан — V21 у verify.yml.
+[Unit]
+Description=Weekly docker prune that keeps images labelled hart.keep=true
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker system prune -af --filter "until={{ a8_docker_prune_until }}" --filter "label!=hart.keep=true"

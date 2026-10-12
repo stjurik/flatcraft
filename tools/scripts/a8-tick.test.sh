@@ -48,6 +48,7 @@ A8_WORKTREES_DIR=$ROOT/wt
 A8_TASK_TIMEOUT=${TASK_TIMEOUT:-20}
 A8_ORACLE_TIMEOUT=${ORACLE_TIMEOUT:-20}
 A8_MAX_TURNS=10
+A8_CONTAINER_IMAGE=hart-agent:test
 A8_DEFAULT_MODEL=sonnet
 A8_CLAUDE_TOKEN_FILE=$ROOT/token
 A8_PUSH_CREDENTIAL_KIND=${PUSH_KIND:-none}
@@ -90,6 +91,11 @@ exec 9>&-
 # би на демоні, який на останній задачі дня валить власний оракул кодом 11.
 "$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
+# IMAGE_MISSING: образу немає — справжній `docker run` падає одразу (125).
+if [[ -n "${IMAGE_MISSING:-}" ]]; then
+  echo "Unable to find image 'hart-agent:test' locally" >&2
+  exit 125
+fi
 # «Контейнер» — цей процес. PID за ім'ям контейнера: заглушка docker на
 # `kill <ім'я>` убиває саме його, як справжній `docker kill` — свій контейнер.
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && echo $$ >"$PIDS/pid-$A8_CONTAINER_NAME"
@@ -201,6 +207,12 @@ echo "docker \$*" >>"$LOGS/docker-calls"
 # DOCKER_KILL_FAIL_ONCE: перший kill б'є в порожнечу — контейнера ще немає.
 if [[ "\$1" == kill && -n "\${DOCKER_KILL_FAIL_ONCE:-}" && ! -e "$LOGS/kill-failed-once" ]]; then
   : >"$LOGS/kill-failed-once"
+  exit 1
+fi
+# IMAGE_MISSING: образу немає (issue #117) — так відповідає \`docker image inspect\`
+# (виміряно на docker 29.8.2: rc=1, текст нижче).
+if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
+  echo "Error response from daemon: No such image: \$3" >&2
   exit 1
 fi
 if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
@@ -833,6 +845,35 @@ EOF
       bad "тік отримав $sig → лишились процеси тіку: $(tick_procs)"
     teardown
   done
+
+  # 21. Образу агента немає (issue #117: 2026-10-11 docker-prune видалив його, і
+  # три задачі поспіль стали failed — пауза черги). Тепер задачу не беруть: вона
+  # лишається в черзі, у журналі env_broken image_missing, а лічильник падінь і
+  # денний ліміт не ростуть. Три тіки без образу — не пауза: щойно образ є, та
+  # сама задача виконується наступним тіком.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2 3; do IMAGE_MISSING=1 tick; done
+  [[ "$(jl .event)" == env_broken && "$(jl .detail)" == "image_missing: hart-agent:test"* ]] &&
+    ok "образу немає → event env_broken, detail «image_missing: <образ>»" || bad "image_missing: $(last)"
+  [[ -e "$QD/001-a.json" && -z "$(find "$QD/running" "$QD/failed" "$QD/done" -name '*.json')" ]] &&
+    ok "образу немає → задача лишається в черзі (не running/, не failed/)" ||
+    bad "image_missing: задача не в черзі: $(find "$QD" -name '*.json')"
+  [[ ! -s "$LOGS/runner-calls" ]] && ok "образу немає → обгортку не запущено жодного разу" ||
+    bad "image_missing: обгортку запущено: $(cat "$LOGS/runner-calls")"
+  cnt="$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null || echo 0)"
+  ! grep -q failed "$LOGS/last-results" 2>/dev/null && [[ "${cnt:-0}" == 0 ]] &&
+    ok "три тіки без образу → лічильник failed і денний ліміт не зросли" ||
+    bad "image_missing: last-results «$(cat "$LOGS/last-results" 2>/dev/null)», лічильник «$cnt»"
+  [[ "$(grep -c '"event":"env_broken"' "$LOGS/runs.log")" == 3 ]] &&
+    ok "кожен тік без образу пише env_broken (3 з 3)" || bad "env_broken: $(cat "$LOGS/runs.log")"
+  grep -qx 'docker image inspect hart-agent:test' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "перевіряється образ із конфігу (A8_CONTAINER_IMAGE)" ||
+    bad "перевірка образу: $(cat "$LOGS/docker-calls" 2>/dev/null)"
+  tick
+  [[ "$(jl .task)" == a && "$(jl .result)" == no-credential && -e "$QD/done/001-a.json" ]] &&
+    ok "образ з'явився → та сама задача виконується наступним тіком (паузи немає)" || bad "після образу: $(last)"
+  teardown
 }
 
 run_scenarios
@@ -941,6 +982,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "без перевірки STOP перед агентом" 's/if stop_requested; then stop_task "перед агентом"; fi\n//'
   mutate "контейнер оракула сироти не вбито" 's/"a8-\$oid" "a8-\$oid-oracle"/"a8-\$oid"/'
   mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
+  # Образ агента (сценарій 21, issue #117).
+  mutate "тік стартує задачу без перевірки образу" 's/if ! imsg=/if false \&\& ! imsg=/'
+  mutate "без образу тік іде далі" 's/(image_missing: [^\n]*\n)  exit 0\n/$1/'
+  mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
   wait
   for i in $(seq 1 "$n"); do

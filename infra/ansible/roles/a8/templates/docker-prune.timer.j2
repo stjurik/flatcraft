@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+# Стан таймера — змінна a8_docker_prune_timer_enabled, а не `systemctl enable`
+# руками: конфігурація, якої немає в git, не існує (CLAUDE.md §0 п.5).
+[Unit]
+Description=Weekly docker prune ({{ a8_docker_prune_on_calendar }})
+
+[Timer]
+OnCalendar={{ a8_docker_prune_on_calendar }}
+
+[Install]
+WantedBy=timers.target
