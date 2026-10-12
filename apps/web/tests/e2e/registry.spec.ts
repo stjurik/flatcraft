@@ -47,16 +47,8 @@ for (const slug of Object.keys(TEMPLATE_REGISTRY) as TemplateSlug[]) {
     const firstNumberInput = page.locator('input[type="number"]').first();
     const exportButton = page.getByRole("button", { name: /експорт|export/i });
 
-    if (
-      productPath &&
-      ((await firstNumberInput.count()) === 0 || (await exportButton.count()) === 0)
-    ) {
-      // Рішення без питання (CLAUDE.md §0 п.4 — дрібниця з очевидним
-      // дефолтом): якщо колись Виріб перестане мати number-поле чи кнопку
-      // експорту — не підганяємо smoke, пропускаємо з посиланням на
-      // dedicated-спек замість хиткого селектора.
-      test.skip(true, `див. apps/web/tests/e2e/product-closed-shelf-standard.spec.ts для ${slug}`);
-    }
+    await expect(firstNumberInput).toBeVisible();
+    await expect(exportButton).toBeVisible();
 
     const min = await firstNumberInput.getAttribute("min");
     await firstNumberInput.fill(min ?? "50");
