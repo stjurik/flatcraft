@@ -130,10 +130,25 @@ done < <(find "$Q" -maxdepth 1 -type f -name '*.json' | sort)
 # Ненульовий код `image inspect` при недоступному docker теж іде сюди: це так
 # само зламане середовище, а перший рядок stderr у деталі називає справжню
 # причину — окремих сигнатур не вигадуємо (CLAUDE.md §0 п.3).
+#
+# СИГНАЛ ЛЮДИНІ. Сама подія в журналі нікого не кличе: тік мовчки виходив би з 0
+# кожні 10 хв (рецензія Flash, PR #232). Тому після A8_CONSECUTIVE_FAILURE_LIMIT
+# тіків поспіль без образу тік пише kill switch із причиною й ліками — той самий
+# механізм, що при 401: STOP видно в пульті й a8-report, а зняти його — рішення
+# людини. Одиничний збій (docker саме перезапускається) STOP не ставить:
+# лічильник серії скидається першим же тіком, що побачив образ.
+streak_file="$A8_LOGS_DIR/env-broken-streak"
 if ! imsg="$("$DOCKER" image inspect "$A8_CONTAINER_IMAGE" 2>&1 >/dev/null)"; then
   "$JOURNAL" event env_broken "image_missing: $A8_CONTAINER_IMAGE — ${imsg%%$'\n'*}"
+  streak=$(($(cat "$streak_file" 2>/dev/null || echo 0) + 1))
+  echo "$streak" >"$streak_file"
+  if ((streak >= A8_CONSECUTIVE_FAILURE_LIMIT)); then
+    printf 'Образу агента %s немає %s тіків поспіль (останній — %s). Ліки: ansible-playbook a8.yml -i inventory.a8.ini (збирає образ), потім rm %s.\n' \
+      "$A8_CONTAINER_IMAGE" "$streak" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+  fi
   exit 0
 fi
+rm -f "$streak_file"
 
 id="$(field id "$task")"
 src="$(field source "$task")"

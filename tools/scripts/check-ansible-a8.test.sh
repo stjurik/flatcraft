@@ -989,6 +989,16 @@ make_prune_tree "$tmproot/p4" "$SVC_HEAD
 ExecStart=/usr/bin/docker system prune -af"
 assert_exit "інв.14: фільтр лише в коментарі → 1" 1 "$tmproot/p4" "prune без --filter"
 
+# Фільтр у ХВОСТОВОМУ коментарі — теж не доходить до docker (рецензія Flash, PR #232).
+make_prune_tree "$tmproot/p4b" "$SVC_HEAD
+ExecStart=/usr/bin/docker system prune -af # --filter \"label!=hart.keep=true\""
+assert_exit "інв.14: фільтр у хвостовому коментарі → 1" 1 "$tmproot/p4b" "prune без --filter"
+
+# ` #` усередині лапок — не коментар: фільтр після нього діє.
+make_prune_tree "$tmproot/p4c" "$SVC_HEAD
+ExecStart=/bin/sh -c \"echo ' #'; /usr/bin/docker system prune -af --filter label!=hart.keep=true\""
+assert_exit "інв.14: ' #' у лапках не зрізає фільтр → 0" 0 "$tmproot/p4c"
+
 # Продовження рядка: фільтр на наступному рядку — та сама команда.
 make_prune_tree "$tmproot/p5" "$SVC_HEAD
 ExecStart=/usr/bin/docker system prune -af \\
@@ -1053,6 +1063,22 @@ assert_exit "інв.14: LABEL з лапками серед інших міток
 make_prune_tree "$tmproot/p13" "" "$DF_HEAD
 # LABEL hart.keep=true"
 assert_exit "інв.14: LABEL лише в коментарі → 1" 1 "$tmproot/p13" "немає LABEL hart.keep=true"
+
+make_prune_tree "$tmproot/p13b" "" "$DF_HEAD
+LABEL org.example=1 # hart.keep=true"
+assert_exit "інв.14: LABEL hart.keep лише в хвостовому коментарі → 1" 1 "$tmproot/p13b" "немає LABEL hart.keep=true"
+
+# Юніт prune згадано лише в хвостовому коментарі задачі template — не ставиться.
+make_prune_tree "$tmproot/p13c" "" "" '---
+- name: Install units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+  loop:
+    - a8-tick.service # docker-prune.service docker-prune.timer'
+assert_exit "інв.14: юніти prune лише в хвостовому коментарі задачі → 1" 1 "$tmproot/p13c"
+grep -qF "жодна задача ролі не ставить docker-prune.timer" "$tmproot/out" ||
+  { echo "✗ інв.14: хвостовий коментар задачі зараховано як встановлення"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 
 # Мітка в проміжній стадії до фінального образу не доходить.
 make_prune_tree "$tmproot/p14" "" "FROM ghcr.io/astral-sh/uv:0.12.17 AS uv

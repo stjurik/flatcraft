@@ -849,11 +849,13 @@ EOF
   # 21. Образу агента немає (issue #117: 2026-10-11 docker-prune видалив його, і
   # три задачі поспіль стали failed — пауза черги). Тепер задачу не беруть: вона
   # лишається в черзі, у журналі env_broken image_missing, а лічильник падінь і
-  # денний ліміт не ростуть. Три тіки без образу — не пауза: щойно образ є, та
-  # сама задача виконується наступним тіком.
+  # денний ліміт не ростуть. Тіки без образу нижче порогу (3) — не пауза: щойно
+  # образ є, та сама задача виконується наступним тіком.
   setup
   enqueue 001-a "$(valid a)"
-  for _ in 1 2 3; do IMAGE_MISSING=1 tick; done
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  [[ ! -e "$ROOT/STOP" ]] && ok "два тіки без образу (нижче порогу) → STOP не поставлено" ||
+    bad "STOP нижче порогу: $(cat "$ROOT/STOP")"
   [[ "$(jl .event)" == env_broken && "$(jl .detail)" == "image_missing: hart-agent:test"* ]] &&
     ok "образу немає → event env_broken, detail «image_missing: <образ>»" || bad "image_missing: $(last)"
   [[ -e "$QD/001-a.json" && -z "$(find "$QD/running" "$QD/failed" "$QD/done" -name '*.json')" ]] &&
@@ -863,16 +865,46 @@ EOF
     bad "image_missing: обгортку запущено: $(cat "$LOGS/runner-calls")"
   cnt="$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null || echo 0)"
   ! grep -q failed "$LOGS/last-results" 2>/dev/null && [[ "${cnt:-0}" == 0 ]] &&
-    ok "три тіки без образу → лічильник failed і денний ліміт не зросли" ||
+    ok "тіки без образу → лічильник failed і денний ліміт не зросли" ||
     bad "image_missing: last-results «$(cat "$LOGS/last-results" 2>/dev/null)», лічильник «$cnt»"
-  [[ "$(grep -c '"event":"env_broken"' "$LOGS/runs.log")" == 3 ]] &&
-    ok "кожен тік без образу пише env_broken (3 з 3)" || bad "env_broken: $(cat "$LOGS/runs.log")"
+  [[ "$(grep -c '"event":"env_broken"' "$LOGS/runs.log")" == 2 ]] &&
+    ok "кожен тік без образу пише env_broken (2 з 2)" || bad "env_broken: $(cat "$LOGS/runs.log")"
   grep -qx 'docker image inspect hart-agent:test' "$LOGS/docker-calls" 2>/dev/null &&
     ok "перевіряється образ із конфігу (A8_CONTAINER_IMAGE)" ||
     bad "перевірка образу: $(cat "$LOGS/docker-calls" 2>/dev/null)"
   tick
   [[ "$(jl .task)" == a && "$(jl .result)" == no-credential && -e "$QD/done/001-a.json" ]] &&
     ok "образ з'явився → та сама задача виконується наступним тіком (паузи немає)" || bad "після образу: $(last)"
+  [[ ! -e "$LOGS/env-broken-streak" ]] && ok "тік з образом скинув серію env_broken" ||
+    bad "серію не скинуто: $(cat "$LOGS/env-broken-streak")"
+  teardown
+
+  # 21b. Сигнал людині: подія в журналі нікого не кличе (рецензія Flash, PR #232).
+  # На A8_CONSECUTIVE_FAILURE_LIMIT-му тіку поспіль без образу тік пише kill
+  # switch із причиною і ліками; далі черга стоїть як при 401, задача — в черзі.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2 3; do IMAGE_MISSING=1 tick; done
+  [[ -e "$ROOT/STOP" ]] && grep -q 'hart-agent:test' "$ROOT/STOP" && grep -q 'ansible-playbook' "$ROOT/STOP" &&
+    ok "третій тік поспіль без образу → STOP з образом і ліками" || bad "STOP після 3: $(cat "$ROOT/STOP" 2>/dev/null || echo немає)"
+  IMAGE_MISSING=1 tick
+  [[ "$(jl .event)" == kill_switch && -e "$QD/001-a.json" ]] &&
+    ok "після STOP тік зупиняється запобіжником, задача ціла в черзі" || bad "після STOP: $(last)"
+  ! grep -q failed "$LOGS/last-results" 2>/dev/null && ok "STOP за образом — не падіння (last-results без failed)" ||
+    bad "last-results: $(cat "$LOGS/last-results")"
+  teardown
+
+  # 21c. Серію рахуємо ПОСПІЛЬ: тік з образом між збоями її скидає, тож два
+  # окремі збої docker (рестарт) STOP не ставлять.
+  setup
+  enqueue 001-a "$(valid a)"
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  tick
+  enqueue 002-b "$(valid b)"
+  for _ in 1 2; do IMAGE_MISSING=1 tick; done
+  [[ ! -e "$ROOT/STOP" && "$(cat "$LOGS/env-broken-streak" 2>/dev/null)" == 2 ]] &&
+    ok "2 збої + тік з образом + 2 збої → серія 2, STOP немає" ||
+    bad "серія не поспіль: STOP=$([[ -e "$ROOT/STOP" ]] && echo є || echo немає), серія=$(cat "$LOGS/env-broken-streak" 2>/dev/null)"
   teardown
 }
 
@@ -984,7 +1016,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "STOP перекриває 401" 's/if \[\[ "\$cls" != auth_stop \]\] && stop_requested/if stop_requested/'
   # Образ агента (сценарій 21, issue #117).
   mutate "тік стартує задачу без перевірки образу" 's/if ! imsg=/if false \&\& ! imsg=/'
-  mutate "без образу тік іде далі" 's/(image_missing: [^\n]*\n)  exit 0\n/$1/'
+  mutate "без образу тік іде далі" 's/(>"\$A8_KILL_SWITCH"\n  fi\n)  exit 0\n/$1/'
+  mutate "без образу STOP не ставиться" 's/  if \(\(streak >= A8_CONSECUTIVE_FAILURE_LIMIT\)\); then/  if false; then/'
+  mutate "серія env_broken не скидається" 's/\nrm -f "\$streak_file"\n/\n/'
+  mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
   mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
   wait

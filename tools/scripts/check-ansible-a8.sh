@@ -837,17 +837,15 @@ fi
 # Живий стан на A8 (мітка на образі, команда юніта, таймер) — V21 у verify.yml.
 PRUNE_SVC="$ROLE/templates/docker-prune.service.j2"
 PRUNE_TMR="$ROLE/templates/docker-prune.timer.j2"
-# no_comments <файл…> — рядки без коментарів `#` (YAML, shell, systemd, Dockerfile)
-# і Jinja-коментарів, з продовженнями `\` склеєними в один рядок. Префікс — ім'я
-# файла: порушення має називати, де шукати.
-no_comments() {
-  awk '
-    FNR == 1 { buf = "" }
-    /^[ \t]*#/ || /^[ \t]*\{#/ { next }
-    { line = buf $0 }
-    /\\$/ { sub(/\\$/, "", line); buf = line " "; next }
-    { buf = ""; print FILENAME ":" FNR ":" line }
-  ' "$@"
+# Коментарі — тим самим strip_comments, що в інваріанті 11: і цілі рядки, і
+# хвостові ` # …` поза лапками. Перша редакція відкидала лише рядки, що
+# починаються з `#`, і фільтр у хвостовому коментарі (`prune -af # --filter
+# "label!=hart.keep=true"`) проходив інваріант, хоча до docker не доходить
+# (рецензія Flash, PR #232). Префікс рядка — ім'я файла: порушення має називати,
+# де шукати.
+uncommented() { # uncommented <файл> — «файл:N:текст» без коментарів
+  local f="$1"
+  strip_comments "$f" | awk -v f="$f" -F '\t' '{ n = $1; sub(/^[^\t]*\t/, ""); if ($0 ~ /[^ \t]/) print f ":" n ":" $0 }'
 }
 if [[ ! -f "$PRUNE_SVC" || ! -f "$PRUNE_TMR" ]]; then
   violations+=("немає шаблону $PRUNE_SVC або $PRUNE_TMR — таймер prune не з роллю, а лише на машині (issue #117)")
@@ -859,13 +857,13 @@ fi
 prune_tasks=""
 if [[ -d "$TASKS" ]]; then
   mapfile -t ptask_files < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
-  [[ ${#ptask_files[@]} -gt 0 ]] && prune_tasks="$(awk '
-    function flush() { if (blk ~ /template:/ && blk ~ /\/etc\/systemd\/system/) printf "%s\036", blk; blk = "" }
-    FNR == 1 { flush() }
-    /^[ \t]*#/ { next }
-    /^- / { flush() }
-    { blk = blk $0 "\n" }
-    END { flush() }' "${ptask_files[@]}")"
+  for f in "${ptask_files[@]}"; do
+    prune_tasks+="$(strip_comments "$f" | cut -f2- | awk '
+      function flush() { if (blk ~ /template:/ && blk ~ /\/etc\/systemd\/system/) printf "%s\036", blk; blk = "" }
+      /^- / { flush() }
+      { blk = blk $0 "\n" }
+      END { flush() }')"
+  done
 fi
 for unit in docker-prune.service docker-prune.timer; do
   grep -qF -- "$unit" <<<"$prune_tasks" ||
@@ -878,8 +876,10 @@ for d in "$ROLE/templates" "$ROLE/files" "$TASKS" "$ROLE/handlers"; do
   [[ -d "$d" ]] && while IFS= read -r f; do prune_files+=("$f"); done < <(find "$d" -type f | sort)
 done
 prune_cmds=""
-[[ ${#prune_files[@]} -gt 0 ]] &&
-  prune_cmds="$(no_comments "${prune_files[@]}" | grep -E 'docker[[:space:]]+(system|image)[[:space:]]+prune' || true)"
+for f in "${prune_files[@]}"; do
+  prune_cmds+="$(uncommented "$f" | grep -E 'docker[[:space:]]+(system|image)[[:space:]]+prune' || true)"$'\n'
+done
+prune_cmds="$(grep -v '^$' <<<"$prune_cmds" || true)"
 if [[ -z "$prune_cmds" ]]; then
   violations+=("у ролі немає жодної команди docker system/image prune — не видно, чим чиститься docker і чи пощадить він образ агента")
 fi
@@ -892,7 +892,8 @@ while IFS= read -r cmd; do
 done <<<"$prune_cmds"
 # Мітка — у ФІНАЛЬНІЙ стадії: LABEL у стадії `uv` до образу агента не доходить.
 if [[ -f "$AGENT_DOCKERFILE" ]]; then
-  final_labels="$(awk '/^[ \t]*#/ { next } /^FROM / { buf = "" ; next } { buf = buf $0 "\n" } END { printf "%s", buf }' "$AGENT_DOCKERFILE" |
+  final_labels="$(strip_comments "$AGENT_DOCKERFILE" | cut -f2- |
+    awk '/^FROM / { buf = ""; next } { buf = buf $0 "\n" } END { printf "%s", buf }' |
     grep -E '^[[:space:]]*LABEL[[:space:]]' | tr -d "\"'" || true)"
   [[ "$final_labels" =~ (^|[[:space:]])hart\.keep=true([[:space:]]|$) ]] ||
     violations+=("у фінальній стадії $AGENT_DOCKERFILE немає LABEL hart.keep=true — prune таймера видалить образ агента (issue #117)")
