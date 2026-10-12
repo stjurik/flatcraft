@@ -12,6 +12,7 @@
 import type { ComponentType } from "react";
 
 import { CornerAngleScene } from "./corner-angle-scene.js";
+import { EnclosedShelfScene } from "./enclosed-shelf-scene.js";
 import { PerforatedPanelScene } from "./perforated-panel-scene.js";
 import { WallShelfScene } from "./wall-shelf-scene.js";
 
@@ -36,4 +37,8 @@ export const COMPOSED_SCENES: Partial<Record<string, ComposedSceneComponent>> = 
   // grid cylinders overlay; той самий підхід, що й corner_angle (наближене
   // прев'ю, точні координати — лише у DXF/PDF).
   wall_shelf: WallShelfScene as ComposedSceneComponent,
+  // enclosed_shelf — cross-розгортка: bottom/back/left/right BoxGeometry
+  // (+ опційний stiffening_rib) + декоративний side_perforation overlay;
+  // той самий підхід, що й perforated_panel (наближене прев'ю).
+  enclosed_shelf: EnclosedShelfScene as ComposedSceneComponent,
 };

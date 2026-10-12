@@ -72,6 +72,19 @@ const cases = [
         />,
       ),
   },
+  {
+    name: "RegistryTemplateEditor (enclosed_shelf)",
+    render: (t: number) =>
+      renderToString(
+        <RegistryTemplateEditor
+          def={TEMPLATE_REGISTRY.enclosed_shelf}
+          value={TEMPLATE_REGISTRY.enclosed_shelf.defaults}
+          onChange={noop}
+          materialCode="cold_rolled_steel"
+          thicknessMm={t}
+        />,
+      ),
+  },
 ] as const;
 
 describe("editor матричний банер (Hotfix 2.9.c)", () => {
