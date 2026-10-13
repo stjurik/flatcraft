@@ -238,6 +238,18 @@ describe("POST /exports — async flow", () => {
     expect(rad?.message).toMatch(/радіус/i);
   });
 
+  it("t=7 (не підтримується) → рівно одна помилка THICKNESS_NOT_SUPPORTED, не дублюється гейтом заготовки", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: { ...VALID_REQUEST, thickness_mm: 7 },
+    });
+    expect(res.statusCode).toBe(422);
+    const problem = res.json<{ errors: { code: string }[] }>();
+    expect(problem.errors.filter((e) => e.code === "THICKNESS_NOT_SUPPORTED")).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("perforated_panel (square holes): pitch_y <= сторона → 422 HOLES_OVERLAP, артефакт не створюється", async () => {
     const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
     const res = await app.inject({

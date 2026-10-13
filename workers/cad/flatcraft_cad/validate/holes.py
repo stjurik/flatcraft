@@ -43,46 +43,65 @@ def validate_holes(
     spec: dict[str, Any] | None = None,
 ) -> list[HoleError]:
     """Перевіряє відстань отворів від лінії гиба. [] → валідно (разом з
-    порожнім `holes` і шаблонами без цього поля)."""
+    порожнім `holes` і шаблонами без цього поля).
+
+    `material_code` обов'язковий (рішення Архітектора 2026-10-13, замінює
+    2026-10-06): відсутній чи невідомий материал (немає у
+    `hole_to_bend_distance.coefficient_by_material`, тобто і в переліку
+    матеріалів) — коефіцієнт невідомий, перевірку зробити неможливо, і це
+    САМЕ ПО СОБІ помилка (паритет з TS `holes.material_coefficient_missing` →
+    `HOLE_MATERIAL_COEFFICIENT_MISSING`), а не мовчазний пропуск.
+    """
     if template_slug not in ("l_bracket", "z_bracket"):
         return []
 
     holes: list[dict[str, Any]] = parameters.get("holes") or []
     if not holes:
         return []
-    if material_code is None:
-        # API завжди передає material_code (рішення yurii 2026-10-06); без
-        # нього коефіцієнт матеріалу невідомий — перевірку неможливо зробити.
-        return []
 
-    spec = spec if spec is not None else load_spec()
-    coeff = spec["hole_to_bend_distance"]["coefficient_by_material"].get(material_code)
-    if coeff is None:
-        return []
-
-    r = float(parameters["bend_radius_mm"])
-    min_edge_mm = coeff * thickness_mm + r
-
-    errors: list[HoleError] = []
-    for idx, hole in enumerate(holes):
-        diameter_mm = float(hole["diameter_mm"])
-        center_distance_mm = float(hole["distance_from_bend_mm"])
-        edge_distance_mm = center_distance_mm - diameter_mm / 2
-        if edge_distance_mm < min_edge_mm:
-            min_center_mm = min_edge_mm + diameter_mm / 2
-            errors.append(
+    try:
+        spec = spec if spec is not None else load_spec()
+        coeff = (
+            None
+            if material_code is None
+            else spec["hole_to_bend_distance"]["coefficient_by_material"].get(material_code)
+        )
+        if coeff is None:
+            return [
                 HoleError(
-                    code="HOLE_TOO_CLOSE_TO_BEND",
-                    field=f"holes[{idx}].distance_from_bend_mm",
+                    code="HOLE_MATERIAL_COEFFICIENT_MISSING",
+                    field="material_code",
                     detail=(
-                        f"Відсуньте отвір №{idx + 1} від лінії гиба: від краю отвору до гиба "
-                        f"має бути не менше {_fmt(min_edge_mm)} мм, тобто від центру "
-                        f"Ø{_fmt(diameter_mm)} — не менше {_fmt(min_center_mm)} мм "
-                        f"(зараз {_fmt(center_distance_mm)} мм)."
+                        f"Для матеріалу {material_code} немає коефіцієнта відстані отвору від гиба."
                     ),
                 )
-            )
-    return errors
+            ]
+
+        r = float(parameters["bend_radius_mm"])
+        min_edge_mm = coeff * thickness_mm + r
+
+        errors: list[HoleError] = []
+        for idx, hole in enumerate(holes):
+            diameter_mm = float(hole["diameter_mm"])
+            center_distance_mm = float(hole["distance_from_bend_mm"])
+            edge_distance_mm = center_distance_mm - diameter_mm / 2
+            if edge_distance_mm < min_edge_mm:
+                min_center_mm = min_edge_mm + diameter_mm / 2
+                errors.append(
+                    HoleError(
+                        code="HOLE_TOO_CLOSE_TO_BEND",
+                        field=f"holes[{idx}].distance_from_bend_mm",
+                        detail=(
+                            f"Відсуньте отвір №{idx + 1} від лінії гиба: від краю отвору до "
+                            f"гиба має бути не менше {_fmt(min_edge_mm)} мм, тобто від центру "
+                            f"Ø{_fmt(diameter_mm)} — не менше {_fmt(min_center_mm)} мм "
+                            f"(зараз {_fmt(center_distance_mm)} мм)."
+                        ),
+                    )
+                )
+        return errors
+    except (KeyError, TypeError, ValueError):
+        return []
 
 
 def validate_export_holes(

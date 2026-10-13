@@ -13,7 +13,12 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { bakedSpec } from "../generated/baked-spec.js";
-import { validateExportBends, validateExportHoles, validateExportSheet } from "./export-gate.js";
+import {
+  sheetDimensionsFor,
+  validateExportBends,
+  validateExportHoles,
+  validateExportSheet,
+} from "./export-gate.js";
 
 function lBracket(overrides: {
   thickness_mm: number;
@@ -205,5 +210,69 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
     expect(
       validateExportSheet(lBracket({ thickness_mm: 2, bend_radius_mm: 2.5 }), bakedSpec),
     ).toEqual([]);
+  });
+
+  describe("sheetDimensionsFor — enclosed_shelf bbox паритет з Python unfold.py", () => {
+    // Числа отримані з `_sheet_dimensions_mm` (workers/cad), яка тепер рахує
+    // bbox точно за формулами `unfold_enclosed_shelf` (left/right звисають
+    // за bottom/back на (t+r)/2 навіть БЕЗ ребра — попередня формула рахувала
+    // «низ» від 0 і занижувала висоту).
+    it("без ребра (width=600 depth=200 t=2 R=2.5) — висота враховує left/right overhang", () => {
+      const req: ExportRequest = {
+        template_slug: "enclosed_shelf",
+        parameters: ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req, bakedSpec);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
+      expect(dims!.heightMm).toBeCloseTo(398.4336278784232, 6);
+    });
+
+    it("з ребром height_mm=15 (width=600 depth=200 t=2 R=2.5)", () => {
+      const req: ExportRequest = {
+        template_slug: "enclosed_shelf",
+        parameters: { ...ENCLOSED_SHELF_DEFAULT_PARAMETERS, stiffening_rib: { height_mm: 15 } },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req, bakedSpec);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
+      expect(dims!.heightMm).toBeCloseTo(407.36725575684636, 6);
+    });
+
+    it("без ребра, великий (width=900 depth=300 t=8 R=5)", () => {
+      const req: ExportRequest = {
+        template_slug: "enclosed_shelf",
+        parameters: {
+          ...ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+          width_mm: 900,
+          depth_mm: 300,
+          bend_radius_mm: 5,
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 8,
+      };
+      const dims = sheetDimensionsFor(req, bakedSpec);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBeCloseTo(1472.2530952857132, 6);
+      expect(dims!.heightMm).toBeCloseTo(592.6265476428566, 6);
+    });
+  });
+});
+
+describe("validateExportSheet — невідома товщина не дублює THICKNESS_NOT_SUPPORTED", () => {
+  it("t=7 (не підтримується) → рівно 1 помилка THICKNESS_NOT_SUPPORTED у validateExportBends, validateExportSheet мовчить", () => {
+    const req: ExportRequest = {
+      template_slug: "l_bracket",
+      parameters: L_BRACKET_DEFAULT_PARAMETERS,
+      material_code: "cold_rolled_steel",
+      thickness_mm: 7,
+    };
+    expect(validateExportSheet(req, bakedSpec)).toEqual([]);
+    const bendIssues = validateExportBends(req, bakedSpec);
+    expect(bendIssues.filter((e) => e.code === "THICKNESS_NOT_SUPPORTED")).toHaveLength(1);
   });
 });

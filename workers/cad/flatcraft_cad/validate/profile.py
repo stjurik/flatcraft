@@ -64,7 +64,9 @@ def validate_profile(
     """Перевіряє геометричну достатність профілю. Порожній список → валідно.
 
     Невідомий slug → []. thickness <= 0 → [] (як `t <= 0` early-return у
-    geometry.ts; Pydantic відмовить окремо).
+    geometry.ts; Pydantic відмовить окремо). Неповні `parameters` (KeyError/
+    TypeError/ValueError з прямого читання `parameters[...]`) → [] — схема
+    шаблону (Pydantic) відмовить пізніше зі своїм 422, а не 500 тут.
     """
     t = thickness_mm
     if t <= 0:
@@ -88,47 +90,50 @@ def validate_profile(
                 )
             )
 
-    if template_slug in ("l_bracket", "corner_angle"):
-        r = float(parameters["bend_radius_mm"])
-        leg("legA", float(parameters["legA_mm"]), r)
-        leg("legB", float(parameters["legB_mm"]), r)
-        return errors
+    try:
+        if template_slug in ("l_bracket", "corner_angle"):
+            r = float(parameters["bend_radius_mm"])
+            leg("legA", float(parameters["legA_mm"]), r)
+            leg("legB", float(parameters["legB_mm"]), r)
+            return errors
 
-    if template_slug == "z_bracket":
-        r = float(parameters["bend_radius_mm"])
-        off = float(parameters["offset_mm"])
-        if off <= r:
-            errors.append(
-                ProfileError(
-                    code="OFFSET_TOO_SMALL", field="offset", detail=_gt_msg("offset", r, t, r)
+        if template_slug == "z_bracket":
+            r = float(parameters["bend_radius_mm"])
+            off = float(parameters["offset_mm"])
+            if off <= r:
+                errors.append(
+                    ProfileError(
+                        code="OFFSET_TOO_SMALL", field="offset", detail=_gt_msg("offset", r, t, r)
+                    )
                 )
-            )
-        flange("top_flange", float(parameters["top_flange_mm"]), r)
-        flange("bottom_flange", float(parameters["bottom_flange_mm"]), r)
-        return errors
+            flange("top_flange", float(parameters["top_flange_mm"]), r)
+            flange("bottom_flange", float(parameters["bottom_flange_mm"]), r)
+            return errors
 
-    if template_slug == "perforated_panel":
-        # Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
-        # має бути додатним → rib_height > t+r (як flange у z/wall).
-        r = float(parameters.get("bend_radius_mm", 2.5))
-        flange("rib_height", float(parameters["rib_height_mm"]), r)
-        return errors
+        if template_slug == "perforated_panel":
+            # Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
+            # має бути додатним → rib_height > t+r (як flange у z/wall).
+            r = float(parameters.get("bend_radius_mm", 2.5))
+            flange("rib_height", float(parameters["rib_height_mm"]), r)
+            return errors
 
-    if template_slug == "wall_shelf":
-        r = float(parameters["bend_radius_mm"])
-        flange("back_height", float(parameters["back_height_mm"]), r)
-        lip = float(parameters.get("front_lip_mm", 0))
-        sd = float(parameters["shelf_depth_mm"])
-        threshold = 2 * (t + r) if lip > 0 else (t + r)
-        if sd <= threshold:
-            errors.append(
-                ProfileError(
-                    code="SHELF_TOO_SHORT",
-                    field="shelf_depth",
-                    detail=_gt_msg("shelf_depth", threshold, t, r),
+        if template_slug == "wall_shelf":
+            r = float(parameters["bend_radius_mm"])
+            flange("back_height", float(parameters["back_height_mm"]), r)
+            lip = float(parameters.get("front_lip_mm", 0))
+            sd = float(parameters["shelf_depth_mm"])
+            threshold = 2 * (t + r) if lip > 0 else (t + r)
+            if sd <= threshold:
+                errors.append(
+                    ProfileError(
+                        code="SHELF_TOO_SHORT",
+                        field="shelf_depth",
+                        detail=_gt_msg("shelf_depth", threshold, t, r),
+                    )
                 )
-            )
-        return errors
+            return errors
+    except (KeyError, TypeError, ValueError):
+        return []
 
     return errors
 

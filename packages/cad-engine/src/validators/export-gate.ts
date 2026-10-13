@@ -392,6 +392,12 @@ export function sheetDimensionsFor(
     case "enclosed_shelf": {
       // Cross-розгортка (ADR-027 Рішення 5): bottom + back + left + right
       // [+ опц. rib]. bbox — по unfold_enclosed_shelf (left/right симетричні).
+      //
+      // left/right звисають за межі bottom/back навіть БЕЗ ребра:
+      // `leftYOffset = (flatBottomY - depth_mm) / 2` < 0, тож min/max беремо
+      // по всіх сегментах (bottom, back, left/right, опц. rib), а не лише по
+      // back+bottom (Hotfix — раніше «низ» рахувався від 0, занижуючи
+      // габарит на (t+r)/2).
       const p = body.parameters;
       const r = p.bend_radius_mm;
       const ba = tryComputeBendAllowanceMm(materialCode, t, r, p.bend_angle_deg, spec);
@@ -402,9 +408,14 @@ export function sheetDimensionsFor(
       const ribPresent = p.stiffening_rib !== null;
       const flatBottomY = p.depth_mm - tr - (ribPresent ? tr : 0);
       const flatBackY = p.depth_mm - tr;
-      const top = flatBottomY + ba + flatBackY;
-      const bottom = ribPresent ? -(ba + (p.stiffening_rib!.height_mm - tr)) : 0;
-      return { widthMm, heightMm: top - bottom };
+      const leftYOffset = (flatBottomY - p.depth_mm) / 2;
+      const topCandidates = [flatBottomY, flatBottomY + ba + flatBackY, leftYOffset + p.depth_mm];
+      const bottomCandidates = [0, leftYOffset];
+      if (ribPresent) {
+        bottomCandidates.push(-(ba + (p.stiffening_rib!.height_mm - tr)));
+      }
+      const heightMm = Math.max(...topCandidates) - Math.min(...bottomCandidates);
+      return { widthMm, heightMm };
     }
   }
 }
@@ -433,10 +444,16 @@ function sheetErrorToProblem(e: ValidationError, dims: SheetDimensionsMm): Probl
  * п.4) — обгортка `validateSheet` навколо `sheetDimensionsFor`. Порожній
  * масив — валідно (разом з усіма 6 шаблонами; `null` від `sheetDimensionsFor`
  * також дає []).
+ *
+ * Невідома товщина → [] тут: `validateExportBends` (bend-гейт) уже звітує
+ * `THICKNESS_NOT_SUPPORTED` для будь-якого шаблону з bend-полями — без цього
+ * early-return той самий код дублювався б двічі в `errors[]` (паритет з
+ * Python `validate_sheet`, рядок «row is None → []»).
  */
 export function validateExportSheet(body: ExportRequest, spec: BendMachineSpec): ProblemError[] {
   const dims = sheetDimensionsFor(body, spec);
   if (!dims) return [];
+  if (!spec.capability_matrix.some((r) => r.thickness_mm === body.thickness_mm)) return [];
   const result = validateSheet(
     {
       materialCode: body.material_code,

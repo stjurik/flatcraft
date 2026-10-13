@@ -155,6 +155,7 @@ class TestExportHappy:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -186,6 +187,7 @@ class TestExportHappy:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         body = res.json()
@@ -201,6 +203,7 @@ class TestExportHappy:
             "parameters": VALID_PARAMS,
             "thickness_mm": 2,
             "k_factor": 0.4,
+            "material_code": "cold_rolled_steel",
         }
         a = client.post("/export", json=payload).json()
         b = client.post("/export", json=payload).json()
@@ -228,6 +231,7 @@ class TestZBracketExport:
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -260,6 +264,7 @@ class TestZBracketExport:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         z_res = client.post(
@@ -268,6 +273,7 @@ class TestZBracketExport:
                 "template_slug": "z_bracket",
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -291,6 +297,7 @@ class TestCornerAngleExport:
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -323,6 +330,7 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -346,6 +354,7 @@ class TestCornerAngleExport:
                 "template_slug": "l_bracket",
                 "parameters": {**VALID_PARAMS, "legA_mm": 50, "legB_mm": 50, "width_mm": 80},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         c_res = client.post(
@@ -354,6 +363,7 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -377,6 +387,7 @@ class TestWallShelfExport:
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -407,6 +418,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         # Без lip: 1 bend line.
@@ -416,6 +428,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": {**WALL_SHELF_VALID_PARAMS, "front_lip_mm": 0},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -449,6 +462,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -474,6 +488,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -507,6 +522,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -537,6 +553,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         big_pitch = client.post(
@@ -549,6 +566,7 @@ class TestPerforatedPanelExport:
                     "pitch_y_mm": 50,
                 },
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -584,6 +602,7 @@ class TestExportIdPermalink:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "export_id": export_id,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -608,7 +627,12 @@ class TestExportIdPermalink:
         monkeypatch.setenv("BASE_URL", "https://hart.crimea.ua")
         res = client.post(
             "/export",
-            json={"template_slug": "l_bracket", "parameters": VALID_PARAMS, "thickness_mm": 2},
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
         )
         assert res.status_code == 200, res.text
         pdf_key = res.json()["artifacts"]["pdf"]["s3_key"]
@@ -802,6 +826,7 @@ class TestSheetAndHolesGateParity:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "export_id": "00000000-1111-2222-3333-444444444444",
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
