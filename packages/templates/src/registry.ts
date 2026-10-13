@@ -9,6 +9,7 @@
  * для slug-паритету TS↔Python).
  */
 import { cornerAngleDefinition } from "./corner-angle/index.js";
+import { enclosedShelfDefinition } from "./enclosed-shelf/index.js";
 import { lBracketDefinition } from "./l-bracket/index.js";
 import { perforatedPanelDefinition } from "./perforated-panel/index.js";
 import { wallShelfDefinition } from "./wall-shelf/index.js";
@@ -27,6 +28,7 @@ export const TEMPLATE_REGISTRY = {
   l_bracket: lBracketDefinition,
   z_bracket: zBracketDefinition,
   wall_shelf: wallShelfDefinition,
+  enclosed_shelf: enclosedShelfDefinition,
 } as const;
 
 export type TemplateSlug = keyof typeof TEMPLATE_REGISTRY;
