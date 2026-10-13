@@ -68,7 +68,7 @@ export function R3FErrorBoundary({ children }: { children: ReactNode }): ReactNo
 export function CornerAngleScene(): null {
   return null;
 }
-export function LBracketScene(): null {
+export function ExtrudeScene(): null {
   return null;
 }
 export function WallShelfScene(): null {
