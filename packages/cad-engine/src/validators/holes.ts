@@ -43,8 +43,8 @@ export function validateHoles(input: HolesInput, spec: BendMachineSpec): Validat
     if (hole.distanceFromBendMm < minDistance) {
       errors.push({
         code: "holes.too_close_to_bend",
-        message_uk: `Отвір #${idx + 1}: відстань ${hole.distanceFromBendMm} мм менша за мінімальну ${minDistance.toFixed(2)} мм (a×t+R = ${coeff}×${input.thicknessMm}+${input.innerRadiusMm}).`,
-        message_en: `Hole #${idx + 1}: distance ${hole.distanceFromBendMm} mm is below minimum ${minDistance.toFixed(2)} mm (a×t+R = ${coeff}×${input.thicknessMm}+${input.innerRadiusMm}).`,
+        message_uk: `Отвір #${idx + 1}: відстань від краю до гиба ${hole.distanceFromBendMm} мм менша за мінімальну ${minDistance.toFixed(2)} мм (a×t+R = ${coeff}×${input.thicknessMm}+${input.innerRadiusMm}).`,
+        message_en: `Hole #${idx + 1}: edge-to-bend distance ${hole.distanceFromBendMm} mm is below minimum ${minDistance.toFixed(2)} mm (a×t+R = ${coeff}×${input.thicknessMm}+${input.innerRadiusMm}).`,
         fields: [`holes[${idx}].distanceFromBendMm`],
       });
     }

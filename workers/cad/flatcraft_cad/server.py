@@ -57,8 +57,10 @@ from flatcraft_cad.unfold import (
 )
 from flatcraft_cad.validate import (
     validate_export,
+    validate_export_holes,
     validate_export_perforation,
     validate_export_profile,
+    validate_export_sheet,
 )
 
 PRESIGN_EXPIRES_SEC = 3600
@@ -85,6 +87,11 @@ class ExportRequest(BaseModel):
     # сюди. Дозволяє QR у PDF вести на {BASE_URL}/f/{export_id} замість
     # непрацюючого fallback-scheme flatcraft://<slug>/<article>.
     export_id: UUID | None = None
+    # Рішення yurii 2026-10-06 (заміняє ADR-018 strip): потрібен для
+    # hole-to-bend-distance parity (coefficient_by_material) —
+    # `validate_export_holes`/`validate_export_sheet`. НЕ впливає на
+    # DXF/PDF-геометрію — лише на валідацію. Потребує правки ADR-018.
+    material_code: str | None = None
 
 
 def _permalink_url(export_id: UUID | None) -> str | None:
@@ -296,6 +303,12 @@ def _build_app() -> FastAPI:
             *validate_export_profile(req.template_slug, req.parameters, req.thickness_mm),
             *validate_export(req.template_slug, req.parameters, req.thickness_mm),
             *validate_export_perforation(req.template_slug, req.parameters),
+            *validate_export_sheet(
+                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+            ),
+            *validate_export_holes(
+                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+            ),
         ]
         if errors:
             raise HTTPException(status_code=422, detail=errors)

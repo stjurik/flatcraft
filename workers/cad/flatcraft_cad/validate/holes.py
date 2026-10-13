@@ -1,0 +1,97 @@
+"""Parity hole-to-bend-distance валідатор (docs/07 §3, рішення yurii 2026-10-11).
+
+Дзеркало TS `packages/cad-engine/src/validators/holes.ts` +
+`export-gate.ts::validateExportHoles`. Правило вимірюється від НАЙБЛИЖЧОГО
+КРАЮ отвору до лінії гиба (>= a·t+R), але поле `distance_from_bend_mm` у
+Zod/Pydantic-схемі й студії — від ЦЕНТРУ отвору (UX). Перераховуємо
+центр → край ТУТ, в одному місці, перед порівнянням з мінімумом.
+
+Лише l_bracket і z_bracket мають поле `holes[].distance_from_bend_mm`
+(corner_angle/wall_shelf — auto-grid без цього поля; perforated_panel/
+enclosed_shelf — отвори не прив'язані до конкретного гиба) — інші слаги → [].
+
+Остання лінія оборони у воркері: навіть якщо API-gate обійдено, воркер
+відмовляє ДО CAD-операції/запису у R2 з 422 RFC 9457.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from typing import Any
+
+from flatcraft_cad.validate.bend import load_spec
+
+
+@dataclass(frozen=True)
+class HoleError:
+    """Один елемент 422-detail. `code` збігається з кодом TS export-gate."""
+
+    code: str
+    field: str
+    detail: str
+
+
+def _fmt(n: float) -> str:
+    return f"{round(n, 3):g}"
+
+
+def validate_holes(
+    template_slug: str,
+    parameters: dict[str, Any],
+    thickness_mm: float,
+    material_code: str | None,
+    spec: dict[str, Any] | None = None,
+) -> list[HoleError]:
+    """Перевіряє відстань отворів від лінії гиба. [] → валідно (разом з
+    порожнім `holes` і шаблонами без цього поля)."""
+    if template_slug not in ("l_bracket", "z_bracket"):
+        return []
+
+    holes: list[dict[str, Any]] = parameters.get("holes") or []
+    if not holes:
+        return []
+    if material_code is None:
+        # API завжди передає material_code (рішення yurii 2026-10-06); без
+        # нього коефіцієнт матеріалу невідомий — перевірку неможливо зробити.
+        return []
+
+    spec = spec if spec is not None else load_spec()
+    coeff = spec["hole_to_bend_distance"]["coefficient_by_material"].get(material_code)
+    if coeff is None:
+        return []
+
+    r = float(parameters["bend_radius_mm"])
+    min_edge_mm = coeff * thickness_mm + r
+
+    errors: list[HoleError] = []
+    for idx, hole in enumerate(holes):
+        diameter_mm = float(hole["diameter_mm"])
+        center_distance_mm = float(hole["distance_from_bend_mm"])
+        edge_distance_mm = center_distance_mm - diameter_mm / 2
+        if edge_distance_mm < min_edge_mm:
+            min_center_mm = min_edge_mm + diameter_mm / 2
+            errors.append(
+                HoleError(
+                    code="HOLE_TOO_CLOSE_TO_BEND",
+                    field=f"holes[{idx}].distance_from_bend_mm",
+                    detail=(
+                        f"Відсуньте отвір №{idx + 1} від лінії гиба: від краю отвору до гиба "
+                        f"має бути не менше {_fmt(min_edge_mm)} мм, тобто від центру "
+                        f"Ø{_fmt(diameter_mm)} — не менше {_fmt(min_center_mm)} мм "
+                        f"(зараз {_fmt(center_distance_mm)} мм)."
+                    ),
+                )
+            )
+    return errors
+
+
+def validate_export_holes(
+    template_slug: str,
+    parameters: dict[str, Any],
+    thickness_mm: float,
+    material_code: str | None = None,
+) -> list[dict[str, str]]:
+    """JSON-готовий список dict-ів для 422-detail (паритет з validate_export)."""
+    return [
+        asdict(e) for e in validate_holes(template_slug, parameters, thickness_mm, material_code)
+    ]
