@@ -1,7 +1,12 @@
 "use client";
 
-import { Activity, LBracketScene, useReducedMotion } from "@flatcraft/ui";
-import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  buildLBracketShapeCommands,
+  ExtrudeScene,
+  useReducedMotion,
+} from "@flatcraft/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
@@ -34,6 +39,10 @@ export function HeroLoopDemo({ locale = DEFAULT_LOCALE }: HeroLoopDemoProps = {}
   const reduced = useReducedMotion();
   const [params, setParams] = useState(() => nextDemoParams(0));
   const pausedRef = useRef(false);
+  const commands = useMemo(
+    () => buildLBracketShapeCommands({ parameters: params, thicknessMm: 2.0 }),
+    [params],
+  );
 
   useEffect(() => {
     if (reduced) return;
@@ -79,7 +88,7 @@ export function HeroLoopDemo({ locale = DEFAULT_LOCALE }: HeroLoopDemoProps = {}
       </span>
 
       <div className="h-full w-full" role="img" aria-label={dict.heroDemoAria}>
-        <LBracketScene parameters={params} thicknessMm={2.0} />
+        <ExtrudeScene commands={commands} depthMm={params.width_mm} testId="l-bracket-canvas" />
       </div>
 
       {reduced ? (
