@@ -46,3 +46,38 @@ export function computeKFactor(input: KFactorInput, spec: BendMachineSpec): numb
 
   return baseK * correction.multiplier;
 }
+
+/**
+ * Bend allowance (довжина матеріалу по нейтральній осі гиба), мм.
+ *
+ * BA = (π/180) · angle · (R + K·t). Дзеркало Python
+ * `workers/cad/flatcraft_cad/unfold.py::compute_bend_allowance` — та сама
+ * формула, яку розгортка воркера використовує для кожного шаблону. Export-gate
+ * (`validateExportSheet`) викликає цю ОДНУ функцію для всіх шаблонів замість
+ * дублювання формули BA по кожному з них (як і сам unfold.py робить).
+ *
+ * Валідація діапазонів — як у Python-версії (однакові межі → throw на тому ж
+ * вхідному сміттю). Real-world виклики з export-gate завжди йдуть із вже
+ * Zod-валідованих параметрів, тож throw тут практично недосяжний.
+ */
+export function computeBendAllowanceMm(
+  angleDeg: number,
+  innerRadiusMm: number,
+  thicknessMm: number,
+  kFactor: number,
+): number {
+  if (!(angleDeg > 0 && angleDeg <= 180)) {
+    throw new Error(`computeBendAllowanceMm: angleDeg must be in (0, 180], got ${angleDeg}`);
+  }
+  if (innerRadiusMm < 0) {
+    throw new Error(`computeBendAllowanceMm: innerRadiusMm must be >= 0, got ${innerRadiusMm}`);
+  }
+  if (thicknessMm <= 0) {
+    throw new Error(`computeBendAllowanceMm: thicknessMm must be > 0, got ${thicknessMm}`);
+  }
+  if (!(kFactor > 0 && kFactor <= 1)) {
+    throw new Error(`computeBendAllowanceMm: kFactor must be in (0, 1], got ${kFactor}`);
+  }
+
+  return (Math.PI / 180) * angleDeg * (innerRadiusMm + kFactor * thicknessMm);
+}
