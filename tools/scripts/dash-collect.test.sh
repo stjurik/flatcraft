@@ -7,7 +7,12 @@
 # status репо не змінюється; той самий сценарій реальних збирачів — зелений і в
 # клоні --depth 1 без origin/main (умова CI, job «Guard-скрипти»; dash-trend.sh за
 # замовчуванням читає REF=origin/main — без клону-з-ref сценарій був би зелений
-# лише там, де origin/main уже є локально).
+# лише там, де origin/main уже є локально); немає збирача в COLLECTORS_DIR —
+# повідомлення без абсолютного шляху (ADR-042 §5); DASH_LEAK_FILE з порожнім
+# рядком не перетворює кожен розділ на «витік». Форсовані сценарії 17–18
+# (DASH_COLLECT_TEST_FORCE_CLONE_FAIL / _FORCE_DEPTH_CLONE_FAIL) доводять, що
+# збій підготовки клону в сценаріях 13–14 і 16 — провал тесту (bad), а не
+# тихий пропуск; пропуск лишається лише для «не git-репозиторій».
 #
 # Мутації в кінці ламають dash-collect.sh по одному правилу — набір мусить
 # почервоніти; мутант, що вижив, — привід дописати сценарій, а не довіряти
@@ -95,6 +100,19 @@ else
   bad "один висне — неочікуваний результат (rc=$rc): $out_combined"
 fi
 
+# ─── 3b. немає збирача в DASH_COLLECTORS_DIR — повідомлення без шляху (ADR-042 §5)
+# COLLECTORS_DIR абсолютний і часто домашній шлях — у повідомленні має лишитись
+# лише ім'я скрипта, інакше шлях потрапляє у snapshot.json.
+C="$T/c3b-empty"; O="$T/o3b"
+mkdir -p "$C"
+run "$C" "$O"
+reason_t5="$(sec "$O" t5 | jq -r '.data.error // ""')"
+if [[ $rc -eq 0 ]] && [[ "$reason_t5" == *"dash-t5.sh"* ]] && [[ "$reason_t5" != *"$C"* ]] && [[ "$reason_t5" != *"$HOME_T"* ]]; then
+  ok "немає збирача — повідомлення містить лише ім'я скрипта, без шляху COLLECTORS_DIR"
+else
+  bad "немає збирача — повідомлення мало містити лише ім'я, отримав «$reason_t5»"
+fi
+
 # ─── 4–7. секрети: IPv4, IPv6 (документаційні RFC 5737 / RFC 3849), токени,
 #          рядок з DASH_LEAK_FILE — розділ error, значення ніде не друкується ──
 assert_redacted() { # assert_redacted <назва> <out-dir> <очікуваний-тип-підрядок> <секрет>
@@ -149,6 +167,30 @@ if grep -rqF -- "server.privatecorp.internal-fake" "$O" 2>/dev/null; then
   bad "DASH_LEAK_FILE — вміст файла все одно потрапив у $O"
 else
   ok "DASH_LEAK_FILE — вміст файла ніде не потрапив у знімок"
+fi
+
+# ─── 7b. DASH_LEAK_FILE з порожнім рядком — порожній рядок не збігається з усім ─
+# Порожній шаблон у grep -Ff збігається з будь-яким рядком: без фільтра кожен
+# розділ, навіть без жодної адреси, став би «витоком».
+LEAK_FILE_BLANK="$T/leak-with-blank-line"
+printf '%s\n\n' "another.fake.leak.address.example" >"$LEAK_FILE_BLANK"
+
+C="$T/c7b-ok"; O="$T/o7b-ok"
+mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
+run "$C" "$O" DASH_LEAK_FILE="$LEAK_FILE_BLANK"
+if [[ "$(sec "$O" trend | jq -r .status)" == ok ]]; then
+  ok "DASH_LEAK_FILE з порожнім рядком — розділ без адреси лишається ok"
+else
+  bad "DASH_LEAK_FILE з порожнім рядком хибно позначив ok-розділ як error: $(sec "$O" trend)"
+fi
+
+C="$T/c7b-leak"; O="$T/o7b-leak"
+mk "$C" "$ENV_T5_OK" 'echo "хост another.fake.leak.address.example у логах"'
+run "$C" "$O" DASH_LEAK_FILE="$LEAK_FILE_BLANK"
+if [[ "$(sec "$O" trend | jq -r .status)" == error ]]; then
+  ok "DASH_LEAK_FILE з порожнім рядком — розділ зі справжньою адресою лишається error"
+else
+  bad "DASH_LEAK_FILE з порожнім рядком мав позначити error для розділу з адресою: $(sec "$O" trend)"
 fi
 
 # ─── 8. час, ISO-дата й хеш коміту — НЕ хибні спрацювання ──────────────────
@@ -245,9 +287,11 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" ]]; then
     RUN_REPO="$REPO_ROOT"
     if ! git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null; then
       RUN_REPO="$T/real-collectors-clone"
-      if ! { git clone -q -- "$REPO_ROOT" "$RUN_REPO" 2>/dev/null &&
+      # DASH_COLLECT_TEST_FORCE_CLONE_FAIL — лише для сценарію нижче (17): форсує
+      # цю саму гілку відмови без потреби справді ламати git clone.
+      if [[ -n "${DASH_COLLECT_TEST_FORCE_CLONE_FAIL:-}" ]] || ! { git clone -q -- "$REPO_ROOT" "$RUN_REPO" 2>/dev/null &&
         git -C "$RUN_REPO" update-ref refs/remotes/origin/main HEAD; }; then
-        echo "пропуск сценарію 13–14: не вдалося підготувати клон із origin/main" >&2
+        bad "сценарій 13–14: не вдалося підготувати клон із origin/main"
         RUN_REPO=""
       fi
     fi
@@ -279,6 +323,33 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" ]]; then
   fi
 fi
 
+# ─── 17. сценарій 13–14: клон не вдалося підготувати → провал тесту, не пропуск ─
+# Git clone локально сам практично не падає, тож форсуємо цю гілку через
+# DASH_COLLECT_TEST_FORCE_CLONE_FAIL (гачок додано вище) — єдиний детермінований
+# спосіб перевірити, що «клон не вдалося підготувати» стає провалом тесту (bad),
+# а не тихим пропуском. Клон --depth 1 (без origin/main) гарантує вхід у гілку
+# підготовки клону; DASH_COLLECT_TEST_CI_SELFCHECK_DONE і _META_DONE гасять
+# сценарії 16/17/18 у вкладеному запуску — інакше він знову клонував би й
+# запускав би себе рекурсивно.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    T17_CLONE="$T/t17-no-origin-main"
+    if git clone -q --depth 1 -- "file://$REPO_ROOT" "$T17_CLONE" 2>/dev/null; then
+      t17_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_CLONE_FAIL=1 DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 \
+        DASH_COLLECT_TEST_META_DONE=1 timeout 60 bash "$T17_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+      t17_rc=$?
+      if [[ $t17_rc -ne 0 ]] && grep -qF '✗' <<<"$t17_out" && grep -q "сценарій 13–14" <<<"$t17_out"; then
+        ok "клон для сценарію 13–14 не вдалося підготувати — провал тесту (bad), не тихий пропуск"
+      else
+        bad "форсований провал клону сценарію 13–14 мав провалити тест (rc=$t17_rc): $t17_out"
+      fi
+    else
+      bad "сценарій 17: не вдалося підготувати клон без origin/main для форсованого тесту"
+    fi
+  fi
+fi
+
 # ─── 16. самоперевірка: сценарій 13–14 зелений у клоні --depth 1 без origin/main
 # (точне відтворення умови CI, job «Guard-скрипти») — без цього можна знову
 # полагодити лише для «origin/main є» і не помітити, що actions/checkout його не
@@ -289,11 +360,13 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_CI_SELFCHECK_
   REPO_ROOT="$(cd "$HERE/../.." && pwd)"
   if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     CI_CLONE="$T/ci-shallow-clone"
-    if git clone -q --depth 1 -- "file://$REPO_ROOT" "$CI_CLONE" 2>/dev/null; then
+    # DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL — лише для сценарію нижче (18):
+    # форсує гілку відмови нижче без потреби справді ламати git clone.
+    if [[ -z "${DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL:-}" ]] && git clone -q --depth 1 -- "file://$REPO_ROOT" "$CI_CLONE" 2>/dev/null; then
       if git -C "$CI_CLONE" rev-parse --verify -q origin/main >/dev/null 2>&1; then
         bad "самоперевірка CI-умови: клон --depth 1 має origin/main — умова CI не відтворена"
       else
-        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 DASH_COLLECT_TEST_META_DONE=1 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
         ci_rc=$?
         if [[ $ci_rc -eq 0 ]]; then
           ok "самоперевірка CI-умови: dash-collect.test.sh зелений у клоні --depth 1 без origin/main"
@@ -302,7 +375,27 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_CI_SELFCHECK_
         fi
       fi
     else
-      echo "пропуск самоперевірки CI-умови: git clone --depth 1 не вдався" >&2
+      bad "самоперевірка CI-умови: git clone --depth 1 не вдався"
+    fi
+  fi
+fi
+
+# ─── 18. самоперевірка CI-умови: клон --depth 1 не вдався → провал тесту, не пропуск
+# Без форсування git clone --depth 1 локально практично не падає, тож форсуємо
+# гілку відмови через DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL (гачок додано
+# вище). Клонувати тут нема потреби — сценарій 16 клонує сам щоразу; запускаємо
+# вкладений тест просто на REPO_ROOT. DASH_COLLECT_TEST_META_DONE гасить
+# сценарії 17/18 у вкладеному запуску, щоб не плодити зайву рекурсію.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    t18_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL=1 DASH_COLLECT_TEST_META_DONE=1 \
+      timeout 60 bash "$REPO_ROOT/tools/scripts/dash-collect.test.sh" 2>&1)"
+    t18_rc=$?
+    if [[ $t18_rc -ne 0 ]] && grep -qF '✗' <<<"$t18_out" && grep -q "depth 1 не вдався" <<<"$t18_out"; then
+      ok "клон --depth 1 самоперевірки CI-умови не вдався — провал тесту (bad), не тихий пропуск"
+    else
+      bad "форсований провал клону --depth 1 мав провалити тест (rc=$t18_rc): $t18_out"
     fi
   fi
 fi
@@ -382,6 +475,12 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && $fail -eq 0 ]]; then
     '    echo "відмова: --out усередині репозиторію (ADR-042 §5)" >&2
     exit 2' \
     '    true'
+  mutate "повідомлення про відсутнього збирача знову містить шлях COLLECTORS_DIR" \
+    'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script»"' \
+    'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script» у «$COLLECTORS_DIR»"'
+  mutate "фільтр порожніх рядків DASH_LEAK_FILE вимкнено" \
+    'hits="$(grep -cFf <(grep -v '"'"'^$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
+    'hits="$(grep -cFf "$LEAK_FILE" <<<"$text" 2>/dev/null || true)"'
 
   rm -rf "$M"
 fi

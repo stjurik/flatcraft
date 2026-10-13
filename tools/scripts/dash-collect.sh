@@ -143,7 +143,10 @@ leak_scan() {
   done
   if [[ -r "$LEAK_FILE" && -s "$LEAK_FILE" ]]; then
     local hits
-    hits="$(grep -cFf "$LEAK_FILE" <<<"$text" 2>/dev/null || true)"
+    # Порожні рядки відкидаємо перед grep -cFf: порожній шаблон збігається з
+    # будь-яким рядком, тож нефільтрований порожній рядок перетворив би кожен
+    # розділ на «витік».
+    hits="$(grep -cFf <(grep -v '^$' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"
     if [[ "${hits:-0}" =~ ^[0-9]+$ ]] && ((hits > 0)); then
       printf '%s\n' "відома адреса (DASH_LEAK_FILE)"
       return 0
@@ -168,7 +171,9 @@ collect_one() {
   trap 'rm -f "$out_f" "$err_f"' RETURN
 
   if [[ ! -r "$path" ]]; then
-    error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script» у «$COLLECTORS_DIR»"
+    # Лише ім'я скрипта — $COLLECTORS_DIR часто домашній шлях (ADR-042 §5), а
+    # це повідомлення потрапляє у snapshot.json.
+    error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script»"
     return
   fi
 
