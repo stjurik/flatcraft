@@ -2,7 +2,8 @@
 # dash-t5.test.sh — розділ "t5" (ADR-042 §6): 8 кроків треку T5 з docs/02_ROADMAP.md,
 # "✅" = закрито, номер першого відкритого, data.a8 — not_measured (хвиля 4).
 # Сценарії: справжній розділ T5 (steps + first_open); розділ відсутній — error;
-# 7 і 9 кроків — error; змінний --roadmap; обгортка проходить dash-schema.sh validate.
+# 7 і 9 кроків — error; змінний --roadmap; обгортка проходить dash-schema.sh validate;
+# дефолтний (без --roadmap) reason не несе абсолютного шляху (ADR-042 §5).
 # Мутації в кінці ламають dash-t5.sh по одному правилу — набір мусить почервоніти.
 #
 # Запуск: tools/scripts/dash-t5.test.sh
@@ -119,7 +120,16 @@ else
   bad "немає розділу T5 — очікував error, отримав (rc=$rc): $out"
 fi
 
-# ─── 3c. дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової
+# ─── 3б. 8 рядків, але номери не 1…8 — error (правка оркестратора, рецензія Flash #204) ──
+make_roadmap "$T/dup.md" "1|✅|А" "1||Б" "2||В" "3||Г" "4||Д" "5||Е" "6||Є" "7||Ж"
+run --roadmap "$T/dup.md"
+if [[ $rc == 0 ]] && echo "$out" | jq -e '.status == "error" and (.data.error | test("1–8"))' >/dev/null 2>&1; then
+  ok "номери 1,1,2…7 — status error"
+else
+  bad "номери 1,1,2…7 — очікував error, отримав (rc=$rc): $out"
+fi
+
+# ─── 3в. дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової
 # теки (ADR-042 §5; рецензія Gemini 3.8 Flash, #240). Без --roadmap ROADMAP
 # обчислюється від $HERE і несе абсолютний (часто домашній) шлях; reason має
 # брати $SOURCE_LABEL (сталу відносну мітку), а не $ROADMAP. Відтворюємо
@@ -136,22 +146,13 @@ cat >"$MIRROR/docs/02_ROADMAP.md" <<'EOF'
 
 1. Крок T4, не T5
 EOF
-out3c="$(bash "$MIRROR/tools/scripts/dash-t5.sh" --now "$NOW" 2>&1)"
-rc3c=$?
-reason3c="$(echo "$out3c" | jq -r '.data.error // ""' 2>/dev/null)"
-if [[ $rc3c == 0 ]] && [[ "$reason3c" == *"T5"* ]] && [[ "$reason3c" != *"$MIRROR"* ]] && [[ "$reason3c" != *"$T"* ]]; then
+out3v="$(bash "$MIRROR/tools/scripts/dash-t5.sh" --now "$NOW" 2>&1)"
+rc3v=$?
+reason3v="$(echo "$out3v" | jq -r '.data.error // ""' 2>/dev/null)"
+if [[ $rc3v == 0 ]] && [[ "$reason3v" == *"T5"* ]] && [[ "$reason3v" != *"$MIRROR"* ]] && [[ "$reason3v" != *"$T"* ]]; then
   ok "дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової теки"
 else
-  bad "дефолтний шлях — reason мав уникати шляху «$MIRROR», отримав (rc=$rc3c): $out3c"
-fi
-
-# ─── 3б. 8 рядків, але номери не 1…8 — error (правка оркестратора, рецензія Flash #204) ──
-make_roadmap "$T/dup.md" "1|✅|А" "1||Б" "2||В" "3||Г" "4||Д" "5||Е" "6||Є" "7||Ж"
-run --roadmap "$T/dup.md"
-if [[ $rc == 0 ]] && echo "$out" | jq -e '.status == "error" and (.data.error | test("1–8"))' >/dev/null 2>&1; then
-  ok "номери 1,1,2…7 — status error"
-else
-  bad "номери 1,1,2…7 — очікував error, отримав (rc=$rc): $out"
+  bad "дефолтний шлях — reason мав уникати шляху «$MIRROR», отримав (rc=$rc3v): $out3v"
 fi
 
 # ─── 4. 7 кроків — error ───────────────────────────────────────────────────────
