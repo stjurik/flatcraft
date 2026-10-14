@@ -8,11 +8,14 @@
 # клоні --depth 1 без origin/main (умова CI, job «Guard-скрипти»; dash-trend.sh за
 # замовчуванням читає REF=origin/main — без клону-з-ref сценарій був би зелений
 # лише там, де origin/main уже є локально); немає збирача в COLLECTORS_DIR —
-# повідомлення без абсолютного шляху (ADR-042 §5); DASH_LEAK_FILE з порожнім
-# рядком не перетворює кожен розділ на «витік». Форсовані сценарії 17–18
-# (DASH_COLLECT_TEST_FORCE_CLONE_FAIL / _FORCE_DEPTH_CLONE_FAIL) доводять, що
-# збій підготовки клону в сценаріях 13–14 і 16 — провал тесту (bad), а не
-# тихий пропуск; пропуск лишається лише для «не git-репозиторій».
+# повідомлення без абсолютного шляху (ADR-042 §5); DASH_LEAK_FILE з порожнім чи
+# пробільним рядком не перетворює кожен розділ на «витік»; голий «::» без
+# жодної hex-групи поруч — не IPv6 (рецензія Gemini 3.8 Flash, #240). Форсовані
+# сценарії 17–18 (DASH_COLLECT_TEST_FORCE_CLONE_FAIL / _FORCE_DEPTH_CLONE_FAIL)
+# доводять, що збій підготовки клону в сценаріях 13–14 і 16 — провал тесту
+# (bad), а не тихий пропуск; пропуск лишається лише для «не git-репозиторій».
+# Сценарій 19 доводить, що сценарії 16–17 не плутають origin/main джерела (коли
+# воно саме стоїть на гілці main) з умовою CI «немає origin/main».
 #
 # Мутації в кінці ламають dash-collect.sh по одному правилу — набір мусить
 # почервоніти; мутант, що вижив, — привід дописати сценарій, а не довіряти
@@ -144,6 +147,22 @@ mk "$C" "$ENV_T5_OK" 'echo "витік 2001:db8::1 у логах"'
 run "$C" "$O"
 assert_redacted "IPv6 (документаційний 2001:db8::/32)" "$O" IPv6 2001:db8::1
 
+# ─── 5b. голий «::» без hex-групи — не IPv6; стиснута адреса без ведучої групи
+#         («::abcd:1234») — і далі витік (рецензія Gemini 3.8 Flash, #240) ─────
+C="$T/c5b-bare"; O="$T/o5b-bare"
+mk "$C" "$ENV_T5_OK" 'echo "{\"schema_version\":1,\"section\":\"trend\",\"title\":\"T\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"origin\":\"measured\",\"data\":{\"note\":\"немає тут адрес, лише код з параметром a :: b у тексті\"}}"'
+run "$C" "$O"
+if [[ "$(sec "$O" trend | jq -r .status)" == ok ]]; then
+  ok "голий «::» без жодної hex-групи поруч — не витік, status ok"
+else
+  bad "голий «::» без hex-групи хибно позначено витоком: $(sec "$O" trend)"
+fi
+
+C="$T/c5c-compressed"; O="$T/o5c-compressed"
+mk "$C" "$ENV_T5_OK" 'echo "витік ::abcd:1234 у логах"'
+run "$C" "$O"
+assert_redacted "IPv6 стиснутий без ведучої групи (::abcd:1234)" "$O" IPv6 "::abcd:1234"
+
 while IFS='|' read -r label secret; do
   C="$T/c-tok-$label"; O="$T/o-tok-$label"
   mk "$C" "$ENV_T5_OK" "echo 'витік $secret у логах'"
@@ -169,11 +188,13 @@ else
   ok "DASH_LEAK_FILE — вміст файла ніде не потрапив у знімок"
 fi
 
-# ─── 7b. DASH_LEAK_FILE з порожнім рядком — порожній рядок не збігається з усім ─
-# Порожній шаблон у grep -Ff збігається з будь-яким рядком: без фільтра кожен
-# розділ, навіть без жодної адреси, став би «витоком».
+# ─── 7b. DASH_LEAK_FILE з порожнім і пробільним рядками — вони не збігаються з усім
+# Порожній чи пробільний (лише пробіл/табуляція) шаблон у grep -Ff збігається з
+# будь-яким рядком, що містить пробіл (тут — заголовок «Продукт і процес» у
+# ENV_TREND_OK): без фільтра кожен розділ, навіть без жодної адреси, став би
+# «витоком».
 LEAK_FILE_BLANK="$T/leak-with-blank-line"
-printf '%s\n\n' "another.fake.leak.address.example" >"$LEAK_FILE_BLANK"
+printf '%s\n' "another.fake.leak.address.example" "" " " "$(printf '\t')" >"$LEAK_FILE_BLANK"
 
 C="$T/c7b-ok"; O="$T/o7b-ok"
 mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
@@ -336,8 +357,15 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}"
   if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     T17_CLONE="$T/t17-no-origin-main"
     if git clone -q --depth 1 -- "file://$REPO_ROOT" "$T17_CLONE" 2>/dev/null; then
+      # Умову «немає origin/main» створюємо самі, а не сподіваємось на неї: git
+      # clone --depth 1 джерела, що стоїть на гілці main (CI на push у main,
+      # локальний запуск у ~/hart), лишає refs/remotes/origin/main — інакше
+      # нижче FORCE_CLONE_FAIL узагалі не входив би в гілку підготовки клону.
+      git -C "$T17_CLONE" update-ref -d refs/remotes/origin/main 2>/dev/null || true
+      git -C "$T17_CLONE" update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
       t17_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_CLONE_FAIL=1 DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 \
-        DASH_COLLECT_TEST_META_DONE=1 timeout 60 bash "$T17_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+        DASH_COLLECT_TEST_META_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+        timeout 60 bash "$T17_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
       t17_rc=$?
       if [[ $t17_rc -ne 0 ]] && grep -qF '✗' <<<"$t17_out" && grep -q "сценарій 13–14" <<<"$t17_out"; then
         ok "клон для сценарію 13–14 не вдалося підготувати — провал тесту (bad), не тихий пропуск"
@@ -363,10 +391,17 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_CI_SELFCHECK_
     # DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL — лише для сценарію нижче (18):
     # форсує гілку відмови нижче без потреби справді ламати git clone.
     if [[ -z "${DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL:-}" ]] && git clone -q --depth 1 -- "file://$REPO_ROOT" "$CI_CLONE" 2>/dev/null; then
+      # Умову «немає origin/main» створюємо самі (те саме пояснення, що в 17):
+      # джерело на гілці main лишило б refs/remotes/origin/main і в цьому клоні.
+      git -C "$CI_CLONE" update-ref -d refs/remotes/origin/main 2>/dev/null || true
+      git -C "$CI_CLONE" update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+      # Перевірку нижче лишаємо як самоконтроль ПІСЛЯ видалення: вона ловить
+      # регресію, якщо видалення вище прибрати (мутант «update-ref -d вимкнено»).
       if git -C "$CI_CLONE" rev-parse --verify -q origin/main >/dev/null 2>&1; then
-        bad "самоперевірка CI-умови: клон --depth 1 має origin/main — умова CI не відтворена"
+        bad "самоперевірка CI-умови: клон --depth 1 має origin/main навіть після видалення рефу — умова CI не відтворена"
       else
-        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 DASH_COLLECT_TEST_META_DONE=1 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 DASH_COLLECT_TEST_META_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+          timeout 60 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
         ci_rc=$?
         if [[ $ci_rc -eq 0 ]]; then
           ok "самоперевірка CI-умови: dash-collect.test.sh зелений у клоні --depth 1 без origin/main"
@@ -390,12 +425,47 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}"
   REPO_ROOT="$(cd "$HERE/../.." && pwd)"
   if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     t18_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL=1 DASH_COLLECT_TEST_META_DONE=1 \
-      timeout 60 bash "$REPO_ROOT/tools/scripts/dash-collect.test.sh" 2>&1)"
+      DASH_COLLECT_TEST_NO_MUTATE=1 timeout 60 bash "$REPO_ROOT/tools/scripts/dash-collect.test.sh" 2>&1)"
     t18_rc=$?
     if [[ $t18_rc -ne 0 ]] && grep -qF '✗' <<<"$t18_out" && grep -q "depth 1 не вдався" <<<"$t18_out"; then
       ok "клон --depth 1 самоперевірки CI-умови не вдався — провал тесту (bad), не тихий пропуск"
     else
       bad "форсований провал клону --depth 1 мав провалити тест (rc=$t18_rc): $t18_out"
+    fi
+  fi
+fi
+
+# ─── 19. самоперевірка: сценарії 16–17 зелені й тоді, коли джерело саме стоїть
+# на гілці main з origin/main (CI на push у main; локальний запуск у ~/hart) —
+# не лише в поточному worktree (тут він на ai/pult-04-collect-4, тож сценарії
+# 16–17 самі по собі цю гілку не перевіряють). git clone (і --depth 1) джерела,
+# що стоїть на гілці main, лишає refs/remotes/origin/main у клоні — без
+# примусового видалення рефу всередині сценаріїв 16/17 (вище) умова CI «немає
+# origin/main» не відтворюється сама собою, і ці сценарії дають хибний результат
+# (рецензія Gemini 3.8 Flash, #240). Гасимо цей сценарій, коли вже всередині
+# будь-якого вкладеного запуску (DASH_COLLECT_TEST_META_DONE — спільний прапорець
+# для 17/18, виставлений і в нашому власному вкладеному запуску нижче) — інакше
+# кожен з них тягнув би ще один повний клон-на-main-гілці рекурсивно.
+# DASH_COLLECT_TEST_NO_MUTATE вимикає лише повторний прогін 12 мутантів у
+# вкладеному запуску — самі сценарії 13–14/16/17/18 там виконуються насправді,
+# інакше перевірка нічого не доводить.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" && -z "${DASH_COLLECT_TEST_MAIN_BRANCH_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    MAIN_CLONE="$T/main-branch-clone"
+    if git clone -q -- "file://$REPO_ROOT" "$MAIN_CLONE" 2>/dev/null &&
+      git -C "$MAIN_CLONE" checkout -q -B main 2>/dev/null &&
+      git -C "$MAIN_CLONE" update-ref refs/remotes/origin/main HEAD; then
+      main_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_MAIN_BRANCH_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+        timeout 120 bash "$MAIN_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+      main_rc=$?
+      if [[ $main_rc -eq 0 ]]; then
+        ok "клон на гілці main з origin/main — dash-collect.test.sh зелений (сценарії 16–17 самі прибирають origin/main джерела)"
+      else
+        bad "клон на гілці main з origin/main — dash-collect.test.sh упав (rc=$main_rc): $main_out"
+      fi
+    else
+      bad "сценарій 19: не вдалося підготувати клон на гілці main з origin/main"
     fi
   fi
 fi
@@ -414,7 +484,7 @@ rc=$?
 [[ $rc -eq 2 ]] && ok "--now у неправильному форматі — exit 2" || bad "--now у неправильному форматі — очікував exit 2, отримав $rc"
 
 # ─── Мутації: кожне правило тримається тестом ───────────────────────────────
-if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && $fail -eq 0 ]]; then
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_NO_MUTATE:-}" && $fail -eq 0 ]]; then
   M="$(mktemp -d)"
   trap 'rm -rf "$M" "$T"' EXIT
   src="$(<"$SCRIPT")"
@@ -440,8 +510,11 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && $fail -eq 0 ]]; then
   }
 
   mutate "IPv6-шаблон вимкнено" \
-    'IPV6_RE="$IPV6_RE|:((:[0-9A-Fa-f]{1,4}){1,7}|:)"' \
+    'IPV6_RE="$IPV6_RE|:(:[0-9A-Fa-f]{1,4}){1,7}"' \
     'IPV6_RE="no-match-at-all-xyz"'
+  mutate "IPv6 голий «::» без hex-групи знову вважається адресою" \
+    'IPV6_RE="$IPV6_RE|:(:[0-9A-Fa-f]{1,4}){1,7}"' \
+    'IPV6_RE="$IPV6_RE|:((:[0-9A-Fa-f]{1,4}){1,7}|:)"'
   mutate "IPv4-шаблон вимкнено" \
     'IPV4_RE="\\b${IPV4_OCTET}(\\.${IPV4_OCTET}){3}\\b"' \
     'IPV4_RE="no-match-at-all-xyz"'
@@ -478,9 +551,12 @@ if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && $fail -eq 0 ]]; then
   mutate "повідомлення про відсутнього збирача знову містить шлях COLLECTORS_DIR" \
     'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script»"' \
     'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script» у «$COLLECTORS_DIR»"'
-  mutate "фільтр порожніх рядків DASH_LEAK_FILE вимкнено" \
-    'hits="$(grep -cFf <(grep -v '"'"'^$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
+  mutate "фільтр порожніх/пробільних рядків DASH_LEAK_FILE вимкнено" \
+    'hits="$(grep -cFf <(grep -vE '"'"'^[[:space:]]*$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
     'hits="$(grep -cFf "$LEAK_FILE" <<<"$text" 2>/dev/null || true)"'
+  mutate "фільтр DASH_LEAK_FILE знову лише '^\$' — пробільні рядки не відкидаються" \
+    'hits="$(grep -cFf <(grep -vE '"'"'^[[:space:]]*$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
+    'hits="$(grep -cFf <(grep -v '"'"'^$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"'
 
   rm -rf "$M"
 fi

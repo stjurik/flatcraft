@@ -119,6 +119,32 @@ else
   bad "немає розділу T5 — очікував error, отримав (rc=$rc): $out"
 fi
 
+# ─── 3c. дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової
+# теки (ADR-042 §5; рецензія Gemini 3.8 Flash, #240). Без --roadmap ROADMAP
+# обчислюється від $HERE і несе абсолютний (часто домашній) шлях; reason має
+# брати $SOURCE_LABEL (сталу відносну мітку), а не $ROADMAP. Відтворюємо
+# розташування dash-t5.sh (HERE/../../docs/02_ROADMAP.md) у тимчасовій теці, щоб
+# дефолтний ROADMAP вказував усередину неї, і запускаємо без --roadmap.
+MIRROR="$T/mirror-default-roadmap"
+mkdir -p "$MIRROR/tools/scripts" "$MIRROR/docs"
+cp "$SCRIPT" "$MIRROR/tools/scripts/dash-t5.sh"
+cp "$HERE/dash-schema.sh" "$MIRROR/tools/scripts/dash-schema.sh"
+cat >"$MIRROR/docs/02_ROADMAP.md" <<'EOF'
+## Треки
+
+### T4. Щось інше
+
+1. Крок T4, не T5
+EOF
+out3c="$(bash "$MIRROR/tools/scripts/dash-t5.sh" --now "$NOW" 2>&1)"
+rc3c=$?
+reason3c="$(echo "$out3c" | jq -r '.data.error // ""' 2>/dev/null)"
+if [[ $rc3c == 0 ]] && [[ "$reason3c" == *"T5"* ]] && [[ "$reason3c" != *"$MIRROR"* ]] && [[ "$reason3c" != *"$T"* ]]; then
+  ok "дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової теки"
+else
+  bad "дефолтний шлях — reason мав уникати шляху «$MIRROR», отримав (rc=$rc3c): $out3c"
+fi
+
 # ─── 3б. 8 рядків, але номери не 1…8 — error (правка оркестратора, рецензія Flash #204) ──
 make_roadmap "$T/dup.md" "1|✅|А" "1||Б" "2||В" "3||Г" "4||Д" "5||Е" "6||Є" "7||Ж"
 run --roadmap "$T/dup.md"
@@ -216,6 +242,9 @@ if [[ -z "${DASH_T5_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "номери кроків не перевіряються" \
     '!= "[1,2,3,4,5,6,7,8]" ]]; then' \
     '== "ніколи" ]]; then'
+  mutate "пояснення «немає розділу T5» знову з абсолютним шляхом ROADMAP" \
+    'reason="розділ «### T5.» не знайдено в $SOURCE_LABEL"' \
+    'reason="розділ «### T5.» не знайдено в $ROADMAP"'
 
   rm -rf "$M"
 fi

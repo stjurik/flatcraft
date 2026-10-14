@@ -64,7 +64,7 @@ first_open_json="null"
 
 if [[ -z "$section" ]]; then
   status=error
-  reason="розділ «### T5.» не знайдено в $ROADMAP"
+  reason="розділ «### T5.» не знайдено в $SOURCE_LABEL"
 else
   lines=()
   while IFS= read -r line; do
