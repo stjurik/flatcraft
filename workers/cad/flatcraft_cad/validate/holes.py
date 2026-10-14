@@ -21,6 +21,15 @@ from typing import Any
 
 from flatcraft_cad.validate.bend import load_spec
 
+# Допуск на представлення чисел із рухомою крапкою (CLAUDE.md §7 — межа «від
+# краю», дзеркало TS `holes.ts::EDGE_DISTANCE_EPSILON_MM`). `edge_distance_mm`
+# зазвичай похідне від `center_distance_mm - diameter_mm / 2`, і для чисел
+# «рівно на межі» (напр. 9.7 - 3.2) IEEE-754 дає 6.499999999999999 замість
+# 6.5 — без допуску гейт хибно блокує геометрично валідний отвір. 1e-9 на
+# кілька порядків менший за будь-яку значущу відстань у мм, тож справжні
+# порушення (напр. 9.69/Ø6.4) усе ще ловляться.
+EDGE_DISTANCE_EPSILON_MM = 1e-9
+
 
 @dataclass(frozen=True)
 class HoleError:
@@ -85,7 +94,7 @@ def validate_holes(
             diameter_mm = float(hole["diameter_mm"])
             center_distance_mm = float(hole["distance_from_bend_mm"])
             edge_distance_mm = center_distance_mm - diameter_mm / 2
-            if edge_distance_mm < min_edge_mm:
+            if edge_distance_mm < min_edge_mm - EDGE_DISTANCE_EPSILON_MM:
                 min_center_mm = min_edge_mm + diameter_mm / 2
                 errors.append(
                     HoleError(

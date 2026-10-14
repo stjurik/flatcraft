@@ -310,7 +310,7 @@ def _build_app() -> FastAPI:
             ),
             *validate_export_perforation(req.template_slug, req.parameters),
             *validate_export_sheet(
-                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+                req.template_slug, req.parameters, req.thickness_mm, req.k_factor
             ),
             *validate_export_holes(
                 req.template_slug, req.parameters, req.thickness_mm, req.material_code

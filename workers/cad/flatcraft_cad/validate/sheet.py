@@ -18,6 +18,18 @@ from typing import Any
 from flatcraft_cad.bend_allowance import compute_bend_allowance
 from flatcraft_cad.validate.bend import load_spec
 
+# Той самий K-фактор, який `server.py::ExportRequest.k_factor` бере за
+# замовчуванням (`Field(default=0.4)`), коли клієнт його не передає — а
+# `apps/api` (`routes/exports.ts`) НЕ форвардить `k_factor` у тілі запиту до
+# воркера, тож цей дефолт застосовується завжди. Дзеркало TS
+# `export-gate.ts::EXPORT_GATE_K_FACTOR`. Раніше гейт брав K з матричної
+# таблиці матеріалу (`_compute_k_factor`), а розгортку воркер будував з іншим
+# K — гейт міг пропустити деталь, яка на виробництві не влізе у верстат (чи
+# навпаки). `validate_sheet`/`validate_export_sheet` приймають `k_factor`
+# параметром (`server.py` передає `req.k_factor`) саме тому, щоб завжди
+# рахувати габарит з тим К, яким реально будується розгортка.
+DEFAULT_K_FACTOR = 0.4
+
 
 @dataclass(frozen=True)
 class SheetError:
@@ -30,24 +42,6 @@ class SheetError:
 
 def _fmt(n: float) -> str:
     return f"{round(n, 3):g}"
-
-
-def _compute_k_factor(
-    material_code: str,
-    thickness_mm: float,
-    inner_radius_mm: float,
-    spec: dict[str, Any],
-) -> float | None:
-    """Дзеркало TS `computeKFactor` (k-factor.ts). `None` — невідомий матеріал
-    чи ratio поза будь-яким `ratio_correction` діапазоном."""
-    base = spec["k_factor"]["default_by_material"].get(material_code)
-    if base is None or thickness_mm <= 0:
-        return None
-    ratio = inner_radius_mm / thickness_mm
-    for row in spec["k_factor"]["ratio_correction"]:
-        if row["ratio_min"] <= ratio < row["ratio_max"]:
-            return float(base) * float(row["multiplier"])
-    return None
 
 
 def _enclosed_shelf_dimensions_mm(
@@ -84,25 +78,21 @@ def _sheet_dimensions_mm(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    material_code: str | None,
-    spec: dict[str, Any],
+    k_factor: float,
 ) -> tuple[float, float] | None:
-    """Дзеркало TS `sheetDimensionsFor`. `None` — матеріал/радіус/кут невідомі,
-    шаблон без bend-полів чи параметри неповні (KeyError/TypeError/ValueError —
+    """Дзеркало TS `sheetDimensionsFor`. `None` — радіус/кут невідомі, шаблон
+    без bend-полів чи параметри неповні (KeyError/TypeError/ValueError —
     пряме читання `parameters[...]`, Zod/Pydantic-схема звітує про причину
     пізніше): `validate_export` (bend) чи схема шаблону вже звітує про реальну
     причину."""
-    if material_code is None:
-        return None
     t = thickness_mm
     try:
         r = float(parameters["bend_radius_mm"])
         angle = float(parameters["bend_angle_deg"])
 
-        k = _compute_k_factor(material_code, t, r, spec)
-        if k is None:
-            return None
-        ba = compute_bend_allowance(angle_deg=angle, inner_radius_mm=r, thickness_mm=t, k_factor=k)
+        ba = compute_bend_allowance(
+            angle_deg=angle, inner_radius_mm=r, thickness_mm=t, k_factor=k_factor
+        )
 
         if template_slug in ("l_bracket", "corner_angle"):
             flat_a = parameters["legA_mm"] - t - r
@@ -144,12 +134,12 @@ def validate_sheet(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    material_code: str | None,
+    k_factor: float = DEFAULT_K_FACTOR,
     spec: dict[str, Any] | None = None,
 ) -> list[SheetError]:
     """Габарит розгортки vs можливості верстата (CLAUDE.md §7 п.4). [] → валідно."""
     spec = spec if spec is not None else load_spec()
-    dims = _sheet_dimensions_mm(template_slug, parameters, thickness_mm, material_code, spec)
+    dims = _sheet_dimensions_mm(template_slug, parameters, thickness_mm, k_factor)
     if dims is None:
         return []
     row = next((r for r in spec["capability_matrix"] if r["thickness_mm"] == thickness_mm), None)
@@ -175,9 +165,7 @@ def validate_export_sheet(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    material_code: str | None = None,
+    k_factor: float = DEFAULT_K_FACTOR,
 ) -> list[dict[str, str]]:
     """JSON-готовий список dict-ів для 422-detail (паритет з validate_export)."""
-    return [
-        asdict(e) for e in validate_sheet(template_slug, parameters, thickness_mm, material_code)
-    ]
+    return [asdict(e) for e in validate_sheet(template_slug, parameters, thickness_mm, k_factor)]

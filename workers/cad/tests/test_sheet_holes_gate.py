@@ -1,7 +1,8 @@
 """Тести sheet/holes/profile воркер-гейтів (CLAUDE.md §7 п.4, docs/07 §3) —
-доробка draft PR #238 (#202) за рецензією Gemini 3.8 Flash.
+доробка draft PR #238 (#202) за рецензією Gemini 3.8 Flash, потім доробка
+draft PR #241 (#202) за контрприкладами Claude Sonnet 5.5.
 
-П'ять регресій:
+Регресії:
 1. Габарит гейту `_sheet_dimensions_mm("enclosed_shelf", ...)` мав занижену Y
    (left/right звисають за bottom/back на (t+r)/2 навіть БЕЗ ребра — гейт
    рахував «низ» від 0). Найсильніший тест — ббокс гейту == бокс СПРАВЖНЬОГО
@@ -12,6 +13,9 @@
    MATERIAL_NOT_ALLOWED ніколи не спрацьовувало.
 5. `material_code` — ОБОВ'ЯЗКОВИЙ (рішення Архітектора 2026-10-13): відсутній
    чи невідомий код мають давати 422, не мовчазний пропуск перевірки.
+6. Гейт габариту брав K з матричної таблиці материалу, а воркер реально
+   будує розгортку з `req.k_factor` (дефолт 0.4) — `TestSheetGateUsesWorker
+   KFactorNotMaterialTable` нижче.
 """
 
 from __future__ import annotations
@@ -42,7 +46,11 @@ from flatcraft_cad.unfold import (
 from flatcraft_cad.validate.bend import load_spec
 from flatcraft_cad.validate.holes import validate_holes
 from flatcraft_cad.validate.profile import validate_profile
-from flatcraft_cad.validate.sheet import _compute_k_factor, _sheet_dimensions_mm
+from flatcraft_cad.validate.sheet import (
+    DEFAULT_K_FACTOR,
+    _sheet_dimensions_mm,
+    validate_export_sheet,
+)
 
 SPEC = load_spec()
 MATERIAL = "cold_rolled_steel"
@@ -51,12 +59,6 @@ MATERIAL = "cold_rolled_steel"
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
-
-
-def _k(t: float, r: float) -> float:
-    k = _compute_k_factor(MATERIAL, t, r, SPEC)
-    assert k is not None, f"немає k-фактора для ({MATERIAL}, t={t}, r={r})"
-    return k
 
 
 class TestSheetDimensionsBboxParity:
@@ -79,7 +81,7 @@ class TestSheetDimensionsBboxParity:
             width_mm=width,
             thickness_mm=t,
         )
-        u = unfold_l_bracket(params, _k(t, r))
+        u = unfold_l_bracket(params, DEFAULT_K_FACTOR)
         dims = _sheet_dimensions_mm(
             "l_bracket",
             {
@@ -90,8 +92,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_angle_deg": 90,
             },
             t,
-            MATERIAL,
-            SPEC,
+            DEFAULT_K_FACTOR,
         )
         assert dims is not None
         assert dims == pytest.approx((u.width_mm, u.length_mm), abs=1e-6)
@@ -115,7 +116,7 @@ class TestSheetDimensionsBboxParity:
             hole_cols=2,
             hole_margin_mm=10.0,
         )
-        u = unfold_corner_angle(params, _k(t, r))
+        u = unfold_corner_angle(params, DEFAULT_K_FACTOR)
         dims = _sheet_dimensions_mm(
             "corner_angle",
             {
@@ -126,8 +127,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_angle_deg": 90,
             },
             t,
-            MATERIAL,
-            SPEC,
+            DEFAULT_K_FACTOR,
         )
         assert dims is not None
         assert dims == pytest.approx((u.width_mm, u.length_mm), abs=1e-6)
@@ -151,7 +151,7 @@ class TestSheetDimensionsBboxParity:
             width_mm=width,
             thickness_mm=t,
         )
-        u = unfold_z_bracket(params, _k(t, r))
+        u = unfold_z_bracket(params, DEFAULT_K_FACTOR)
         dims = _sheet_dimensions_mm(
             "z_bracket",
             {
@@ -163,8 +163,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_angle_deg": 90,
             },
             t,
-            MATERIAL,
-            SPEC,
+            DEFAULT_K_FACTOR,
         )
         assert dims is not None
         assert dims == pytest.approx((u.width_mm, u.length_mm), abs=1e-6)
@@ -192,7 +191,7 @@ class TestSheetDimensionsBboxParity:
             mount_hole_cols=2,
             mount_hole_margin_mm=15.0,
         )
-        u = unfold_wall_shelf(params, _k(t, r))
+        u = unfold_wall_shelf(params, DEFAULT_K_FACTOR)
         dims = _sheet_dimensions_mm(
             "wall_shelf",
             {
@@ -204,8 +203,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_angle_deg": 90,
             },
             t,
-            MATERIAL,
-            SPEC,
+            DEFAULT_K_FACTOR,
         )
         assert dims is not None
         assert dims == pytest.approx((u.width_mm, u.length_mm), abs=1e-6)
@@ -231,7 +229,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_radius_mm": r,
             }
         )
-        u = unfold_perforated_panel(params, _k(t, r))
+        u = unfold_perforated_panel(params, DEFAULT_K_FACTOR)
         dims = _sheet_dimensions_mm(
             "perforated_panel",
             {
@@ -242,8 +240,7 @@ class TestSheetDimensionsBboxParity:
                 "bend_angle_deg": 90,
             },
             t,
-            MATERIAL,
-            SPEC,
+            DEFAULT_K_FACTOR,
         )
         assert dims is not None
         expected = (
@@ -276,7 +273,7 @@ class TestSheetDimensionsBboxParity:
             thickness_mm=t,
             stiffening_rib=stiffening_rib,
         )
-        u = unfold_enclosed_shelf(params, _k(t, r))
+        u = unfold_enclosed_shelf(params, DEFAULT_K_FACTOR)
         parameters: dict[str, Any] = {
             "width_mm": width,
             "depth_mm": depth,
@@ -284,7 +281,7 @@ class TestSheetDimensionsBboxParity:
             "bend_angle_deg": 90,
             "stiffening_rib": None if rib_height is None else {"height_mm": rib_height},
         }
-        dims = _sheet_dimensions_mm("enclosed_shelf", parameters, t, MATERIAL, SPEC)
+        dims = _sheet_dimensions_mm("enclosed_shelf", parameters, t, DEFAULT_K_FACTOR)
         assert dims is not None
         expected = (
             u.bbox_max_x_mm - u.bbox_min_x_mm,
@@ -346,8 +343,7 @@ class TestIncompleteParametersGiveSchema422NotCrash:
                 "l_bracket",
                 {"legB_mm": 60, "bend_radius_mm": 2.5, "bend_angle_deg": 90, "width_mm": 100},
                 2.0,
-                MATERIAL,
-                SPEC,
+                DEFAULT_K_FACTOR,
             )
             is None
         )
@@ -445,3 +441,111 @@ class TestMaterialCodeMandatory:
             SPEC,
         )
         assert any(e.code == "HOLE_MATERIAL_COEFFICIENT_MISSING" for e in errors)
+
+
+class TestSheetGateUsesWorkerKFactorNotMaterialTable:
+    """Доробка draft PR #241 (#202) за контрприкладами Claude Sonnet 5.5.
+
+    Регресія: гейт габариту рахував BA з K з матричної таблиці материалу
+    (`_compute_k_factor`), а воркер реально будує розгортку з `req.k_factor`
+    (`server.py::ExportRequest.k_factor`, `Field(default=0.4)` — `apps/api`
+    НЕ форвардить це поле, тож дефолт застосовується завжди). Різні K →
+    гейт міг пропустити деталь, яка на виробництві не влізе у верстат (чи
+    навпаки заблокувати валідну).
+
+    z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100:
+    справжня заготовка (K=0.4) = 975 + 2·BA(0.4) ≈ 1000.76мм > max 1000мм
+    для t=8 → 422. Старий код брав K з таблиці матеріалу (ratio=5/8=0.625 →
+    multiplier 0.85): cold_rolled K=0.34 → ≈999.26мм (помилково 202),
+    aluminum_5754 K=0.2805 → ≈997.75мм (помилково 202); лише stainless_304
+    K=0.3825 випадково давав ≈1000.31мм (422). Новий код: 422 для ВСІХ трьох
+    материалів — К завжди однаковий (req.k_factor), таблиця матеріалу для
+    габариту більше не читається.
+    """
+
+    CONTREXAMPLE_PARAMETERS: dict[str, object] = {
+        "top_flange_mm": 400,
+        "bottom_flange_mm": 400,
+        "offset_mm": 214,
+        "bend_radius_mm": 5,
+        "bend_angle_deg": 90,
+        "width_mm": 100,
+        "holes": [],
+    }
+
+    @pytest.mark.parametrize(
+        "material_code", ["cold_rolled_steel", "aluminum_5754", "stainless_304"]
+    )
+    def test_z_bracket_t8_contrexample_422_regardless_of_material(
+        self, client: TestClient, material_code: str
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": self.CONTREXAMPLE_PARAMETERS,
+                "thickness_mm": 8,
+                "material_code": material_code,
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
+
+    def test_validate_export_sheet_unit_level_default_k_factor_422(self) -> None:
+        # Без явного k_factor — той самий дефолт 0.4, що Pydantic
+        # `ExportRequest.k_factor` (server.py).
+        errors = validate_export_sheet("z_bracket", self.CONTREXAMPLE_PARAMETERS, 8.0)
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in errors)
+
+    @pytest.mark.parametrize(
+        ("template_slug", "parameters", "t", "k_factor", "unfold_fn", "build_params_cls"),
+        [
+            (
+                "l_bracket",
+                {
+                    "legA_mm": 60.0,
+                    "legB_mm": 60.0,
+                    "width_mm": 100.0,
+                    "bend_radius_mm": 5.0,
+                    "bend_angle_deg": 90,
+                },
+                8.0,
+                DEFAULT_K_FACTOR,
+                unfold_l_bracket,
+                LBracketBuildParameters,
+            ),
+            (
+                "z_bracket",
+                {
+                    "top_flange_mm": 80.0,
+                    "bottom_flange_mm": 80.0,
+                    "offset_mm": 60.0,
+                    "width_mm": 100.0,
+                    "bend_radius_mm": 5.0,
+                    "bend_angle_deg": 90,
+                },
+                8.0,
+                DEFAULT_K_FACTOR,
+                unfold_z_bracket,
+                ZBracketBuildParameters,
+            ),
+        ],
+    )
+    def test_bbox_matches_real_unfold_built_with_req_k_factor(
+        self,
+        template_slug: str,
+        parameters: dict[str, Any],
+        t: float,
+        k_factor: float,
+        unfold_fn: Any,
+        build_params_cls: Any,
+    ) -> None:
+        """Найсильніший тест: гейт рахує ТОЙ САМИЙ габарит, що й СПРАВЖНЯ
+        розгортка воркера, побудована з `k_factor=req.k_factor` — не з
+        таблиці матеріалу (gate не отримує і не читає `material_code` для
+        цього розрахунку взагалі)."""
+        params = build_params_cls.model_validate({**parameters, "thickness_mm": t})
+        u = unfold_fn(params, k_factor)
+        dims = _sheet_dimensions_mm(template_slug, parameters, t, k_factor)
+        assert dims is not None
+        assert dims == pytest.approx((u.width_mm, u.length_mm), abs=1e-6)

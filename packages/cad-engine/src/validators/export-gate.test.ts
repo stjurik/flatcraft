@@ -144,6 +144,22 @@ describe("validateExportHoles (browser, bakedSpec) — рішення yurii 2026
     expect(issues[0]?.message).toMatch(/9\.5/);
   });
 
+  it("l_bracket: D=9.7 Ø6.4 — край 6.499999999999999 (IEEE-754) з допуском 1e-9 — допустимо", () => {
+    const req = lBracketWithHoles(2, 2.5, [
+      { leg: "A", distance_from_edge_mm: 20, distance_from_bend_mm: 9.7, diameter_mm: 6.4 },
+    ]);
+    expect(validateExportHoles(req, bakedSpec)).toEqual([]);
+  });
+
+  it("l_bracket: D=9.69 Ø6.4 — дійсно ближче за межу, допуск не маскує → HOLE_TOO_CLOSE_TO_BEND", () => {
+    const req = lBracketWithHoles(2, 2.5, [
+      { leg: "A", distance_from_edge_mm: 20, distance_from_bend_mm: 9.69, diameter_mm: 6.4 },
+    ]);
+    const issues = validateExportHoles(req, bakedSpec);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("HOLE_TOO_CLOSE_TO_BEND");
+  });
+
   it("l_bracket: D=30 — контроль далеко від межі → допустимо", () => {
     const req = lBracketWithHoles(2, 2.5, [
       { leg: "A", distance_from_edge_mm: 20, distance_from_bend_mm: 30, diameter_mm: 6 },
@@ -196,6 +212,45 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
     expect(issues[0]?.message).toMatch(/Зменшіть/);
   });
 
+  it("z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.76мм > 1000, гейт рахує K воркера — не з таблиці матеріалу)", () => {
+    const req: ExportRequest = {
+      template_slug: "z_bracket",
+      parameters: {
+        ...Z_BRACKET_DEFAULT_PARAMETERS,
+        top_flange_mm: 400,
+        bottom_flange_mm: 400,
+        offset_mm: 214,
+        bend_radius_mm: 5,
+        width_mm: 100,
+      },
+      material_code: "cold_rolled_steel",
+      thickness_mm: 8,
+    };
+    const issues = validateExportSheet(req, bakedSpec);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("SHEET_EXCEEDS_MAX_LENGTH");
+  });
+
+  it("той самий z_bracket контрприклад — однаковий результат для aluminum_5754 і stainless_304 (гейт більше не бере K з таблиці матеріалу)", () => {
+    for (const material_code of ["cold_rolled_steel", "aluminum_5754", "stainless_304"]) {
+      const req: ExportRequest = {
+        template_slug: "z_bracket",
+        parameters: {
+          ...Z_BRACKET_DEFAULT_PARAMETERS,
+          top_flange_mm: 400,
+          bottom_flange_mm: 400,
+          offset_mm: 214,
+          bend_radius_mm: 5,
+          width_mm: 100,
+        },
+        material_code,
+        thickness_mm: 8,
+      };
+      const issues = validateExportSheet(req, bakedSpec);
+      expect(issues.map((i) => i.code)).toEqual(["SHEET_EXCEEDS_MAX_LENGTH"]);
+    }
+  });
+
   it("enclosed_shelf t=2 на дефолтах (width=600, depth=200) → валідно, далеко від межі", () => {
     const req: ExportRequest = {
       template_slug: "enclosed_shelf",
@@ -224,7 +279,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req, bakedSpec);
+      const dims = sheetDimensionsFor(req);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
       expect(dims!.heightMm).toBeCloseTo(398.4336278784232, 6);
@@ -237,7 +292,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req, bakedSpec);
+      const dims = sheetDimensionsFor(req);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
       expect(dims!.heightMm).toBeCloseTo(407.36725575684636, 6);
@@ -255,10 +310,12 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 8,
       };
-      const dims = sheetDimensionsFor(req, bakedSpec);
+      const dims = sheetDimensionsFor(req);
       expect(dims).not.toBeNull();
-      expect(dims!.widthMm).toBeCloseTo(1472.2530952857132, 6);
-      expect(dims!.heightMm).toBeCloseTo(592.6265476428566, 6);
+      // K фіксований EXPORT_GATE_K_FACTOR=0.4 (не з таблиці матеріалу,
+      // ratio=5/8=0.625 раніше давав multiplier 0.85 → K=0.34).
+      expect(dims!.widthMm).toBeCloseTo(1473.7610597594362, 6);
+      expect(dims!.heightMm).toBeCloseTo(593.3805298797181, 6);
     });
   });
 });

@@ -484,6 +484,56 @@ describe("POST /exports — async flow", () => {
       });
       expect(res.statusCode).toBe(202);
     });
+
+    it("d1) l_bracket D=9.7 Ø6.4 — край 6.499999999999999 (IEEE-754), допуск 1e-9 → 202", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.7, 6.4),
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("d2) l_bracket D=9.69 Ø6.4 — дійсно ближче за межу, допуск не маскує → 422", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.69, 6.4),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+    });
+
+    it("e) z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → 422 SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.76мм > 1000, гейт рахує K воркера, не з таблиці матеріалу)", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: {
+          template_slug: "z_bracket",
+          parameters: {
+            top_flange_mm: 400,
+            bottom_flange_mm: 400,
+            offset_mm: 214,
+            bend_radius_mm: 5,
+            bend_angle_deg: 90,
+            width_mm: 100,
+            holes: [],
+          },
+          material_code: "cold_rolled_steel",
+          thickness_mm: 8,
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "SHEET_EXCEEDS_MAX_LENGTH")).toBe(true);
+    });
   });
 
   it("GET /exports/:id для неіснуючого → 404", async () => {
