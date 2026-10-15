@@ -21,7 +21,11 @@ const HoleSchema = z.object({
   leg: z.enum(["A", "B"]),
   /** Відстань від найближчого зовнішнього краю полиці, мм. */
   distance_from_edge_mm: z.number().min(5),
-  /** Відстань від лінії гиба (centre to centre), мм. */
+  /**
+   * Відстань від лінії гиба (centre to centre), мм. Поле — від ЦЕНТРУ отвору;
+   * фізичне правило відстані до гиба — від НАЙБЛИЖЧОГО КРАЮ отвору (рішення
+   * yurii 2026-10-11), гейт перераховує центр → край, див. export-gate.ts.
+   */
   distance_from_bend_mm: z.number().min(5),
   diameter_mm: z.number().min(2).max(50),
 });

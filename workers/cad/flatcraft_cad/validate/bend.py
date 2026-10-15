@@ -8,11 +8,12 @@
 (прямий виклик /export, майбутній BullMQ-producer без gate тощо), воркер
 відмовляє ДО CAD-операції та запису у R2.
 
-Матеріал: API strip'ить `material_code` перед forward (ADR-018), тож воркер
-зазвичай валідує без матеріалу (material_code=None) — radius/angle/thickness
-матеріало-незалежні. Перевірка material-group лишається у API-gate, де
-material_code присутній. Функція приймає material_code опційно для повного
-паритету (використовується property-based тестами).
+Матеріал: API (apps/api) завжди передає `material_code` у воркер (ADR-043) —
+`server.py::ExportRequest.material_code` ОБОВ'ЯЗКОВИЙ, його відсутність дає
+422 ще на рівні Pydantic-схеми, до будь-якого виклику цього модуля. Параметр
+`material_code` тут лишається опційним (`str | None`) лише для
+property-based тестів цього файлу, які перевіряють radius/angle/thickness
+матеріало-незалежно, без matrix-перевірки material-group.
 """
 
 from __future__ import annotations

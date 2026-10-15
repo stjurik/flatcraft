@@ -25,10 +25,13 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   profileIssueToProblem,
+  sheetDimensionsFor,
   validateBend,
   validateExportBends,
+  validateExportHoles,
   validateExportPerforation,
   validateExportProfile,
+  validateExportSheet,
   validateHoles,
   validatePerforation,
   validateProfile,
@@ -49,4 +52,4 @@ export {
   type ValidationResult,
 } from "./validators/index.js";
 
-export { computeKFactor, type KFactorInput } from "./k-factor.js";
+export { computeBendAllowanceMm, computeKFactor, type KFactorInput } from "./k-factor.js";

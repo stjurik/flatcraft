@@ -155,6 +155,7 @@ class TestExportHappy:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -186,6 +187,7 @@ class TestExportHappy:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         body = res.json()
@@ -201,6 +203,7 @@ class TestExportHappy:
             "parameters": VALID_PARAMS,
             "thickness_mm": 2,
             "k_factor": 0.4,
+            "material_code": "cold_rolled_steel",
         }
         a = client.post("/export", json=payload).json()
         b = client.post("/export", json=payload).json()
@@ -228,6 +231,7 @@ class TestZBracketExport:
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -260,6 +264,7 @@ class TestZBracketExport:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         z_res = client.post(
@@ -268,6 +273,7 @@ class TestZBracketExport:
                 "template_slug": "z_bracket",
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -291,6 +297,7 @@ class TestCornerAngleExport:
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -323,6 +330,7 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -346,6 +354,7 @@ class TestCornerAngleExport:
                 "template_slug": "l_bracket",
                 "parameters": {**VALID_PARAMS, "legA_mm": 50, "legB_mm": 50, "width_mm": 80},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         c_res = client.post(
@@ -354,6 +363,7 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -377,6 +387,7 @@ class TestWallShelfExport:
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "k_factor": 0.4,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -407,6 +418,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         # Без lip: 1 bend line.
@@ -416,6 +428,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": {**WALL_SHELF_VALID_PARAMS, "front_lip_mm": 0},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -449,6 +462,7 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -474,6 +488,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -507,6 +522,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -537,6 +553,7 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         big_pitch = client.post(
@@ -549,6 +566,7 @@ class TestPerforatedPanelExport:
                     "pitch_y_mm": 50,
                 },
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -584,6 +602,7 @@ class TestExportIdPermalink:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "export_id": export_id,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -608,7 +627,12 @@ class TestExportIdPermalink:
         monkeypatch.setenv("BASE_URL", "https://hart.crimea.ua")
         res = client.post(
             "/export",
-            json={"template_slug": "l_bracket", "parameters": VALID_PARAMS, "thickness_mm": 2},
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
         )
         assert res.status_code == 200, res.text
         pdf_key = res.json()["artifacts"]["pdf"]["s3_key"]
@@ -626,6 +650,175 @@ class TestExportIdPermalink:
         # перевіряємо саме відсутність QR-permalink шляху, а не домену взагалі.
         assert "QR: https://hart.crimea.ua/f/" not in text
 
+
+ENCLOSED_SHELF_VALID_PARAMS: dict[str, object] = {
+    "width_mm": 600,
+    "depth_mm": 200,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
+    "bends": [{"direction": "up"}] * 4,
+    "side_perforation": None,
+    "stiffening_rib": None,
+}
+
+
+class TestSheetAndHolesGateParity:
+    """Воркер дублює TS export-gate (CLAUDE.md §7 п.4, docs/07 §3, рішення
+    yurii 2026-10-11: правило — від краю отвору, поле — від центру): та сама
+    межа, що й API-gate. Остання лінія оборони, навіть якщо API обійдено."""
+
+    def test_enclosed_shelf_t8_r5_900x300_sheet_exceeds_max_length_422(
+        self, client: TestClient
+    ) -> None:
+        # flat_bottom + 2·BA + 2·(depth-tr) ≈ 1472мм > max_bend_length_mm=1000 для t=8.
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": {
+                    **ENCLOSED_SHELF_VALID_PARAMS,
+                    "width_mm": 900,
+                    "depth_mm": 300,
+                    "bend_radius_mm": 5,
+                },
+                "thickness_mm": 8,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
+
+    @pytest.mark.parametrize(
+        ("distance_from_bend_mm", "diameter_mm", "expected_status"),
+        [
+            (9.4, 6, 422),  # a·t+R − 0.1 (край 6.4 < 6.5)
+            (6.5, 6, 422),  # головний регресійний кейс — «від центру» пройшло б
+            (9.5, 6, 200),  # рівно межа (край 6.5) — допустимо
+            (9.5, 8, 422),  # той самий D, більший діаметр → край 5.5 < 6.5
+            (30, 6, 200),  # контроль, далеко від межі
+            # 9.7 - 6.4/2 = 6.499999999999999 (IEEE-754) — без допуску 1e-9
+            # хибно блокує геометрично валідний отвір (рівно на межі 6.5).
+            (9.7, 6.4, 200),
+            (9.69, 6.4, 422),  # дійсно ближче за межу — допуск не маскує
+        ],
+    )
+    def test_l_bracket_cold_rolled_hole_edge_parity(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        distance_from_bend_mm: float,
+        diameter_mm: float,
+        expected_status: int,
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": {
+                    **VALID_PARAMS,
+                    "holes": [
+                        {
+                            "leg": "A",
+                            "distance_from_edge_mm": 20,
+                            "distance_from_bend_mm": distance_from_bend_mm,
+                            "diameter_mm": diameter_mm,
+                        }
+                    ],
+                },
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == expected_status, res.text
+        if expected_status == 422:
+            assert any(e["code"] == "HOLE_TOO_CLOSE_TO_BEND" for e in res.json()["detail"])
+
+    def test_l_bracket_aluminum_5754_d85_ok(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        # aluminum_5754 a=1.5, t=2, R=2.5 → мінімум від краю 5.5; D=8.5,Ø6 → край=5.5 — межа.
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": {
+                    **VALID_PARAMS,
+                    "holes": [
+                        {
+                            "leg": "A",
+                            "distance_from_edge_mm": 20,
+                            "distance_from_bend_mm": 8.5,
+                            "diameter_mm": 6,
+                        }
+                    ],
+                },
+                "thickness_mm": 2,
+                "material_code": "aluminum_5754",
+            },
+        )
+        assert res.status_code == 200, res.text
+
+    def test_z_bracket_segment_t_d65_422(self, client: TestClient) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "holes": [
+                        {
+                            "segment": "T",
+                            "distance_from_edge_mm": 20,
+                            "distance_from_bend_mm": 6.5,
+                            "diameter_mm": 6,
+                        }
+                    ],
+                },
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "HOLE_TOO_CLOSE_TO_BEND" for e in res.json()["detail"])
+
+    def test_z_bracket_segment_t_d12_control_ok(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "holes": [
+                        {
+                            "segment": "T",
+                            "distance_from_edge_mm": 20,
+                            "distance_from_bend_mm": 12,
+                            "diameter_mm": 6,
+                        }
+                    ],
+                },
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 200, res.text
+
+    def test_enclosed_shelf_t2_defaults_control_ok(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": ENCLOSED_SHELF_VALID_PARAMS,
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 200, res.text
+
     def test_export_id_без_base_url_env_теж_fallback(
         self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -637,6 +830,7 @@ class TestExportIdPermalink:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "export_id": "00000000-1111-2222-3333-444444444444",
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -651,3 +845,67 @@ class TestExportIdPermalink:
             f.flush()
             text = PdfReader(f.name).pages[0].extract_text() or ""
         assert "flatcraft://l_bracket/" in text
+
+    # z_bracket t=10 R=5 (max_bend_length_mm=1000), top=bottom=400, offset=205:
+    # flat_sum = (400-15)+(205-15)+(400-15) = 960. BA(K) = (π/2)·(5+10·K).
+    # K=0.4 (дефолт ExportRequest.k_factor) → BA=14.137166941154069,
+    #   heightMm=960+2·BA=988.2743338823082 — на 11.7мм НИЖЧЕ межі 1000.
+    # K=1.0 (явно у запиті, максимум дозволеного Field(le=1.0)) →
+    #   BA=23.561944901923447, heightMm=1007.1238898038469 — на 7.1мм ВИЩЕ
+    #   межі 1000. Обидва margin'и у межах мм, далеко від 1e-9-похибки
+    #   округлення на самій межі 1000.0.
+    #
+    # Регресія: `server.py` передає `validate_export_sheet(...,
+    # req.k_factor)` — якщо замінити на хардкод 0.4, гейт перевірятиме
+    # габарит розгортки, яку насправді будує воркер з K=1.0 (запит явно
+    # просить k_factor=1.0), застарілим K=0.4 — пропустить деталь, що по
+    # факту НЕ влізає у верстат.
+    def test_z_bracket_t10_явний_k_factor_1_0_перевищує_max_length_422(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        # `aws_with_bucket` тут не для happy-path — захист від мутанта, що
+        # пропускає SHEET-гейт: якщо валідація помилково не впаде у 422, код
+        # піде далі у CAD-генерацію + S3-upload, а без мокнутого `mock_aws()`
+        # boto3 намагається реальний network call (у сендбоксі — зависання
+        # на connect-timeout) замість швидкого AssertionError.
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "top_flange_mm": 400,
+                    "bottom_flange_mm": 400,
+                    "offset_mm": 205,
+                    "bend_radius_mm": 5,
+                },
+                "thickness_mm": 10,
+                "k_factor": 1.0,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
+
+    def test_z_bracket_t10_без_k_factor_контроль_не_перевищує_max_length(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Той самий запит без `k_factor` → Pydantic-дефолт 0.4 → габарит
+        988.27мм < 1000мм → не SHEET_EXCEEDS_MAX_LENGTH (контроль до
+        попереднього теста: різниця лише у k_factor)."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "top_flange_mm": 400,
+                    "bottom_flange_mm": 400,
+                    "offset_mm": 205,
+                    "bend_radius_mm": 5,
+                },
+                "thickness_mm": 10,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 200, res.text
