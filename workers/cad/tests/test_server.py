@@ -845,3 +845,67 @@ class TestSheetAndHolesGateParity:
             f.flush()
             text = PdfReader(f.name).pages[0].extract_text() or ""
         assert "flatcraft://l_bracket/" in text
+
+    # z_bracket t=10 R=5 (max_bend_length_mm=1000), top=bottom=400, offset=205:
+    # flat_sum = (400-15)+(205-15)+(400-15) = 960. BA(K) = (π/2)·(5+10·K).
+    # K=0.4 (дефолт ExportRequest.k_factor) → BA=14.137166941154069,
+    #   heightMm=960+2·BA=988.2743338823082 — на 11.7мм НИЖЧЕ межі 1000.
+    # K=1.0 (явно у запиті, максимум дозволеного Field(le=1.0)) →
+    #   BA=23.561944901923447, heightMm=1007.1238898038469 — на 7.1мм ВИЩЕ
+    #   межі 1000. Обидва margin'и у межах мм, далеко від 1e-9-похибки
+    #   округлення на самій межі 1000.0.
+    #
+    # Регресія: `server.py` передає `validate_export_sheet(...,
+    # req.k_factor)` — якщо замінити на хардкод 0.4, гейт перевірятиме
+    # габарит розгортки, яку насправді будує воркер з K=1.0 (запит явно
+    # просить k_factor=1.0), застарілим K=0.4 — пропустить деталь, що по
+    # факту НЕ влізає у верстат.
+    def test_z_bracket_t10_явний_k_factor_1_0_перевищує_max_length_422(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        # `aws_with_bucket` тут не для happy-path — захист від мутанта, що
+        # пропускає SHEET-гейт: якщо валідація помилково не впаде у 422, код
+        # піде далі у CAD-генерацію + S3-upload, а без мокнутого `mock_aws()`
+        # boto3 намагається реальний network call (у сендбоксі — зависання
+        # на connect-timeout) замість швидкого AssertionError.
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "top_flange_mm": 400,
+                    "bottom_flange_mm": 400,
+                    "offset_mm": 205,
+                    "bend_radius_mm": 5,
+                },
+                "thickness_mm": 10,
+                "k_factor": 1.0,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
+
+    def test_z_bracket_t10_без_k_factor_контроль_не_перевищує_max_length(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Той самий запит без `k_factor` → Pydantic-дефолт 0.4 → габарит
+        988.27мм < 1000мм → не SHEET_EXCEEDS_MAX_LENGTH (контроль до
+        попереднього теста: різниця лише у k_factor)."""
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "z_bracket",
+                "parameters": {
+                    **Z_VALID_PARAMS,
+                    "top_flange_mm": 400,
+                    "bottom_flange_mm": 400,
+                    "offset_mm": 205,
+                    "bend_radius_mm": 5,
+                },
+                "thickness_mm": 10,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 200, res.text

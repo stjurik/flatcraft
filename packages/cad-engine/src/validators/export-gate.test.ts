@@ -5,8 +5,11 @@
  * тут — функціональна перевірка, що клієнт ловить ті самі помилки, що й сервер.
  */
 import {
+  CORNER_ANGLE_DEFAULT_PARAMETERS,
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   L_BRACKET_DEFAULT_PARAMETERS,
+  PERFORATED_PANEL_DEFAULT_PARAMETERS,
+  WALL_SHELF_DEFAULT_PARAMETERS,
   Z_BRACKET_DEFAULT_PARAMETERS,
   type ExportRequest,
 } from "@flatcraft/types";
@@ -316,6 +319,76 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
       // ratio=5/8=0.625 раніше давав multiplier 0.85 → K=0.34).
       expect(dims!.widthMm).toBeCloseTo(1473.7610597594362, 6);
       expect(dims!.heightMm).toBeCloseTo(593.3805298797181, 6);
+    });
+  });
+
+  describe("sheetDimensionsFor — l_bracket/corner_angle/wall_shelf/perforated_panel bbox паритет з unfold.py", () => {
+    // Усі числа нижче отримані локально: `uv run --directory workers/cad python`,
+    // викликаючи `unfold_l_bracket`/`unfold_corner_angle`/`unfold_wall_shelf`/
+    // `unfold_perforated_panel` (workers/cad/flatcraft_cad/unfold.py) з
+    // t=2, R=2.5, K=0.4 (EXPORT_GATE_K_FACTOR) на default-параметрах шаблону
+    // (override лише front_lip_mm для wall_shelf-кейсів). BA = (π/2)·(2.5+0.4·2)
+    // = 5.183627878423157мм — спільний доданок для всіх, крім perforated_panel,
+    // де він входить у відступ двічі з кожного боку.
+
+    it("l_bracket (legA=legB=60, width=100, t=2, R=2.5) — звірено з unfold_l_bracket: length_mm=116.18362787842315", () => {
+      const req = lBracket({ thickness_mm: 2, bend_radius_mm: 2.5 });
+      const dims = sheetDimensionsFor(req);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBe(100);
+      expect(dims!.heightMm).toBeCloseTo(116.18362787842315, 9);
+    });
+
+    it("corner_angle (legA=legB=50, width=80, t=2, R=2.5) — звірено з unfold_corner_angle: length_mm=96.18362787842315", () => {
+      const req: ExportRequest = {
+        template_slug: "corner_angle",
+        parameters: { ...CORNER_ANGLE_DEFAULT_PARAMETERS, bend_radius_mm: 2.5 },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBe(80);
+      expect(dims!.heightMm).toBeCloseTo(96.18362787842315, 9);
+    });
+
+    it("wall_shelf з губою (back=80, shelf=150, lip=20, width=300, t=2, R=2.5) — звірено з unfold_wall_shelf: length_mm=242.3672557568463", () => {
+      const req: ExportRequest = {
+        template_slug: "wall_shelf",
+        parameters: { ...WALL_SHELF_DEFAULT_PARAMETERS, bend_radius_mm: 2.5 },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBe(300);
+      expect(dims!.heightMm).toBeCloseTo(242.3672557568463, 9);
+    });
+
+    it("wall_shelf без губи (front_lip_mm=0, back=80, shelf=150, width=300, t=2, R=2.5) — звірено з unfold_wall_shelf: length_mm=226.18362787842315", () => {
+      const req: ExportRequest = {
+        template_slug: "wall_shelf",
+        parameters: { ...WALL_SHELF_DEFAULT_PARAMETERS, bend_radius_mm: 2.5, front_lip_mm: 0 },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBe(300);
+      expect(dims!.heightMm).toBeCloseTo(226.18362787842315, 9);
+    });
+
+    it("perforated_panel (length=200, width=150, rib_height=30, t=2, R=2.5) — звірено з unfold_perforated_panel bbox: 261.3672557568463×211.3672557568463", () => {
+      const req: ExportRequest = {
+        template_slug: "perforated_panel",
+        parameters: { ...PERFORATED_PANEL_DEFAULT_PARAMETERS, bend_radius_mm: 2.5 },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+      const dims = sheetDimensionsFor(req);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBeCloseTo(261.3672557568463, 9);
+      expect(dims!.heightMm).toBeCloseTo(211.3672557568463, 9);
     });
   });
 });

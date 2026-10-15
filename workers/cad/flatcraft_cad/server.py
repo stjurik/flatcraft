@@ -88,11 +88,11 @@ class ExportRequest(BaseModel):
     # непрацюючого fallback-scheme flatcraft://<slug>/<article>.
     export_id: UUID | None = None
     # Рішення Архітектора 2026-10-13 (заміняє рішення yurii 2026-10-06, яке
-    # зробило поле опційним): material_code ОБОВ'ЯЗКОВИЙ — потрібен для
-    # matrix-валідації матеріалу (validate_bend) і hole-to-bend-distance
+    # зробило поле опційним; ADR-043): material_code ОБОВ'ЯЗКОВИЙ — потрібен
+    # для matrix-валідації матеріалу (validate_bend) і hole-to-bend-distance
     # parity (coefficient_by_material) — `validate_export`/
     # `validate_export_holes`/`validate_export_sheet`. НЕ впливає на
-    # DXF/PDF-геометрію — лише на валідацію. Потребує правки ADR-018.
+    # DXF/PDF-геометрію — лише на валідацію.
     # API (apps/api) уже завжди його передає (Zod-схема вимагає). Відсутнє
     # поле → 422 від Pydantic-схеми цього ExportRequest.
     material_code: str

@@ -84,11 +84,12 @@ async function runJob(
   });
 
   try {
-    // Рішення yurii 2026-10-06 («матеріал передаємо у воркер»; раніше —
-    // ADR-018 strip): material_code тепер форвардиться у cad-worker — воркеру
+    // Рішення yurii 2026-10-06 («матеріал передаємо у воркер»; раніше воркер
+    // його не отримував), обов'язковість закріплена рішенням Архітектора
+    // 2026-10-13 (ADR-043): material_code форвардиться у cad-worker — воркеру
     // потрібен коефіцієнт матеріалу для parity-перевірки відстані отворів від
     // гиба (hole_to_bend_distance). cad-worker Pydantic ExportRequest приймає
-    // поле `material_code` (optional). Потребує правки ADR-018 — див. PR.
+    // поле `material_code` ОБОВ'ЯЗКОВИМ (ADR-043) — без нього 422.
     // Issue #70: export_id = jobId (== persisted exports.id) — worker вживає
     // його для QR-permalink {BASE_URL}/f/{export_id} у PDF замість fallback
     // непрацюючого flatcraft:// scheme.
