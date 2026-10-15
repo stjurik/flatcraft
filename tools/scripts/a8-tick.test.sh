@@ -871,9 +871,13 @@ EOF
     enqueue 001-a "$(valid a)"
     AGENT_MODE=hang bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1 &
     tp=$!
-    for _ in $(seq 1 300); do [[ -e "$ROOT/agent-started" ]] && break; sleep 0.1; done
+    for _ in $(seq 1 300); do
+      [[ -e "$ROOT/agent-started" ]] && break
+      kill -0 "$tp" 2>/dev/null || break # тік помер до агента — не чекати 30 с
+      sleep 0.1
+    done
     if [[ ! -e "$ROOT/agent-started" ]]; then
-      bad "тік не дійшов до агента за 30 с — сценарій $sig не перевірено"
+      bad "тік не дійшов до агента (помер раніше або 30 с минуло) — сценарій $sig не перевірено"
       kill -9 "$tp" 2>/dev/null
       wait "$tp" 2>/dev/null
       teardown
@@ -990,7 +994,9 @@ EOF
   dt=$(($(date +%s) - t0))
   [[ "$(jl .detail)" == "docker_unavailable:"*"не відповів за 1 с"* && "$(cat "$LOGS/env-broken-streak")" == 1 ]] && ((dt < 10)) &&
     ok "завислий inspect → таймаут за ${dt} с, env_broken, серія 1" || bad "завислий inspect: ${dt} с; $(last)"
-  pkill -f "sleep $HANG_S" 2>/dev/null
+  # -x: точний збіг усього рядка — без нього «sleep 30.1234» збігався б як
+  # підрядок із «sleep 30.12345» паралельного прогону (рецензія Flash #259).
+  pkill -x -f "sleep $HANG_S" 2>/dev/null
   teardown
 
   # 21g. Серію не записати (повний диск) — вести лічбу нічим, тож STOP одразу,
