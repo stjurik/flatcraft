@@ -57,8 +57,10 @@ from flatcraft_cad.unfold import (
 )
 from flatcraft_cad.validate import (
     validate_export,
+    validate_export_holes,
     validate_export_perforation,
     validate_export_profile,
+    validate_export_sheet,
 )
 
 PRESIGN_EXPIRES_SEC = 3600
@@ -85,6 +87,15 @@ class ExportRequest(BaseModel):
     # сюди. Дозволяє QR у PDF вести на {BASE_URL}/f/{export_id} замість
     # непрацюючого fallback-scheme flatcraft://<slug>/<article>.
     export_id: UUID | None = None
+    # Рішення Архітектора 2026-10-13 (заміняє рішення yurii 2026-10-06, яке
+    # зробило поле опційним): material_code ОБОВ'ЯЗКОВИЙ — потрібен для
+    # matrix-валідації матеріалу (validate_bend) і hole-to-bend-distance
+    # parity (coefficient_by_material) — `validate_export`/
+    # `validate_export_holes`/`validate_export_sheet`. НЕ впливає на
+    # DXF/PDF-геометрію — лише на валідацію. Потребує правки ADR-018.
+    # API (apps/api) уже завжди його передає (Zod-схема вимагає). Відсутнє
+    # поле → 422 від Pydantic-схеми цього ExportRequest.
+    material_code: str
 
 
 def _permalink_url(export_id: UUID | None) -> str | None:
@@ -294,8 +305,16 @@ def _build_app() -> FastAPI:
         # S3-запису. Остання лінія оборони — навіть якщо API-gate обійдено.
         errors = [
             *validate_export_profile(req.template_slug, req.parameters, req.thickness_mm),
-            *validate_export(req.template_slug, req.parameters, req.thickness_mm),
+            *validate_export(
+                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+            ),
             *validate_export_perforation(req.template_slug, req.parameters),
+            *validate_export_sheet(
+                req.template_slug, req.parameters, req.thickness_mm, req.k_factor
+            ),
+            *validate_export_holes(
+                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+            ),
         ]
         if errors:
             raise HTTPException(status_code=422, detail=errors)

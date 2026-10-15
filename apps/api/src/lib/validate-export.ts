@@ -18,8 +18,10 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   validateExportBends,
+  validateExportHoles,
   validateExportPerforation,
   validateExportProfile,
+  validateExportSheet,
   type ProblemDetails,
   type ProblemError,
 } from "@flatcraft/cad-engine";

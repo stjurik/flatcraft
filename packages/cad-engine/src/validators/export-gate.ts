@@ -17,10 +17,13 @@
 import type { ExportRequest } from "@flatcraft/types";
 import { z } from "zod";
 
+import { computeBendAllowanceMm } from "../k-factor.js";
 import type { BendMachineSpec } from "../spec.js";
 import { validateBend, type BendInput } from "./bend.js";
+import { validateHoles, type HoleInput } from "./holes.js";
 import { validatePerforation, type PerforationIssue } from "./perforation.js";
 import { validateProfile, type ProfileIssue } from "./profile.js";
+import { validateSheet } from "./sheet.js";
 import type { ValidationError } from "./types.js";
 
 export const ProblemErrorSchema = z.object({
@@ -289,6 +292,278 @@ export function validateExportPerforation(body: ExportRequest): ProblemError[] {
     default:
       return [];
   }
+}
+
+/** Округлює до 3 знаків і прибирає хвостові нулі — для дружніх повідомлень (6.50 → 6.5). */
+function fmtMm(n: number): string {
+  return Number(n.toFixed(3)).toString();
+}
+
+interface SheetDimensionsMm {
+  readonly widthMm: number;
+  readonly heightMm: number;
+}
+
+/**
+ * K-фактор, який воркер (`workers/cad/flatcraft_cad/server.py::ExportRequest.
+ * k_factor`, `Field(default=0.4)`) реально використовує для побудови
+ * розгортки — `apps/api` (`routes/exports.ts`) НЕ передає `k_factor` у тілі
+ * запиту до воркера, тож Pydantic-дефолт застосовується завжди. Раніше гейт
+ * брав K з матричної таблиці матеріалу (`computeKFactor`), а розгортка
+ * будувалася з іншим K — гейт міг пропустити деталь, яка на виробництві не
+ * влізе у верстат (чи навпаки). Якщо колись `apps/api` почне форвардити
+ * `k_factor` з запиту — цю константу треба замінити на реальне значення.
+ */
+export const EXPORT_GATE_K_FACTOR = 0.4;
+
+/**
+ * Bend allowance для (товщина, радіус, кут) з export-gate'у, з тим самим
+ * `EXPORT_GATE_K_FACTOR`, яким воркер реально будує розгортку. На
+ * Zod-валідованих параметрах (реальний шлях) завжди успішний; `null` — лише
+ * захист від throw у `computeBendAllowanceMm` на (теоретично) неможливому
+ * вході.
+ */
+function tryComputeBendAllowanceMm(
+  thicknessMm: number,
+  innerRadiusMm: number,
+  angleDeg: number,
+): number | null {
+  try {
+    return computeBendAllowanceMm(angleDeg, innerRadiusMm, thicknessMm, EXPORT_GATE_K_FACTOR);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Габарит розгортки (ширина × висота) для ExportRequest — та сама формула, що
+ * й `workers/cad/flatcraft_cad/unfold.py` (кожен `unfold_*`), не грубе
+ * «сума полиць без BA». CLAUDE.md §7 п.4: «габарит у площі заготовки ≤ 3050».
+ *
+ * `null` — шаблон геометрично невалідний (полиці закороткі для гибу): інший
+ * валідатор (`validateExportProfile`) уже звітує про реальну причину.
+ */
+export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | null {
+  const t = body.thickness_mm;
+
+  switch (body.template_slug) {
+    case "l_bracket":
+    case "corner_angle": {
+      const p = body.parameters;
+      const r = p.bend_radius_mm;
+      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      if (ba === null) return null;
+      const flatA = p.legA_mm - t - r;
+      const flatB = p.legB_mm - t - r;
+      return { widthMm: p.width_mm, heightMm: flatB + ba + flatA };
+    }
+    case "z_bracket": {
+      const p = body.parameters;
+      const r = p.bend_radius_mm;
+      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      if (ba === null) return null;
+      const flatBottom = p.bottom_flange_mm - t - r;
+      const flatMiddle = p.offset_mm - t - r;
+      const flatTop = p.top_flange_mm - t - r;
+      return { widthMm: p.width_mm, heightMm: flatBottom + ba + flatMiddle + ba + flatTop };
+    }
+    case "wall_shelf": {
+      const p = body.parameters;
+      const r = p.bend_radius_mm;
+      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      if (ba === null) return null;
+      const lipPresent = p.front_lip_mm > 0;
+      const flatBack = p.back_height_mm - t - r;
+      const flatShelf = p.shelf_depth_mm - (t + r) - (lipPresent ? t + r : 0);
+      const heightMm = lipPresent
+        ? flatBack + ba + flatShelf + ba + (p.front_lip_mm - t - r)
+        : flatBack + ba + flatShelf;
+      return { widthMm: p.width_mm, heightMm };
+    }
+    case "perforated_panel": {
+      // Хрест-розгортка (ADR-030/031): 4 ребра однакової висоти → симетричний
+      // відступ (ba+flange) з усіх боків центральної площини.
+      const p = body.parameters;
+      const r = p.bend_radius_mm;
+      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      if (ba === null) return null;
+      const flange = p.rib_height_mm - (t + r);
+      return {
+        widthMm: p.length_mm + 2 * (ba + flange),
+        heightMm: p.width_mm + 2 * (ba + flange),
+      };
+    }
+    case "enclosed_shelf": {
+      // Cross-розгортка (ADR-027 Рішення 5): bottom + back + left + right
+      // [+ опц. rib]. bbox — по unfold_enclosed_shelf (left/right симетричні).
+      //
+      // left/right звисають за межі bottom/back навіть БЕЗ ребра:
+      // `leftYOffset = (flatBottomY - depth_mm) / 2` < 0, тож min/max беремо
+      // по всіх сегментах (bottom, back, left/right, опц. rib), а не лише по
+      // back+bottom (Hotfix — раніше «низ» рахувався від 0, занижуючи
+      // габарит на (t+r)/2).
+      const p = body.parameters;
+      const r = p.bend_radius_mm;
+      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      if (ba === null) return null;
+      const tr = t + r;
+      const flatLeftRight = p.depth_mm - tr;
+      const widthMm = p.width_mm - 2 * tr + 2 * ba + 2 * flatLeftRight;
+      const ribPresent = p.stiffening_rib !== null;
+      const flatBottomY = p.depth_mm - tr - (ribPresent ? tr : 0);
+      const flatBackY = p.depth_mm - tr;
+      const leftYOffset = (flatBottomY - p.depth_mm) / 2;
+      const topCandidates = [flatBottomY, flatBottomY + ba + flatBackY, leftYOffset + p.depth_mm];
+      const bottomCandidates = [0, leftYOffset];
+      if (ribPresent) {
+        bottomCandidates.push(-(ba + (p.stiffening_rib!.height_mm - tr)));
+      }
+      const heightMm = Math.max(...topCandidates) - Math.min(...bottomCandidates);
+      return { widthMm, heightMm };
+    }
+  }
+}
+
+function sheetErrorToProblem(e: ValidationError, dims: SheetDimensionsMm): ProblemError {
+  if (e.code === "sheet.exceeds_max_bend_length") {
+    const maxDim = Math.max(dims.widthMm, dims.heightMm);
+    return {
+      field: "width_mm",
+      code: "SHEET_EXCEEDS_MAX_LENGTH",
+      value: Number(maxDim.toFixed(2)),
+      message: `Зменшіть габарити деталі: розгорнута заготовка (${fmtMm(maxDim)} мм) перевищує максимальну довжину гиба верстата для цієї товщини.`,
+    };
+  }
+  if (e.code === "sheet.thickness_unsupported") {
+    return { field: "thickness_mm", code: "THICKNESS_NOT_SUPPORTED", message: e.message_uk };
+  }
+  if (e.code === "sheet.material_not_in_group") {
+    return { field: "material_code", code: "MATERIAL_NOT_ALLOWED", message: e.message_uk };
+  }
+  return { field: "unknown", code: e.code.toUpperCase().replace(/\./g, "_") };
+}
+
+/**
+ * Габарит розгортки vs можливості верстата для ExportRequest (CLAUDE.md §7
+ * п.4) — обгортка `validateSheet` навколо `sheetDimensionsFor`. Порожній
+ * масив — валідно (разом з усіма 6 шаблонами; `null` від `sheetDimensionsFor`
+ * також дає []).
+ *
+ * Невідома товщина → [] тут: `validateExportBends` (bend-гейт) уже звітує
+ * `THICKNESS_NOT_SUPPORTED` для будь-якого шаблону з bend-полями — без цього
+ * early-return той самий код дублювався б двічі в `errors[]` (паритет з
+ * Python `validate_sheet`, рядок «row is None → []»).
+ */
+export function validateExportSheet(body: ExportRequest, spec: BendMachineSpec): ProblemError[] {
+  const dims = sheetDimensionsFor(body);
+  if (!dims) return [];
+  if (!spec.capability_matrix.some((r) => r.thickness_mm === body.thickness_mm)) return [];
+  const result = validateSheet(
+    {
+      materialCode: body.material_code,
+      thicknessMm: body.thickness_mm,
+      widthMm: dims.widthMm,
+      heightMm: dims.heightMm,
+    },
+    spec,
+  );
+  if (result.valid) return [];
+  return result.errors.map((e) => sheetErrorToProblem(e, dims));
+}
+
+interface HolesContext {
+  readonly materialCode: string;
+  readonly thicknessMm: number;
+  readonly innerRadiusMm: number;
+  readonly rawHoles: ReadonlyArray<{
+    readonly distance_from_bend_mm: number;
+    readonly diameter_mm: number;
+  }>;
+}
+
+/**
+ * Лише l_bracket і z_bracket мають поле `holes[].distance_from_bend_mm`
+ * (corner_angle/wall_shelf — auto-grid без цього поля; perforated_panel/
+ * enclosed_shelf — отвори не прив'язані до конкретного гиба). Інші слаги → null.
+ */
+function holesContextFor(body: ExportRequest): HolesContext | null {
+  switch (body.template_slug) {
+    case "l_bracket":
+    case "z_bracket": {
+      const p = body.parameters;
+      return {
+        materialCode: body.material_code,
+        thicknessMm: body.thickness_mm,
+        innerRadiusMm: p.bend_radius_mm,
+        rawHoles: p.holes,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+function holeErrorToProblem(
+  e: ValidationError,
+  ctx: HolesContext,
+  spec: BendMachineSpec,
+): ProblemError {
+  if (e.code !== "holes.too_close_to_bend") {
+    return {
+      field: "material_code",
+      code: "HOLE_MATERIAL_COEFFICIENT_MISSING",
+      message: e.message_uk,
+    };
+  }
+  const idxMatch = /holes\[(\d+)\]/.exec(e.fields[0] ?? "");
+  const idx = idxMatch?.[1] !== undefined ? Number(idxMatch[1]) : 0;
+  const hole = ctx.rawHoles[idx];
+  const coeff = spec.hole_to_bend_distance.coefficient_by_material[ctx.materialCode] ?? 0;
+  const minEdgeMm = coeff * ctx.thicknessMm + ctx.innerRadiusMm;
+  const diameterMm = hole?.diameter_mm ?? 0;
+  const currentCenterMm = hole?.distance_from_bend_mm ?? 0;
+  const minCenterMm = minEdgeMm + diameterMm / 2;
+  return {
+    field: `holes[${idx}].distance_from_bend_mm`,
+    code: "HOLE_TOO_CLOSE_TO_BEND",
+    value: currentCenterMm,
+    // Рішення yurii 2026-10-11: правило — від краю отвору, але поле у
+    // студії/API — від центру (UX). Повідомлення говорить мовою поля, яке
+    // користувач бачить: перераховуємо мінімум-від-краю у мінімум-від-центру
+    // для цього конкретного діаметра.
+    message:
+      `Відсуньте отвір №${idx + 1} від лінії гиба: від краю отвору до гиба має бути ` +
+      `не менше ${fmtMm(minEdgeMm)} мм, тобто від центру Ø${fmtMm(diameterMm)} — не менше ` +
+      `${fmtMm(minCenterMm)} мм (зараз ${fmtMm(currentCenterMm)} мм).`,
+  };
+}
+
+/**
+ * Відстань отворів від лінії гиба (docs/07 §3, CLAUDE.md §7) — l_bracket і
+ * z_bracket. Поле `distance_from_bend_mm` — від ЦЕНТРУ отвору (Zod-схема, UI),
+ * фізичне правило — від НАЙБЛИЖЧОГО КРАЮ (рішення yurii 2026-10-11, заміняє
+ * рішення 2026-10-06). Перераховуємо центр → край ТУТ, в одному місці, перед
+ * викликом `validateHoles` — сама `validateHoles` лишається «від краю».
+ */
+export function validateExportHoles(body: ExportRequest, spec: BendMachineSpec): ProblemError[] {
+  const ctx = holesContextFor(body);
+  if (!ctx) return [];
+
+  const holes: HoleInput[] = ctx.rawHoles.map((h) => ({
+    distanceFromBendMm: h.distance_from_bend_mm - h.diameter_mm / 2,
+    diameterMm: h.diameter_mm,
+  }));
+  const result = validateHoles(
+    {
+      materialCode: ctx.materialCode,
+      thicknessMm: ctx.thicknessMm,
+      innerRadiusMm: ctx.innerRadiusMm,
+      holes,
+    },
+    spec,
+  );
+  if (result.valid) return [];
+  return result.errors.map((e) => holeErrorToProblem(e, ctx, spec));
 }
 
 export function buildProblem(errors: ProblemError[], instance: string): ProblemDetails {

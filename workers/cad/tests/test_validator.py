@@ -45,6 +45,7 @@ def test_export_z_bracket_t5_r2_5_must_fail(client: TestClient) -> None:
             "template_slug": "z_bracket",
             "parameters": {**Z_VALID_PARAMS, "bend_radius_mm": 2.5},
             "thickness_mm": 5.0,
+            "material_code": "cold_rolled_steel",
         },
     )
     assert resp.status_code == 422, resp.text

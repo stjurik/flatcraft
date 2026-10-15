@@ -238,6 +238,18 @@ describe("POST /exports — async flow", () => {
     expect(rad?.message).toMatch(/радіус/i);
   });
 
+  it("t=7 (не підтримується) → рівно одна помилка THICKNESS_NOT_SUPPORTED, не дублюється гейтом заготовки", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: { ...VALID_REQUEST, thickness_mm: 7 },
+    });
+    expect(res.statusCode).toBe(422);
+    const problem = res.json<{ errors: { code: string }[] }>();
+    expect(problem.errors.filter((e) => e.code === "THICKNESS_NOT_SUPPORTED")).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("perforated_panel (square holes): pitch_y <= сторона → 422 HOLES_OVERLAP, артефакт не створюється", async () => {
     const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
     const res = await app.inject({
@@ -277,6 +289,253 @@ describe("POST /exports — async flow", () => {
     expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
   });
 
+  describe("sheet + holes gate (CLAUDE.md §7 п.4, docs/07 §3, рішення yurii 2026-10-11)", () => {
+    const ENCLOSED_SHELF_BASE = {
+      template_slug: "enclosed_shelf" as const,
+      material_code: "cold_rolled_steel",
+      thickness_mm: 2,
+      parameters: {
+        width_mm: 600,
+        depth_mm: 200,
+        bend_radius_mm: 2.5 as const,
+        bend_angle_deg: 90 as const,
+        bends: [
+          { direction: "up" as const },
+          { direction: "up" as const },
+          { direction: "up" as const },
+          { direction: "up" as const },
+        ],
+        side_perforation: null,
+        stiffening_rib: null,
+      },
+    };
+
+    function lBracketWithHole(distanceFromBendMm: number, diameterMm: number) {
+      return {
+        template_slug: "l_bracket" as const,
+        parameters: {
+          legA_mm: 60,
+          legB_mm: 60,
+          bend_radius_mm: 2.5 as const,
+          bend_angle_deg: 90 as const,
+          width_mm: 100,
+          holes: [
+            {
+              leg: "A" as const,
+              distance_from_edge_mm: 20,
+              distance_from_bend_mm: distanceFromBendMm,
+              diameter_mm: diameterMm,
+            },
+          ],
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+    }
+
+    function zBracketWithHole(distanceFromBendMm: number, diameterMm = 6) {
+      return {
+        template_slug: "z_bracket" as const,
+        parameters: {
+          top_flange_mm: 60,
+          bottom_flange_mm: 60,
+          offset_mm: 40,
+          bend_radius_mm: 2.5 as const,
+          bend_angle_deg: 90 as const,
+          width_mm: 100,
+          holes: [
+            {
+              segment: "T" as const,
+              distance_from_edge_mm: 20,
+              distance_from_bend_mm: distanceFromBendMm,
+              diameter_mm: diameterMm,
+            },
+          ],
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      };
+    }
+
+    it("a) enclosed_shelf t=8 R=5 900×300 (3 гиби) → 422 SHEET_EXCEEDS_MAX_LENGTH, job не створюється", async () => {
+      const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: {
+          ...ENCLOSED_SHELF_BASE,
+          thickness_mm: 8,
+          parameters: {
+            ...ENCLOSED_SHELF_BASE.parameters,
+            width_mm: 900,
+            depth_mm: 300,
+            bend_radius_mm: 5,
+          },
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "SHEET_EXCEEDS_MAX_LENGTH")).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
+    });
+
+    it("b1) l_bracket D=9.4 Ø6 (t=2 R=2.5, край 6.4<6.5) → 422 HOLE_TOO_CLOSE_TO_BEND", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.4, 6),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string; field: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("b2) l_bracket D=6.5 Ø6 (головний регресійний кейс — «від центру» пройшло б) → 422", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(6.5, 6),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+    });
+
+    it("b3) l_bracket D=9.5 Ø8 (діаметр впливає на край: 5.5<6.5) → 422", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.5, 8),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+    });
+
+    it("b4) z_bracket (segment T) D=6.5 Ø6, той самий t/R → 422", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: zBracketWithHole(6.5),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+    });
+
+    it("c1) l_bracket D=9.5 Ø6 — рівно межа (6.5) → 202, job створюється", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.5, 6),
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("c2) l_bracket D=30 Ø6 — далеко від межі → 202", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(30, 6),
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("c3) z_bracket D=12 Ø6 — далеко від межі → 202", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: zBracketWithHole(12),
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("c4) enclosed_shelf t=2 на дефолтах — далеко від межі → 202", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: ENCLOSED_SHELF_BASE,
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("d1) l_bracket D=9.7 Ø6.4 — край 6.499999999999999 (IEEE-754), допуск 1e-9 → 202", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.7, 6.4),
+      });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it("d2) l_bracket D=9.69 Ø6.4 — дійсно ближче за межу, допуск не маскує → 422", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: lBracketWithHole(9.69, 6.4),
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
+    });
+
+    it("e) z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → 422 SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.76мм > 1000, гейт рахує K воркера, не з таблиці матеріалу)", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: {
+          template_slug: "z_bracket",
+          parameters: {
+            top_flange_mm: 400,
+            bottom_flange_mm: 400,
+            offset_mm: 214,
+            bend_radius_mm: 5,
+            bend_angle_deg: 90,
+            width_mm: 100,
+            holes: [],
+          },
+          material_code: "cold_rolled_steel",
+          thickness_mm: 8,
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { code: string }[] }>();
+      expect(problem.errors.some((e) => e.code === "SHEET_EXCEEDS_MAX_LENGTH")).toBe(true);
+    });
+  });
+
   it("GET /exports/:id для неіснуючого → 404", async () => {
     const res = await app.inject({
       method: "GET",
@@ -286,7 +545,7 @@ describe("POST /exports — async flow", () => {
     expect(res.json<{ error: string }>().error).toBe("job_not_found");
   });
 
-  it("ADR-018: material_code приймається на /exports, але обрізається перед cad-worker", async () => {
+  it("рішення yurii 2026-10-06: material_code форвардиться у cad-worker (потрібен для hole-to-bend parity)", async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify(UPSTREAM_OK_BODY), {
         status: 200,
@@ -307,7 +566,7 @@ describe("POST /exports — async flow", () => {
     expect(forwarded.template_slug).toBe("l_bracket");
     expect(forwarded.thickness_mm).toBe(2);
     expect(forwarded.parameters).toBeDefined();
-    expect(forwarded).not.toHaveProperty("material_code");
+    expect(forwarded.material_code).toBe("cold_rolled_steel");
   });
 
   it("issue #70: export_id (== job.id) форвардиться у cad-worker для QR-permalink", async () => {

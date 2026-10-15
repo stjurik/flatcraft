@@ -31,24 +31,15 @@ import {
   getBendSpec,
   ProblemDetailsSchema,
   validateExportBends,
+  validateExportHoles,
   validateExportPerforation,
   validateExportProfile,
+  validateExportSheet,
 } from "../lib/validate-export.js";
 
 const NotFoundSchema = z.object({ error: z.literal("job_not_found") });
 
 const PARAMS = z.object({ id: z.string().uuid() });
-
-/**
- * Видаляє `material_code` з payload перед форвардом у cad-worker.
- * Body уже провалідовано ExportRequestSchema (discriminatedUnion з обов'язковим
- * material_code), тож типобезпека гарантується на rest-стороні.
- */
-function stripMaterialCode(body: unknown): unknown {
-  if (body === null || typeof body !== "object") return body;
-  const { material_code: _unused, ...rest } = body as Record<string, unknown>;
-  return rest;
-}
 
 function toEvent(job: ExportJob) {
   const base = {
@@ -93,14 +84,16 @@ async function runJob(
   });
 
   try {
-    // ADR-018: web→api приймає material_code, але cad-worker Pydantic має
-    // extra="forbid" — strip перед форвардом. material_code знадобиться при
-    // drafts-persistence (Phase 3+); поки лише доходить до API.
+    // Рішення yurii 2026-10-06 («матеріал передаємо у воркер»; раніше —
+    // ADR-018 strip): material_code тепер форвардиться у cad-worker — воркеру
+    // потрібен коефіцієнт матеріалу для parity-перевірки відстані отворів від
+    // гиба (hole_to_bend_distance). cad-worker Pydantic ExportRequest приймає
+    // поле `material_code` (optional). Потребує правки ADR-018 — див. PR.
     // Issue #70: export_id = jobId (== persisted exports.id) — worker вживає
     // його для QR-permalink {BASE_URL}/f/{export_id} у PDF замість fallback
     // непрацюючого flatcraft:// scheme.
     const cadBody = {
-      ...(stripMaterialCode(body) as Record<string, unknown>),
+      ...(body as Record<string, unknown>),
       export_id: jobId,
     };
     const upstream = await fetch(`${env.CAD_WORKER_URL}/export`, {
@@ -201,10 +194,15 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
         // та сама validateProfile, що й render-gate у браузері.
         // validateExportPerforation: grid отворів перфо-панелі (pitch > розмір
         // отвору) — інакше отвори зливаються у проріз.
+        // validateExportSheet: габарит розгортки vs можливості верстата
+        // (CLAUDE.md §7 п.4). validateExportHoles: відстань отворів від лінії
+        // гиба — від краю отвору (докладніше у export-gate.ts).
         const errors = [
           ...validateExportProfile(req.body),
           ...validateExportBends(req.body, spec),
           ...validateExportPerforation(req.body),
+          ...validateExportSheet(req.body, spec),
+          ...validateExportHoles(req.body, spec),
         ];
         // Телеметрія (ADR-032): session_hash з IP+добовий salt — сирий IP не
         // зберігається. params — знімок геометрії (не PII).
