@@ -9,9 +9,12 @@ export {
   ProblemDetailsSchema,
   ProblemErrorSchema,
   profileIssueToProblem,
+  sheetDimensionsFor,
   validateExportBends,
+  validateExportHoles,
   validateExportPerforation,
   validateExportProfile,
+  validateExportSheet,
   type ProblemDetails,
   type ProblemError,
 } from "./export-gate.js";

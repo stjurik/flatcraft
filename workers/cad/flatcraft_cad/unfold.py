@@ -22,6 +22,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Literal
 
+from flatcraft_cad.bend_allowance import compute_bend_allowance as compute_bend_allowance
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters
 from flatcraft_cad.templates.enclosed_shelf import EnclosedShelfBuildParameters
 from flatcraft_cad.templates.l_bracket import LBracketBuildParameters
@@ -224,29 +225,6 @@ class UnfoldedWallShelf:
     bend_allowance_mm: float
     holes: tuple[Hole2D, ...]
     """Mounting holes на back-секції (x ∈ [0, flat_back])."""
-
-
-def compute_bend_allowance(
-    angle_deg: float,
-    inner_radius_mm: float,
-    thickness_mm: float,
-    k_factor: float,
-) -> float:
-    """BA = (π/180) · angle · (R + K·t).
-
-    Невалідні діапазони — ValueError (мають відсіюватись TS-валідатором
-    до виклику воркера).
-    """
-    if not 0.0 < angle_deg <= 180.0:
-        raise ValueError(f"angle_deg must be in (0, 180]; got {angle_deg}")
-    if inner_radius_mm < 0.0:
-        raise ValueError(f"inner_radius_mm must be >= 0; got {inner_radius_mm}")
-    if thickness_mm <= 0.0:
-        raise ValueError(f"thickness_mm must be > 0; got {thickness_mm}")
-    if not 0.0 < k_factor <= 1.0:
-        raise ValueError(f"k_factor must be in (0, 1]; got {k_factor}")
-
-    return math.radians(angle_deg) * (inner_radius_mm + k_factor * thickness_mm)
 
 
 def unfold_l_bracket(params: LBracketBuildParameters, k_factor: float) -> UnfoldedLBracket:

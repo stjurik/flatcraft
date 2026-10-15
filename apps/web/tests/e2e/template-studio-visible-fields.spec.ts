@@ -20,7 +20,7 @@ import { expect, test } from "@playwright/test";
  * задачі.
  */
 test.describe("Template studio — форма читає ui.visibleFields (issue #96)", () => {
-  test("l_bracket: «Напрям згину» приховано, holes — лише summary, решта полів на місці", async ({
+  test("l_bracket: «Напрям згину» приховано, holes приховано без плейсхолдера (issue #247 ч.1), решта полів на місці", async ({
     page,
   }) => {
     await page.goto("/templates/l_bracket");
@@ -28,7 +28,8 @@ test.describe("Template studio — форма читає ui.visibleFields (issue
 
     await expect(page.getByTestId("field-bend_direction")).toHaveCount(0);
     await expect(page.getByTestId("auto-form-unsupported-holes")).toHaveCount(0);
-    await expect(page.getByTestId("auto-form-holes-placeholder")).toBeVisible();
+    await expect(page.getByTestId("auto-form-holes-placeholder")).toHaveCount(0);
+    await expect(page.getByText("Phase 2.7")).toHaveCount(0);
 
     await expect(page.getByTestId("param-legA_mm")).toBeVisible();
     await expect(page.getByTestId("param-legB_mm")).toBeVisible();
@@ -46,7 +47,8 @@ test.describe("Template studio — форма читає ui.visibleFields (issue
     await expect(page.getByTestId("field-bends")).toHaveCount(0);
     await expect(page.getByTestId("auto-form-unsupported-bends")).toHaveCount(0);
     await expect(page.getByTestId("auto-form-unsupported-holes")).toHaveCount(0);
-    await expect(page.getByTestId("auto-form-holes-placeholder")).toBeVisible();
+    await expect(page.getByTestId("auto-form-holes-placeholder")).toHaveCount(0);
+    await expect(page.getByText("Phase 2.7")).toHaveCount(0);
 
     await expect(page.getByTestId("param-top_flange_mm")).toBeVisible();
     await expect(page.getByTestId("param-bottom_flange_mm")).toBeVisible();
