@@ -131,9 +131,11 @@ class TestExportValidation:
                 "template_slug": "non_existent_template",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"][0]["type"] == "literal_error", res.text
 
     def test_leg_a_за_межами_422(self, client: TestClient) -> None:
         res = client.post(
@@ -142,9 +144,12 @@ class TestExportValidation:
                 "template_slug": "l_bracket",
                 "parameters": {**VALID_PARAMS, "legA_mm": 10},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"].startswith("invalid_parameters"), res.text
+        assert "\nlegA_mm\n" in res.json()["detail"], res.text
 
     def test_невідоме_поле_у_request_422(self, client: TestClient) -> None:
         res = client.post(
@@ -153,10 +158,12 @@ class TestExportValidation:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
                 "extra_garbage": "x",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"][0]["type"] == "extra_forbidden", res.text
 
 
 class TestExportHappy:
@@ -266,9 +273,12 @@ class TestZBracketExport:
                 "template_slug": "z_bracket",
                 "parameters": {**Z_VALID_PARAMS, "offset_mm": 10},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"].startswith("invalid_parameters"), res.text
+        assert "\noffset_mm\n" in res.json()["detail"], res.text
 
     def test_l_і_z_bracket_дають_різні_артефакти(
         self, client: TestClient, aws_with_bucket: None
@@ -331,9 +341,12 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": {**CORNER_VALID_PARAMS, "hole_rows": 6},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"].startswith("invalid_parameters"), res.text
+        assert "\nhole_rows\n" in res.json()["detail"], res.text
 
     def test_corner_angle_dxf_має_inner_cuts_layer(
         self, client: TestClient, aws_with_bucket: None
@@ -419,9 +432,12 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": {**WALL_SHELF_VALID_PARAMS, "back_height_mm": 10},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        assert res.json()["detail"].startswith("invalid_parameters"), res.text
+        assert "\nback_height_mm\n" in res.json()["detail"], res.text
 
     def test_wall_shelf_без_lip_має_1_bend(self, client: TestClient, aws_with_bucket: None) -> None:
         """front_lip=0 → DXF має лише 1 лінію гибу (не 2). ADR-024: рахуємо
@@ -522,9 +538,14 @@ class TestPerforatedPanelExport:
                 "template_slug": "perforated_panel",
                 "parameters": {**PERFORATED_PANEL_VALID_PARAMS, "pitch_x_mm": 5},
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        # Відмовляє гейт перфорації (validate_export_perforation), а не схема.
+        assert {(e["code"], e["field"]) for e in res.json()["detail"]} == {
+            ("HOLES_OVERLAP", "pitch_x_mm")
+        }, res.text
 
     def test_perforated_panel_dxf_layers_and_holes(
         self, client: TestClient, aws_with_bucket: None
@@ -614,6 +635,7 @@ class TestEnclosedShelfExport:
                 "template_slug": "enclosed_shelf",
                 "parameters": ENCLOSED_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -638,9 +660,13 @@ class TestEnclosedShelfExport:
                     ],
                 },
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        # Саме через напрям: шлях `bends.1.direction` дає лише Pydantic-валідатор шаблону
+        # (у вхідному JSON, який FastAPI повторює в 422, такого рядка немає).
+        assert "bends.1.direction" in res.json()["detail"], res.text
 
 
 class TestExportIdPermalink:
@@ -705,17 +731,6 @@ class TestExportIdPermalink:
         # BETA-watermark footer (feedback@hart.crimea.ua) теж містить домен —
         # перевіряємо саме відсутність QR-permalink шляху, а не домену взагалі.
         assert "QR: https://hart.crimea.ua/f/" not in text
-
-
-ENCLOSED_SHELF_VALID_PARAMS: dict[str, object] = {
-    "width_mm": 600,
-    "depth_mm": 200,
-    "bend_radius_mm": 2.5,
-    "bend_angle_deg": 90,
-    "bends": [{"direction": "up"}] * 4,
-    "side_perforation": None,
-    "stiffening_rib": None,
-}
 
 
 class TestSheetAndHolesGateParity:
