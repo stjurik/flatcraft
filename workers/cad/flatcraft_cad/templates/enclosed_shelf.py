@@ -19,9 +19,22 @@ from typing import Literal
 import cadquery as cq
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from flatcraft_cad.templates.base import BendSpec, Template
+from flatcraft_cad.templates.base import Template
 
 ALLOWED_INNER_RADIUS_MM: tuple[float, ...] = (1.0, 2.5, 4.0, 5.0)
+
+
+class EnclosedShelfBendSpec(BaseModel):
+    """Напрям гибу enclosed_shelf — лише 'up' (issue #237 п.1, рішення yurii
+    2026-10-14 «3а»). Окремий від `flatcraft_cad.templates.base.BendSpec`
+    (up/down, інші шаблони) — закрита полиця фізично гнеться лише вгору, а
+    PDF (export/pdf.py) усе одно пише «UP (усі)»: 'down' на вході зробив би
+    креслення брехнею.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    direction: Literal["up"] = Field(default="up", description="Напрям згину: лише 'up'.")
 
 
 class EnclosedShelfSidePerforation(BaseModel):
@@ -46,8 +59,9 @@ class EnclosedShelfStiffeningRib(BaseModel):
 class EnclosedShelfBuildParameters(BaseModel):
     """Параметри enclosed_shelf для CadQuery-builder'у (паритет з TS-схемою).
 
-    `bends`: tuple з 3 або 4 BendSpec залежно від наявності stiffening_rib.
-    Дефолт усіх — 'up' (enclosed-форма, на відміну від wall_shelf 'down').
+    `bends`: tuple з 3 або 4 `EnclosedShelfBendSpec` залежно від наявності
+    stiffening_rib. Лише 'up' (issue #237 п.1) — дефолт і єдине дозволене
+    значення.
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -60,9 +74,9 @@ class EnclosedShelfBuildParameters(BaseModel):
     )
     bend_radius_mm: float = Field(description="Внутрішній радіус гиба.")
     bend_angle_deg: Literal[90] = Field(default=90, description="MVP: тільки 90°.")
-    bends: tuple[BendSpec, ...] = Field(
-        default=(BendSpec(direction="up"),) * 4,
-        description="Напрям 3-4 гибів: [back, left, right, rib?].",
+    bends: tuple[EnclosedShelfBendSpec, ...] = Field(
+        default=(EnclosedShelfBendSpec(),) * 4,
+        description="Напрям 3-4 гибів: [back, left, right, rib?]. Лише 'up'.",
     )
     thickness_mm: float = Field(gt=0, le=10, description="Товщина листа.")
     side_perforation: EnclosedShelfSidePerforation | None = Field(
@@ -83,7 +97,9 @@ class EnclosedShelfBuildParameters(BaseModel):
 
     @field_validator("bends")
     @classmethod
-    def _bends_count_3_or_4(cls, value: tuple[BendSpec, ...]) -> tuple[BendSpec, ...]:
+    def _bends_count_3_or_4(
+        cls, value: tuple[EnclosedShelfBendSpec, ...]
+    ) -> tuple[EnclosedShelfBendSpec, ...]:
         if len(value) not in (3, 4):
             raise ValueError(f"bends must contain 3 or 4 items; got {len(value)}")
         return value

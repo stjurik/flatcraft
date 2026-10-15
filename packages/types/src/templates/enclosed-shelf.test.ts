@@ -103,6 +103,19 @@ describe("EnclosedShelfParametersSchema (Phase 3.0 PR 7)", () => {
     });
     expect(parsed.success).toBe(false);
   });
+
+  it("відхиляє bends[i].direction = 'down' (issue #237 п.1 — лише UP)", () => {
+    const parsed = EnclosedShelfParametersSchema.safeParse({
+      ...ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+      bends: [{ direction: "up" }, { direction: "down" }, { direction: "up" }, { direction: "up" }],
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const issue = parsed.error.issues.find((i) => i.path.join(".") === "bends.1.direction");
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain("вгору");
+    }
+  });
 });
 
 describe("EnclosedShelfSidePerforationSchema", () => {

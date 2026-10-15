@@ -36,7 +36,29 @@
  */
 import { z } from "zod";
 
-import { BendSpecSchema } from "./bends.js";
+/**
+ * Напрям гибу enclosed_shelf — лише 'up' (issue #237 п.1, рішення yurii
+ * 2026-10-14 «3а»). На відміну від інших multi-bend шаблонів (`BendSpecSchema`
+ * у `./bends.js`, up/down) закрита полиця фізично гнеться лише вгору — `down`
+ * дав би дзеркальну, нежиттєздатну деталь, а PDF усе одно пише «UP (усі)»
+ * (export/pdf.py), тож `down` на вході — брехня на кресленні. Власна схема,
+ * не розширення `BendSpecSchema`, — щоб інші шаблони (wall_shelf, z_bracket)
+ * лишались у стані up/down без змін.
+ */
+export const EnclosedShelfBendSpecSchema = z.object({
+  direction: z
+    .literal("up", {
+      // zod ігнорує `message` для invalid_literal (лише invalid_type/invalid_enum_value) —
+      // тому дружнє повідомлення йде через errorMap, не через `message`.
+      errorMap: () => ({
+        message:
+          "Закрита полиця (enclosed_shelf) гнеться лише вгору — напрям гибу може бути тільки 'up'.",
+      }),
+    })
+    .default("up")
+    .describe("group:Гиб|label:Напрям згину"),
+});
+export type EnclosedShelfBendSpec = z.infer<typeof EnclosedShelfBendSpecSchema>;
 
 /**
  * Опційна декоративна перфорація бокових стінок. Якщо `null` — без отворів.
@@ -81,10 +103,10 @@ export const EnclosedShelfParametersSchema = z.object({
   bend_angle_deg: z.literal(90).describe("group:Гиб|label:Кут гиба (°)"),
   /**
    * Напрям згину на кожен з 3-4 гибів: [back, left, right, rib?].
-   * Дефолт — всі 'up' (UP-bend для enclosed-форми, на відміну від wall_shelf).
+   * Лише 'up' (issue #237 п.1) — дефолт і єдине дозволене значення.
    */
   bends: z
-    .array(BendSpecSchema)
+    .array(EnclosedShelfBendSpecSchema)
     .min(3)
     .max(4)
     .default([{ direction: "up" }, { direction: "up" }, { direction: "up" }, { direction: "up" }])
