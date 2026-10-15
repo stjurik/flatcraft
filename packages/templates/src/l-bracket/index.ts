@@ -16,10 +16,10 @@
  * ADR-033 §1 Рішення 1).
  *
  * `holes` (масив, ручне розміщення) — AutoForm не має редактора для
- * array-полів (Phase 2.7 placeholder, паритет з наявним
- * `l-bracket-editor.tsx`): приховано з `visibleFields`, показано через
- * `extraControls` summary з тим самим testId, що й раніше
- * (`auto-form-holes-placeholder`).
+ * array-полів, приховано з `visibleFields` (`HIDDEN_FIELDS`). Issue #247
+ * ч.1: summary-плейсхолдер, що обіцяв майбутній редактор отворів, видалено —
+ * редактора отворів немає, а DXF/PDF (#247 ч.2) отвори ще не рендерять,
+ * напис обіцяв неіснуючу функціональність. Схема й API не змінені.
  */
 import { buildLBracketShapeCommands, type ShapeCommand } from "@flatcraft/cad-engine/geometry";
 import { profileIssueToProblem, validateProfile } from "@flatcraft/cad-engine";
@@ -41,18 +41,13 @@ const profileValidator: ProfileValidator<LBracketParameters> = (params, thicknes
     thicknessMm,
   }).map(profileIssueToProblem);
 
-/** Placeholder-сумарі для `holes[]` — паритет з `l-bracket-editor.tsx` (Phase 2.7). */
-function holesPlaceholderSummary(p: LBracketParameters): string {
-  return `Отвори (${p.holes.length}) — редактор у Phase 2.7.`;
-}
-
 function buildShapeCommands(params: LBracketParameters, thicknessMm: number): ShapeCommand[] {
   return buildLBracketShapeCommands({ parameters: params, thicknessMm });
 }
 
 // Hotfix 2.10.e: bend_direction — частина моделі (дефолт 'down'), генерик-
 // редактор його не показує — паритет з наявним `LBracketParametersSchema.omit`.
-// `holes` — окремий summary-плейсхолдер замість AutoForm-поля (див. докстрінг).
+// `holes` — прихований, редактора немає (issue #247 ч.1, див. докстрінг).
 const HIDDEN_FIELDS = new Set(["bend_direction", "holes"]);
 const VISIBLE_FIELDS = Object.keys(LBracketParametersSchema.shape).filter(
   (field) => !HIDDEN_FIELDS.has(field),
@@ -71,9 +66,6 @@ export const lBracketDefinition: TemplateDefinition<LBracketParameters> = {
   defaults: L_BRACKET_DEFAULT_PARAMETERS,
   ui: {
     scene: { kind: "extrude", build: buildShapeCommands },
-    extraControls: [
-      { kind: "summary", render: holesPlaceholderSummary, testId: "auto-form-holes-placeholder" },
-    ],
     visibleFields: VISIBLE_FIELDS,
     thumbSlug: "l_bracket",
   },
