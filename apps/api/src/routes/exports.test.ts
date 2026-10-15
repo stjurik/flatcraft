@@ -173,6 +173,70 @@ describe("POST /exports — async flow", () => {
     expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
   });
 
+  it("202: enclosed_shelf з дефолтними (усі 'up') bends приймається", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "enclosed_shelf",
+        parameters: {
+          width_mm: 600,
+          depth_mm: 200,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
+          bends: [
+            { direction: "up" },
+            { direction: "up" },
+            { direction: "up" },
+            { direction: "up" },
+          ],
+          side_perforation: null,
+          stiffening_rib: null,
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      },
+    });
+    expect(res.statusCode).toBe(202);
+  });
+
+  it("issue #237 п.1: enclosed_shelf з bends[1].direction='down' → 4xx, job не створюється", async () => {
+    const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
+    const res = await app.inject({
+      method: "POST",
+      url: "/exports",
+      payload: {
+        template_slug: "enclosed_shelf",
+        parameters: {
+          width_mm: 600,
+          depth_mm: 200,
+          bend_radius_mm: 2.5,
+          bend_angle_deg: 90,
+          bends: [
+            { direction: "up" },
+            { direction: "down" },
+            { direction: "up" },
+            { direction: "up" },
+          ],
+          side_perforation: null,
+          stiffening_rib: null,
+        },
+        material_code: "cold_rolled_steel",
+        thickness_mm: 2,
+      },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((store as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
+  });
+
   it("Hotfix 2.10.e: z_bracket t=5/R=2.5 → 422 RADIUS_NOT_ALLOWED, артефакт не створюється", async () => {
     const before = (store as unknown as { jobs: Map<string, unknown> }).jobs.size;
     const res = await app.inject({

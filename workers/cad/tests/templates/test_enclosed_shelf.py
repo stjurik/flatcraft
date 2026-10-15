@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from flatcraft_cad.templates.base import BendSpec
 from flatcraft_cad.templates.enclosed_shelf import (
+    EnclosedShelfBendSpec,
     EnclosedShelfBuildParameters,
     EnclosedShelfSidePerforation,
     EnclosedShelfStiffeningRib,
@@ -62,7 +62,7 @@ def test_rejects_disallowed_bend_radius() -> None:
 
 def test_accepts_3_bends_no_rib() -> None:
     p = EnclosedShelfBuildParameters.model_validate(
-        _valid_params(bends=(BendSpec(direction="up"),) * 3)
+        _valid_params(bends=(EnclosedShelfBendSpec(),) * 3)
     )
     assert len(p.bends) == 3
 
@@ -70,14 +70,14 @@ def test_accepts_3_bends_no_rib() -> None:
 def test_rejects_2_bends() -> None:
     with pytest.raises(ValidationError):
         EnclosedShelfBuildParameters.model_validate(
-            _valid_params(bends=(BendSpec(direction="up"),) * 2)
+            _valid_params(bends=(EnclosedShelfBendSpec(),) * 2)
         )
 
 
 def test_rejects_5_bends() -> None:
     with pytest.raises(ValidationError):
         EnclosedShelfBuildParameters.model_validate(
-            _valid_params(bends=(BendSpec(direction="up"),) * 5)
+            _valid_params(bends=(EnclosedShelfBendSpec(),) * 5)
         )
 
 
@@ -116,3 +116,24 @@ def test_frozen_model_disallows_mutation() -> None:
     with pytest.raises(ValidationError):
         # Pydantic frozen=True raises ValidationError on field assignment.
         p.width_mm = 700
+
+
+def test_rejects_down_direction() -> None:
+    """Issue #237 п.1 (рішення yurii 2026-10-14 «3а»): enclosed_shelf гнеться
+    лише вгору — 'down' має бути ValidationError, а не прийнятим значенням."""
+    with pytest.raises(ValidationError):
+        EnclosedShelfBuildParameters.model_validate(
+            _valid_params(
+                bends=[
+                    {"direction": "up"},
+                    {"direction": "down"},
+                    {"direction": "up"},
+                    {"direction": "up"},
+                ]
+            )
+        )
+
+
+def test_bend_spec_direction_is_literal_up_only() -> None:
+    with pytest.raises(ValidationError):
+        EnclosedShelfBendSpec.model_validate({"direction": "down"})

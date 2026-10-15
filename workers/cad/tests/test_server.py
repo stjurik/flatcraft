@@ -107,6 +107,21 @@ PERFORATED_PANEL_VALID_PARAMS: dict[str, object] = {
     "bend_angle_deg": 90,
 }
 
+ENCLOSED_SHELF_VALID_PARAMS: dict[str, object] = {
+    "width_mm": 600,
+    "depth_mm": 200,
+    "bend_radius_mm": 2.5,
+    "bend_angle_deg": 90,
+    "bends": [
+        {"direction": "up"},
+        {"direction": "up"},
+        {"direction": "up"},
+        {"direction": "up"},
+    ],
+    "side_perforation": None,
+    "stiffening_rib": None,
+}
+
 
 class TestExportValidation:
     def test_невалідний_template_slug_422(self, client: TestClient) -> None:
@@ -567,6 +582,47 @@ class TestPerforatedPanelExport:
             .decode("utf-8")
         )
         assert small.count("\nLWPOLYLINE\n") > big.count("\nLWPOLYLINE\n")
+
+
+class TestEnclosedShelfExport:
+    """Issue #237 п.1 (рішення yurii 2026-10-14 «3а»): лише 'up'."""
+
+    def test_enclosed_shelf_успішний_експорт_dxf_і_pdf(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": ENCLOSED_SHELF_VALID_PARAMS,
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        for kind in ("dxf", "pdf"):
+            art = body["artifacts"][kind]
+            assert art["bytes"] > 0
+            assert art["s3_key"].endswith(f"_enclosed_shelf.{kind}")
+
+    def test_enclosed_shelf_down_422(self, client: TestClient, aws_with_bucket: None) -> None:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": {
+                    **ENCLOSED_SHELF_VALID_PARAMS,
+                    "bends": [
+                        {"direction": "up"},
+                        {"direction": "down"},
+                        {"direction": "up"},
+                        {"direction": "up"},
+                    ],
+                },
+                "thickness_mm": 2,
+            },
+        )
+        assert res.status_code == 422
 
 
 class TestExportIdPermalink:

@@ -1425,6 +1425,10 @@ def export_enclosed_shelf_pdf(
             ("Кут гибу, °", "90"),
             ("BA, мм", f"{unfolded.bend_allowance_mm:.2f}"),
             ("k-фактор (derived)", f"{k_derived:.2g}"),
+            # Хардкод, не bug: EnclosedShelfBendSpec (templates/enclosed_shelf.py)
+            # дозволяє лише direction='up' (issue #237 п.1, рішення yurii
+            # 2026-10-14 «3а») — "UP (усі)" тут правда за побудовою, а не
+            # ігнорування реального напряму кожного гибу.
             ("Напрям", "UP (усі)"),
             ("Гибів", f"{n_bends} ({', '.join(bend_descriptors)})"),
         ],
