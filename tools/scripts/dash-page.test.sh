@@ -100,6 +100,15 @@ if [[ $fail -eq 0 ]]; then
     'if (w.week != null) return String(w.week);' \
     'return String(w.week);'
 
+  # wk-minor (#249): позначка через один від ОСТАННЬОГО тижня — не від початку
+  # і не на всіх підряд.
+  mutate "trend: wk-minor рахується від початку, не від кінця" \
+    "var distFromEnd = weeks.length - 1 - i;" \
+    "var distFromEnd = i;"
+  mutate "trend: wk-minor на всіх підписах" \
+    'var wkCls = distFromEnd % 2 === 1 ? "wk wk-minor" : "wk";' \
+    'var wkCls = "wk wk-minor";'
+
   # index.html бере «зараз» саме з pageNow (інакше функція тестована, але не викликана).
   grep -q 'DashRender.pageNow(snap.collected_at, example, Date.now())' "$DASH_DIR/index.html" &&
     ok "index.html: «зараз» — через DashRender.pageNow" ||

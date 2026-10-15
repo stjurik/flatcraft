@@ -200,12 +200,16 @@
       max = Math.max(max, Number(w.product) || 0, Number(w.process) || 0);
     });
     var cols = weeks
-      .map(function (w) {
+      .map(function (w, i) {
         var prod = Number(w.product) || 0;
         var proc = Number(w.process) || 0;
         var prodH = Math.round((prod / max) * 100);
         var procH = Math.round((proc / max) * 100);
         var label = esc(weekLabel(w)) + ": продукт " + prod + ", процес " + proc;
+        // Підписи через один — від ОСТАННЬОГО тижня (вузькі екрани, #249): останній
+        // завжди підписаний, далі назад через один. title лишається на всіх колонках.
+        var distFromEnd = weeks.length - 1 - i;
+        var wkCls = distFromEnd % 2 === 1 ? "wk wk-minor" : "wk";
         return (
           '<div class="col" title="' +
           label +
@@ -213,7 +217,9 @@
           prodH +
           '%"></span><span class="b-proc" style="height:' +
           procH +
-          '%"></span></div><div class="wk">' +
+          '%"></span></div><div class="' +
+          wkCls +
+          '">' +
           esc(weekLabel(w)) +
           "</div></div>"
         );
