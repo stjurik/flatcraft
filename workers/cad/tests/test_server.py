@@ -614,6 +614,7 @@ class TestEnclosedShelfExport:
                 "template_slug": "enclosed_shelf",
                 "parameters": ENCLOSED_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 200, res.text
@@ -638,9 +639,12 @@ class TestEnclosedShelfExport:
                     ],
                 },
                 "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
             },
         )
         assert res.status_code == 422
+        # Саме через напрям, а не через іншу відмову (без material_code тест проходив би й так).
+        assert "direction" in res.text, res.text
 
 
 class TestExportIdPermalink:
@@ -705,17 +709,6 @@ class TestExportIdPermalink:
         # BETA-watermark footer (feedback@hart.crimea.ua) теж містить домен —
         # перевіряємо саме відсутність QR-permalink шляху, а не домену взагалі.
         assert "QR: https://hart.crimea.ua/f/" not in text
-
-
-ENCLOSED_SHELF_VALID_PARAMS: dict[str, object] = {
-    "width_mm": 600,
-    "depth_mm": 200,
-    "bend_radius_mm": 2.5,
-    "bend_angle_deg": 90,
-    "bends": [{"direction": "up"}] * 4,
-    "side_perforation": None,
-    "stiffening_rib": None,
-}
 
 
 class TestSheetAndHolesGateParity:
