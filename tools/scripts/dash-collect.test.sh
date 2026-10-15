@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+# dash-collect.test.sh — збір знімка пульту (ADR-042 §10, задача 7): обидва збирачі
+# ok; один падає/висне/друкує секрет — лише його розділ error, другий лишається ok;
+# час/дата/хеш — не хибні спрацювання; невалідна обгортка — error; відмова писати в
+# ~/.flatcraft/ чи в репо; атомарний запис (mv, не пряме перезаписування); реальні
+# збирачі хвилі 1 без DASH_COLLECTORS_DIR проходять dash-schema.sh validate; git
+# status репо не змінюється; той самий сценарій реальних збирачів — зелений і в
+# клоні --depth 1 без origin/main (умова CI, job «Guard-скрипти»; dash-trend.sh за
+# замовчуванням читає REF=origin/main — без клону-з-ref сценарій був би зелений
+# лише там, де origin/main уже є локально); немає збирача в COLLECTORS_DIR —
+# повідомлення без абсолютного шляху (ADR-042 §5); DASH_LEAK_FILE з порожнім чи
+# пробільним рядком не перетворює кожен розділ на «витік»; голий «::» без
+# жодної hex-групи поруч — не IPv6 (рецензія Gemini 3.8 Flash, #240). Форсовані
+# сценарії 17–18 (DASH_COLLECT_TEST_FORCE_CLONE_FAIL / _FORCE_DEPTH_CLONE_FAIL)
+# доводять, що збій підготовки клону в сценаріях 13–14 і 16 — провал тесту
+# (bad), а не тихий пропуск; пропуск лишається лише для «не git-репозиторій».
+# Сценарій 19 доводить, що сценарії 16–17 не плутають origin/main джерела (коли
+# воно саме стоїть на гілці main) з умовою CI «немає origin/main».
+#
+# Мутації в кінці ламають dash-collect.sh по одному правилу — набір мусить
+# почервоніти; мутант, що вижив, — привід дописати сценарій, а не довіряти
+# зеленому прогону без мутацій.
+#
+# Запуск: tools/scripts/dash-collect.test.sh
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="${DASH_COLLECT_UNDER_TEST:-$HERE/dash-collect.sh}"
+DASHBOARD_DIR="$HERE/../dashboard"
+fail=0
+ok() { echo "✓ $1"; }
+bad() {
+  echo "✗ $1"
+  fail=1
+  [[ -z "${DASH_COLLECT_UNDER_TEST:-}" ]] || exit 1
+}
+
+NOW=2026-10-08T12:00:00Z
+
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+
+# Ізоляція від реальної машини: дефолтний OUT і ~/.flatcraft/ — лише тут, у T.
+HOME_T="$T/home"
+mkdir -p "$HOME_T"
+
+# mk <dir> <t5-тіло> <trend-тіло> — кладе два заглушкові збирачі в <dir>.
+mk() {
+  local dir="$1" t5_body="$2" trend_body="$3"
+  mkdir -p "$dir"
+  { echo '#!/usr/bin/env bash'; printf '%s\n' "$t5_body"; } >"$dir/dash-t5.sh"
+  { echo '#!/usr/bin/env bash'; printf '%s\n' "$trend_body"; } >"$dir/dash-trend.sh"
+  chmod +x "$dir/dash-t5.sh" "$dir/dash-trend.sh"
+}
+
+ENV_T5_OK='echo "{\"schema_version\":1,\"section\":\"t5\",\"title\":\"Трек T5\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"origin\":\"measured\",\"data\":{\"n\":1}}"'
+ENV_TREND_OK='echo "{\"schema_version\":1,\"section\":\"trend\",\"title\":\"Продукт і процес\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"origin\":\"measured\",\"data\":{\"n\":2}}"'
+
+# run <збирачі-dir> <out-dir> [ДОДАТКОВІ_ENV=...] -- друкує stdout+stderr скрипта,
+# встановлює $rc. Зовнішній timeout 20 — запобіжник: мутант без внутрішнього
+# тайм-ауту (М9 нижче) не має права повісити весь тестовий прогін.
+run() {
+  local coll="$1" out="$2"
+  shift 2
+  out_combined="$(env HOME="$HOME_T" DASH_COLLECTORS_DIR="$coll" "$@" timeout 20 bash "$SCRIPT" --out "$out" --now "$NOW" 2>&1)"
+  rc=$?
+}
+
+sec() { jq -c --arg s "$2" '.sections[] | select(.section == $s)' "$1/snapshot.json" 2>/dev/null; }
+
+# ─── 1. обидва збирачі ok ───────────────────────────────────────────────────
+C="$T/c1"; O="$T/o1"
+mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
+run "$C" "$O"
+if [[ $rc -eq 0 ]] && jq -e '.sections | length == 2 and all(.status == "ok")' "$O/snapshot.json" >/dev/null 2>&1 &&
+  [[ -f "$O/snapshot.js" && -f "$O/index.html" && -f "$O/render.js" ]]; then
+  ok "обидва збирачі ok — 2 розділи status ok, усі 4 файли записано"
+else
+  bad "обидва ok — неочікуваний результат (rc=$rc): $out_combined"
+fi
+
+# ─── 2. один падає (exit 1, без секретів) — лише його розділ error ─────────
+C="$T/c2"; O="$T/o2"
+mk "$C" "$ENV_T5_OK" 'echo звичайна помилка >&2; exit 1'
+run "$C" "$O"
+if [[ $rc -eq 0 ]] && [[ "$(sec "$O" t5 | jq -r .status)" == ok ]] &&
+  [[ "$(sec "$O" trend | jq -r .status)" == error ]] &&
+  [[ "$(sec "$O" trend | jq -r '.data.error // ""')" == *"код"* ]]; then
+  ok "один падає — його розділ error з кодом, інший лишається ok"
+else
+  bad "один падає — неочікуваний результат (rc=$rc): $out_combined; $(cat "$O/snapshot.json" 2>/dev/null)"
+fi
+
+# ─── 3. один висне довше timeout — лише його розділ error ──────────────────
+C="$T/c3"; O="$T/o3"
+mk "$C" "$ENV_T5_OK" 'sleep 30'
+run "$C" "$O" DASH_COLLECT_TIMEOUT_S=0.3
+if [[ $rc -eq 0 ]] && [[ "$(sec "$O" t5 | jq -r .status)" == ok ]] &&
+  [[ "$(sec "$O" trend | jq -r .status)" == error ]] &&
+  [[ "$(sec "$O" trend | jq -r '.data.error // ""')" == *"тайм-аут"* ]]; then
+  ok "один висне — його розділ error з «тайм-аут», інший ok"
+else
+  bad "один висне — неочікуваний результат (rc=$rc): $out_combined"
+fi
+
+# ─── 3b. немає збирача в DASH_COLLECTORS_DIR — повідомлення без шляху (ADR-042 §5)
+# COLLECTORS_DIR абсолютний і часто домашній шлях — у повідомленні має лишитись
+# лише ім'я скрипта, інакше шлях потрапляє у snapshot.json.
+C="$T/c3b-empty"; O="$T/o3b"
+mkdir -p "$C"
+run "$C" "$O"
+reason_t5="$(sec "$O" t5 | jq -r '.data.error // ""')"
+if [[ $rc -eq 0 ]] && [[ "$reason_t5" == *"dash-t5.sh"* ]] && [[ "$reason_t5" != *"$C"* ]] && [[ "$reason_t5" != *"$HOME_T"* ]]; then
+  ok "немає збирача — повідомлення містить лише ім'я скрипта, без шляху COLLECTORS_DIR"
+else
+  bad "немає збирача — повідомлення мало містити лише ім'я, отримав «$reason_t5»"
+fi
+
+# ─── 4–7. секрети: IPv4, IPv6 (документаційні RFC 5737 / RFC 3849), токени,
+#          рядок з DASH_LEAK_FILE — розділ error, значення ніде не друкується ──
+assert_redacted() { # assert_redacted <назва> <out-dir> <очікуваний-тип-підрядок> <секрет>
+  local name="$1" out="$2" type_needle="$3" secret="$4" st reason
+  st="$(sec "$out" trend | jq -r .status)"
+  reason="$(sec "$out" trend | jq -r '.data.error // ""')"
+  if [[ "$st" != error || "$reason" != *"$type_needle"* ]]; then
+    bad "$name — очікував error з «$type_needle», отримав status=$st reason=«$reason»"
+    return
+  fi
+  if grep -rqF -- "$secret" "$out" 2>/dev/null; then
+    bad "$name — секрет знайдено у $out"
+    return
+  fi
+  if grep -qF -- "$secret" <<<"$out_combined"; then
+    bad "$name — секрет знайдено у виводі скрипта"
+    return
+  fi
+  ok "$name — error «$type_needle», секрет ніде не з'явився"
+}
+
+C="$T/c4"; O="$T/o4"
+mk "$C" "$ENV_T5_OK" 'echo "витік 192.0.2.77 у логах"'
+run "$C" "$O"
+assert_redacted "IPv4 (документаційний 192.0.2.0/24)" "$O" IPv4 192.0.2.77
+
+C="$T/c5"; O="$T/o5"
+mk "$C" "$ENV_T5_OK" 'echo "витік 2001:db8::1 у логах"'
+run "$C" "$O"
+assert_redacted "IPv6 (документаційний 2001:db8::/32)" "$O" IPv6 2001:db8::1
+
+# ─── 5b. голий «::» без hex-групи — не IPv6; стиснута адреса без ведучої групи
+#         («::abcd:1234») — і далі витік (рецензія Gemini 3.8 Flash, #240) ─────
+C="$T/c5b-bare"; O="$T/o5b-bare"
+mk "$C" "$ENV_T5_OK" 'echo "{\"schema_version\":1,\"section\":\"trend\",\"title\":\"T\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"origin\":\"measured\",\"data\":{\"note\":\"немає тут адрес, лише код з параметром a :: b у тексті\"}}"'
+run "$C" "$O"
+if [[ "$(sec "$O" trend | jq -r .status)" == ok ]]; then
+  ok "голий «::» без жодної hex-групи поруч — не витік, status ok"
+else
+  bad "голий «::» без hex-групи хибно позначено витоком: $(sec "$O" trend)"
+fi
+
+C="$T/c5c-compressed"; O="$T/o5c-compressed"
+mk "$C" "$ENV_T5_OK" 'echo "витік ::abcd:1234 у логах"'
+run "$C" "$O"
+assert_redacted "IPv6 стиснутий без ведучої групи (::abcd:1234)" "$O" IPv6 "::abcd:1234"
+
+while IFS='|' read -r label secret; do
+  C="$T/c-tok-$label"; O="$T/o-tok-$label"
+  mk "$C" "$ENV_T5_OK" "echo 'витік $secret у логах'"
+  run "$C" "$O"
+  assert_redacted "шаблон токена: $label" "$O" "вирізано" "$secret"
+done <<'EOF'
+ghp|ghp_FAKEFAKEFAKEFAKEFAKE1234567890
+github_pat|github_pat_FAKEFAKEFAKEFAKEFAKE
+sk-ant|sk-ant-FAKE1234567890abcdef
+age|AGE-SECRET-KEY-1QYQSZQGPQYQSZQ
+privkey|-----BEGIN RSA PRIVATE KEY-----
+EOF
+
+LEAK_FILE="$T/leak-origin-host"
+printf '%s\n' "server.privatecorp.internal-fake" >"$LEAK_FILE"
+C="$T/c7"; O="$T/o7"
+mk "$C" "$ENV_T5_OK" 'echo "хост: server.privatecorp.internal-fake у журналі"'
+run "$C" "$O" DASH_LEAK_FILE="$LEAK_FILE"
+assert_redacted "рядок з DASH_LEAK_FILE" "$O" "вирізано" "server.privatecorp.internal-fake"
+if grep -rqF -- "server.privatecorp.internal-fake" "$O" 2>/dev/null; then
+  bad "DASH_LEAK_FILE — вміст файла все одно потрапив у $O"
+else
+  ok "DASH_LEAK_FILE — вміст файла ніде не потрапив у знімок"
+fi
+
+# ─── 7b. DASH_LEAK_FILE з порожнім і пробільним рядками — вони не збігаються з усім
+# Порожній чи пробільний (лише пробіл/табуляція) шаблон у grep -Ff збігається з
+# будь-яким рядком, що містить пробіл (тут — заголовок «Продукт і процес» у
+# ENV_TREND_OK): без фільтра кожен розділ, навіть без жодної адреси, став би
+# «витоком».
+LEAK_FILE_BLANK="$T/leak-with-blank-line"
+printf '%s\n' "another.fake.leak.address.example" "" " " "$(printf '\t')" >"$LEAK_FILE_BLANK"
+
+C="$T/c7b-ok"; O="$T/o7b-ok"
+mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
+run "$C" "$O" DASH_LEAK_FILE="$LEAK_FILE_BLANK"
+if [[ "$(sec "$O" trend | jq -r .status)" == ok ]]; then
+  ok "DASH_LEAK_FILE з порожнім рядком — розділ без адреси лишається ok"
+else
+  bad "DASH_LEAK_FILE з порожнім рядком хибно позначив ok-розділ як error: $(sec "$O" trend)"
+fi
+
+C="$T/c7b-leak"; O="$T/o7b-leak"
+mk "$C" "$ENV_T5_OK" 'echo "хост another.fake.leak.address.example у логах"'
+run "$C" "$O" DASH_LEAK_FILE="$LEAK_FILE_BLANK"
+if [[ "$(sec "$O" trend | jq -r .status)" == error ]]; then
+  ok "DASH_LEAK_FILE з порожнім рядком — розділ зі справжньою адресою лишається error"
+else
+  bad "DASH_LEAK_FILE з порожнім рядком мав позначити error для розділу з адресою: $(sec "$O" trend)"
+fi
+
+# ─── 8. час, ISO-дата й хеш коміту — НЕ хибні спрацювання ──────────────────
+C="$T/c8"; O="$T/o8"
+mk "$C" "$ENV_T5_OK" 'echo "{\"schema_version\":1,\"section\":\"trend\",\"title\":\"T\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"origin\":\"measured\",\"data\":{\"time\":\"14:05:12\",\"date\":\"2026-10-08T12:00:00Z\",\"sha\":\"e1fd6d5abc1234\"}}"'
+run "$C" "$O"
+if [[ "$(sec "$O" trend | jq -r .status)" == ok ]] &&
+  [[ "$(sec "$O" trend | jq -r .data.time)" == "14:05:12" ]]; then
+  ok "час 14:05:12, ISO-дата і хеш коміту — не вирізано, status ok"
+else
+  bad "час/дата/хеш хибно вирізано: $(sec "$O" trend)"
+fi
+
+# ─── 9. невалідна обгортка (бракує поля) — error, а не пропуск як є ────────
+C="$T/c9"; O="$T/o9"
+mk "$C" "$ENV_T5_OK" 'echo "{\"schema_version\":1,\"section\":\"trend\",\"title\":\"T\",\"source\":\"s\",\"collected_at\":\"2026-10-08T12:00:00Z\",\"interval_s\":3600,\"status\":\"ok\",\"data\":{}}"'
+run "$C" "$O"
+if [[ "$(sec "$O" trend | jq -r .status)" == error ]] &&
+  [[ "$(sec "$O" trend | jq -r .data.error)" == *"невалідна обгортка"* ]]; then
+  ok "невалідна обгортка (бракує origin) — status error з поясненням"
+else
+  bad "невалідна обгортка — очікував error: $(sec "$O" trend)"
+fi
+
+# ─── 10. --out усередині тимчасової «~/.flatcraft» — відмова ───────────────
+C="$T/c10"
+mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
+mkdir -p "$HOME_T/.flatcraft/secrets"
+run "$C" "$HOME_T/.flatcraft/secrets/out"
+if [[ $rc -eq 2 ]] && [[ "$out_combined" == *"flatcraft"* ]]; then
+  ok "--out усередині ~/.flatcraft/ — відмова, exit 2"
+else
+  bad "--out усередині ~/.flatcraft/ — очікував exit 2, отримав $rc: $out_combined"
+fi
+run "$C" "$HOME_T/.flatcraft"
+[[ $rc -eq 2 ]] && ok "--out рівно ~/.flatcraft/ (без підтеки) — теж відмова" ||
+  bad "--out рівно ~/.flatcraft/ — очікував exit 2, отримав $rc: $out_combined"
+
+# ─── 11. --out усередині репозиторію — відмова ─────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+REPO_LIKE_TARGET="$SCRIPT_DIR/.."
+run "$C" "$REPO_LIKE_TARGET/tmp-dash-collect-test-$$"
+if [[ $rc -eq 2 ]] && [[ "$out_combined" == *"репозитор"* ]]; then
+  ok "--out усередині репозиторію — відмова, exit 2"
+else
+  bad "--out усередині репозиторію — очікував exit 2, отримав $rc: $out_combined"
+fi
+
+# ─── 12. атомарний запис: temp-файл поруч, потім mv — не пряме записування ─
+BIN="$T/bin"
+mkdir -p "$BIN"
+MVLOG="$T/mvlog"
+: >"$MVLOG"
+cat >"$BIN/mv" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$MVLOG"
+exec /bin/mv "\$@"
+EOF
+chmod +x "$BIN/mv"
+C="$T/c12"; O="$T/o12"
+mk "$C" "$ENV_T5_OK" "$ENV_TREND_OK"
+out_combined="$(env HOME="$HOME_T" DASH_COLLECTORS_DIR="$C" PATH="$BIN:$PATH" timeout 20 bash "$SCRIPT" --out "$O" --now "$NOW" 2>&1)"
+rc=$?
+mvlog_content="$(<"$MVLOG")"
+if [[ $rc -eq 0 ]] &&
+  grep -q "snapshot.json$" <<<"$mvlog_content" && grep -q "snapshot.js$" <<<"$mvlog_content" &&
+  grep -q "index.html$" <<<"$mvlog_content" && grep -q "render.js$" <<<"$mvlog_content" &&
+  ! grep -qE 'snapshot\.json .*snapshot\.json$' <<<"$mvlog_content"; then
+  ok "запис атомарний — кожен файл через mv з окремого тимчасового джерела"
+else
+  bad "атомарний запис — mv не викликано як очікувалось: $mvlog_content"
+fi
+
+# ─── 13–14. лише top-level (не для мутантів): реальні збирачі й git status ──
+#
+# ЧОМУ КЛОН. dash-trend.sh за замовчуванням читає REF="origin/main" (сам рахує
+# REPO як $HERE/../.. — теку, де лежить виконуваний файл скрипта) і відмовляється
+# (exit 2 → розділ error), якщо цього ref немає в REPO. actions/checkout у CI
+# (fetch-depth: 1 за дефолтом) кладе робоче дерево з одним комітом без
+# refs/remotes/origin/main; локальний клон розробника цей ref зазвичай має — тому
+# раніше сценарій був зелений локально й червоний у CI (job «Guard-скрипти»),
+# хоча збирач і колектор поводились правильно. Щоб сценарій не залежав від
+# середовища, де origin/main немає — готуємо тимчасовий клон репозиторію й
+# виставляємо в ньому refs/remotes/origin/main на HEAD, і запускаємо справжні
+# скрипти (dash-collect.sh, dash-t5.sh, dash-trend.sh) САМЕ з цього клону: підміна
+# ref працює лише в тій самій копії репо, де лежать самі скрипти, — передати
+# --ref в dash-trend.sh через dash-collect.sh неможливо (той викликає збирачів
+# лише з --now). git status перевіряємо на тому репо, де фактично запускали
+# (клон або оригінал) — не на оригінальному дереві, яке в разі клону взагалі не
+# торкається.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    RUN_REPO="$REPO_ROOT"
+    if ! git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null; then
+      RUN_REPO="$T/real-collectors-clone"
+      # DASH_COLLECT_TEST_FORCE_CLONE_FAIL — лише для сценарію нижче (17): форсує
+      # цю саму гілку відмови без потреби справді ламати git clone.
+      if [[ -n "${DASH_COLLECT_TEST_FORCE_CLONE_FAIL:-}" ]] || ! { git clone -q -- "$REPO_ROOT" "$RUN_REPO" 2>/dev/null &&
+        git -C "$RUN_REPO" update-ref refs/remotes/origin/main HEAD; }; then
+        bad "сценарій 13–14: не вдалося підготувати клон із origin/main"
+        RUN_REPO=""
+      fi
+    fi
+    if [[ -n "$RUN_REPO" ]]; then
+      BEFORE="$(git -C "$RUN_REPO" status --porcelain)"
+      O="$T/o-real"
+      out_combined="$(env HOME="$HOME_T" timeout 20 bash "$RUN_REPO/tools/scripts/dash-collect.sh" --out "$O" --now "$NOW" 2>&1)"
+      rc=$?
+      AFTER="$(git -C "$RUN_REPO" status --porcelain)"
+      if [[ $rc -eq 0 ]] && [[ "$BEFORE" == "$AFTER" ]]; then
+        ok "git status репо не змінюється після збору справжніми збирачами"
+      else
+        bad "git status змінився після збору (rc=$rc): до=«$BEFORE» після=«$AFTER»; $out_combined"
+      fi
+      for s in t5 trend; do
+        env_file="$T/real-$s.json"
+        sec "$O" "$s" >"$env_file"
+        vout="$(bash "$HERE/dash-schema.sh" validate "$env_file" 2>&1)"
+        status="$(jq -r .status <"$env_file" 2>/dev/null)"
+        if [[ "$vout" == ok && "$status" != error ]]; then
+          ok "реальний збирач «$s» — обгортка проходить validate, status не error"
+        else
+          bad "реальний збирач «$s» — validate=«$vout» status=«$status»: $(cat "$env_file")"
+        fi
+      done
+    fi
+  else
+    echo "пропуск сценарію 13–14: «$REPO_ROOT» не git-репозиторій" >&2
+  fi
+fi
+
+# ─── 17. сценарій 13–14: клон не вдалося підготувати → провал тесту, не пропуск ─
+# Git clone локально сам практично не падає, тож форсуємо цю гілку через
+# DASH_COLLECT_TEST_FORCE_CLONE_FAIL (гачок додано вище) — єдиний детермінований
+# спосіб перевірити, що «клон не вдалося підготувати» стає провалом тесту (bad),
+# а не тихим пропуском. Клон --depth 1 (без origin/main) гарантує вхід у гілку
+# підготовки клону; DASH_COLLECT_TEST_CI_SELFCHECK_DONE і _META_DONE гасять
+# сценарії 16/17/18 у вкладеному запуску — інакше він знову клонував би й
+# запускав би себе рекурсивно.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    T17_CLONE="$T/t17-no-origin-main"
+    if git clone -q --depth 1 -- "file://$REPO_ROOT" "$T17_CLONE" 2>/dev/null; then
+      # Умову «немає origin/main» створюємо самі, а не сподіваємось на неї: git
+      # clone --depth 1 джерела, що стоїть на гілці main (CI на push у main,
+      # локальний запуск у ~/hart), лишає refs/remotes/origin/main — інакше
+      # нижче FORCE_CLONE_FAIL узагалі не входив би в гілку підготовки клону.
+      git -C "$T17_CLONE" update-ref -d refs/remotes/origin/main 2>/dev/null || true
+      git -C "$T17_CLONE" update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+      t17_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_CLONE_FAIL=1 DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 \
+        DASH_COLLECT_TEST_META_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+        timeout 60 bash "$T17_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+      t17_rc=$?
+      if [[ $t17_rc -ne 0 ]] && grep -qF '✗' <<<"$t17_out" && grep -q "сценарій 13–14" <<<"$t17_out"; then
+        ok "клон для сценарію 13–14 не вдалося підготувати — провал тесту (bad), не тихий пропуск"
+      else
+        bad "форсований провал клону сценарію 13–14 мав провалити тест (rc=$t17_rc): $t17_out"
+      fi
+    else
+      bad "сценарій 17: не вдалося підготувати клон без origin/main для форсованого тесту"
+    fi
+  fi
+fi
+
+# ─── 16. самоперевірка: сценарій 13–14 зелений у клоні --depth 1 без origin/main
+# (точне відтворення умови CI, job «Guard-скрипти») — без цього можна знову
+# полагодити лише для «origin/main є» і не помітити, що actions/checkout його не
+# дає. DASH_COLLECT_TEST_CI_SELFCHECK_DONE боронить від рекурсії: вкладений запуск
+# цього ж тестового скрипта має свою секцію 16, яка без прапорця знову клонувала
+# б і знову запускала б себе — до виснаження диска.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_CI_SELFCHECK_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    CI_CLONE="$T/ci-shallow-clone"
+    # DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL — лише для сценарію нижче (18):
+    # форсує гілку відмови нижче без потреби справді ламати git clone.
+    if [[ -z "${DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL:-}" ]] && git clone -q --depth 1 -- "file://$REPO_ROOT" "$CI_CLONE" 2>/dev/null; then
+      # Умову «немає origin/main» створюємо самі (те саме пояснення, що в 17):
+      # джерело на гілці main лишило б refs/remotes/origin/main і в цьому клоні.
+      git -C "$CI_CLONE" update-ref -d refs/remotes/origin/main 2>/dev/null || true
+      git -C "$CI_CLONE" update-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+      # Перевірку нижче лишаємо як самоконтроль ПІСЛЯ видалення: вона ловить
+      # регресію, якщо видалення вище прибрати (мутант «update-ref -d вимкнено»).
+      if git -C "$CI_CLONE" rev-parse --verify -q origin/main >/dev/null 2>&1; then
+        bad "самоперевірка CI-умови: клон --depth 1 має origin/main навіть після видалення рефу — умова CI не відтворена"
+      else
+        ci_out="$(env DASH_COLLECT_TEST_CI_SELFCHECK_DONE=1 DASH_COLLECT_TEST_META_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+          timeout 60 bash "$CI_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+        ci_rc=$?
+        if [[ $ci_rc -eq 0 ]]; then
+          ok "самоперевірка CI-умови: dash-collect.test.sh зелений у клоні --depth 1 без origin/main"
+        else
+          bad "самоперевірка CI-умови: dash-collect.test.sh у клоні --depth 1 впав (rc=$ci_rc): $ci_out"
+        fi
+      fi
+    else
+      bad "самоперевірка CI-умови: git clone --depth 1 не вдався"
+    fi
+  fi
+fi
+
+# ─── 18. самоперевірка CI-умови: клон --depth 1 не вдався → провал тесту, не пропуск
+# Без форсування git clone --depth 1 локально практично не падає, тож форсуємо
+# гілку відмови через DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL (гачок додано
+# вище). Клонувати тут нема потреби — сценарій 16 клонує сам щоразу; запускаємо
+# вкладений тест просто на REPO_ROOT. DASH_COLLECT_TEST_META_DONE гасить
+# сценарії 17/18 у вкладеному запуску, щоб не плодити зайву рекурсію.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    t18_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_FORCE_DEPTH_CLONE_FAIL=1 DASH_COLLECT_TEST_META_DONE=1 \
+      DASH_COLLECT_TEST_NO_MUTATE=1 timeout 60 bash "$REPO_ROOT/tools/scripts/dash-collect.test.sh" 2>&1)"
+    t18_rc=$?
+    if [[ $t18_rc -ne 0 ]] && grep -qF '✗' <<<"$t18_out" && grep -q "depth 1 не вдався" <<<"$t18_out"; then
+      ok "клон --depth 1 самоперевірки CI-умови не вдався — провал тесту (bad), не тихий пропуск"
+    else
+      bad "форсований провал клону --depth 1 мав провалити тест (rc=$t18_rc): $t18_out"
+    fi
+  fi
+fi
+
+# ─── 19. самоперевірка: сценарії 16–17 зелені й тоді, коли джерело саме стоїть
+# на гілці main з origin/main (CI на push у main; локальний запуск у ~/hart) —
+# не лише в поточному worktree (тут він на ai/pult-04-collect-4, тож сценарії
+# 16–17 самі по собі цю гілку не перевіряють). git clone (і --depth 1) джерела,
+# що стоїть на гілці main, лишає refs/remotes/origin/main у клоні — без
+# примусового видалення рефу всередині сценаріїв 16/17 (вище) умова CI «немає
+# origin/main» не відтворюється сама собою, і ці сценарії дають хибний результат
+# (рецензія Gemini 3.8 Flash, #240). Гасимо цей сценарій, коли вже всередині
+# будь-якого вкладеного запуску (DASH_COLLECT_TEST_META_DONE — спільний прапорець
+# для 17/18, виставлений і в нашому власному вкладеному запуску нижче) — інакше
+# кожен з них тягнув би ще один повний клон-на-main-гілці рекурсивно.
+# DASH_COLLECT_TEST_NO_MUTATE вимикає лише повторний прогін 12 мутантів у
+# вкладеному запуску — самі сценарії 13–14/16/17/18 там виконуються насправді,
+# інакше перевірка нічого не доводить.
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_META_DONE:-}" && -z "${DASH_COLLECT_TEST_MAIN_BRANCH_DONE:-}" ]]; then
+  REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    MAIN_CLONE="$T/main-branch-clone"
+    if git clone -q -- "file://$REPO_ROOT" "$MAIN_CLONE" 2>/dev/null &&
+      git -C "$MAIN_CLONE" checkout -q -B main 2>/dev/null &&
+      git -C "$MAIN_CLONE" update-ref refs/remotes/origin/main HEAD; then
+      main_out="$(env HOME="$HOME_T" DASH_COLLECT_TEST_MAIN_BRANCH_DONE=1 DASH_COLLECT_TEST_NO_MUTATE=1 \
+        timeout 120 bash "$MAIN_CLONE/tools/scripts/dash-collect.test.sh" 2>&1)"
+      main_rc=$?
+      if [[ $main_rc -eq 0 ]]; then
+        ok "клон на гілці main з origin/main — dash-collect.test.sh зелений (сценарії 16–17 самі прибирають origin/main джерела)"
+      else
+        bad "клон на гілці main з origin/main — dash-collect.test.sh упав (rc=$main_rc): $main_out"
+      fi
+    else
+      bad "сценарій 19: не вдалося підготувати клон на гілці main з origin/main"
+    fi
+  fi
+fi
+
+# ─── 15. базові відмови CLI ─────────────────────────────────────────────────
+out_combined="$(env HOME="$HOME_T" timeout 20 bash "$SCRIPT" --дивний 2>&1)"
+rc=$?
+[[ $rc -eq 2 ]] && ok "невідомий прапорець — exit 2" || bad "невідомий прапорець — очікував exit 2, отримав $rc"
+
+out_combined="$(env HOME="$HOME_T" timeout 20 bash "$SCRIPT" --out 2>&1)"
+rc=$?
+[[ $rc -eq 2 ]] && ok "--out без значення — exit 2" || bad "--out без значення — очікував exit 2, отримав $rc"
+
+out_combined="$(env HOME="$HOME_T" timeout 20 bash "$SCRIPT" --now "не-дата" --out "$T/o-bad-now" 2>&1)"
+rc=$?
+[[ $rc -eq 2 ]] && ok "--now у неправильному форматі — exit 2" || bad "--now у неправильному форматі — очікував exit 2, отримав $rc"
+
+# ─── Мутації: кожне правило тримається тестом ───────────────────────────────
+if [[ -z "${DASH_COLLECT_UNDER_TEST:-}" && -z "${DASH_COLLECT_TEST_NO_MUTATE:-}" && $fail -eq 0 ]]; then
+  M="$(mktemp -d)"
+  trap 'rm -rf "$M" "$T"' EXIT
+  src="$(<"$SCRIPT")"
+  n=0
+  mutate() { # mutate <назва> <було> <стало> — «було» має стояти в скрипті рівно раз
+    local name="$1" from="$2" to="$3" d="$M/$((++n))" rest
+    rest="${src#*"$from"}"
+    if [[ "$rest" == "$src" || "$rest" == *"$from"* ]]; then
+      bad "мутант «$name»: текст не знайдено рівно один раз — мутація застаріла"
+      return
+    fi
+    mkdir -p "$d/scripts" "$d/dashboard"
+    cp "$HERE/dash-schema.sh" "$d/scripts/dash-schema.sh"
+    cp "$DASHBOARD_DIR/index.html" "$d/dashboard/index.html"
+    cp "$DASHBOARD_DIR/render.js" "$d/dashboard/render.js"
+    cp "$DASHBOARD_DIR/snapshot.schema.json" "$d/dashboard/snapshot.schema.json"
+    printf '%s\n' "${src/"$from"/"$to"}" >"$d/scripts/dash-collect.sh"
+    if DASH_COLLECT_UNDER_TEST="$d/scripts/dash-collect.sh" bash "$HERE/$(basename "$0")" >"$d/out" 2>&1; then
+      bad "мутант ВИЖИВ: $name"
+    else
+      ok "мутанта вбито: $name"
+    fi
+  }
+
+  mutate "IPv6-шаблон вимкнено" \
+    'IPV6_RE="$IPV6_RE|:(:[0-9A-Fa-f]{1,4}){1,7}"' \
+    'IPV6_RE="no-match-at-all-xyz"'
+  mutate "IPv6 голий «::» без hex-групи знову вважається адресою" \
+    'IPV6_RE="$IPV6_RE|:(:[0-9A-Fa-f]{1,4}){1,7}"' \
+    'IPV6_RE="$IPV6_RE|:((:[0-9A-Fa-f]{1,4}){1,7}|:)"'
+  mutate "IPv4-шаблон вимкнено" \
+    'IPV4_RE="\\b${IPV4_OCTET}(\\.${IPV4_OCTET}){3}\\b"' \
+    'IPV4_RE="no-match-at-all-xyz"'
+  mutate "DASH_LEAK_FILE не читається" \
+    'if [[ -r "$LEAK_FILE" && -s "$LEAK_FILE" ]]; then' \
+    'if false; then'
+  mutate "збій одного збирача зупиняє весь збір" \
+    'data="$(jq -nc --arg reason "$reason" '"'"'{error: $reason}'"'"')"' \
+    'data="$(jq -nc --arg reason "$reason" '"'"'{error: $reason}'"'"')"; exit 1'
+  mutate "запис без тимчасового файла (atomic_write напряму)" \
+    'tmp="$(mktemp "$(dirname -- "$dest")/.dash-collect.XXXXXX")"
+  printf '"'"'%s'"'"' "$content" >"$tmp"
+  mv -f -- "$tmp" "$dest"' \
+    'printf '"'"'%s'"'"' "$content" >"$dest"'
+  mutate "копіювання без тимчасового файла (atomic_copy напряму)" \
+    'tmp="$(mktemp "$(dirname -- "$dest")/.dash-collect.XXXXXX")"
+  cp -f -- "$src" "$tmp"
+  mv -f -- "$tmp" "$dest"' \
+    'cp -f -- "$src" "$dest"'
+  mutate "валідація обгортки пропускається" \
+    'if [[ "$vout" != ok ]]; then' \
+    'if false; then'
+  mutate "тайм-аут на збирач вимкнено" \
+    'timeout -k 2 "$TIMEOUT_S" bash "$path" --now "$NOW" >"$out_f" 2>"$err_f"' \
+    'bash "$path" --now "$NOW" >"$out_f" 2>"$err_f"'
+  mutate "відмова для ~/.flatcraft/ вимкнена" \
+    '    echo "відмова: --out усередині ~/.flatcraft/ — там секрети оркестратора (ADR-042 §5)" >&2
+    exit 2' \
+    '    true'
+  mutate "відмова для шляху в репо вимкнена" \
+    '    echo "відмова: --out усередині репозиторію (ADR-042 §5)" >&2
+    exit 2' \
+    '    true'
+  mutate "повідомлення про відсутнього збирача знову містить шлях COLLECTORS_DIR" \
+    'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script»"' \
+    'error_envelope "$section" "$title" "$source" "$interval_s" "немає збирача «$script» у «$COLLECTORS_DIR»"'
+  mutate "фільтр порожніх/пробільних рядків DASH_LEAK_FILE вимкнено" \
+    'hits="$(grep -cFf <(grep -vE '"'"'^[[:space:]]*$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
+    'hits="$(grep -cFf "$LEAK_FILE" <<<"$text" 2>/dev/null || true)"'
+  mutate "фільтр DASH_LEAK_FILE знову лише '^\$' — пробільні рядки не відкидаються" \
+    'hits="$(grep -cFf <(grep -vE '"'"'^[[:space:]]*$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"' \
+    'hits="$(grep -cFf <(grep -v '"'"'^$'"'"' -- "$LEAK_FILE") <<<"$text" 2>/dev/null || true)"'
+
+  rm -rf "$M"
+fi
+
+if [[ $fail -eq 1 ]]; then
+  echo "FAIL"
+  exit 1
+fi
+echo "Усі тести пройдено."

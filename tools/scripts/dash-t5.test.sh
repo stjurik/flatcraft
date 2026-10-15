@@ -2,7 +2,8 @@
 # dash-t5.test.sh — розділ "t5" (ADR-042 §6): 8 кроків треку T5 з docs/02_ROADMAP.md,
 # "✅" = закрито, номер першого відкритого, data.a8 — not_measured (хвиля 4).
 # Сценарії: справжній розділ T5 (steps + first_open); розділ відсутній — error;
-# 7 і 9 кроків — error; змінний --roadmap; обгортка проходить dash-schema.sh validate.
+# 7 і 9 кроків — error; змінний --roadmap; обгортка проходить dash-schema.sh validate;
+# дефолтний (без --roadmap) reason не несе абсолютного шляху (ADR-042 §5).
 # Мутації в кінці ламають dash-t5.sh по одному правилу — набір мусить почервоніти.
 #
 # Запуск: tools/scripts/dash-t5.test.sh
@@ -128,6 +129,32 @@ else
   bad "номери 1,1,2…7 — очікував error, отримав (rc=$rc): $out"
 fi
 
+# ─── 3в. дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової
+# теки (ADR-042 §5; рецензія Gemini 3.8 Flash, #240). Без --roadmap ROADMAP
+# обчислюється від $HERE і несе абсолютний (часто домашній) шлях; reason має
+# брати $SOURCE_LABEL (сталу відносну мітку), а не $ROADMAP. Відтворюємо
+# розташування dash-t5.sh (HERE/../../docs/02_ROADMAP.md) у тимчасовій теці, щоб
+# дефолтний ROADMAP вказував усередину неї, і запускаємо без --roadmap.
+MIRROR="$T/mirror-default-roadmap"
+mkdir -p "$MIRROR/tools/scripts" "$MIRROR/docs"
+cp "$SCRIPT" "$MIRROR/tools/scripts/dash-t5.sh"
+cp "$HERE/dash-schema.sh" "$MIRROR/tools/scripts/dash-schema.sh"
+cat >"$MIRROR/docs/02_ROADMAP.md" <<'EOF'
+## Треки
+
+### T4. Щось інше
+
+1. Крок T4, не T5
+EOF
+out3v="$(bash "$MIRROR/tools/scripts/dash-t5.sh" --now "$NOW" 2>&1)"
+rc3v=$?
+reason3v="$(echo "$out3v" | jq -r '.data.error // ""' 2>/dev/null)"
+if [[ $rc3v == 0 ]] && [[ "$reason3v" == *"T5"* ]] && [[ "$reason3v" != *"$MIRROR"* ]] && [[ "$reason3v" != *"$T"* ]]; then
+  ok "дефолтний шлях (без --roadmap) — reason без абсолютного шляху тимчасової теки"
+else
+  bad "дефолтний шлях — reason мав уникати шляху «$MIRROR», отримав (rc=$rc3v): $out3v"
+fi
+
 # ─── 4. 7 кроків — error ───────────────────────────────────────────────────────
 make_roadmap "$T/roadmap7.md" "${STEPS8[@]:0:7}"
 run --roadmap "$T/roadmap7.md"
@@ -216,6 +243,9 @@ if [[ -z "${DASH_T5_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "номери кроків не перевіряються" \
     '!= "[1,2,3,4,5,6,7,8]" ]]; then' \
     '== "ніколи" ]]; then'
+  mutate "пояснення «немає розділу T5» знову з абсолютним шляхом ROADMAP" \
+    'reason="розділ «### T5.» не знайдено в $SOURCE_LABEL"' \
+    'reason="розділ «### T5.» не знайдено в $ROADMAP"'
 
   rm -rf "$M"
 fi
