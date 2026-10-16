@@ -18,9 +18,11 @@
  * `bends` (масив напрямів 2 гибів, дефолт [down, up]) — рендериться лише на
  * кресленні (Hotfix 2.10.e), не в редакторі: паритет з наявним
  * `ZBracketParametersSchema.omit({ bends: true })`. `holes` (ручний масив,
- * не auto-grid) — AutoForm не має array-редактора (Phase 2.7 placeholder),
- * той самий підхід, що й l_bracket: приховано з `visibleFields`, показано
- * через `extraControls` summary з тим самим testId (`auto-form-holes-placeholder`).
+ * не auto-grid) — AutoForm не має array-редактора, приховано з
+ * `visibleFields` (`HIDDEN_FIELDS`), той самий підхід, що й l_bracket. Issue
+ * #247 ч.1: summary-плейсхолдер, що обіцяв майбутній редактор отворів,
+ * видалено — редактора отворів немає, а DXF/PDF (#247 ч.2) отвори ще не
+ * рендерять, напис обіцяв неіснуючу функціональність. Схема й API не змінені.
  */
 import { buildZBracketShapeCommands, type ShapeCommand } from "@flatcraft/cad-engine/geometry";
 import { profileIssueToProblem, validateProfile } from "@flatcraft/cad-engine";
@@ -42,18 +44,13 @@ const profileValidator: ProfileValidator<ZBracketParameters> = (params, thicknes
     thicknessMm,
   }).map(profileIssueToProblem);
 
-/** Placeholder-сумарі для `holes[]` — паритет з `z-bracket-editor.tsx` (Phase 2.7). */
-function holesPlaceholderSummary(p: ZBracketParameters): string {
-  return `Отвори (${p.holes.length}) — редактор у Phase 2.7.`;
-}
-
 function buildShapeCommands(params: ZBracketParameters, thicknessMm: number): ShapeCommand[] {
   return buildZBracketShapeCommands({ parameters: params, thicknessMm });
 }
 
 // Hotfix 2.10.e: bends — частина моделі (дефолт [down, up]), генерик-редактор
 // їх не показує — паритет з наявним `ZBracketParametersSchema.omit({ bends: true })`.
-// `holes` — окремий summary-плейсхолдер замість AutoForm-поля (див. докстрінг).
+// `holes` — прихований, редактора немає (issue #247 ч.1, див. докстрінг).
 const HIDDEN_FIELDS = new Set(["bends", "holes"]);
 const VISIBLE_FIELDS = Object.keys(ZBracketParametersSchema.shape).filter(
   (field) => !HIDDEN_FIELDS.has(field),
@@ -72,9 +69,6 @@ export const zBracketDefinition: TemplateDefinition<ZBracketParameters> = {
   defaults: Z_BRACKET_DEFAULT_PARAMETERS,
   ui: {
     scene: { kind: "extrude", build: buildShapeCommands },
-    extraControls: [
-      { kind: "summary", render: holesPlaceholderSummary, testId: "auto-form-holes-placeholder" },
-    ],
     visibleFields: VISIBLE_FIELDS,
     thumbSlug: "z_bracket",
   },

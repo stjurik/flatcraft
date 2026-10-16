@@ -272,3 +272,57 @@ test("trend-віджет: формат dash-trend.sh {week_start, product, proce
   assert.ok(!html.includes("undefined"), html);
   assert.ok(html.includes('<div class="wk">28.09</div>'), html);
 });
+
+// ─── trend-віджет: wk-minor на вузькому екрані (#249) ────────────────────────
+// Колонка — flex: 1 0 18px, підпис .wk — 10.5px nowrap (≈28px на «20.07»):
+// на ширині телефона підписи зливаються. wk-minor позначає підписи, сховані
+// медіа-запитом (max-width: 640px) — через один, рахуючи від ОСТАННЬОГО
+// тижня, щоб саме найсвіжіший тиждень завжди лишався підписаним.
+
+function weeksFixture(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    week_start: `2026-07-${String(6 + i).padStart(2, "0")}T00:00:00Z`,
+    product: i,
+    process: 1,
+  }));
+}
+
+function wkClasses(html) {
+  return [...html.matchAll(/<div class="(wk[^"]*)">/g)].map((m) => m[1]);
+}
+
+test("trend-віджет: 13 тижнів — wk-minor через один від кінця, останній без позначки", () => {
+  const env = envelope({ section: "trend", data: { weeks: weeksFixture(13) } });
+  const html = DashRender.renderSection(env, NOW, {});
+  const cls = wkClasses(html);
+  assert.equal(cls.length, 13, html);
+  const minor = cls.map((c) => /\bwk-minor\b/.test(c));
+  assert.equal(minor[12], false, "останній тиждень мусить бути підписаний");
+  for (let i = 0; i < 13; i++) {
+    assert.equal(
+      minor[i],
+      (12 - i) % 2 === 1,
+      "позначка не через один від кінця: " + JSON.stringify(minor),
+    );
+  }
+  assert.equal((html.match(/title="/g) || []).length, 13, "title мусить лишитись на всіх тижнях");
+});
+
+test("trend-віджет: 1 тиждень — без позначки (сам собі останній)", () => {
+  const env = envelope({ section: "trend", data: { weeks: weeksFixture(1) } });
+  const html = DashRender.renderSection(env, NOW, {});
+  const cls = wkClasses(html);
+  assert.deepEqual(cls, ["wk"]);
+});
+
+test("trend-віджет: 12 тижнів (парна кількість) — перший має позначку", () => {
+  const env = envelope({ section: "trend", data: { weeks: weeksFixture(12) } });
+  const html = DashRender.renderSection(env, NOW, {});
+  const cls = wkClasses(html);
+  assert.equal(cls.length, 12, html);
+  assert.ok(
+    /\bwk-minor\b/.test(cls[0]),
+    "перший тиждень мусить мати wk-minor: " + JSON.stringify(cls),
+  );
+  assert.ok(!/\bwk-minor\b/.test(cls[11]), "останній тиждень без позначки: " + JSON.stringify(cls));
+});

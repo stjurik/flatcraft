@@ -16,6 +16,12 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROLE="$HERE/../../infra/ansible/roles/a8/templates"
 TICK_SRC="${A8_TICK_UNDER_TEST:-$ROLE/a8-tick.sh.j2}"
+# «Зависання» заглушок — `sleep $HANG_S`, а не `sleep 30`: тривалість унікальна
+# для прогону (PID), тож прибирання (pkill) зачіпає лише СВОЇ процеси. Із
+# загальним `pkill -f "sleep 30"` паралельні прогони мутантів убивали «завислого
+# агента» один одному — сценарій 20k закінчувався раніше, і мутанти виживали
+# випадково (#243, червоний main 15.10).
+HANG_S="30.$$"
 fail=0
 say() { [[ -z "${QUIET:-}" ]] && echo "$@"; return 0; }
 ok() { say "✓ $1"; }
@@ -78,6 +84,8 @@ ENV
 #!/usr/bin/env bash
 CALLS="$LOGS/runner-calls"
 STOPFILE="$ROOT/STOP"
+AGENT_STARTED="$ROOT/agent-started"
+HANG_S="$HANG_S"
 PIDS="$LOGS"
 STUB
   cat >>"$BIN/a8-run-agent" <<'STUB'
@@ -179,11 +187,11 @@ case "${AGENT_MODE:-commit}" in
     # Без спостерігача тік чекав би кінця сесії (A8_TASK_TIMEOUT).
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
     touch "$STOPFILE"
-    sleep 30 ;;
+    sleep "$HANG_S" ;;
   sleepstop0)
     # Те саме, але комітів ще немає.
     touch "$STOPFILE"
-    sleep 30 ;;
+    sleep "$HANG_S" ;;
   oom) exit 137 ;;
   authstop)
     # 401, а людина саме створила STOP.
@@ -194,7 +202,11 @@ case "${AGENT_MODE:-commit}" in
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
   paused) exit 12 ;;
-  hang) sleep 30 ;;
+  hang)
+    # Мітка «агент стартував»: watch_start іде перед запуском агента, тож мітка
+    # означає, що спостерігач уже живий (сценарій 20k чекає її, а не годинник).
+    : >"$AGENT_STARTED"
+    sleep "$HANG_S" ;;
 esac
 STUB
   chmod +x "$BIN/a8-run-agent"
@@ -218,7 +230,7 @@ if [[ "\$1" == image && "\$2" == inspect && -n "\${DOCKER_DOWN:-}" ]]; then
   exit 1
 fi
 if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_HANG:-}" ]]; then
-  exec sleep 30
+  exec sleep $HANG_S
 fi
 # STOP_DURING=inspect: людина створює STOP на ДРУГОМУ inspect тіку (крок 2a,
 # уже після запобіжників); перший — рання проба серії.
@@ -792,7 +804,7 @@ EOF
 
   # 20i. STOP посеред оракула → спостерігач зупиняє контейнер ОРАКУЛА.
   PUSH_KIND=token_file setup
-  enqueue 001-a "$(with_oracle a "grep -q MARKER result.txt && touch '$ROOT/STOP' && sleep 30")"
+  enqueue 001-a "$(with_oracle a "grep -q MARKER result.txt && touch '$ROOT/STOP' && sleep $HANG_S")"
   t0="$(date +%s)"
   AGENT_MODE=work tick
   dt=$(($(date +%s) - t0))
@@ -845,17 +857,37 @@ EOF
   (($(tick_procs) == 0)) && ok "після звичайної задачі жодного процесу тіку не лишилось" ||
     bad "після звичайної задачі лишились процеси тіку: $(tick_procs)"
   teardown
+  # Сигнал — лише коли спостерігач точно живий (мітка заглушки агента), а не
+  # через фіксований sleep: під навантаженням (мутанти йдуть паралельно) тік за
+  # 2 с міг не дійти до watch_start — тоді спостерігача, який мав би лишитись,
+  # ще не було, і мутанти «trap EXIT прибрано» / «спостерігач не бачить, що тіку
+  # вже немає» виживали випадково (#243, 15.10 — червоний main).
+  #   TERM: інтервал 30 с — без trap спостерігач гарантовано ще живий у мить
+  #   перевірки; з trap його прибирають одразу.
+  #   KILL: інтервал 1 с — спостерігач мусить зникнути сам; чекаємо до 10 с
+  #   з опитуванням (мутант «while :» не зникне ніколи).
   for sig in TERM KILL; do
-    WATCH_S=1 setup
+    if [[ "$sig" == TERM ]]; then WATCH_S=30 setup; else WATCH_S=1 setup; fi
     enqueue 001-a "$(valid a)"
     AGENT_MODE=hang bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1 &
     tp=$!
-    sleep 2
+    for _ in $(seq 1 300); do
+      [[ -e "$ROOT/agent-started" ]] && break
+      kill -0 "$tp" 2>/dev/null || break # тік помер до агента — не чекати 30 с
+      sleep 0.1
+    done
+    if [[ ! -e "$ROOT/agent-started" ]]; then
+      bad "тік не дійшов до агента (помер раніше або 30 с минуло) — сценарій $sig не перевірено"
+      kill -9 "$tp" 2>/dev/null
+      wait "$tp" 2>/dev/null
+      teardown
+      continue
+    fi
     kill -"$sig" "$tp" 2>/dev/null
     wait "$tp" 2>/dev/null
-    # TERM: trap EXIT прибирає одразу. KILL: спостерігач бачить, що тіку немає,
-    # за один інтервал (1 с) — чекаємо з запасом.
-    [[ "$sig" == KILL ]] && sleep 3
+    if [[ "$sig" == KILL ]]; then
+      for _ in $(seq 1 100); do (($(tick_procs) == 0)) && break; sleep 0.1; done
+    fi
     (($(tick_procs) == 0)) && ok "тік отримав $sig посеред агента → спостерігача не лишилось" ||
       bad "тік отримав $sig → лишились процеси тіку: $(tick_procs)"
     teardown
@@ -962,7 +994,9 @@ EOF
   dt=$(($(date +%s) - t0))
   [[ "$(jl .detail)" == "docker_unavailable:"*"не відповів за 1 с"* && "$(cat "$LOGS/env-broken-streak")" == 1 ]] && ((dt < 10)) &&
     ok "завислий inspect → таймаут за ${dt} с, env_broken, серія 1" || bad "завислий inspect: ${dt} с; $(last)"
-  pkill -f "sleep 30" 2>/dev/null
+  # -x: точний збіг усього рядка — без нього «sleep 30.1234» збігався б як
+  # підрядок із «sleep 30.12345» паралельного прогону (рецензія Flash #259).
+  pkill -x -f "sleep $HANG_S" 2>/dev/null
   teardown
 
   # 21g. Серію не записати (повний диск) — вести лічбу нічим, тож STOP одразу,

@@ -102,4 +102,33 @@ describe("validateHoles", () => {
     );
     expect(result.valid).toBe(true);
   });
+
+  it("допуск на представлення чисел: 9.7 − 6.4/2 = 6.499999999999999 (IEEE-754) не повинно блокувати", () => {
+    // cold rolled, t=2.0, R=2.5: min = 6.5. 9.7 - 3.2 рівно на межі, але
+    // floating-point дає 6.499999999999999 < 6.5 без допуску (CLAUDE.md §7).
+    expect(9.7 - 6.4 / 2).toBeLessThan(6.5);
+    const result = validateHoles(
+      {
+        materialCode: "cold_rolled_steel",
+        thicknessMm: 2.0,
+        innerRadiusMm: 2.5,
+        holes: [{ distanceFromBendMm: 9.7 - 6.4 / 2, diameterMm: 6.4 }],
+      },
+      spec,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("допуск не маскує справжнє порушення: 9.69 − 6.4/2 — дійсно ближче за межу", () => {
+    const result = validateHoles(
+      {
+        materialCode: "cold_rolled_steel",
+        thicknessMm: 2.0,
+        innerRadiusMm: 2.5,
+        holes: [{ distanceFromBendMm: 9.69 - 6.4 / 2, diameterMm: 6.4 }],
+      },
+      spec,
+    );
+    expect(result.valid).toBe(false);
+  });
 });

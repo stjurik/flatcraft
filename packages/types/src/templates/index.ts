@@ -37,9 +37,11 @@ export {
 
 export {
   ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+  EnclosedShelfBendSpecSchema,
   EnclosedShelfParametersSchema,
   EnclosedShelfSidePerforationSchema,
   EnclosedShelfStiffeningRibSchema,
+  type EnclosedShelfBendSpec,
   type EnclosedShelfParameters,
   type EnclosedShelfSidePerforation,
   type EnclosedShelfStiffeningRib,
