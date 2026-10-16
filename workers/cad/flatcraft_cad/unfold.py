@@ -881,3 +881,81 @@ def unfold_enclosed_shelf(
         bbox_max_y_mm=bbox_max_y,
         side_holes=side_holes,
     )
+
+
+@dataclass(frozen=True)
+class UnfoldedFurnitureLeg:
+    """Результат розгортки C-профілю меблевої ніжки (furniture_leg, частина 1).
+
+    Конвенція: розгортка починається з вільного краю монтажної пластини A,
+    далі bend, вертикальна стінка H, bend, опорна лапка B (`docs/parts/furniture_leg.md` §8).
+    """
+
+    length_mm: float
+    """Повна розгорнута довжина (A + BA + H + BA + B)."""
+
+    width_mm: float
+    """= width_mm на вході — не змінюється при розгортці."""
+
+    thickness_mm: float
+    """= thickness_mm на вході — товщина листа."""
+
+    bend_positions_mm: tuple[float, float]
+    """Центри двох BA-зон, від вільного краю A."""
+
+    bend_allowance_mm: float
+    """Довжина матеріалу у bend region (по нейтральній осі), однакова для обох гибів."""
+
+
+def unfold_furniture_leg(
+    plate_length_mm: float,
+    height_mm: float,
+    foot_length_mm: float,
+    width_mm: float,
+    thickness_mm: float,
+    bend_radius_mm: float,
+    k_factor: float = 0.40,
+) -> UnfoldedFurnitureLeg:
+    """Розгортає C-профіль меблевої ніжки у смужку з 3 плоских сегментів + 2 BA.
+
+    A / H / B — зовнішні габарити (конвенція `docs/parts/furniture_leg.md` §8).
+    Обидва гиби — 90°, в один бік.
+    """
+    rt = bend_radius_mm + thickness_mm
+    flat_a = plate_length_mm - rt
+    flat_h = height_mm - 2 * rt
+    flat_b = foot_length_mm - rt
+
+    if flat_a <= 0:
+        raise ValueError(
+            f"furniture_leg segment A too short for bend (plate_length_mm={plate_length_mm}, "
+            f"R={bend_radius_mm}, t={thickness_mm}): flat_a={flat_a} would be non-positive"
+        )
+    if flat_h <= 0:
+        raise ValueError(
+            f"furniture_leg segment H too short for bend (height_mm={height_mm}, "
+            f"R={bend_radius_mm}, t={thickness_mm}): flat_h={flat_h} would be non-positive"
+        )
+    if flat_b <= 0:
+        raise ValueError(
+            f"furniture_leg segment B too short for bend (foot_length_mm={foot_length_mm}, "
+            f"R={bend_radius_mm}, t={thickness_mm}): flat_b={flat_b} would be non-positive"
+        )
+
+    ba = compute_bend_allowance(
+        angle_deg=90.0,
+        inner_radius_mm=bend_radius_mm,
+        thickness_mm=thickness_mm,
+        k_factor=k_factor,
+    )
+
+    bend1 = flat_a + ba / 2
+    bend2 = flat_a + ba + flat_h + ba / 2
+
+    return UnfoldedFurnitureLeg(
+        length_mm=flat_a + flat_h + flat_b + 2 * ba,
+        width_mm=width_mm,
+        thickness_mm=thickness_mm,
+        bend_positions_mm=(bend1, bend2),
+        bend_allowance_mm=ba,
+    )
