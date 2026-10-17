@@ -600,6 +600,18 @@ def _draw_unfold(
     c.setFillColorRGB(0, 0, 0)
 
 
+def _k_label(
+    bend_allowance_mm: float, angle_deg: float, radius_mm: float, thickness_mm: float
+) -> str:
+    """K, яким реально побудована розгортка, — з оберненої формули BA = angle_rad·(R + K·t).
+
+    ADR-043 / issue #246: K залежить від матеріалу, тож у таблиці гибів не хардкодимо
+    жодного K (раніше тут стояло "0.40" для всіх матеріалів).
+    """
+    k = (bend_allowance_mm / math.radians(angle_deg) - radius_mm) / thickness_mm
+    return f"{k:.2f}"
+
+
 def _draw_bend_table(
     c: pdfcanvas.Canvas,
     parameters: LBracketBuildParameters,
@@ -613,7 +625,12 @@ def _draw_bend_table(
             f"{parameters.bend_angle_deg}",
             f"{parameters.bend_radius_mm}",
             f"{parameters.width_mm:.1f}",
-            "0.40",
+            _k_label(
+                unfolded.bend_allowance_mm,
+                parameters.bend_angle_deg,
+                parameters.bend_radius_mm,
+                parameters.thickness_mm,
+            ),
             f"{unfolded.bend_allowance_mm:.2f}",
             _direction_label(parameters.bend_direction),
         ),
@@ -888,7 +905,12 @@ def export_corner_angle_pdf(
                 f"{parameters.bend_angle_deg}",
                 f"{parameters.bend_radius_mm}",
                 f"{parameters.width_mm:.1f}",
-                "0.40",
+                _k_label(
+                    unfolded.bend_allowance_mm,
+                    parameters.bend_angle_deg,
+                    parameters.bend_radius_mm,
+                    parameters.thickness_mm,
+                ),
                 f"{unfolded.bend_allowance_mm:.2f}",
                 _direction_label(parameters.bend_direction),
             )
@@ -991,7 +1013,12 @@ def export_wall_shelf_pdf(
             f"{parameters.bend_angle_deg}",
             f"{parameters.bend_radius_mm}",
             f"{parameters.width_mm:.1f}",
-            "0.40",
+            _k_label(
+                unfolded.bend_allowance_mm,
+                parameters.bend_angle_deg,
+                parameters.bend_radius_mm,
+                parameters.thickness_mm,
+            ),
             f"{unfolded.bend_allowance_mm:.2f}",
             _direction_label(
                 parameters.bends[i].direction if i < len(parameters.bends) else "down"
@@ -1578,7 +1605,12 @@ def _draw_z_bracket_bend_table(
             f"{parameters.bend_angle_deg}",
             f"{parameters.bend_radius_mm}",
             f"{parameters.width_mm:.1f}",
-            "0.40",
+            _k_label(
+                unfolded.bend_allowance_mm,
+                parameters.bend_angle_deg,
+                parameters.bend_radius_mm,
+                parameters.thickness_mm,
+            ),
             f"{unfolded.bend_allowance_mm:.2f}",
             _direction_label(parameters.bends[i].direction),
         )

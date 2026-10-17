@@ -1050,3 +1050,102 @@ class TestKFactorAffectsRealGeometry:
         length_galvanized = self._blank_length_mm(client, "galvanized_steel", 2.5)
         length_cold_rolled = self._blank_length_mm(client, "cold_rolled_steel", 2.5)
         assert length_galvanized == pytest.approx(length_cold_rolled, abs=1e-9)
+
+
+class TestKFactorByMaterialAllTemplates:
+    """Issue #246, рецензія Flash до PR #260: K за матеріалом — у КОЖНОМУ шаблоні,
+    не лише l_bracket. Мутант «k_factor = 0.4 у `_generate_<шаблон>`» або
+    «"0.40" у таблиці гибів PDF» тепер червоніє для свого шаблону.
+
+    Алюміній (K=0.33 при 1 ≤ R/t < 3) проти холоднокатаної сталі (K=0.40) на тих
+    самих параметрах: кожен гиб коротшає, тож сума габаритів розгортки менша.
+    """
+
+    TEMPLATES = [
+        ("l_bracket", VALID_PARAMS),
+        ("z_bracket", Z_VALID_PARAMS),
+        ("corner_angle", CORNER_VALID_PARAMS),
+        ("wall_shelf", WALL_SHELF_VALID_PARAMS),
+        ("perforated_panel", PERFORATED_PANEL_VALID_PARAMS),
+        ("enclosed_shelf", ENCLOSED_SHELF_VALID_PARAMS),
+    ]
+    # Шаблони з колонкою «K» у таблиці гибів PDF.
+    BEND_TABLE_TEMPLATES = ["l_bracket", "z_bracket", "corner_angle", "wall_shelf"]
+
+    def _export(
+        self, client: TestClient, slug: str, params: dict[str, object], material: str
+    ) -> tuple[str, str]:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": slug,
+                "parameters": params,
+                "thickness_mm": 2,
+                "material_code": material,
+            },
+        )
+        assert res.status_code == 200, res.text
+        s3 = boto3.client("s3", region_name="us-east-1")
+        art = res.json()["artifacts"]
+        dxf = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=art["dxf"]["s3_key"])
+        pdf = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=art["pdf"]["s3_key"])
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf["Body"].read())
+            f.flush()
+            text = PdfReader(f.name).pages[0].extract_text() or ""
+        return dxf["Body"].read().decode(), text
+
+    @staticmethod
+    def _extent_sum_mm(dxf_text: str) -> float:
+        doc = ezdxf.read(io.StringIO(dxf_text))  # type: ignore[attr-defined]
+        ext = bbox.extents(doc.modelspace().query('*[layer=="LASER_CUT"]'))
+        return float(ext.size.x) + float(ext.size.y)
+
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_розгортка_алюмінію_менша_за_сталеву(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+    ) -> None:
+        alu, _ = self._export(client, slug, params, "aluminum_5754")
+        steel, _ = self._export(client, slug, params, "cold_rolled_steel")
+        assert self._extent_sum_mm(alu) < self._extent_sum_mm(steel) - 1e-3
+
+    @pytest.mark.parametrize("slug", BEND_TABLE_TEMPLATES)
+    def test_pdf_колонка_k_за_матеріалом(
+        self, client: TestClient, aws_with_bucket: None, slug: str
+    ) -> None:
+        params = dict(self.TEMPLATES)[slug]
+        _, alu_text = self._export(client, slug, params, "aluminum_5754")
+        _, steel_text = self._export(client, slug, params, "cold_rolled_steel")
+        assert "0.33" in alu_text
+        assert "0.40" not in alu_text
+        assert "0.40" in steel_text
+
+    def test_помилка_k_фактора_дає_422_а_не_500(
+        self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Рецензія Flash до PR #260: матеріал є в групі матриці, але немає в
+        `k_factor.default_by_material` (розбіжність YAML) — `compute_k_factor`
+        кидає ValueError. Відповідь — 422 з причиною, не 500."""
+        import flatcraft_cad.server as server
+
+        def broken(*_: object) -> float:
+            raise ValueError("compute_k_factor: no base K-factor")
+
+        monkeypatch.setattr(server, "compute_k_factor", broken)
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert "K-factor" in res.text

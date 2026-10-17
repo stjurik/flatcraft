@@ -138,6 +138,15 @@ def _upload(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> E
     return ExportArtifact(url=url, bytes=len(data), expires_at=expires, s3_key=key)
 
 
+def _k_factor_or_422(req: ExportRequest, inner_radius_mm: float) -> float:
+    """K за матеріалом (ADR-043); ValueError (матеріал без K у YAML, R/t поза
+    діапазонами) — 422 з причиною, а не 500 (рецензія Flash до PR #260)."""
+    try:
+        return compute_k_factor(req.material_code, req.thickness_mm, inner_radius_mm)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
+
+
 def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
     """Повертає (dxf_bytes, pdf_bytes) для L-bracket."""
     try:
@@ -147,7 +156,7 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_l_bracket(params)
     unfolded = unfold_l_bracket(params, k_factor)
     dxf = export_l_bracket_dxf(
@@ -175,7 +184,7 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_z_bracket(params)
     unfolded = unfold_z_bracket(params, k_factor)
     dxf = export_z_bracket_dxf(
@@ -203,7 +212,7 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_corner_angle(params)
     unfolded = unfold_corner_angle(params, k_factor)
     dxf = export_corner_angle_dxf(
@@ -231,7 +240,7 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_wall_shelf(params)
     unfolded = unfold_wall_shelf(params, k_factor)
     dxf = export_wall_shelf_dxf(
@@ -263,7 +272,7 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_perforated_panel(params)
     unfolded = unfold_perforated_panel(params, k_factor)
     dxf = export_perforated_panel_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
@@ -290,7 +299,7 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
-    k_factor = compute_k_factor(req.material_code, req.thickness_mm, params.bend_radius_mm)
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     _ = build_enclosed_shelf(params)  # 3D-валідація геометрії, у PDF поки не вживаємо
     unfolded = unfold_enclosed_shelf(params, k_factor)
     dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()

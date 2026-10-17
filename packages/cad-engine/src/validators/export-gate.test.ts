@@ -428,3 +428,32 @@ describe("validateExportSheet — невідома товщина не дубл�
     expect(bendIssues.filter((e) => e.code === "THICKNESS_NOT_SUPPORTED")).toHaveLength(1);
   });
 });
+
+describe("sheetDimensionsFor — K за матеріалом у кожному шаблоні (рецензія Flash до PR #260)", () => {
+  // Мутант «kFactor = 0.40 для <шаблону>» у sheetDimensionsFor раніше виживав:
+  // поза l_bracket/z_bracket гейт перевірявся лише на cold_rolled_steel (K=0.40).
+  // Алюміній (K=0.33 при R/t=1.25) скорочує кожен гиб — сума габаритів менша.
+  const cases: ReadonlyArray<[ExportRequest["template_slug"], ExportRequest["parameters"]]> = [
+    ["l_bracket", L_BRACKET_DEFAULT_PARAMETERS],
+    ["z_bracket", Z_BRACKET_DEFAULT_PARAMETERS],
+    ["corner_angle", CORNER_ANGLE_DEFAULT_PARAMETERS],
+    ["wall_shelf", WALL_SHELF_DEFAULT_PARAMETERS],
+    ["perforated_panel", PERFORATED_PANEL_DEFAULT_PARAMETERS],
+    ["enclosed_shelf", ENCLOSED_SHELF_DEFAULT_PARAMETERS],
+  ];
+
+  it.each(cases)("%s: aluminum_5754 дає меншу заготовку за cold_rolled_steel", (slug, defaults) => {
+    const dims = (material_code: string) => {
+      const req = {
+        template_slug: slug,
+        parameters: { ...defaults, bend_radius_mm: 2.5 },
+        material_code,
+        thickness_mm: 2,
+      } as ExportRequest;
+      const d = sheetDimensionsFor(req, bakedSpec);
+      expect(d).not.toBeNull();
+      return d!.widthMm + d!.heightMm;
+    };
+    expect(dims("aluminum_5754")).toBeLessThan(dims("cold_rolled_steel") - 1e-3);
+  });
+});
