@@ -1411,8 +1411,11 @@ def export_enclosed_shelf_pdf(
     # PR 8c (issue #5): уніфікована таблиця «Розміри» (як у perfo-панелях).
     n_bends = len(unfolded.bend_lines)
     bend_descriptors = ["back", "left", "right", "rib"][:n_bends]
-    k_derived = unfolded.bend_allowance_mm / (
-        math.radians(90) * (parameters.bend_radius_mm + 0.4 * unfolded.thickness_mm)
+    # K-фактор, яким реально побудована ЦЯ розгортка — обернена формула BA =
+    # angle_rad·(R + K·t) (ADR-043: K тепер залежить від матеріалу, тож тут
+    # НЕ хардкодимо жоден K — виводимо його з уже рахованого bend_allowance_mm).
+    k_derived = (unfolded.bend_allowance_mm / math.radians(90) - parameters.bend_radius_mm) / (
+        unfolded.thickness_mm
     )
     bottom_y = _draw_dimensions_table(
         c,

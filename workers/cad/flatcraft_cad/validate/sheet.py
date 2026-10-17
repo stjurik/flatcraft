@@ -16,19 +16,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from flatcraft_cad.bend_allowance import compute_bend_allowance
+from flatcraft_cad.k_factor import compute_k_factor
 from flatcraft_cad.validate.bend import load_spec
-
-# Той самий K-фактор, який `server.py::ExportRequest.k_factor` бере за
-# замовчуванням (`Field(default=0.4)`), коли клієнт його не передає — а
-# `apps/api` (`routes/exports.ts`) НЕ форвардить `k_factor` у тілі запиту до
-# воркера, тож цей дефолт застосовується завжди. Дзеркало TS
-# `export-gate.ts::EXPORT_GATE_K_FACTOR`. Раніше гейт брав K з матричної
-# таблиці матеріалу (`_compute_k_factor`), а розгортку воркер будував з іншим
-# K — гейт міг пропустити деталь, яка на виробництві не влізе у верстат (чи
-# навпаки). `validate_sheet`/`validate_export_sheet` приймають `k_factor`
-# параметром (`server.py` передає `req.k_factor`) саме тому, щоб завжди
-# рахувати габарит з тим К, яким реально будується розгортка.
-DEFAULT_K_FACTOR = 0.4
 
 
 @dataclass(frozen=True)
@@ -78,18 +67,22 @@ def _sheet_dimensions_mm(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    k_factor: float,
+    material_code: str,
+    spec: dict[str, Any] | None = None,
 ) -> tuple[float, float] | None:
     """Дзеркало TS `sheetDimensionsFor`. `None` — радіус/кут невідомі, шаблон
     без bend-полів чи параметри неповні (KeyError/TypeError/ValueError —
     пряме читання `parameters[...]`, Zod/Pydantic-схема звітує про причину
     пізніше): `validate_export` (bend) чи схема шаблону вже звітує про реальну
-    причину."""
+    причину. Невідомий матеріал (`compute_k_factor` кидає ValueError) теж
+    потрапляє у цей except — `validate_export`/`validate_holes` уже звітують
+    MATERIAL_NOT_ALLOWED/HOLE_MATERIAL_COEFFICIENT_MISSING."""
     t = thickness_mm
     try:
         r = float(parameters["bend_radius_mm"])
         angle = float(parameters["bend_angle_deg"])
 
+        k_factor = compute_k_factor(material_code, t, r, spec)
         ba = compute_bend_allowance(
             angle_deg=angle, inner_radius_mm=r, thickness_mm=t, k_factor=k_factor
         )
@@ -134,12 +127,17 @@ def validate_sheet(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    k_factor: float = DEFAULT_K_FACTOR,
+    material_code: str,
     spec: dict[str, Any] | None = None,
 ) -> list[SheetError]:
-    """Габарит розгортки vs можливості верстата (CLAUDE.md §7 п.4). [] → валідно."""
+    """Габарит розгортки vs можливості верстата (CLAUDE.md §7 п.4). [] → валідно.
+
+    K-фактор рахується за матеріалом (`compute_k_factor`, ADR-043) — та сама
+    функція, якою `server.py` будує реальну розгортку, тож гейт і воркер
+    завжди бачать той самий габарит.
+    """
     spec = spec if spec is not None else load_spec()
-    dims = _sheet_dimensions_mm(template_slug, parameters, thickness_mm, k_factor)
+    dims = _sheet_dimensions_mm(template_slug, parameters, thickness_mm, material_code, spec)
     if dims is None:
         return []
     row = next((r for r in spec["capability_matrix"] if r["thickness_mm"] == thickness_mm), None)
@@ -165,7 +163,9 @@ def validate_export_sheet(
     template_slug: str,
     parameters: dict[str, Any],
     thickness_mm: float,
-    k_factor: float = DEFAULT_K_FACTOR,
+    material_code: str,
 ) -> list[dict[str, str]]:
     """JSON-готовий список dict-ів для 422-detail (паритет з validate_export)."""
-    return [asdict(e) for e in validate_sheet(template_slug, parameters, thickness_mm, k_factor)]
+    return [
+        asdict(e) for e in validate_sheet(template_slug, parameters, thickness_mm, material_code)
+    ]
