@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import io
+import math
 import os
 from collections.abc import Iterator
 from tempfile import NamedTemporaryFile
 
 import boto3
+import ezdxf
 import pytest
+from ezdxf import bbox
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
@@ -176,7 +180,6 @@ class TestExportHappy:
                 "template_slug": "l_bracket",
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
-                "k_factor": 0.4,
                 "material_code": "cold_rolled_steel",
             },
         )
@@ -224,7 +227,6 @@ class TestExportHappy:
             "template_slug": "l_bracket",
             "parameters": VALID_PARAMS,
             "thickness_mm": 2,
-            "k_factor": 0.4,
             "material_code": "cold_rolled_steel",
         }
         a = client.post("/export", json=payload).json()
@@ -252,7 +254,6 @@ class TestZBracketExport:
                 "template_slug": "z_bracket",
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
-                "k_factor": 0.4,
                 "material_code": "cold_rolled_steel",
             },
         )
@@ -321,7 +322,6 @@ class TestCornerAngleExport:
                 "template_slug": "corner_angle",
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
-                "k_factor": 0.4,
                 "material_code": "cold_rolled_steel",
             },
         )
@@ -414,7 +414,6 @@ class TestWallShelfExport:
                 "template_slug": "wall_shelf",
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
-                "k_factor": 0.4,
                 "material_code": "cold_rolled_steel",
             },
         )
@@ -917,21 +916,28 @@ class TestSheetAndHolesGateParity:
             text = PdfReader(f.name).pages[0].extract_text() or ""
         assert "flatcraft://l_bracket/" in text
 
-    # z_bracket t=10 R=5 (max_bend_length_mm=1000), top=bottom=400, offset=205:
-    # flat_sum = (400-15)+(205-15)+(400-15) = 960. BA(K) = (π/2)·(5+10·K).
-    # K=0.4 (дефолт ExportRequest.k_factor) → BA=14.137166941154069,
-    #   heightMm=960+2·BA=988.2743338823082 — на 11.7мм НИЖЧЕ межі 1000.
-    # K=1.0 (явно у запиті, максимум дозволеного Field(le=1.0)) →
-    #   BA=23.561944901923447, heightMm=1007.1238898038469 — на 7.1мм ВИЩЕ
-    #   межі 1000. Обидва margin'и у межах мм, далеко від 1e-9-похибки
-    #   округлення на самій межі 1000.0.
+    # z_bracket t=10 R=5 (max_bend_length_mm=1000, allowed_inner_radius_mm=[5.0]
+    # — тож ratio=R/t=0.5 фіксований для будь-якої геометрії при цій товщині),
+    # top=bottom=400, offset=219: flat_sum=(400-15)+(219-15)+(400-15)=974.
+    # BA(K) = (π/2)·(5+10·K); ratio=0.5 ∈ [0,1) → multiplier 0.85 для ВСІХ
+    # материалів групи "carbon_alu_galv_only" (t=10 не допускає stainless).
+    # hot_rolled_steel: K=0.42·0.85=0.357 → heightMm=974+2·BA≈1000.923 (>1000)
+    #   → SHEET_EXCEEDS_MAX_LENGTH.
+    # aluminum_5754: K=0.33·0.85=0.2805 → heightMm≈998.520 (<1000) → валідно.
     #
-    # Регресія: `server.py` передає `validate_export_sheet(...,
-    # req.k_factor)` — якщо замінити на хардкод 0.4, гейт перевірятиме
-    # габарит розгортки, яку насправді будує воркер з K=1.0 (запит явно
-    # просить k_factor=1.0), застарілим K=0.4 — пропустить деталь, що по
-    # факту НЕ влізає у верстат.
-    def test_z_bracket_t10_явний_k_factor_1_0_перевищує_max_length_422(
+    # Регресія (issue #246, ADR-043, рішення yurii 2026-10-14 «1а»): гейт і
+    # воркер мають рахувати ОДНАКОВИЙ K, виведений з `material_code` через
+    # `compute_k_factor` — не фіксований. Якщо гейт замінити на хардкод,
+    # результат не залежатиме від матеріалу, хоча реальна розгортка — залежить.
+    PARAMS_T10_R5 = {
+        **Z_VALID_PARAMS,
+        "top_flange_mm": 400,
+        "bottom_flange_mm": 400,
+        "offset_mm": 219,
+        "bend_radius_mm": 5,
+    }
+
+    def test_z_bracket_t10_hot_rolled_steel_перевищує_max_length_422(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
         # `aws_with_bucket` тут не для happy-path — захист від мутанта, що
@@ -943,40 +949,203 @@ class TestSheetAndHolesGateParity:
             "/export",
             json={
                 "template_slug": "z_bracket",
-                "parameters": {
-                    **Z_VALID_PARAMS,
-                    "top_flange_mm": 400,
-                    "bottom_flange_mm": 400,
-                    "offset_mm": 205,
-                    "bend_radius_mm": 5,
-                },
+                "parameters": self.PARAMS_T10_R5,
                 "thickness_mm": 10,
-                "k_factor": 1.0,
-                "material_code": "cold_rolled_steel",
+                "material_code": "hot_rolled_steel",
             },
         )
         assert res.status_code == 422, res.text
         assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
 
-    def test_z_bracket_t10_без_k_factor_контроль_не_перевищує_max_length(
+    def test_z_bracket_t10_aluminum_5754_контроль_не_перевищує_max_length(
         self, client: TestClient, aws_with_bucket: None
     ) -> None:
-        """Той самий запит без `k_factor` → Pydantic-дефолт 0.4 → габарит
-        988.27мм < 1000мм → не SHEET_EXCEEDS_MAX_LENGTH (контроль до
-        попереднього теста: різниця лише у k_factor)."""
+        """Та сама геометрія, інший матеріал (менший базовий K) → габарит
+        ≈998.52мм < 1000мм → не SHEET_EXCEEDS_MAX_LENGTH (контроль до
+        попереднього теста: різниця лише у material_code)."""
         res = client.post(
             "/export",
             json={
                 "template_slug": "z_bracket",
-                "parameters": {
-                    **Z_VALID_PARAMS,
-                    "top_flange_mm": 400,
-                    "bottom_flange_mm": 400,
-                    "offset_mm": 205,
-                    "bend_radius_mm": 5,
-                },
+                "parameters": self.PARAMS_T10_R5,
                 "thickness_mm": 10,
-                "material_code": "cold_rolled_steel",
+                "material_code": "aluminum_5754",
             },
         )
         assert res.status_code == 200, res.text
+
+
+class TestKFactorAffectsRealGeometry:
+    """Issue #246 (ADR-043, рішення yurii 2026-10-14 «1а»): K-фактор реальної
+    розгортки, записаної у DXF, залежить від `material_code` — не лише
+    результат sheet-гейту (`TestSheetGateUsesComputeKFactorByMaterial` у
+    test_sheet_holes_gate.py перевіряє гейт; тут — САМ артефакт).
+
+    Мутант, який цей тест ловить: якщо `server.py::_generate_l_bracket`
+    замінити `k_factor = compute_k_factor(...)` на хардкод (напр. `0.4`),
+    гейт (окремий виклик `validate_export_sheet`) цього не помітить — і
+    раніше ніщо в тестах не перевіряло, що РЕАЛЬНИЙ DXF теж змінюється.
+
+    legA=60, legB=50, width=30, t=2 — довжина розгортки L = (legB-t-R) +
+    BA(K) + (legA-t-R); Δ між двома материалами при тих самих (t, R) =
+    (π/2)·(K1−K2)·t (кут 90°, той самий доданок, що й `computeBendAllowanceMm`).
+    """
+
+    def _blank_length_mm(self, client: TestClient, material_code: str, r: float) -> float:
+        width_mm = 30.0
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": {
+                    "legA_mm": 60,
+                    "legB_mm": 50,
+                    "bend_radius_mm": r,
+                    "bend_angle_deg": 90,
+                    "width_mm": width_mm,
+                    "holes": [],
+                },
+                "thickness_mm": 2,
+                "material_code": material_code,
+            },
+        )
+        assert res.status_code == 200, res.text
+        key = res.json()["artifacts"]["dxf"]["s3_key"]
+        s3 = boto3.client("s3", region_name="us-east-1")
+        data = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=key)["Body"].read().decode()
+        doc = ezdxf.read(io.StringIO(data))  # type: ignore[attr-defined]
+        ext = bbox.extents(doc.modelspace().query('*[layer=="LASER_CUT"]'))
+        sx, sy = float(ext.size.x), float(ext.size.y)
+        assert min(abs(sx - width_mm), abs(sy - width_mm)) < 1e-6, ("ширина не знайдена", sx, sy)
+        return sx if abs(sy - width_mm) < 1e-6 else sy
+
+    @pytest.mark.parametrize(
+        ("material1", "material2", "r", "expected_delta"),
+        [
+            # ratio=R/t=1.25 ∈ [1,3) → multiplier 1.0 для обох.
+            ("aluminum_amg3", "cold_rolled_steel", 2.5, math.pi / 2 * (0.33 - 0.40) * 2.0),
+            ("stainless_304", "cold_rolled_steel", 2.5, math.pi / 2 * (0.45 - 0.40) * 2.0),
+            # ratio=R/t=0.5 ∈ [0,1) → multiplier 0.85 для обох.
+            ("aluminum_5754", "cold_rolled_steel", 1.0, math.pi / 2 * (0.33 - 0.40) * 0.85 * 2.0),
+        ],
+    )
+    def test_l_bracket_довжина_dxf_залежить_від_материалу(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        material1: str,
+        material2: str,
+        r: float,
+        expected_delta: float,
+    ) -> None:
+        length1 = self._blank_length_mm(client, material1, r)
+        length2 = self._blank_length_mm(client, material2, r)
+        assert length1 - length2 == pytest.approx(expected_delta, abs=1e-6)
+
+    def test_l_bracket_однаковий_k_для_galvanized_і_cold_rolled(
+        self, client: TestClient, aws_with_bucket: None
+    ) -> None:
+        """Контроль: galvanized_steel і cold_rolled_steel мають однаковий
+        базовий K=0.40 — довжина розгортки має бути ІДЕНТИЧНОЮ (Δ=0)."""
+        length_galvanized = self._blank_length_mm(client, "galvanized_steel", 2.5)
+        length_cold_rolled = self._blank_length_mm(client, "cold_rolled_steel", 2.5)
+        assert length_galvanized == pytest.approx(length_cold_rolled, abs=1e-9)
+
+
+class TestKFactorByMaterialAllTemplates:
+    """Issue #246, рецензія Flash до PR #260: K за матеріалом — у КОЖНОМУ шаблоні,
+    не лише l_bracket. Мутант «k_factor = 0.4 у `_generate_<шаблон>`» або
+    «"0.40" у таблиці гибів PDF» тепер червоніє для свого шаблону.
+
+    Алюміній (K=0.33 при 1 ≤ R/t < 3) проти холоднокатаної сталі (K=0.40) на тих
+    самих параметрах: кожен гиб коротшає, тож сума габаритів розгортки менша.
+    """
+
+    TEMPLATES = [
+        ("l_bracket", VALID_PARAMS),
+        ("z_bracket", Z_VALID_PARAMS),
+        ("corner_angle", CORNER_VALID_PARAMS),
+        ("wall_shelf", WALL_SHELF_VALID_PARAMS),
+        ("perforated_panel", PERFORATED_PANEL_VALID_PARAMS),
+        ("enclosed_shelf", ENCLOSED_SHELF_VALID_PARAMS),
+    ]
+    # Шаблони з колонкою «K» у таблиці гибів PDF.
+    BEND_TABLE_TEMPLATES = ["l_bracket", "z_bracket", "corner_angle", "wall_shelf"]
+
+    def _export(
+        self, client: TestClient, slug: str, params: dict[str, object], material: str
+    ) -> tuple[str, str]:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": slug,
+                "parameters": params,
+                "thickness_mm": 2,
+                "material_code": material,
+            },
+        )
+        assert res.status_code == 200, res.text
+        s3 = boto3.client("s3", region_name="us-east-1")
+        art = res.json()["artifacts"]
+        dxf = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=art["dxf"]["s3_key"])
+        pdf = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=art["pdf"]["s3_key"])
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf["Body"].read())
+            f.flush()
+            text = PdfReader(f.name).pages[0].extract_text() or ""
+        return dxf["Body"].read().decode(), text
+
+    @staticmethod
+    def _extent_sum_mm(dxf_text: str) -> float:
+        doc = ezdxf.read(io.StringIO(dxf_text))  # type: ignore[attr-defined]
+        ext = bbox.extents(doc.modelspace().query('*[layer=="LASER_CUT"]'))
+        return float(ext.size.x) + float(ext.size.y)
+
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_розгортка_алюмінію_менша_за_сталеву(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+    ) -> None:
+        alu, _ = self._export(client, slug, params, "aluminum_5754")
+        steel, _ = self._export(client, slug, params, "cold_rolled_steel")
+        assert self._extent_sum_mm(alu) < self._extent_sum_mm(steel) - 1e-3
+
+    @pytest.mark.parametrize("slug", BEND_TABLE_TEMPLATES)
+    def test_pdf_колонка_k_за_матеріалом(
+        self, client: TestClient, aws_with_bucket: None, slug: str
+    ) -> None:
+        params = dict(self.TEMPLATES)[slug]
+        _, alu_text = self._export(client, slug, params, "aluminum_5754")
+        _, steel_text = self._export(client, slug, params, "cold_rolled_steel")
+        assert "0.33" in alu_text
+        assert "0.40" not in alu_text
+        assert "0.40" in steel_text
+
+    def test_помилка_k_фактора_дає_422_а_не_500(
+        self, client: TestClient, aws_with_bucket: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Рецензія Flash до PR #260: матеріал є в групі матриці, але немає в
+        `k_factor.default_by_material` (розбіжність YAML) — `compute_k_factor`
+        кидає ValueError. Відповідь — 422 з причиною, не 500."""
+        import flatcraft_cad.server as server
+
+        def broken(*_: object) -> float:
+            raise ValueError("compute_k_factor: no base K-factor")
+
+        monkeypatch.setattr(server, "compute_k_factor", broken)
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "l_bracket",
+                "parameters": VALID_PARAMS,
+                "thickness_mm": 2,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert "K-factor" in res.text

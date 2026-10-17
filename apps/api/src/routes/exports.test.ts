@@ -575,28 +575,52 @@ describe("POST /exports — async flow", () => {
       expect(problem.errors.some((e) => e.code === "HOLE_TOO_CLOSE_TO_BEND")).toBe(true);
     });
 
-    it("e) z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → 422 SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.76мм > 1000, гейт рахує K воркера, не з таблиці матеріалу)", async () => {
+    function zBracketT8R5Geometry(material_code: string) {
+      return {
+        template_slug: "z_bracket",
+        parameters: {
+          top_flange_mm: 400,
+          bottom_flange_mm: 400,
+          offset_mm: 214,
+          bend_radius_mm: 5,
+          bend_angle_deg: 90,
+          width_mm: 100,
+          holes: [],
+        },
+        material_code,
+        thickness_mm: 8,
+      };
+    }
+
+    // ADR-043/#246 (рішення yurii 2026-10-14 «1а»): гейт рахує K за
+    // матеріалом (compute_k_factor/computeKFactor), не фіксований 0.4 —
+    // ratio=R/t=0.625 → multiplier 0.85. stainless_304 (K=0.3825) дає
+    // заготовку 1000.32мм (> 1000) → 422; cold_rolled_steel (K=0.34) дає
+    // 999.25мм (< 1000) → проходить гейт.
+    it("e1) z_bracket stainless_304 t=8 R=5 top=bottom=400 offset=214 width=100 → 422 SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.32мм > 1000)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/exports",
-        payload: {
-          template_slug: "z_bracket",
-          parameters: {
-            top_flange_mm: 400,
-            bottom_flange_mm: 400,
-            offset_mm: 214,
-            bend_radius_mm: 5,
-            bend_angle_deg: 90,
-            width_mm: 100,
-            holes: [],
-          },
-          material_code: "cold_rolled_steel",
-          thickness_mm: 8,
-        },
+        payload: zBracketT8R5Geometry("stainless_304"),
       });
       expect(res.statusCode).toBe(422);
       const problem = res.json<{ errors: { code: string }[] }>();
       expect(problem.errors.some((e) => e.code === "SHEET_EXCEEDS_MAX_LENGTH")).toBe(true);
+    });
+
+    it("e2) та сама геометрія, cold_rolled_steel (K менший) → 202, проходить гейт (999.25мм < 1000)", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const res = await app.inject({
+        method: "POST",
+        url: "/exports",
+        payload: zBracketT8R5Geometry("cold_rolled_steel"),
+      });
+      expect(res.statusCode).toBe(202);
     });
   });
 

@@ -34,6 +34,7 @@ from flatcraft_cad.export.pdf import (
     export_wall_shelf_pdf,
     export_z_bracket_pdf,
 )
+from flatcraft_cad.k_factor import compute_k_factor
 from flatcraft_cad.sentry_setup import init_sentry
 from flatcraft_cad.templates.corner_angle import CornerAngleBuildParameters, build_corner_angle
 from flatcraft_cad.templates.enclosed_shelf import (
@@ -82,17 +83,19 @@ class ExportRequest(BaseModel):
     template_slug: TemplateSlug
     parameters: dict[str, Any]
     thickness_mm: float = Field(gt=0, le=10)
-    k_factor: float = Field(default=0.4, gt=0.0, le=1.0)
     # Issue #70: генерується apps/api (== persisted exports.id) перед форвардом
     # сюди. Дозволяє QR у PDF вести на {BASE_URL}/f/{export_id} замість
     # непрацюючого fallback-scheme flatcraft://<slug>/<article>.
     export_id: UUID | None = None
     # Рішення Архітектора 2026-10-13 (заміняє рішення yurii 2026-10-06, яке
     # зробило поле опційним; ADR-043): material_code ОБОВ'ЯЗКОВИЙ — потрібен
-    # для matrix-валідації матеріалу (validate_bend) і hole-to-bend-distance
+    # для matrix-валідації матеріалу (validate_bend), hole-to-bend-distance
     # parity (coefficient_by_material) — `validate_export`/
-    # `validate_export_holes`/`validate_export_sheet`. НЕ впливає на
-    # DXF/PDF-геометрію — лише на валідацію.
+    # `validate_export_holes`/`validate_export_sheet` — і (рішення yurii
+    # 2026-10-14 «1а», issue #246) для K-фактора розгортки: `compute_k_factor`
+    # нижче бере базове K матеріалу з `k_factor.default_by_material`
+    # ПЕРЕД побудовою кожної розгортки (`unfold_*`), тож material_code тепер
+    # ВПЛИВАЄ на геометрію DXF/PDF, не лише на валідацію.
     # API (apps/api) уже завжди його передає (Zod-схема вимагає). Відсутнє
     # поле → 422 від Pydantic-схеми цього ExportRequest.
     material_code: str
@@ -135,6 +138,15 @@ def _upload(s3: Any, bucket: str, key: str, data: bytes, content_type: str) -> E
     return ExportArtifact(url=url, bytes=len(data), expires_at=expires, s3_key=key)
 
 
+def _k_factor_or_422(req: ExportRequest, inner_radius_mm: float) -> float:
+    """K за матеріалом (ADR-043); ValueError (матеріал без K у YAML, R/t поза
+    діапазонами) — 422 з причиною, а не 500 (рецензія Flash до PR #260)."""
+    try:
+        return compute_k_factor(req.material_code, req.thickness_mm, inner_radius_mm)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
+
+
 def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]:
     """Повертає (dxf_bytes, pdf_bytes) для L-bracket."""
     try:
@@ -144,8 +156,9 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_l_bracket(params)
-    unfolded = unfold_l_bracket(params, req.k_factor)
+    unfolded = unfold_l_bracket(params, k_factor)
     dxf = export_l_bracket_dxf(
         unfolded,
         tmpdir / "out.dxf",
@@ -171,8 +184,9 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_z_bracket(params)
-    unfolded = unfold_z_bracket(params, req.k_factor)
+    unfolded = unfold_z_bracket(params, k_factor)
     dxf = export_z_bracket_dxf(
         unfolded,
         tmpdir / "out.dxf",
@@ -198,8 +212,9 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_corner_angle(params)
-    unfolded = unfold_corner_angle(params, req.k_factor)
+    unfolded = unfold_corner_angle(params, k_factor)
     dxf = export_corner_angle_dxf(
         unfolded,
         tmpdir / "out.dxf",
@@ -225,8 +240,9 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_wall_shelf(params)
-    unfolded = unfold_wall_shelf(params, req.k_factor)
+    unfolded = unfold_wall_shelf(params, k_factor)
     dxf = export_wall_shelf_dxf(
         unfolded,
         tmpdir / "out.dxf",
@@ -256,8 +272,9 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     solid = build_perforated_panel(params)
-    unfolded = unfold_perforated_panel(params, req.k_factor)
+    unfolded = unfold_perforated_panel(params, k_factor)
     dxf = export_perforated_panel_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
     pdf = export_perforated_panel_pdf(
         params,
@@ -282,8 +299,9 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
+    k_factor = _k_factor_or_422(req, params.bend_radius_mm)
     _ = build_enclosed_shelf(params)  # 3D-валідація геометрії, у PDF поки не вживаємо
-    unfolded = unfold_enclosed_shelf(params, req.k_factor)
+    unfolded = unfold_enclosed_shelf(params, k_factor)
     dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
     pdf = export_enclosed_shelf_pdf(
         params, unfolded, tmpdir / "out.pdf", permalink_url=_permalink_url(req.export_id)
@@ -310,7 +328,7 @@ def _build_app() -> FastAPI:
             ),
             *validate_export_perforation(req.template_slug, req.parameters),
             *validate_export_sheet(
-                req.template_slug, req.parameters, req.thickness_mm, req.k_factor
+                req.template_slug, req.parameters, req.thickness_mm, req.material_code
             ),
             *validate_export_holes(
                 req.template_slug, req.parameters, req.thickness_mm, req.material_code

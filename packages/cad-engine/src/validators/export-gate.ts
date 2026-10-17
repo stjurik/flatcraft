@@ -17,7 +17,7 @@
 import type { ExportRequest } from "@flatcraft/types";
 import { z } from "zod";
 
-import { computeBendAllowanceMm } from "../k-factor.js";
+import { computeBendAllowanceMm, computeKFactor } from "../k-factor.js";
 import type { BendMachineSpec } from "../spec.js";
 import { validateBend, type BendInput } from "./bend.js";
 import { validateHoles, type HoleInput } from "./holes.js";
@@ -305,31 +305,30 @@ interface SheetDimensionsMm {
 }
 
 /**
- * K-фактор, який воркер (`workers/cad/flatcraft_cad/server.py::ExportRequest.
- * k_factor`, `Field(default=0.4)`) реально використовує для побудови
- * розгортки — `apps/api` (`routes/exports.ts`) НЕ передає `k_factor` у тілі
- * запиту до воркера, тож Pydantic-дефолт застосовується завжди. Раніше гейт
- * брав K з матричної таблиці матеріалу (`computeKFactor`), а розгортка
- * будувалася з іншим K — гейт міг пропустити деталь, яка на виробництві не
- * влізе у верстат (чи навпаки). Якщо колись `apps/api` почне форвардити
- * `k_factor` з запиту — цю константу треба замінити на реальне значення.
- */
-export const EXPORT_GATE_K_FACTOR = 0.4;
-
-/**
- * Bend allowance для (товщина, радіус, кут) з export-gate'у, з тим самим
- * `EXPORT_GATE_K_FACTOR`, яким воркер реально будує розгортку. На
- * Zod-валідованих параметрах (реальний шлях) завжди успішний; `null` — лише
- * захист від throw у `computeBendAllowanceMm` на (теоретично) неможливому
- * вході.
+ * Bend allowance для (матеріал, товщина, радіус, кут) з export-gate'у — тим
+ * самим K-фактором, яким воркер реально будує розгортку (рішення yurii
+ * 2026-10-14 «1а», issue #246, ADR-043): `computeKFactor` бере базове K
+ * матеріалу з `k_factor.default_by_material` × `ratio_correction(R/t)`, та
+ * сама функція, яку `workers/cad/flatcraft_cad/server.py` викликає перед
+ * кожним `unfold_*`. Раніше тут був фіксований константний K, однаковий для
+ * всіх материалів (той самий, що й старий Pydantic-дефолт воркера); тепер
+ * дефолту в воркера немає, `material_code` ОБОВ'ЯЗКОВИЙ в обох, тож гейт і
+ * воркер завжди рахують однаковий K. На Zod-валідованих параметрах (реальний
+ * шлях) завжди успішний;
+ * `null` — лише захист від throw на (теоретично) неможливому вході
+ * (невідомий матеріал чи ratio поза діапазоном — інший валідатор
+ * (`validateExportBends`/`MATERIAL_NOT_ALLOWED`) уже звітує реальну причину).
  */
 function tryComputeBendAllowanceMm(
+  materialCode: string,
   thicknessMm: number,
   innerRadiusMm: number,
   angleDeg: number,
+  spec: BendMachineSpec,
 ): number | null {
   try {
-    return computeBendAllowanceMm(angleDeg, innerRadiusMm, thicknessMm, EXPORT_GATE_K_FACTOR);
+    const kFactor = computeKFactor({ materialCode, thicknessMm, innerRadiusMm }, spec);
+    return computeBendAllowanceMm(angleDeg, innerRadiusMm, thicknessMm, kFactor);
   } catch {
     return null;
   }
@@ -339,19 +338,27 @@ function tryComputeBendAllowanceMm(
  * Габарит розгортки (ширина × висота) для ExportRequest — та сама формула, що
  * й `workers/cad/flatcraft_cad/unfold.py` (кожен `unfold_*`), не грубе
  * «сума полиць без BA». CLAUDE.md §7 п.4: «габарит у площі заготовки ≤ 3050».
+ * K-фактор — за матеріалом (`computeKFactor`, ADR-043), тож `spec`
+ * обов'язковий параметр.
  *
- * `null` — шаблон геометрично невалідний (полиці закороткі для гибу): інший
- * валідатор (`validateExportProfile`) уже звітує про реальну причину.
+ * `null` — шаблон геометрично невалідний (полиці закороткі для гибу) або
+ * K-фактор нерахований (невідомий матеріал/ratio поза діапазоном): інший
+ * валідатор (`validateExportProfile`/`validateExportBends`) уже звітує про
+ * реальну причину.
  */
-export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | null {
+export function sheetDimensionsFor(
+  body: ExportRequest,
+  spec: BendMachineSpec,
+): SheetDimensionsMm | null {
   const t = body.thickness_mm;
+  const material = body.material_code;
 
   switch (body.template_slug) {
     case "l_bracket":
     case "corner_angle": {
       const p = body.parameters;
       const r = p.bend_radius_mm;
-      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      const ba = tryComputeBendAllowanceMm(material, t, r, p.bend_angle_deg, spec);
       if (ba === null) return null;
       const flatA = p.legA_mm - t - r;
       const flatB = p.legB_mm - t - r;
@@ -360,7 +367,7 @@ export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | nul
     case "z_bracket": {
       const p = body.parameters;
       const r = p.bend_radius_mm;
-      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      const ba = tryComputeBendAllowanceMm(material, t, r, p.bend_angle_deg, spec);
       if (ba === null) return null;
       const flatBottom = p.bottom_flange_mm - t - r;
       const flatMiddle = p.offset_mm - t - r;
@@ -370,7 +377,7 @@ export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | nul
     case "wall_shelf": {
       const p = body.parameters;
       const r = p.bend_radius_mm;
-      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      const ba = tryComputeBendAllowanceMm(material, t, r, p.bend_angle_deg, spec);
       if (ba === null) return null;
       const lipPresent = p.front_lip_mm > 0;
       const flatBack = p.back_height_mm - t - r;
@@ -385,7 +392,7 @@ export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | nul
       // відступ (ba+flange) з усіх боків центральної площини.
       const p = body.parameters;
       const r = p.bend_radius_mm;
-      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      const ba = tryComputeBendAllowanceMm(material, t, r, p.bend_angle_deg, spec);
       if (ba === null) return null;
       const flange = p.rib_height_mm - (t + r);
       return {
@@ -404,7 +411,7 @@ export function sheetDimensionsFor(body: ExportRequest): SheetDimensionsMm | nul
       // габарит на (t+r)/2).
       const p = body.parameters;
       const r = p.bend_radius_mm;
-      const ba = tryComputeBendAllowanceMm(t, r, p.bend_angle_deg);
+      const ba = tryComputeBendAllowanceMm(material, t, r, p.bend_angle_deg, spec);
       if (ba === null) return null;
       const tr = t + r;
       const flatLeftRight = p.depth_mm - tr;
@@ -455,7 +462,7 @@ function sheetErrorToProblem(e: ValidationError, dims: SheetDimensionsMm): Probl
  * Python `validate_sheet`, рядок «row is None → []»).
  */
 export function validateExportSheet(body: ExportRequest, spec: BendMachineSpec): ProblemError[] {
-  const dims = sheetDimensionsFor(body);
+  const dims = sheetDimensionsFor(body, spec);
   if (!dims) return [];
   if (!spec.capability_matrix.some((r) => r.thickness_mm === body.thickness_mm)) return [];
   const result = validateSheet(

@@ -215,7 +215,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
     expect(issues[0]?.message).toMatch(/Зменшіть/);
   });
 
-  it("z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → SHEET_EXCEEDS_MAX_LENGTH (справжня заготовка 1000.76мм > 1000, гейт рахує K воркера — не з таблиці матеріалу)", () => {
+  it("z_bracket cold_rolled_steel t=8 R=5 top=bottom=400 offset=214 width=100 → валідно (K матеріалу 0.34 менший за старий фіксований 0.4: 999.25мм < 1000, ADR-043/#246)", () => {
     const req: ExportRequest = {
       template_slug: "z_bracket",
       parameters: {
@@ -229,29 +229,36 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
       material_code: "cold_rolled_steel",
       thickness_mm: 8,
     };
-    const issues = validateExportSheet(req, bakedSpec);
-    expect(issues).toHaveLength(1);
-    expect(issues[0]?.code).toBe("SHEET_EXCEEDS_MAX_LENGTH");
+    expect(validateExportSheet(req, bakedSpec)).toEqual([]);
   });
 
-  it("той самий z_bracket контрприклад — однаковий результат для aluminum_5754 і stainless_304 (гейт більше не бере K з таблиці матеріалу)", () => {
-    for (const material_code of ["cold_rolled_steel", "aluminum_5754", "stainless_304"]) {
+  it("той самий z_bracket кейс — K за матеріалом (ADR-043/#246): cold_rolled (999.25мм) і aluminum_5754 (997.76мм) валідні, stainless_304 (1000.32мм) перевищує", () => {
+    const baseParams: typeof Z_BRACKET_DEFAULT_PARAMETERS = {
+      ...Z_BRACKET_DEFAULT_PARAMETERS,
+      top_flange_mm: 400,
+      bottom_flange_mm: 400,
+      offset_mm: 214,
+      bend_radius_mm: 5,
+      width_mm: 100,
+    };
+    for (const material_code of ["cold_rolled_steel", "aluminum_5754"]) {
       const req: ExportRequest = {
         template_slug: "z_bracket",
-        parameters: {
-          ...Z_BRACKET_DEFAULT_PARAMETERS,
-          top_flange_mm: 400,
-          bottom_flange_mm: 400,
-          offset_mm: 214,
-          bend_radius_mm: 5,
-          width_mm: 100,
-        },
+        parameters: baseParams,
         material_code,
         thickness_mm: 8,
       };
-      const issues = validateExportSheet(req, bakedSpec);
-      expect(issues.map((i) => i.code)).toEqual(["SHEET_EXCEEDS_MAX_LENGTH"]);
+      expect(validateExportSheet(req, bakedSpec)).toEqual([]);
     }
+    const req: ExportRequest = {
+      template_slug: "z_bracket",
+      parameters: baseParams,
+      material_code: "stainless_304",
+      thickness_mm: 8,
+    };
+    expect(validateExportSheet(req, bakedSpec).map((i) => i.code)).toEqual([
+      "SHEET_EXCEEDS_MAX_LENGTH",
+    ]);
   });
 
   it("enclosed_shelf t=2 на дефолтах (width=600, depth=200) → валідно, далеко від межі", () => {
@@ -282,7 +289,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
       expect(dims!.heightMm).toBeCloseTo(398.4336278784232, 6);
@@ -295,7 +302,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBeCloseTo(992.3672557568464, 6);
       expect(dims!.heightMm).toBeCloseTo(407.36725575684636, 6);
@@ -313,12 +320,12 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 8,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
-      // K фіксований EXPORT_GATE_K_FACTOR=0.4 (не з таблиці матеріалу,
-      // ratio=5/8=0.625 раніше давав multiplier 0.85 → K=0.34).
-      expect(dims!.widthMm).toBeCloseTo(1473.7610597594362, 6);
-      expect(dims!.heightMm).toBeCloseTo(593.3805298797181, 6);
+      // cold_rolled_steel: ratio=5/8=0.625 → multiplier 0.85 → K=0.40×0.85=0.34
+      // (ADR-043/#246: K за матеріалом, не фіксований 0.4).
+      expect(dims!.widthMm).toBeCloseTo(1472.2530952857132, 6);
+      expect(dims!.heightMm).toBeCloseTo(592.6265476428566, 6);
     });
   });
 
@@ -326,17 +333,32 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
     // Усі числа нижче отримані локально: `uv run --directory workers/cad python`,
     // викликаючи `unfold_l_bracket`/`unfold_corner_angle`/`unfold_wall_shelf`/
     // `unfold_perforated_panel` (workers/cad/flatcraft_cad/unfold.py) з
-    // t=2, R=2.5, K=0.4 (EXPORT_GATE_K_FACTOR) на default-параметрах шаблону
-    // (override лише front_lip_mm для wall_shelf-кейсів). BA = (π/2)·(2.5+0.4·2)
-    // = 5.183627878423157мм — спільний доданок для всіх, крім perforated_panel,
-    // де він входить у відступ двічі з кожного боку.
+    // t=2, R=2.5, матеріал cold_rolled_steel на default-параметрах шаблону
+    // (override лише front_lip_mm для wall_shelf-кейсів). ratio=R/t=1.25 →
+    // multiplier 1.0 → K=0.40 (ADR-043: той самий результат, що й старий
+    // фіксований константний K=0.4, бо множник у цьому діапазоні — 1).
+    // BA = (π/2)·(2.5+0.4·2) = 5.183627878423157мм — спільний доданок для
+    // всіх, крім perforated_panel, де він входить у відступ двічі з кожного боку.
 
     it("l_bracket (legA=legB=60, width=100, t=2, R=2.5) — звірено з unfold_l_bracket: length_mm=116.18362787842315", () => {
       const req = lBracket({ thickness_mm: 2, bend_radius_mm: 2.5 });
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBe(100);
       expect(dims!.heightMm).toBeCloseTo(116.18362787842315, 9);
+    });
+
+    it("l_bracket той самий t=2, R=2.5 — aluminum_5754 (K=0.33) дає коротшу розгортку за cold_rolled_steel (K=0.40): Δ=π/2·0.07·2 (ADR-043/#246)", () => {
+      const req = lBracket({
+        thickness_mm: 2,
+        bend_radius_mm: 2.5,
+        material_code: "aluminum_5754",
+      });
+      const dims = sheetDimensionsFor(req, bakedSpec);
+      expect(dims).not.toBeNull();
+      expect(dims!.widthMm).toBe(100);
+      expect(dims!.heightMm).toBeCloseTo(115.96371639267187, 9);
+      expect(116.18362787842315 - dims!.heightMm).toBeCloseTo((Math.PI / 2) * 0.07 * 2, 9);
     });
 
     it("corner_angle (legA=legB=50, width=80, t=2, R=2.5) — звірено з unfold_corner_angle: length_mm=96.18362787842315", () => {
@@ -346,7 +368,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBe(80);
       expect(dims!.heightMm).toBeCloseTo(96.18362787842315, 9);
@@ -359,7 +381,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBe(300);
       expect(dims!.heightMm).toBeCloseTo(242.3672557568463, 9);
@@ -372,7 +394,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBe(300);
       expect(dims!.heightMm).toBeCloseTo(226.18362787842315, 9);
@@ -385,7 +407,7 @@ describe("validateExportSheet (browser, bakedSpec) — CLAUDE.md §7 п.4", () =
         material_code: "cold_rolled_steel",
         thickness_mm: 2,
       };
-      const dims = sheetDimensionsFor(req);
+      const dims = sheetDimensionsFor(req, bakedSpec);
       expect(dims).not.toBeNull();
       expect(dims!.widthMm).toBeCloseTo(261.3672557568463, 9);
       expect(dims!.heightMm).toBeCloseTo(211.3672557568463, 9);
@@ -404,5 +426,34 @@ describe("validateExportSheet — невідома товщина не дубл�
     expect(validateExportSheet(req, bakedSpec)).toEqual([]);
     const bendIssues = validateExportBends(req, bakedSpec);
     expect(bendIssues.filter((e) => e.code === "THICKNESS_NOT_SUPPORTED")).toHaveLength(1);
+  });
+});
+
+describe("sheetDimensionsFor — K за матеріалом у кожному шаблоні (рецензія Flash до PR #260)", () => {
+  // Мутант «kFactor = 0.40 для <шаблону>» у sheetDimensionsFor раніше виживав:
+  // поза l_bracket/z_bracket гейт перевірявся лише на cold_rolled_steel (K=0.40).
+  // Алюміній (K=0.33 при R/t=1.25) скорочує кожен гиб — сума габаритів менша.
+  const cases: ReadonlyArray<[ExportRequest["template_slug"], ExportRequest["parameters"]]> = [
+    ["l_bracket", L_BRACKET_DEFAULT_PARAMETERS],
+    ["z_bracket", Z_BRACKET_DEFAULT_PARAMETERS],
+    ["corner_angle", CORNER_ANGLE_DEFAULT_PARAMETERS],
+    ["wall_shelf", WALL_SHELF_DEFAULT_PARAMETERS],
+    ["perforated_panel", PERFORATED_PANEL_DEFAULT_PARAMETERS],
+    ["enclosed_shelf", ENCLOSED_SHELF_DEFAULT_PARAMETERS],
+  ];
+
+  it.each(cases)("%s: aluminum_5754 дає меншу заготовку за cold_rolled_steel", (slug, defaults) => {
+    const dims = (material_code: string) => {
+      const req = {
+        template_slug: slug,
+        parameters: { ...defaults, bend_radius_mm: 2.5 },
+        material_code,
+        thickness_mm: 2,
+      } as ExportRequest;
+      const d = sheetDimensionsFor(req, bakedSpec);
+      expect(d).not.toBeNull();
+      return d!.widthMm + d!.heightMm;
+    };
+    expect(dims("aluminum_5754")).toBeLessThan(dims("cold_rolled_steel") - 1e-3);
   });
 });
