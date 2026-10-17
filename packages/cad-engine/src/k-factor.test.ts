@@ -67,6 +67,25 @@ describe("computeKFactor", () => {
     // Якщо це попало у [0, 1), результат був би 0.4*0.85=0.34 — перевіряємо що ні.
     expect(k).toBeGreaterThan(0.34);
   });
+
+  // Паритет TS↔Python (issue #246): ОДНАКОВІ числа дзеркалить
+  // `workers/cad/tests/test_k_factor.py::test_parity_table` — обидва файли
+  // рахують (material, t, R) незалежно, і якщо один з них розійдеться з
+  // bend-machine-esi.yaml, збіжність зникне.
+  it.each([
+    ["cold_rolled_steel", 2, 1, 0.34],
+    ["hot_rolled_steel", 2, 2.5, 0.42],
+    ["galvanized_steel", 1, 4, 0.44],
+    ["stainless_304", 2, 2, 0.45],
+    ["stainless_430", 2.5, 1, 0.374],
+    ["aluminum_5754", 2, 10, 0.363],
+    ["aluminum_amg3", 4, 4, 0.33],
+    ["copper", 1, 0.5, 0.323],
+    ["brass", 2, 6, 0.418],
+  ] as const)("%s t=%s R=%s → K=%s", (materialCode, thicknessMm, innerRadiusMm, expectedK) => {
+    const k = computeKFactor({ materialCode, thicknessMm, innerRadiusMm }, spec);
+    expect(k).toBeCloseTo(expectedK, 9);
+  });
 });
 
 describe("computeBendAllowanceMm", () => {
