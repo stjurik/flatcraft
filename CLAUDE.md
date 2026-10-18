@@ -509,7 +509,7 @@ deny-правила перенесені в git (`.claude/settings.autonomous.js
 
 > Snapshot для нових сесій, ≤ 2000 знаків до кінця файлу; подробиці — `docs/13_PROGRESS_LOG.md`.
 
-**Де ми зараз (2026-09-30):** staging.hart.crimea.ua працює; MVP + EN-версія (ADR-037). Template Registry — 4 з 6 шаблонів у main, `wall_shelf` — draft PR #154, лишається `enclosed_shelf`. **Крок 5 треку T5 закрито 2026-09-29:** A8 — kill switch 3 с, м'який ребут 40 с, 3 задачі end-to-end поспіль. Не зроблено: прев'ю, CI на self-hosted, повна заборона force-push (#151), тест вимкненням живлення (до кроку 6). Крок 4 не закрито; крок 6 — лише рішенням yurii. Репо `PUBLIC` — ADR-038 не виконано.
+**Де ми зараз (2026-10-18):** staging.hart.crimea.ua працює; MVP + EN-версія (ADR-037). Template Registry — 6 з 6 шаблонів у main. **Крок 5 треку T5 закрито 2026-09-29:** A8 — kill switch 3 с, м'який ребут 40 с, 3 задачі end-to-end поспіль. Не зроблено: прев'ю, CI на self-hosted, повна заборона force-push (#151), тест вимкненням живлення (до кроку 6). Крок 4 не закрито; крок 6 — лише рішенням yurii. Репо `PUBLIC` — ADR-038 не виконано.
 
 **Останні 3 milestones:**
 
