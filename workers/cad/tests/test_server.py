@@ -1240,7 +1240,8 @@ class TestMaterialLabelByMaterialAllTemplates:
     # Рецензії Flash і Argon до PR #267: (1) тести вище бачать лише 3 матеріали з 7 —
     # мутант «хардкод для решти матеріалів» виживав; (2) очікування будувалось тією
     # самою format_material_label, що й код, — мутант у ній теж виживав. Тут —
-    # усі 7 матеріалів матриці верстата і назви дослівно (не через format_material_label).
+    # усі 7 матеріалів матриці верстата × 6 шаблонів (контрприклади
+    # Sonnet 5.5) і назви дослівно (не через format_material_label).
     @pytest.mark.parametrize(
         ("material", "label"),
         [
@@ -1253,9 +1254,16 @@ class TestMaterialLabelByMaterialAllTemplates:
             ("aluminum_amg3", "АМг3 (ДСТУ 4400-86) — алюмінієвий сплав"),
         ],
     )
-    def test_pdf_l_bracket_назва_кожного_матеріалу_дослівно(
-        self, client: TestClient, aws_with_bucket: None, material: str, label: str
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_pdf_назва_кожного_матеріалу_дослівно(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+        material: str,
+        label: str,
     ) -> None:
-        text = " ".join(self._pdf_text(client, "l_bracket", VALID_PARAMS, material).split())
+        text = " ".join(self._pdf_text(client, slug, params, material).split())
         assert f"Матеріал: {label}" in text, text
         assert text.count("Матеріал:") == 1
