@@ -144,6 +144,12 @@ def validate_sheet(
     if row is None:
         return []  # validate_export (bend) вже звітує THICKNESS_NOT_SUPPORTED
 
+    group = spec["material_groups"].get(row["group"])
+    if group is not None and material_code not in group["members"]:
+        # validate_export (bend) вже звітує MATERIAL_NOT_ALLOWED — не дублюємо
+        # (issue #257 п.3, паритет з TS export-gate.ts::validateExportSheet).
+        return []
+
     max_dim = max(dims)
     if max_dim <= row["max_bend_length_mm"]:
         return []

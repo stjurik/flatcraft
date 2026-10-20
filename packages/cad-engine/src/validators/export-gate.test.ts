@@ -429,6 +429,20 @@ describe("validateExportSheet — невідома товщина не дубл�
   });
 });
 
+describe("validateExportSheet — матеріал поза групою не дублює MATERIAL_NOT_ALLOWED (issue #257 п.3)", () => {
+  it("z_bracket t=10 stainless_304 R=5 (група carbon_alu_galv_only — без stainless) → рівно 1 MATERIAL_NOT_ALLOWED сумарно, validateExportSheet мовчить", () => {
+    const req: ExportRequest = {
+      template_slug: "z_bracket",
+      parameters: { ...Z_BRACKET_DEFAULT_PARAMETERS, bend_radius_mm: 5 },
+      material_code: "stainless_304",
+      thickness_mm: 10,
+    };
+    expect(validateExportSheet(req, bakedSpec)).toEqual([]);
+    const all = [...validateExportBends(req, bakedSpec), ...validateExportSheet(req, bakedSpec)];
+    expect(all.filter((e) => e.code === "MATERIAL_NOT_ALLOWED")).toHaveLength(1);
+  });
+});
+
 describe("sheetDimensionsFor — K за матеріалом у кожному шаблоні (рецензія Flash до PR #260)", () => {
   // Мутант «kFactor = 0.40 для <шаблону>» у sheetDimensionsFor раніше виживав:
   // поза l_bracket/z_bracket гейт перевірявся лише на cold_rolled_steel (K=0.40).
