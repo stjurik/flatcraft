@@ -171,6 +171,7 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         tmpdir / "out.pdf",
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
@@ -199,6 +200,7 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         tmpdir / "out.pdf",
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
@@ -227,6 +229,7 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
         tmpdir / "out.pdf",
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
@@ -255,6 +258,7 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
         tmpdir / "out.pdf",
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
@@ -282,6 +286,7 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
         tmpdir / "out.pdf",
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
@@ -304,7 +309,11 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
     unfolded = unfold_enclosed_shelf(params, k_factor)
     dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
     pdf = export_enclosed_shelf_pdf(
-        params, unfolded, tmpdir / "out.pdf", permalink_url=_permalink_url(req.export_id)
+        params,
+        unfolded,
+        tmpdir / "out.pdf",
+        permalink_url=_permalink_url(req.export_id),
+        material_label=req.material_code,
     ).read_bytes()
     return dxf, pdf
 
