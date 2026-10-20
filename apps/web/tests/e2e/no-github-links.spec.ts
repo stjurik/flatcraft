@@ -11,7 +11,7 @@ test.describe("#266 — без посилань і згадок GitHub", () => {
   for (const path of PAGES) {
     test(`${path}: немає a[href*=github.com] і слова GitHub`, async ({ page }) => {
       await page.goto(path);
-      await expect(page.locator("footer")).toBeVisible();
+      await expect(page.getByTestId("footer")).toBeVisible();
       await expect(page.locator('a[href*="github.com"]')).toHaveCount(0);
       const text = (await page.locator("body").innerText()).toLowerCase();
       expect(text, `на ${path} лишилась згадка GitHub`).not.toContain("github");
@@ -20,6 +20,6 @@ test.describe("#266 — без посилань і згадок GitHub", () => {
 
   test("футер: Discord лишився", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator('footer a[href*="discord"]').first()).toBeVisible();
+    await expect(page.getByTestId("footer").locator('a[href*="discord"]').first()).toBeVisible();
   });
 });
