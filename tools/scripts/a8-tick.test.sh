@@ -1160,7 +1160,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "контейнер не вбивається при таймауті" 's/\[\[ "\$rc" == 124 \]\] && "\$DOCKER" kill[^\n]*\n//'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
-  mutate "відхилений запис лишається в черзі" 's/  mv "\$f" "\$Q\/rejected\/"\n//'
+  mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
   mutate "перевірку хука прибрано" 's/if \(\(hrc != 0\)\); then/if false; then/'
   mutate "case без гілки за замовчуванням" 's/  ok\) ;;\n  \*\)\n(.*?\n)*?    ;;\n(esac)/$2/'
   mutate "сироту не вбито" 's/  \[\[ -n "\$oid" \]\] && "\$DOCKER" kill[^\n]*\n//'
