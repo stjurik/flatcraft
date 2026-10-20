@@ -1149,3 +1149,121 @@ class TestKFactorByMaterialAllTemplates:
         )
         assert res.status_code == 422, res.text
         assert "K-factor" in res.text
+
+
+class TestMaterialLabelByMaterialAllTemplates:
+    """Issue #261 ч.1: PDF писав «Матеріал: ... холоднокатана сталь» для
+    будь-якого material_code — `_generate_<шаблон>` у server.py не передавав
+    `material_label` у `export_*_pdf` (дефолт `cold_rolled_steel` у pdf.py).
+
+    Мутант «material_label="cold_rolled_steel"» замість `req.material_code`
+    у server.py мусить зробити цей тест червоним для кожного шаблону.
+    """
+
+    TEMPLATES = [
+        ("l_bracket", VALID_PARAMS),
+        ("z_bracket", Z_VALID_PARAMS),
+        ("corner_angle", CORNER_VALID_PARAMS),
+        ("wall_shelf", WALL_SHELF_VALID_PARAMS),
+        ("perforated_panel", PERFORATED_PANEL_VALID_PARAMS),
+        ("enclosed_shelf", ENCLOSED_SHELF_VALID_PARAMS),
+    ]
+
+    def _pdf_text(
+        self, client: TestClient, slug: str, params: dict[str, object], material: str
+    ) -> str:
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": slug,
+                "parameters": params,
+                "thickness_mm": 2,
+                "material_code": material,
+            },
+        )
+        assert res.status_code == 200, res.text
+        s3 = boto3.client("s3", region_name="us-east-1")
+        art = res.json()["artifacts"]
+        pdf = s3.get_object(Bucket=os.environ["S3_BUCKET"], Key=art["pdf"]["s3_key"])
+
+        from pypdf import PdfReader
+
+        with NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf["Body"].read())
+            f.flush()
+            return PdfReader(f.name).pages[0].extract_text() or ""
+
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_pdf_матеріал_алюміній_не_холоднокатана(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+    ) -> None:
+        from flatcraft_cad.materials.industry_names import format_material_label
+
+        text = " ".join(self._pdf_text(client, slug, params, "aluminum_5754").split())
+        want = " ".join(f"Матеріал: {format_material_label('aluminum_5754')}".split())
+        assert want in text, text
+        assert "холоднокатана" not in text
+
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_pdf_матеріал_нержавійка_не_холоднокатана(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+    ) -> None:
+        from flatcraft_cad.materials.industry_names import format_material_label
+
+        text = " ".join(self._pdf_text(client, slug, params, "stainless_304").split())
+        want = " ".join(f"Матеріал: {format_material_label('stainless_304')}".split())
+        assert want in text, text
+        assert "холоднокатана" not in text
+
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_pdf_матеріал_холоднокатана_сталь_незмінно(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+    ) -> None:
+        from flatcraft_cad.materials.industry_names import format_material_label
+
+        text = " ".join(self._pdf_text(client, slug, params, "cold_rolled_steel").split())
+        want = " ".join(f"Матеріал: {format_material_label('cold_rolled_steel')}".split())
+        assert want in text, text
+
+    # Рецензії Flash і Argon до PR #267: (1) тести вище бачать лише 3 матеріали з 7 —
+    # мутант «хардкод для решти матеріалів» виживав; (2) очікування будувалось тією
+    # самою format_material_label, що й код, — мутант у ній теж виживав. Тут —
+    # усі 7 матеріалів матриці верстата × 6 шаблонів (контрприклади
+    # Sonnet 5.5) і назви дослівно (не через format_material_label).
+    @pytest.mark.parametrize(
+        ("material", "label"),
+        [
+            ("cold_rolled_steel", "DC01 (ДСТУ EN 10130) — холоднокатана сталь"),
+            ("hot_rolled_steel", "S235JR (ДСТУ EN 10025-2) — гарячекатана сталь"),
+            ("galvanized_steel", "DX51D+Z (ДСТУ EN 10346) — оцинкована сталь"),
+            ("stainless_304", "AISI 304 (ДСТУ EN 10088-2) — нержавіюча сталь"),
+            ("stainless_430", "AISI 430 (ДСТУ EN 10088-2) — нержавіюча сталь"),
+            ("aluminum_5754", "5754-H22 (EN 573-3) — алюмінієвий сплав"),
+            ("aluminum_amg3", "АМг3 (ДСТУ 4400-86) — алюмінієвий сплав"),
+        ],
+    )
+    @pytest.mark.parametrize(("slug", "params"), TEMPLATES)
+    def test_pdf_назва_кожного_матеріалу_дослівно(
+        self,
+        client: TestClient,
+        aws_with_bucket: None,
+        slug: str,
+        params: dict[str, object],
+        material: str,
+        label: str,
+    ) -> None:
+        text = " ".join(self._pdf_text(client, slug, params, material).split())
+        assert f"Матеріал: {label}" in text, text
+        assert text.count("Матеріал:") == 1
