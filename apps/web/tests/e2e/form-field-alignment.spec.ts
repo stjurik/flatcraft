@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * #264 (зауваження yurii, hart-inbox #4): у формі параметрів поля одного рядка сітки
@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  */
 type Row = { names: string[]; labelHeights: number[]; controlTops: number[] };
 
-async function rows(page: import("@playwright/test").Page): Promise<Row[]> {
+async function rows(page: Page): Promise<Row[]> {
   return page.evaluate(() => {
     const shells = Array.from(
       document.querySelectorAll<HTMLElement>(
