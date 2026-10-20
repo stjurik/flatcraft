@@ -122,6 +122,16 @@ run_suite() { # run_suite <local|ssh>
     ok "$T status на порожній черзі → 0, STOP немає, черга 0, потік працює" || bad "$T status: rc=$RC $OUT $ERR"
   [[ "$(ctl .verb)" == status && "$(ctl .via)" == "$MODE" && "$(ctl .rc)" == 0 ]] &&
     ok "$T status → рядок у ctl.log (via=$MODE, rc=0)" || bad "$T ctl.log status: $(lastctl)"
+  [[ "$OUT" == *"tick.lock: вільний"* ]] && ok "$T status: tick.lock вільний" || bad "$T lock вільний: $OUT"
+  # Тік працює (тримає tick.lock) — status це бачить і сам не зависає.
+  : >"$LOGS/tick.lock"
+  flock "$LOGS/tick.lock" sleep 3 &
+  holder=$!
+  sleep 0.5
+  call status </dev/null
+  wait "$holder"
+  [[ "$RC" == 0 && "$OUT" == *"tick.lock: ЗАЙНЯТИЙ"* ]] && ok "$T status під утриманим tick.lock → «ЗАЙНЯТИЙ», rc=0" ||
+    bad "$T lock зайнятий: rc=$RC $OUT"
   teardown
 
   # 2. enqueue валідного запису: у черзі, 0644, байт-у-байт, подія, журнал.
@@ -182,6 +192,12 @@ run_suite() { # run_suite <local|ssh>
   task c2 >"$QD/done/c2.json"
   call enqueue < <(task c2)
   [[ "$RC" == 1 && "$ERR" == *"(done)"* ]] && ok "$T id уже в done/ → 1" || bad "$T done: rc=$RC $ERR"
+  task c3 >"$QD/failed/001-c3.json"
+  call enqueue < <(task c3)
+  [[ "$RC" == 1 && "$ERR" == *"(failed)"* && -z "$(qfiles)" ]] && ok "$T id уже в failed/ → 1 (повернення — requeue)" || bad "$T failed: rc=$RC $ERR"
+  task c4 >"$QD/running/001-c4.json"
+  call enqueue < <(task c4)
+  [[ "$RC" == 1 && "$ERR" == *"(running)"* && -z "$(qfiles)" ]] && ok "$T id уже в running/ → 1" || bad "$T running: rc=$RC $ERR"
   teardown
 
   # 6. --urgent: в urgent/, лише одна одночасно.
@@ -197,6 +213,45 @@ run_suite() { # run_suite <local|ssh>
   [[ "$RC" == 1 && "$ERR" == *"виконується"* ]] && ok "$T невідкладна, поки інша виконується → 1" || bad "$T urgent у running: rc=$RC $ERR"
   call enqueue < <(task p1)
   [[ "$RC" == 0 ]] && ok "$T планова, поки йде невідкладна → 0" || bad "$T планова поруч з urgent: rc=$RC $ERR"
+  teardown
+
+  # 6b. Гонка (рецензія Flash, PR #272): дві одночасні постановки — дві невідкладні
+  # або той самий id — проходять перевірку по черзі під enqueue.lock. Без lock'а обидві
+  # бачили б порожньо й обидві писали б. A8_ENQUEUE_HOLD_S тримає першу між
+  # перевірками й записом, щоб друга гарантовано прийшла посередині.
+  setup
+  race() { # race <файл задачі> <аргумент enqueue або ""> <вихід>
+    if [[ "$MODE" == local ]]; then
+      A8_ENQUEUE_HOLD_S=1 "$BIN/a8-queue" enqueue $2 <"$1" >"$3.out" 2>&1
+    else
+      SSH_ORIGINAL_COMMAND="enqueue $2" A8_ENQUEUE_HOLD_S=1 "$BIN/a8-ctl" <"$1" >"$3.out" 2>&1
+    fi
+    echo $? >"$3.rc"
+  }
+  task g1 >"$ROOT/g1.json"
+  task g2 >"$ROOT/g2.json"
+  race "$ROOT/g1.json" --urgent "$ROOT/r1" &
+  race "$ROOT/g2.json" --urgent "$ROOT/r2" &
+  wait
+  rcs="$(cat "$ROOT/r1.rc" "$ROOT/r2.rc" | sort | tr '\n' ' ')"
+  nu="$(find "$QD/urgent" -maxdepth 1 -name '*.json' | wc -l)"
+  [[ "$rcs" == "0 1 " && "$nu" == 1 ]] && ok "$T дві одночасні --urgent → одна прийнята, друга 1" ||
+    bad "$T гонка urgent: rc=[$rcs] у urgent/ $nu; $(cat "$ROOT/r1.out" "$ROOT/r2.out")"
+  # Котра з двох виграла — недетерміновано: беремо id тієї, що лежить в urgent/.
+  task "$(jq -r .id "$QD"/urgent/*.json 2>/dev/null)" >"$ROOT/gw.json"
+  race "$ROOT/gw.json" "" "$ROOT/r3" &
+  race "$ROOT/gw.json" "" "$ROOT/r4" &
+  wait
+  rcs="$(cat "$ROOT/r3.rc" "$ROOT/r4.rc" | sort | tr '\n' ' ')"
+  [[ "$rcs" == "1 1 " && -z "$(qfiles)" ]] && ok "$T той самий id (уже в urgent/) двічі одночасно → обидві 1" ||
+    bad "$T гонка того самого id: rc=[$rcs] $(qfiles)"
+  task g3 >"$ROOT/g3.json"
+  race "$ROOT/g3.json" "" "$ROOT/r5" &
+  race "$ROOT/g3.json" "" "$ROOT/r6" &
+  wait
+  rcs="$(cat "$ROOT/r5.rc" "$ROOT/r6.rc" | sort | tr '\n' ' ')"
+  [[ "$rcs" == "0 1 " && "$(qfiles | grep -c .)" == 1 ]] && ok "$T новий id двічі одночасно → один файл, друга 1" ||
+    bad "$T гонка нового id: rc=[$rcs] $(qfiles)"
   teardown
 
   # 7. pause / resume: подія лише при зміні стану.
@@ -259,11 +314,19 @@ run_ssh_only() {
     fi
   done
   [[ ! -e "$ROOT/pwned" ]] && ok "[ssh] метасимволи, оболонка, невідомі дієслова → 126, нічого не виконано" || bad "[ssh] щось виконалось"
-  # requeue ../../etc проходить алфавіт, тож це a8-queue/a8-requeue — 1 чи 2; решта — 126.
+  # Усі 15 відхиляє сам a8-ctl (126): `/`, лапки й метасимволи — поза алфавітом,
+  # `_denied` і `bash` — не з п'яти дієслів.
   n_denied="$(grep -c '"verb":"denied"' "$LOGS/ctl.log" 2>/dev/null || true)"
   ((n_denied >= 13)) && ok "[ssh] кожна відмова a8-ctl записана в ctl.log (verb=denied, via=ssh): $n_denied" ||
     bad "[ssh] відмов у ctl.log: ${n_denied:-0}"
   [[ "$(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .via | sort -u)" == ssh ]] && ok "[ssh] відмови мають via=ssh" || bad "[ssh] via відмов"
+  [[ "$(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .rc | sort -u)" == 126 ]] && ok "[ssh] відмови записані з rc=126" ||
+    bad "[ssh] rc відмов: $(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .rc | sort -u | tr '\n' ' ')"
+  # `..` без слеша проходить алфавіт a8-ctl — тоді відмовляє вже a8-requeue
+  # (id задачі не може бути `..`), і це код 2, а не 126.
+  call_raw "requeue .."
+  [[ "$RC" == 2 && "$(ctl .verb)" == requeue && "$(ctl .rc)" == 2 && "$(ctl .via)" == ssh ]] &&
+    ok "[ssh] requeue .. → дійшло до a8-requeue, відмова 2, рядок у ctl.log" || bad "[ssh] requeue ..: rc=$RC $(lastctl) $ERR"
   teardown
 }
 
@@ -312,6 +375,7 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}" ]]; then
   mutate queue "журнал викликів не пишеться" 's/\ntrap ctl_log EXIT\n/\n/'
   mutate queue "via не з транспорту" 's/\[\[ "\$VIA" == ssh \]\] \|\| VIA=local/VIA=local/'
   mutate queue "requeue пропускає будь-які прапорці" 's/      -\*\) die 2 "requeue: невідомий прапорець/      -*) flags+=("\$a") ;; -NEVER) die 2 "requeue: невідомий прапорець/'
+  mutate queue "enqueue без lock" 's/  flock -w 30 7 \|\| die 3/  true || die 3/'
   mutate queue "розмір запису не обмежено" 's/\(\(size <= MAX_TASK_BYTES\)\) \|\| die 1/true || die 1/'
   mutate ctl "a8-ctl виконує команду оболонкою" 's/exec "\$QUEUE" "\$\{argv\[@\]\}"/exec bash -c "\$cmd"/'
   mutate ctl "a8-ctl пропускає метасимволи" 's/\[\[ "\$cmd" =~ \^\[A-Za-z0-9\._\\ -\]\+\$ \]\] \|\| deny/true || deny/'

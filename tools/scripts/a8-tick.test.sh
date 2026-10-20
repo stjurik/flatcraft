@@ -278,6 +278,19 @@ with_oracle() { # with_oracle <id> <текст оракула>
     '{id:$id, source:"human", origin:"direction", oracle:$o, prompt:("do "+$id)}'
 }
 tick() { bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1; }
+# collating_locale — локаль, у якій «001_a» сортується РАНІШЕ за «001-z» (у C — навпаки):
+# так видно, чи тік сортує в C, а не в локалі машини. Немає такої — сценарій 22d
+# і його мутант не ганяються, і це друкується (не «зелено»).
+collating_locale() {
+  local l
+  for l in en_US.UTF-8 en_US.utf8 uk_UA.UTF-8 de_DE.UTF-8; do
+    [[ "$(printf '001-z\n001_a\n' | LC_ALL="$l" sort 2>/dev/null | head -n 1)" == 001_a ]] && {
+      echo "$l"
+      return 0
+    }
+  done
+  return 1
+}
 tick_rc() {
   local rc=0
   bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1 || rc=$?
@@ -1057,6 +1070,21 @@ EOF
   [[ "$(jl .result)" == stopped && -e "$QD/urgent/urgent-20261020T000000Z-u.json" && -z "$(find "$QD" -maxdepth 1 -name '*.json')" ]] &&
     ok "зупинена невідкладна повертається в urgent/" || bad "повернення urgent: $(last); $(find "$QD" -name '*.json')"
   teardown
+
+  # 22d. Порядок черги не залежить від локалі машини (рецензія Flash, PR #272). До
+  # LC_ALL=C тік сортував у локалі A8: у en_US.UTF-8 `-` і `_` при порівнянні
+  # пропускаються, і «найстаріша» за назвою задача могла йти не першою.
+  if loc="$(collating_locale)"; then
+    setup
+    enqueue 001-z "$(valid z)"
+    enqueue 001_a "$(valid a)"
+    LC_ALL="$loc" tick
+    [[ "$(jl .task)" == z ]] && ok "у локалі $loc тік бере 001-z.json перед 001_a.json — порядок C" ||
+      bad "порядок за локаллю $loc: $(last)"
+    teardown
+  else
+    say "⚠ 22d НЕ ПЕРЕВІРЕНО: у системі немає локалі, де 001_a сортується раніше за 001-z (locale -a)"
+  fi
 }
 
 run_scenarios
@@ -1176,6 +1204,11 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "urgent/ не береться" 's/  find "\$Q\/urgent" -maxdepth 1 -type f -name \x27\*\.json\x27 \| LC_ALL=C sort\n//'
   mutate "пауза планового потоку ігнорується" 's/  \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] && return 0\n//'
   mutate "невідкладна повертається в плановий потік" 's/mv "\$claimed" "\$home\/"/mv "\$claimed" "\$Q\/"/'
+  if collating_locale >/dev/null; then
+    mutate "порядок планового потоку — у локалі машини" 's/(  find "\$Q" -maxdepth 1 -type f -name \x27\*\.json\x27 \| )LC_ALL=C sort\n\}/$1sort\n}/'
+  else
+    say "⚠ мутація «порядок планового потоку — у локалі машини» НЕ ганялась: немає відповідної локалі"
+  fi
   mutate "STOP людини затирається" 's/      set -o noclobber\n//'
   mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'

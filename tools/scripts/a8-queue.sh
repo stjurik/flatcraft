@@ -46,12 +46,14 @@
 # Змінні (точки підміни для тесту, як у тіку): A8_CONFIG (/etc/a8/a8.env),
 # A8_TICK_LOGIC (/usr/local/lib/a8/a8-tick-logic.sh), A8_REQUEUE
 # (/usr/local/lib/a8/a8-requeue.sh), A8_JOURNAL (/usr/local/bin/a8-journal),
-# A8_GUARD (/usr/local/bin/a8-guard), A8_CTL_VIA (local|ssh; ставить a8-ctl).
+# A8_GUARD (/usr/local/bin/a8-guard), A8_CTL_VIA (local|ssh; ставить a8-ctl),
+# A8_ENQUEUE_HOLD_S (лише тест гонки enqueue).
 # Через ssh-ключ із `restrict` sshd змінних середовища не приймає, тож підмінити
 # їх ззовні не можна.
 #
 # Виходи: 0 — зроблено; 1 — відмова по суті (невалідний запис, id уже є, SKIP у
-# requeue); 2 — помилка використання чи конфігу; 3 — зайнято (lock тіку).
+# requeue); 2 — помилка використання чи конфігу; 3 — зайнято (lock тіку для
+# requeue, enqueue.lock для enqueue).
 set -uo pipefail
 
 CONFIG="${A8_CONFIG:-/etc/a8/a8.env}"
@@ -235,6 +237,13 @@ do_enqueue() {
   id="$(jq -r '.id' "$tmp")"
   log_ids="$id"
 
+  # Перевірка «id ще немає, невідкладної ще немає» і запис — під одним lock'ом:
+  # інакше дві одночасні постановки обидві бачили б порожньо й обидві писали б
+  # (рецензія Flash, PR #272). Окремий файл, не tick.lock: тік тримає свій lock
+  # усю задачу, а постановка мусить іти й тоді.
+  { exec 7>"$A8_LOGS_DIR/enqueue.lock"; } 2>/dev/null || die 2 "не відкрито $A8_LOGS_DIR/enqueue.lock"
+  flock -w 30 7 || die 3 "інша постановка тримає enqueue.lock понад 30 с — нічого не змінено"
+
   where="$(find_id "$id")"
   [[ -z "$where" ]] || die 1 "id '$id' уже є в черзі ($where)"
   # Гілка лишається після done і після падіння з комітами: тік на ній упав би
@@ -260,6 +269,9 @@ do_enqueue() {
   ((urgent)) && name="urgent-$name"
   dest="$tmpdir/$name"
   [[ ! -e "$dest" ]] || die 1 "файл $name уже є"
+  # Лише для тесту гонки: затримка між перевірками й записом. Через ssh-ключ із
+  # `restrict` змінних середовища не передати.
+  [[ -z "${A8_ENQUEUE_HOLD_S:-}" ]] || sleep "$A8_ENQUEUE_HOLD_S"
   chmod 0644 "$tmp" || die 2 "chmod не вдався"
   mv -n -- "$tmp" "$dest" || die 2 "mv у чергу не вдався"
   [[ -e "$dest" && ! -e "$tmp" ]] || die 2 "файл $name не з'явився в черзі"
