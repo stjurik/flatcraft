@@ -69,6 +69,13 @@ flock -n 9 || {
 }
 
 logic() { bash "$LOGIC" "$@"; }
+# Кожне переміщення задачі між теками черги — під queue.lock, тим самим, під яким
+# a8-queue enqueue перевіряє «id ще немає, невідкладної немає» і пише, а
+# a8-requeue.sh повертає задачу. Інакше перевірка тек по черзі не була б знімком:
+# невідкладна, яку тік повертає з running/ в urgent/ посеред перевірки enqueue
+# --urgent, не знайшлася б ніде, і в urgent/ лягли б дві (контрприклад 3, PR #272).
+# Lock короткий — лише на mv; tick.lock тримається всю задачу, тому він окремий.
+qmv() { flock "$A8_LOGS_DIR/queue.lock" mv "$@"; }
 field() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$2"; }
 now() { date +%s; }
 
@@ -114,7 +121,7 @@ for orphan in "$Q"/running/*.json; do
     "попередній тік обірвався посеред задачі" \
     exit_class=failed detail=orphan origin="$(field origin "$orphan")" \
     oracle="$(field oracle "$orphan")" branch="ai/${oid}"
-  mv "$orphan" "$Q/failed/"
+  qmv "$orphan" "$Q/failed/"
 done
 
 # ─── 1. Запобіжники ────────────────────────────────────────────────────────
@@ -148,7 +155,7 @@ while IFS= read -r f; do
   # Fail closed: невалідний запис не виконується і не лишається в черзі, щоб
   # не відхилятись щотіку. Журнал називає САМЕ ТІ поля, що відхилили задачу.
   "$JOURNAL" reject "$(basename "$f" .json)" "${verdict#reject }"
-  mv "$f" "$Q/rejected/"
+  qmv "$f" "$Q/rejected/"
 done < <(candidates)
 
 [[ -n "$task" ]] || exit 0
@@ -231,7 +238,7 @@ claimed="$Q/running/$(basename "$task")"
 # Куди повертати задачу, яку не виконали (STOP, 401): туди ж, звідки взяли, —
 # невідкладна лишається невідкладною.
 home="$(dirname "$task")"
-mv "$task" "$claimed"
+qmv "$task" "$claimed"
 started="$(now)"
 
 finish() { # finish <результат> <клас> <деталь> <куди>
@@ -239,9 +246,9 @@ finish() { # finish <результат> <клас> <деталь> <куди>
     exit_class="$2" detail="$3" origin="$origin" oracle="$oracle" \
     oracle_rc="$oracle_rc" branch="$branch" worktree="$wt"
   if [[ "$4" == queue ]]; then
-    mv "$claimed" "$home/"
+    qmv "$claimed" "$home/"
   else
-    mv "$claimed" "$Q/$4/"
+    qmv "$claimed" "$Q/$4/"
   fi
 }
 

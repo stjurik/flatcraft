@@ -21,6 +21,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROLE="$HERE/../../infra/ansible/roles/a8/templates"
 QUEUE="${A8_QUEUE_UNDER_TEST:-$HERE/a8-queue.sh}"
 CTL="${A8_CTL_UNDER_TEST:-$HERE/a8-ctl.sh}"
+REQUEUE_SRC="${A8_REQUEUE_UNDER_TEST:-$HERE/a8-requeue.sh}"
 fail=0
 say() { [[ -z "${QUIET:-}" ]] && echo "$@"; return 0; }
 ok() { say "✓ $1"; }
@@ -75,7 +76,7 @@ ENV
   git clone -q "$ROOT/origin.git" "$REPO"
 
   export A8_CONFIG="$ETC/a8.env" A8_JOURNAL="$BIN/a8-journal" A8_GUARD="$BIN/a8-guard"
-  export A8_TICK_LOGIC="$HERE/a8-tick-logic.sh" A8_REQUEUE="$HERE/a8-requeue.sh"
+  export A8_TICK_LOGIC="$HERE/a8-tick-logic.sh" A8_REQUEUE="$REQUEUE_SRC"
   export A8_QUEUE_BIN="$BIN/a8-queue"
   unset A8_CTL_VIA SSH_ORIGINAL_COMMAND
 }
@@ -152,6 +153,18 @@ run_suite() { # run_suite <local|ssh>
     ok "$T той самий id удруге → 1, у черзі як і було один" || bad "$T дублікат: rc=$RC $(qfiles) $ERR"
   teardown
 
+  # 3b. Порядок у черзі — порядок постановки, навіть у межах однієї секунди
+  # (контрприклад 4, PR #272): з міткою в секундах a…-use обганяв би b…-setup за id.
+  setup
+  for k in 1 2 3; do
+    call enqueue < <(task "b$k-setup")
+    call enqueue < <(task "a$k-use")
+  done
+  order="$(qfiles | sed -E 's/^[0-9]+T[0-9]+Z-//; s/\.json$//' | tr '\n' ' ')"
+  [[ "$order" == "b1-setup a1-use b2-setup a2-use b3-setup a3-use " ]] &&
+    ok "$T шість постановок поспіль → тік візьме їх у порядку постановки, не за id" || bad "$T порядок постановки: [$order]"
+  teardown
+
   # 4. Невалідний запис — відмова з назвою поля, у черзі нічого.
   setup
   jq -nc '{id:"b1", source:"human", origin:"direction", prompt:"p"}' >"$ROOT/in.json"
@@ -216,7 +229,7 @@ run_suite() { # run_suite <local|ssh>
   teardown
 
   # 6b. Гонка (рецензія Flash, PR #272): дві одночасні постановки — дві невідкладні
-  # або той самий id — проходять перевірку по черзі під enqueue.lock. Без lock'а обидві
+  # або той самий id — проходять перевірку по черзі під queue.lock. Без lock'а обидві
   # бачили б порожньо й обидві писали б. A8_ENQUEUE_HOLD_S тримає першу між
   # перевірками й записом, щоб друга гарантовано прийшла посередині.
   setup
@@ -288,6 +301,80 @@ run_suite() { # run_suite <local|ssh>
     ok "$T requeue задачі з комітами → SKIP, гілка ціла" || bad "$T requeue з комітами: rc=$RC $OUT"
   teardown
 
+  # 8b. Невідкладна після падіння → requeue повертає її в urgent/ (контрприклад 1,
+  # PR #272): у корені вона стала б останньою з планових, на паузі не взялась би, а
+  # префікс urgent- у running/ блокував би нову невідкладну.
+  setup
+  task v1 >"$QD/failed/urgent-001-v1.json"
+  call pause </dev/null
+  call requeue v1 </dev/null
+  [[ "$RC" == 0 && -e "$QD/urgent/urgent-001-v1.json" && -z "$(qfiles)" && "$OUT" == *"→ urgent/"* ]] &&
+    ok "$T requeue невідкладної → в urgent/ (не в плановий потік), хоч потік на паузі" || bad "$T requeue urgent: rc=$RC $OUT $(find "$QD" -name '*.json')"
+  call enqueue --urgent < <(task v2)
+  [[ "$RC" == 1 && "$ERR" == *"лише одна"* ]] && ok "$T повернена невідкладна займає місце: нова --urgent → 1" || bad "$T --urgent після requeue: rc=$RC $ERR"
+  # Невідкладна вже чекає — друга через requeue не повертається, файл лишається в failed/.
+  task v3 >"$QD/failed/urgent-002-v3.json"
+  call requeue v3 </dev/null
+  [[ "$RC" == 1 && -e "$QD/failed/urgent-002-v3.json" && "$OUT" == *"одночасно лише одна"* ]] &&
+    ok "$T requeue невідкладної, коли в urgent/ уже чекає інша → SKIP, файл у failed/" || bad "$T друга urgent через requeue: rc=$RC $OUT"
+  teardown
+
+  # 8c. Невідкладна з'явилась, поки requeue чекав на queue.lock: перевірка під lock'ом
+  # бачить її, і друга невідкладна в urgent/ не лягає.
+  setup
+  task v4 >"$QD/failed/urgent-001-v4.json"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  holder=$!
+  sleep 0.5
+  (
+    call requeue v4 </dev/null
+    echo "$RC" >"$ROOT/v4.rc"
+  ) &
+  sleep 1.5
+  mkdir -p "$QD/urgent"
+  task v5 >"$QD/urgent/urgent-002-v5.json"
+  wait
+  [[ "$(cat "$ROOT/v4.rc")" == 1 && -e "$QD/failed/urgent-001-v4.json" && "$(find "$QD/urgent" -name '*.json' | wc -l)" == 1 ]] &&
+    ok "$T невідкладна з'явилась, поки requeue чекав queue.lock → SKIP, в urgent/ одна" ||
+    bad "$T перевірка під lock'ом: rc=$(cat "$ROOT/v4.rc") $(find "$QD" -name '*.json')"
+  teardown
+
+  # 8d. requeue переносить файл лише під queue.lock — тим самим, під яким enqueue
+  # перевіряє теки (контрприклад 3, PR #272).
+  setup
+  task x1 >"$QD/failed/001-x1.json"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  holder=$!
+  sleep 0.5
+  (
+    call requeue x1 </dev/null
+    echo "$RC" >"$ROOT/x1.rc"
+  ) &
+  sleep 1.5
+  early=1
+  [[ -e "$QD/failed/001-x1.json" ]] && early=0
+  wait
+  [[ "$early" == 0 && "$(cat "$ROOT/x1.rc")" == 0 && -e "$QD/001-x1.json" ]] &&
+    ok "$T requeue чекає queue.lock і лише тоді переносить задачу" || bad "$T requeue без lock'а: early=$early rc=$(cat "$ROOT/x1.rc") $(qfiles)"
+  teardown
+
+  # 8e. --reset-pause знімає облік падінь, а паузу після трьох падінь знімає людина
+  # (CLAUDE.md §0 п.7; контрприклад 2, PR #272): через a8-ctl — відмова, нічого не
+  # змінено; локально на A8 — як і було.
+  setup
+  task w1 >"$QD/failed/001-w1.json"
+  call requeue --reset-pause w1 </dev/null
+  if [[ "$MODE" == ssh ]]; then
+    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"знімає людина"* && "$(ctl .rc)" == 1 ]] &&
+      ok "$T requeue --reset-pause через a8-ctl → 1, нічого не змінено" || bad "$T --reset-pause через ssh: rc=$RC $ERR"
+  else
+    [[ "$RC" == 0 && -e "$QD/001-w1.json" ]] && ok "$T requeue --reset-pause локально → 0, задача в черзі" ||
+      bad "$T --reset-pause локально: rc=$RC $OUT $ERR"
+  fi
+  teardown
+
   # 9. Аргументи поза контрактом — відмова, нічого не змінено.
   setup
   call requeue --remote x </dev/null
@@ -304,11 +391,14 @@ run_suite() { # run_suite <local|ssh>
 run_ssh_only() {
   MODE=ssh
   setup
-  local c
+  local c before after miss=""
   for c in "" "   " "bash" "sh -i" "rm -rf /" "status; touch $ROOT/pwned" "status && touch $ROOT/pwned" \
     "status | touch $ROOT/pwned" "\$(touch $ROOT/pwned)" "\`touch $ROOT/pwned\`" "status > $ROOT/pwned" \
     "_denied x" "requeue ../../etc" $'status\ntouch '"$ROOT/pwned" "enqueue --urgent'"; do
+    before="$(grep -c '"verb":"denied"' "$LOGS/ctl.log" 2>/dev/null || true)"
     call_raw "$c"
+    after="$(grep -c '"verb":"denied"' "$LOGS/ctl.log" 2>/dev/null || true)"
+    ((${after:-0} == ${before:-0} + 1)) || miss+=" «${c//$'\n'/\\n}»"
     if [[ "$RC" != 126 || -e "$ROOT/pwned" ]]; then
       bad "[ssh] «${c//$'\n'/\\n}» → rc=$RC (треба 126), pwned=$([[ -e "$ROOT/pwned" ]] && echo так || echo ні)"
     fi
@@ -316,9 +406,11 @@ run_ssh_only() {
   [[ ! -e "$ROOT/pwned" ]] && ok "[ssh] метасимволи, оболонка, невідомі дієслова → 126, нічого не виконано" || bad "[ssh] щось виконалось"
   # Усі 15 відхиляє сам a8-ctl (126): `/`, лапки й метасимволи — поза алфавітом,
   # `_denied` і `bash` — не з п'яти дієслів.
+  # Кожна — рівно одним рядком (контрприклад 5, PR #272: поріг «≥ 13» пропускав
+  # відмови без запису).
   n_denied="$(grep -c '"verb":"denied"' "$LOGS/ctl.log" 2>/dev/null || true)"
-  ((n_denied >= 13)) && ok "[ssh] кожна відмова a8-ctl записана в ctl.log (verb=denied, via=ssh): $n_denied" ||
-    bad "[ssh] відмов у ctl.log: ${n_denied:-0}"
+  [[ -z "$miss" && "$n_denied" == 15 ]] && ok "[ssh] кожна з 15 відмов a8-ctl — рівно один рядок у ctl.log (verb=denied)" ||
+    bad "[ssh] відмов у ctl.log: ${n_denied:-0} з 15; без рядка:$miss"
   [[ "$(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .via | sort -u)" == ssh ]] && ok "[ssh] відмови мають via=ssh" || bad "[ssh] via відмов"
   [[ "$(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .rc | sort -u)" == 126 ]] && ok "[ssh] відмови записані з rc=126" ||
     bad "[ssh] rc відмов: $(grep '"verb":"denied"' "$LOGS/ctl.log" | jq -r .rc | sort -u | tr '\n' ' ')"
@@ -335,17 +427,21 @@ run_ssh_only
 
 # ─── Мутації ────────────────────────────────────────────────────────────────
 # Контроль перед мутаціями: на червоному базисі кожен мутант «вбитий» за визначенням.
-if [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
+if [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
   echo
   echo "✗ мутації НЕ ганялись: базовий набір червоний (див. ✗ вище)."
-elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}" ]]; then
+elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   MUTDIR="$(mktemp -d)"
   trap 'rm -rf "$MUTDIR"' EXIT
   n=0
-  mutate() { # mutate <queue|ctl> <назва> <perl-вираз>
+  mutate() { # mutate <queue|ctl|requeue> <назва> <perl-вираз>
     n=$((n + 1))
     local src var m="$MUTDIR/$n.sh"
-    if [[ "$1" == queue ]]; then src="$QUEUE" var=A8_QUEUE_UNDER_TEST; else src="$CTL" var=A8_CTL_UNDER_TEST; fi
+    case "$1" in
+      queue) src="$QUEUE" var=A8_QUEUE_UNDER_TEST ;;
+      ctl) src="$CTL" var=A8_CTL_UNDER_TEST ;;
+      requeue) src="$REQUEUE_SRC" var=A8_REQUEUE_UNDER_TEST ;;
+    esac
     echo "$2" >"$MUTDIR/$n.name"
     perl -0pe "$3" "$src" >"$m"
     if cmp -s "$m" "$src"; then
@@ -377,6 +473,12 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}" ]]; then
   mutate queue "requeue пропускає будь-які прапорці" 's/      -\*\) die 2 "requeue: невідомий прапорець/      -*) flags+=("\$a") ;; -NEVER) die 2 "requeue: невідомий прапорець/'
   mutate queue "enqueue без lock" 's/  flock -w 30 7 \|\| die 3/  true || die 3/'
   mutate queue "розмір запису не обмежено" 's/\(\(size <= MAX_TASK_BYTES\)\) \|\| die 1/true || die 1/'
+  mutate queue "--reset-pause через a8-ctl дозволено" 's/        \[\[ "\$VIA" != ssh \]\] \|\|\n          die 1/        true ||\n          die 1/'
+  mutate queue "мітка постановки в секундах" 's/%H%M%S%NZ/%H%M%SZ/'
+  mutate requeue "requeue повертає невідкладну в плановий потік" 's/  \[\[ "\$\(basename "\$taskfile"\)" == urgent-\* \]\] && destdir="\$URGENT"\n//'
+  mutate requeue "requeue кладе другу невідкладну" 's/  if \[\[ "\$destdir" == "\$URGENT" \]\] && compgen -G "\$URGENT\/\*\.json" >\/dev\/null; then\n    skip "невідкладна, а/  if false; then\n    skip "невідкладна, а/'
+  mutate requeue "requeue не перевіряє urgent/ під lock'ом" 's/  if \[\[ "\$destdir" == "\$URGENT" \]\] && compgen -G "\$URGENT\/\*\.json" >\/dev\/null; then\n    exec 8>&-/  if false; then\n    exec 8>&-/'
+  mutate requeue "requeue переносить без queue.lock" 's/ \|\| ! flock -w 30 8; then/; then/'
   mutate ctl "a8-ctl виконує команду оболонкою" 's/exec "\$QUEUE" "\$\{argv\[@\]\}"/exec bash -c "\$cmd"/'
   mutate ctl "a8-ctl пропускає метасимволи" 's/\[\[ "\$cmd" =~ \^\[A-Za-z0-9\._\\ -\]\+\$ \]\] \|\| deny/true || deny/'
   mutate ctl "a8-ctl пропускає будь-яке дієслово" 's/  status \| enqueue \| requeue \| pause \| resume\) ;;\n  \*\) deny/  *) ;;\n  NEVER) deny/'

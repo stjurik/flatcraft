@@ -1071,6 +1071,25 @@ EOF
     ok "зупинена невідкладна повертається в urgent/" || bad "повернення urgent: $(last); $(find "$QD" -name '*.json')"
   teardown
 
+  # 22e. Тік бере задачу (і переносить її далі) лише під queue.lock — тим самим, під
+  # яким a8-queue enqueue перевіряє теки (контрприклад 3, PR #272).
+  setup
+  enqueue 001-a "$(valid a)"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  qholder=$!
+  sleep 0.5
+  tick &
+  tpid=$!
+  sleep 1.5
+  early=1
+  [[ -e "$QD/001-a.json" ]] && early=0
+  wait "$tpid"
+  wait "$qholder"
+  [[ "$early" == 0 && "$(jl .task)" == a ]] && ok "тік чекає queue.lock і лише тоді бере задачу" ||
+    bad "тік без queue.lock: early=$early $(last)"
+  teardown
+
   # 22d. Порядок черги не залежить від локалі машини (рецензія Flash, PR #272). До
   # LC_ALL=C тік сортував у локалі A8: у en_US.UTF-8 `-` і `_` при порівнянні
   # пропускаються, і «найстаріша» за назвою задача могла йти не першою.
@@ -1201,6 +1220,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
   mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
   # Невідкладні й пауза планового потоку (сценарії 22).
+  mutate "тік переносить задачі без queue.lock" 's/qmv\(\) \{ flock "\$A8_LOGS_DIR\/queue.lock" mv "\$@"; \}/qmv() { mv "\$@"; }/'
   mutate "urgent/ не береться" 's/  find "\$Q\/urgent" -maxdepth 1 -type f -name \x27\*\.json\x27 \| LC_ALL=C sort\n//'
   mutate "пауза планового потоку ігнорується" 's/  \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] && return 0\n//'
   mutate "невідкладна повертається в плановий потік" 's/mv "\$claimed" "\$home\/"/mv "\$claimed" "\$Q\/"/'
