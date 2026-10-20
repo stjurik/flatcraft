@@ -133,3 +133,11 @@ a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only
 # реалізовані й не покриті тестом, демон приймає лише human.
 a8_sources_allowed: human
 a8_push_ssh_url: "git@github.com:stjurik/flatcraft.git"
+
+# ─── Ключ оркестратора для a8-ctl (#231, #262) ─────────────────────────────
+# Публічний ключ T470 (рядок з ~/.ssh/<ключ>.pub: `ssh-ed25519 AAAA… коментар`).
+# Роль кладе його в authorized_keys агента ЛИШЕ з `restrict,command="/usr/local/bin/a8-ctl"`:
+# через цей ключ виконується тільки a8-ctl, без pty і без forwarding. Ключ
+# публічний — йому можна бути в git. Порожньо — роль ключа не ставить (дефолт:
+# новий ключ — рішення yurii, клас A).
+a8_ctl_pubkey: ""

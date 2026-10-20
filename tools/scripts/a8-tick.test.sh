@@ -1017,6 +1017,46 @@ EOF
   [[ "$(cat "$ROOT/STOP" 2>/dev/null)" == "причина людини" && "$(jl .event)" == env_broken ]] &&
     ok "STOP людини під час inspect не затерто" || bad "STOP затерто: $(cat "$ROOT/STOP" 2>/dev/null)"
   teardown
+
+  # 22a. Невідкладна (urgent/, a8-queue enqueue --urgent) береться ПЕРШОЮ, навіть
+  # коли в плановому потоці є старіша задача (рішення yurii 2026-10-19, #262).
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  tick
+  [[ "$(jl .task)" == u && -e "$QD/001-a.json" && -e "$QD/done/urgent-20261020T000000Z-u.json" ]] &&
+    ok "urgent/ береться першою, планова 001-a чекає" || bad "urgent першою: $(last); $(find "$QD" -name '*.json')"
+  teardown
+
+  # 22b. Плановий потік на паузі (a8-queue pause): планову не беремо, невідкладну —
+  # так. Тік на паузі мовчить: подія щотіку витісняла б записи прогонів (#231).
+  setup
+  enqueue 001-a "$(valid a)"
+  date -u +%FT%TZ >"$LOGS/planned-paused"
+  tick
+  [[ -e "$QD/001-a.json" && ! -s "$LOGS/runs.log" && ! -e "$LOGS/runner-calls" ]] &&
+    ok "плановий потік на паузі → планову не взято, обгортку не запущено, runs.log порожній" ||
+    bad "пауза планового: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  tick
+  [[ "$(jl .task)" == u && "$(jl .result)" == no-credential && -e "$QD/001-a.json" ]] &&
+    ok "на паузі планового потоку невідкладна виконується, планова чекає" || bad "urgent на паузі: $(last)"
+  rm -f "$LOGS/planned-paused"
+  tick
+  [[ "$(jl .task)" == a ]] && ok "після resume планова виконується" || bad "після resume: $(last)"
+  teardown
+
+  # 22c. Невідкладну, яку не виконали (STOP на залежностях), тік повертає в urgent/,
+  # а не в плановий потік — інакше вона стала б у хвіст і на паузі не взялась би.
+  setup
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  STOP_DURING=pnpm tick
+  [[ "$(jl .result)" == stopped && -e "$QD/urgent/urgent-20261020T000000Z-u.json" && -z "$(find "$QD" -maxdepth 1 -name '*.json')" ]] &&
+    ok "зупинена невідкладна повертається в urgent/" || bad "повернення urgent: $(last); $(find "$QD" -name '*.json')"
+  teardown
 }
 
 run_scenarios
@@ -1132,6 +1172,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "серія env_broken не скидається" 's/if \[\[ -e "\$streak_file" \]\] && image_probe; then\n  rm -f "\$streak_file"\nfi\n//'
   mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
   mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
+  # Невідкладні й пауза планового потоку (сценарії 22).
+  mutate "urgent/ не береться" 's/  find "\$Q\/urgent" -maxdepth 1 -type f -name \x27\*\.json\x27 \| LC_ALL=C sort\n//'
+  mutate "пауза планового потоку ігнорується" 's/  \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] && return 0\n//'
+  mutate "невідкладна повертається в плановий потік" 's/mv "\$claimed" "\$home\/"/mv "\$claimed" "\$Q\/"/'
   mutate "STOP людини затирається" 's/      set -o noclobber\n//'
   mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'

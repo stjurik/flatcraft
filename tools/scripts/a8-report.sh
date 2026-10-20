@@ -130,7 +130,7 @@ emit "хвіст last-results:"
 emit "$(remote 'sudo -u agent tail -6 /home/agent/agent-logs/last-results 2>/dev/null || echo "(немає)"')"
 
 section "Черга"
-emit "$(remote 'sudo -u agent ls -la /home/agent/agent-queue/ /home/agent/agent-queue/running/ /home/agent/agent-queue/done/ /home/agent/agent-queue/failed/ /home/agent/agent-queue/rejected/ 2>&1')"
+emit "$(remote 'sudo -u agent ls -la /home/agent/agent-queue/ /home/agent/agent-queue/urgent/ /home/agent/agent-queue/running/ /home/agent/agent-queue/done/ /home/agent/agent-queue/failed/ /home/agent/agent-queue/rejected/ 2>&1')"
 
 section "Worktree і диск"
 # Worktree після успішної задачі НЕ прибираються — кожен несе node_modules і
