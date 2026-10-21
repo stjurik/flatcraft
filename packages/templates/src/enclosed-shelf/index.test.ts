@@ -38,3 +38,53 @@ describe("enclosedShelfDefinition — summary (testId enclosed-shelf-summary)", 
     );
   });
 });
+
+describe("enclosedShelfDefinition — validators (issue #237 п.2, render-gate ADR-026)", () => {
+  const T = 2;
+  const runValidators = (params: (typeof enclosedShelfDefinition)["defaults"], thicknessMm = T) =>
+    enclosedShelfDefinition.validators.flatMap((v) => v(params, thicknessMm));
+
+  it("дефолтні параметри → []", () => {
+    expect(enclosedShelfDefinition.validators.length).toBeGreaterThan(0);
+    expect(runValidators(enclosedShelfDefinition.defaults)).toEqual([]);
+  });
+
+  it("width_mm: 50 (< min 300) → issue з field width_mm", () => {
+    const issues = runValidators({ ...enclosedShelfDefinition.defaults, width_mm: 50 });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((i) => i.field === "width_mm")).toBe(true);
+  });
+
+  it("depth_mm: 20 (< min 100) → issue з field depth_mm", () => {
+    const issues = runValidators({ ...enclosedShelfDefinition.defaults, depth_mm: 20 });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.some((i) => i.field === "depth_mm")).toBe(true);
+  });
+
+  it("bend_angle_deg: 45 (literal 90) → issue з field bend_angle_deg", () => {
+    const issues = runValidators({
+      ...enclosedShelfDefinition.defaults,
+      bend_angle_deg: 45 as unknown as 90,
+    });
+    expect(issues.some((i) => i.field === "bend_angle_deg")).toBe(true);
+  });
+
+  it("stiffening_rib.height_mm: 2 (< min 5) → issue з field stiffening_rib.height_mm", () => {
+    const issues = runValidators({
+      ...enclosedShelfDefinition.defaults,
+      stiffening_rib: { height_mm: 2 },
+    });
+    expect(issues.some((i) => i.field === "stiffening_rib.height_mm")).toBe(true);
+  });
+
+  it("товщина 1.5 (у матриці) на дефолтах → []", () => {
+    expect(runValidators(enclosedShelfDefinition.defaults, 1.5)).toEqual([]);
+  });
+
+  it("товщина 0 і 999 (поза матрицею) → issue з field thickness_mm", () => {
+    for (const thicknessMm of [0, 999]) {
+      const issues = runValidators(enclosedShelfDefinition.defaults, thicknessMm);
+      expect(issues.some((i) => i.field === "thickness_mm")).toBe(true);
+    }
+  });
+});

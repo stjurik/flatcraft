@@ -16,22 +16,70 @@
  * `EnclosedShelfParametersSchema.omit({ bends: true, side_perforation: true,
  * stiffening_rib: true })` у видаленому `enclosed-shelf-editor.tsx`.
  *
- * `validators: []` — на відміну від l_bracket/z_bracket/wall_shelf/
- * corner_angle/perforated_panel, `validateProfile` НЕ підтримує
- * `templateSlug: "enclosed_shelf"` (нема запису у `ProfileValidationInput`
- * union, `packages/cad-engine/src/validators/profile.ts`). Це не прогалина
- * цієї міграції — те саме задокументоване рішення вже лежить у
- * `export-gate.ts` (`case "enclosed_shelf": return []` — "profile-валідатор
- * для cross-розгортки поки не моделюється, Zod-min ranges відсіюють
- * невалідне ще на API") і в `template-studio.tsx` (`SLUGS_WITH_PROFILE` не
- * містить `enclosed_shelf`). CLAUDE.md §7 забороняє чіпати render-gate
- * `validateProfile` цією задачею — тож `[]` тут, а не новий case.
+ * `validators` (issue #237 п.2, render-gate ADR-026): на відміну від
+ * l_bracket/z_bracket/wall_shelf/corner_angle/perforated_panel,
+ * `validateProfile` НЕ підтримує `templateSlug: "enclosed_shelf"` (нема
+ * запису у `ProfileValidationInput` union,
+ * `packages/cad-engine/src/validators/profile.ts`) — те саме задокументоване
+ * рішення вже лежить у `export-gate.ts` (`case "enclosed_shelf": return []`)
+ * і в `template-studio.tsx` (`SLUGS_WITH_PROFILE` не містить
+ * `enclosed_shelf`). CLAUDE.md §7 забороняє чіпати render-gate
+ * `validateProfile` цією задачею — тож тут НЕ profile-валідатор, а два інші,
+ * що НЕ потребують cross-розгортки:
+ *   - `schemaValidator` — Zod `.safeParse` проти `EnclosedShelfParametersSchema`
+ *     (діапазони width_mm/depth_mm/stiffening_rib.height_mm, literal
+ *     bend_angle_deg) — те, що раніше відсіювалось лише на API/сервері, render-gate
+ *     тепер ловить ДО рендера сцени (студія не мала показувати 3D на
+ *     width_mm=50 — сервер усе одно заблокував би експорт, UI розходився);
+ *   - `thicknessSupportedValidator` — товщина має рядок у
+ *     `bakedSpec.capability_matrix` (лише наявність `thickness_mm`, БЕЗ пари з
+ *     радіусом — студія не має бути суворішою за `export-gate.ts`, де
+ *     bend-матрична перевірка для `enclosed_shelf` теж не чіпається цією
+ *     задачею).
  */
+import { bakedSpec } from "@flatcraft/cad-engine";
 import { ENCLOSED_SHELF_DEFAULT_PARAMETERS, EnclosedShelfParametersSchema } from "@flatcraft/types";
 import type { EnclosedShelfParameters } from "@flatcraft/types";
 import type { z } from "zod";
 
-import type { TemplateDefinition } from "../definition.js";
+import type { ProfileValidator, TemplateDefinition } from "../definition.js";
+
+/**
+ * Zod-валідатор поверх повної `EnclosedShelfParametersSchema` (діапазони,
+ * literal `bend_angle_deg: 90`) — `ProblemError.field` = `issue.path.join(".")`
+ * (без префіксів, напр. `stiffening_rib.height_mm`), бо AutoForm мапить
+ * помилки за точним ключем поля (`registry-template-editor.tsx`).
+ */
+const schemaValidator: ProfileValidator<EnclosedShelfParameters> = (params) => {
+  const result = EnclosedShelfParametersSchema.safeParse(params);
+  if (result.success) return [];
+  return result.error.issues.map((issue) => ({
+    field: issue.path.join("."),
+    code: "INVALID_PARAMETER",
+    message: issue.message,
+  }));
+};
+
+/**
+ * Товщина має рядок у bend-matrix — лише наявність `thickness_mm`, БЕЗ пари з
+ * радіусом (та перевірка лишається серверу, `validateExportBends`/
+ * `export-gate.ts`, щоб студія не стала суворішою за експорт).
+ */
+const thicknessSupportedValidator: ProfileValidator<EnclosedShelfParameters> = (
+  _params,
+  thicknessMm,
+) => {
+  const supported = bakedSpec.capability_matrix.some((row) => row.thickness_mm === thicknessMm);
+  if (supported) return [];
+  return [
+    {
+      field: "thickness_mm",
+      code: "THICKNESS_NOT_SUPPORTED",
+      value: thicknessMm,
+      message: `Товщина ${thicknessMm} мм не підтримується верстатом.`,
+    },
+  ];
+};
 
 /** Summary — паритет з наявним `enclosed-shelf-editor.tsx` (testId `enclosed-shelf-summary`). */
 function shelfSummary(p: EnclosedShelfParameters): string {
@@ -66,6 +114,6 @@ export const enclosedShelfDefinition: TemplateDefinition<EnclosedShelfParameters
     visibleFields: VISIBLE_FIELDS,
     thumbSlug: "enclosed_shelf",
   },
-  validators: [],
+  validators: [schemaValidator, thicknessSupportedValidator],
   capabilities: ["bends"],
 };
