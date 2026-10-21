@@ -101,6 +101,44 @@ class ExportRequest(BaseModel):
     material_code: str
 
 
+_BUILD_PARAMS_BY_SLUG: dict[TemplateSlug, type[BaseModel]] = {
+    "l_bracket": LBracketBuildParameters,
+    "z_bracket": ZBracketBuildParameters,
+    "corner_angle": CornerAngleBuildParameters,
+    "wall_shelf": WallShelfBuildParameters,
+    "perforated_panel": PerforatedPanelBuildParameters,
+    "enclosed_shelf": EnclosedShelfBuildParameters,
+}
+
+
+def _params_with_defaults(
+    slug: TemplateSlug, parameters: dict[str, Any], thickness_mm: float
+) -> dict[str, Any]:
+    """Issue #257 п.1: доповнює сирі `parameters` Pydantic-дефолтами шаблону.
+
+    `validate/*.py`-гейти читають `parameters[...]` напряму: без цієї функції
+    відсутнє `bend_angle_deg` (wall_shelf) чи `bend_radius_mm`
+    (perforated_panel) робить їх сліпими (KeyError → []), а Pydantic у
+    `_generate_*` тим часом підставляє дефолт і будує деталь — гейт і
+    генерація бачать різні параметри. `req.thickness_mm` перемагає поле
+    `thickness_mm` у `parameters` (той самий порядок, що й у `_generate_*`).
+
+    Невалідні parameters (модель кидає) → повертаємо parameters як є: 422
+    дасть генерація (`_generate_*`), як і зараз. Поля моделі (з приведеними
+    типами й дефолтами, `thickness_mm` = req) мають пріоритет над сирими —
+    інакше рядок "80" з `parameters` повертався б у гейт, ламав арифметику
+    sheet-гейту (TypeError → []) і давав 200 замість 422 (контрприклади
+    Gemini 4 Argon до PR #273). Сирі поля, яких модель не знає (напр.
+    `holes` у l_bracket), зберігаються.
+    """
+    model_cls = _BUILD_PARAMS_BY_SLUG[slug]
+    try:
+        model = model_cls.model_validate({**parameters, "thickness_mm": thickness_mm})
+    except Exception:  # noqa: BLE001
+        return parameters
+    return {**parameters, **model.model_dump(by_alias=True), "thickness_mm": thickness_mm}
+
+
 def _permalink_url(export_id: UUID | None) -> str | None:
     """`{BASE_URL}/f/{export_id}` для QR у PDF, або None (fallback у export/pdf.py)."""
     if export_id is None:
@@ -330,17 +368,19 @@ def _build_app() -> FastAPI:
     def export(req: ExportRequest) -> ExportResponse:
         # ADR-019/026: parity-валідація профілю+гиба ДО будь-якої CAD-операції /
         # S3-запису. Остання лінія оборони — навіть якщо API-gate обійдено.
+        # Issue #257 п.1: гейти рахують параметри ПІСЛЯ Pydantic-дефолтів
+        # шаблону (bend_angle_deg/bend_radius_mm і т.п.), інакше вони сліпі до
+        # того, що з повними параметрами відхиляють.
+        gate_params = _params_with_defaults(req.template_slug, req.parameters, req.thickness_mm)
         errors = [
-            *validate_export_profile(req.template_slug, req.parameters, req.thickness_mm),
-            *validate_export(
-                req.template_slug, req.parameters, req.thickness_mm, req.material_code
-            ),
-            *validate_export_perforation(req.template_slug, req.parameters),
+            *validate_export_profile(req.template_slug, gate_params, req.thickness_mm),
+            *validate_export(req.template_slug, gate_params, req.thickness_mm, req.material_code),
+            *validate_export_perforation(req.template_slug, gate_params),
             *validate_export_sheet(
-                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+                req.template_slug, gate_params, req.thickness_mm, req.material_code
             ),
             *validate_export_holes(
-                req.template_slug, req.parameters, req.thickness_mm, req.material_code
+                req.template_slug, gate_params, req.thickness_mm, req.material_code
             ),
         ]
         if errors:
