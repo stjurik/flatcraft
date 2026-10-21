@@ -16,6 +16,7 @@ enclosed_shelf — отвори не прив'язані до конкретно
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -60,6 +61,10 @@ def validate_holes(
     матеріалів) — коефіцієнт невідомий, перевірку зробити неможливо, і це
     САМЕ ПО СОБІ помилка (паритет з TS `holes.material_coefficient_missing` →
     `HOLE_MATERIAL_COEFFICIENT_MISSING`), а не мовчазний пропуск.
+
+    Зіпсований отвір (немає `diameter_mm`/`distance_from_bend_mm`, не число,
+    NaN/нескінченність) пропускається — скасовує перевірку ЛИШЕ себе, решта
+    отворів перевіряється незалежно від порядку (issue #257 п.2).
     """
     if template_slug not in ("l_bracket", "z_bracket"):
         return []
@@ -91,8 +96,22 @@ def validate_holes(
 
         errors: list[HoleError] = []
         for idx, hole in enumerate(holes):
-            diameter_mm = float(hole["diameter_mm"])
-            center_distance_mm = float(hole["distance_from_bend_mm"])
+            try:
+                # bool — підклас int у Python (float(False) == 0.0): «false» у
+                # JSON — зіпсований отвір, а не 0 мм (контрприклади Argon, #273).
+                if isinstance(hole["diameter_mm"], bool) or isinstance(
+                    hole["distance_from_bend_mm"], bool
+                ):
+                    continue
+                diameter_mm = float(hole["diameter_mm"])
+                center_distance_mm = float(hole["distance_from_bend_mm"])
+            except (KeyError, TypeError, ValueError):
+                # Зіпсований отвір (немає поля чи не число) — пропускаємо
+                # ЛИШЕ його, решта отворів перевіряється незалежно від
+                # порядку (issue #257 п.2).
+                continue
+            if not (math.isfinite(diameter_mm) and math.isfinite(center_distance_mm)):
+                continue
             edge_distance_mm = center_distance_mm - diameter_mm / 2
             if edge_distance_mm < min_edge_mm - EDGE_DISTANCE_EPSILON_MM:
                 min_center_mm = min_edge_mm + diameter_mm / 2
