@@ -1054,7 +1054,8 @@ EOF
   date -u +%FT%TZ >"$LOGS/planned-paused"
   tick
   [[ -e "$QD/001-a.json" && ! -s "$LOGS/runs.log" && ! -e "$LOGS/runner-calls" ]] &&
-    ok "плановий потік на паузі → планову не взято, обгортку не запущено, runs.log порожній" ||
+    ! grep -q 'image inspect' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "плановий потік на паузі → планову не взято, docker і обгортку не чіпали, runs.log порожній" ||
     bad "пауза планового: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
   mkdir -p "$QD/urgent"
   valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
