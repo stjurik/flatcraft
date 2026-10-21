@@ -52,9 +52,19 @@
 # ефективним root (`sudo a8-queue requeue --reset-pause <id>…`), а не будь-який
 # локальний користувач — з 02.11 оркестратор теж працюватиме на A8 локально. Ознака —
 # $EUID (bash, лише для читання), а не SUDO_USER: змінну середовища підробить
-# кожен. Самі зміни черги й журналів root не робить: a8-requeue.sh іде від імені
-# власника теки черги (runuser), інакше в черзі й журналах лишились би файли root,
-# яких тік від agent не змінить.
+# кожен. Самі зміни черги й журналів root не робить: a8-requeue.sh і запис ctl.log
+# ідуть від імені власника теки (runuser), інакше в черзі й журналах лишились би
+# файли root, яких тік від agent не змінить, а root писав би в чужу теку, де agent
+# може підкласти симлінк (контрприклад Argon 1, PR #272). Від root дозволено ЛИШЕ
+# `requeue --reset-pause`: решту дієслів root виконав би від себе (файли root у
+# черзі, queue.lock, planned-paused; git у чужому репозиторії — «dubious
+# ownership»), тож для них — відмова (контрприклад Argon 3а).
+#
+# ЦЕ ПРАВИЛО ДЛЯ ВИКЛИКІВ a8-queue, А НЕ МЕХАНІЧНА МЕЖА. a8-requeue.sh, a8-guard і
+# last-results належать agent: хто працює від agent, може зняти облік падінь і без
+# a8-queue. Межу дає те, що оркестратор отримує лише a8-queue (через a8-ctl, а з
+# 02.11 — локально без прав agent), а не оболонку agent. Механічна межа потребує
+# стану, що належить root, — окреме рішення (контрприклад Argon 2, PR #272).
 #
 # LOCK СТАНУ ЧЕРГИ — $A8_LOGS_DIR/queue.lock. Під ним enqueue перевіряє «id ще
 # немає, невідкладної немає» і пише; під ним же тік і a8-requeue.sh роблять кожне
@@ -88,6 +98,9 @@ MAX_TASK_BYTES=65536
 verb="${1:-}"
 (($# > 0)) && shift
 args=("$@")
+# Від root поточна тека — тека адміністратора, недоступна власнику черги, від
+# імені якого далі йдуть runuser-виклики.
+((EUID != 0)) || cd /
 log_ids=""
 log_detail=""
 enq_tmp=""
@@ -101,12 +114,19 @@ ctl_log() {
   # того, як код виходу вже взято (окремий trap з `rm` підмінив би його кодом rm).
   [[ -z "$enq_tmp" ]] || rm -f -- "$enq_tmp"
   [[ -n "${A8_LOGS_DIR:-}" && -d "${A8_LOGS_DIR:-}" ]] || return "$rc"
-  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg via "$VIA" --arg verb "$verb" \
+  local line owner
+  line="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg via "$VIA" --arg verb "$verb" \
     --arg ids "$log_ids" --argjson rc "$rc" --arg detail "$log_detail" \
-    '{ts:$ts, via:$via, verb:$verb, ids:$ids, rc:$rc, detail:$detail}' \
-    >>"$A8_LOGS_DIR/ctl.log" 2>/dev/null
-  # Виклик від root (sudo) не лишає ctl.log з власником root.
-  ((EUID != 0)) || chown --reference="$A8_LOGS_DIR" "$A8_LOGS_DIR/ctl.log" 2>/dev/null
+    '{ts:$ts, via:$via, verb:$verb, ids:$ids, rc:$rc, detail:$detail}')"
+  if ((EUID != 0)); then
+    printf '%s\n' "$line" >>"$A8_LOGS_DIR/ctl.log" 2>/dev/null
+  else
+    # Від root — не писати самому в чужу теку (симлінк, власник root): дописує
+    # власник теки журналів. Тека root — запису немає зовсім.
+    owner="$(stat -c %U -- "$A8_LOGS_DIR" 2>/dev/null)"
+    [[ -z "$owner" || "$owner" == root ]] ||
+      printf '%s\n' "$line" | runuser -u "$owner" -- sh -c 'cat >>"$1"' sh "$A8_LOGS_DIR/ctl.log" 2>/dev/null
+  fi
   return "$rc"
 }
 trap ctl_log EXIT
@@ -134,6 +154,10 @@ source "$CONFIG" || die 2 "не вдалося прочитати $CONFIG"
 for v in A8_QUEUE_DIR A8_LOGS_DIR A8_REPO_DIR A8_KILL_SWITCH; do
   [[ -n "${!v:-}" ]] || die 2 "у $CONFIG немає $v"
 done
+# Від root — лише `requeue --reset-pause` (див. --reset-pause у заголовку).
+if ((EUID == 0)) && [[ "$verb" != requeue || " ${args[*]} " != *" --reset-pause "* ]]; then
+  die 1 "від root (sudo) — лише requeue --reset-pause; решта дієслів — від власника черги: sudo -u agent a8-queue …"
+fi
 # Режим OQ-34 — з конфігу, як у тіку: інакше enqueue прийняв би те, що тік відхилить.
 export A8_SOURCES_ALLOWED
 Q="$A8_QUEUE_DIR"
@@ -229,7 +253,7 @@ do_status() {
 
 # ─── enqueue ────────────────────────────────────────────────────────────────
 do_enqueue() {
-  local urgent=0 tmpdir tmp verdict id where dest name stamp size
+  local urgent=0 tmpdir tmp verdict id where dest name stamp size grc
   while (($# > 0)); do
     case "$1" in
       --urgent) urgent=1 ;;
@@ -270,9 +294,14 @@ do_enqueue() {
   [[ -z "$where" ]] || die 1 "id '$id' уже є в черзі ($where)"
   # Гілка лишається після done і після падіння з комітами: тік на ній упав би
   # «гілка вже існує» (a8-tick, крок 3) і записав би `failed`.
-  if git -C "$A8_REPO_DIR" show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null; then
-    die 1 "гілка ai/$id уже є в $A8_REPO_DIR — тік на ній упав би; новий id або a8-queue requeue"
-  fi
+  # Помилка git (не «гілки немає», а, скажімо, «dubious ownership») — не «вільно».
+  grc=0
+  git -C "$A8_REPO_DIR" show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null || grc=$?
+  case "$grc" in
+    0) die 1 "гілка ai/$id уже є в $A8_REPO_DIR — тік на ній упав би; новий id або a8-queue requeue" ;;
+    1) ;;
+    *) die 2 "git show-ref не вдався (код $grc) — не можу перевірити гілку ai/$id; у черзі нічого" ;;
+  esac
   if ((urgent)); then
     # Одночасно — лише одна невідкладна: і в urgent/, і та, що вже йде.
     if [[ "$(count_json "$URGENT")" != 0 ]]; then

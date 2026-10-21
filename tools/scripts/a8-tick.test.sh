@@ -238,6 +238,11 @@ if [[ "\$1" == image && "\$2" == inspect && "\${STOP_DURING:-}" == inspect ]] &&
   (( \$(grep -c 'image inspect' "$LOGS/docker-calls") >= 2 )); then
   echo "причина людини" >"$ROOT/STOP"
 fi
+# DURING_INSPECT_CMD: щось відбувається, поки тік пробує образ (крок 2a) — між
+# вибором кандидата і взяттям задачі (контрприклад Argon 5б, PR #272).
+if [[ "\$1" == image && "\$2" == inspect && -n "\${DURING_INSPECT_CMD:-}" ]]; then
+  bash -c "\$DURING_INSPECT_CMD"
+fi
 if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
   echo "Error response from daemon: No such image: \$3" >&2
   exit 1
@@ -1090,6 +1095,49 @@ EOF
     bad "тік без queue.lock: early=$early $(last)"
   teardown
 
+  # 22f. Відхилений запис іде в rejected/ теж лише під queue.lock.
+  setup
+  echo '{"id":"bad"}' >"$QD/001-bad.json"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  qholder=$!
+  sleep 0.5
+  tick &
+  tpid=$!
+  sleep 1.5
+  early=1
+  [[ -e "$QD/001-bad.json" ]] && early=0
+  wait "$tpid"
+  wait "$qholder"
+  [[ "$early" == 0 && -e "$QD/rejected/001-bad.json" ]] && ok "відхилений запис переноситься в rejected/ лише під queue.lock" ||
+    bad "rejected без queue.lock: early=$early $(find "$QD" -name '*.json')"
+  teardown
+
+  # 22g/22h. Між вибором кандидата і взяттям (проба образу) плановий потік
+  # поставили на паузу чи з'явилась невідкладна — планову не беремо, наступний тік
+  # вибирає заново (контрприклад Argon 5б, PR #272).
+  setup
+  enqueue 001-a "$(valid a)"
+  DURING_INSPECT_CMD="date -u +%FT%TZ >'$LOGS/planned-paused'" tick
+  [[ -e "$QD/001-a.json" && ! -s "$LOGS/runs.log" && ! -e "$LOGS/runner-calls" ]] &&
+    ok "пауза з'явилась перед взяттям → планову не взято, обгортку не запущено" ||
+    bad "пауза перед взяттям: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  rm -f "$LOGS/planned-paused"
+  tick
+  [[ "$(jl .task)" == a ]] && ok "після resume планова виконується" || bad "після resume (22g): $(last)"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir -p "$QD/urgent"
+  valid u >"$ROOT/u.json"
+  DURING_INSPECT_CMD="cp '$ROOT/u.json' '$QD/urgent/urgent-20261021T000000Z-u.json'" tick
+  [[ -e "$QD/001-a.json" && -e "$QD/urgent/urgent-20261021T000000Z-u.json" && ! -s "$LOGS/runs.log" ]] &&
+    ok "невідкладна з'явилась перед взяттям → планову не взято" ||
+    bad "urgent перед взяттям: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  tick
+  [[ "$(jl .task)" == u && -e "$QD/001-a.json" ]] && ok "наступний тік бере невідкладну, планова чекає" || bad "наступний тік (22h): $(last)"
+  teardown
+
   # 22d. Порядок черги не залежить від локалі машини (рецензія Flash, PR #272). До
   # LC_ALL=C тік сортував у локалі A8: у en_US.UTF-8 `-` і `_` при порівнянні
   # пропускаються, і «найстаріша» за назвою задача могла йти не першою.
@@ -1220,6 +1268,9 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
   mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
   # Невідкладні й пауза планового потоку (сценарії 22).
+  mutate "тік бере задачу без queue.lock" 's/exec 6>"\$A8_LOGS_DIR\/queue.lock"\nflock 6\n/exec 6>"\$A8_LOGS_DIR\/queue.lock"\n/'
+  mutate "тік бере планову, хоч з'явилась пауза" 's/  \{ \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] \|\| /  { false || /'
+  mutate "тік бере планову, хоч з'явилась невідкладна" 's/ \|\| compgen -G "\$Q\/urgent\/\*\.json" >\/dev\/null; \}; then/ || false; }; then/'
   mutate "тік переносить задачі без queue.lock" 's/qmv\(\) \{ flock "\$A8_LOGS_DIR\/queue.lock" mv "\$@"; \}/qmv() { mv "\$@"; }/'
   mutate "urgent/ не береться" 's/  find "\$Q\/urgent" -maxdepth 1 -type f -name \x27\*\.json\x27 \| LC_ALL=C sort\n//'
   mutate "пауза планового потоку ігнорується" 's/  \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] && return 0\n//'

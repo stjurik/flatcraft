@@ -279,6 +279,13 @@ inspect_worktrees() {
   return 0
 }
 
+# urgent_busy — невідкладна вже є: чекає в urgent/ або йде (running/urgent-*, з
+# будь-яким id). Те саме правило, що в a8-queue enqueue --urgent (контрприклад
+# Argon 5а, PR #272): одночасно лише одна.
+urgent_busy() {
+  compgen -G "$URGENT/*.json" >/dev/null || compgen -G "$Q/running/urgent-*.json" >/dev/null
+}
+
 # ─── Одна задача: 0 — OK/WOULD, 1 — SKIP ────────────────────────────────────
 # Викликається в умові `if`, тож set -e тут не діє: кожну команду перевіряємо явно.
 process_id() {
@@ -343,8 +350,8 @@ process_id() {
     skip "у черзі вже є файл ${destfile##*/} — перезапис затер би його"
     return 1
   fi
-  if [[ "$destdir" == "$URGENT" ]] && compgen -G "$URGENT/*.json" >/dev/null; then
-    skip "невідкладна, а в urgent/ уже чекає інша — одночасно лише одна; поверни, коли та піде"
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
+    skip "невідкладна, а інша вже чекає в urgent/ чи йде — одночасно лише одна; поверни, коли та піде"
     return 1
   fi
 
@@ -492,9 +499,9 @@ process_id() {
     skip "ЧАСТКОВО: queue.lock не взято за 30 с — файл задачі лишився в failed/"
     return 1
   fi
-  if [[ "$destdir" == "$URGENT" ]] && compgen -G "$URGENT/*.json" >/dev/null; then
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
     exec 8>&-
-    skip "ЧАСТКОВО: поки прибирали залишки, в urgent/ з'явилась інша невідкладна — файл задачі лишився в failed/"
+    skip "ЧАСТКОВО: поки прибирали залишки, з'явилась інша невідкладна — файл задачі лишився в failed/"
     return 1
   fi
   rc=0

@@ -238,7 +238,19 @@ claimed="$Q/running/$(basename "$task")"
 # Куди повертати задачу, яку не виконали (STOP, 401): туди ж, звідки взяли, —
 # невідкладна лишається невідкладною.
 home="$(dirname "$task")"
-qmv "$task" "$claimed"
+# Узяти — під queue.lock, з повторною перевіркою. Між вибором кандидата (крок 2)
+# і цим місцем — проба образу й читання полів, до хвилини. Якщо за цей час
+# плановий потік поставили на паузу чи в urgent/ з'явилась задача, планову не
+# беремо: наступний тік вибере заново (контрприклад Argon 5б, PR #272).
+exec 6>"$A8_LOGS_DIR/queue.lock"
+flock 6
+if [[ "$home" == "$Q" ]] &&
+  { [[ -e "$A8_LOGS_DIR/planned-paused" ]] || compgen -G "$Q/urgent/*.json" >/dev/null; }; then
+  exec 6>&-
+  exit 0
+fi
+mv "$task" "$claimed"
+exec 6>&-
 started="$(now)"
 
 finish() { # finish <результат> <клас> <деталь> <куди>
