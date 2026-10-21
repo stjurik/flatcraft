@@ -45,6 +45,25 @@ a8_ro_paths:
 a8_git_author_name: "hart agent"
 a8_git_author_email: "agent@hart.local"
 
+# ─── Смуга виконавця gemini (orchestrator-autonomy.md §8, PR-B #262) ────────
+# Задача з `executor: gemini` іде в agy, а не в claude. Модель за замовчуванням —
+# Gemini 3.8 Flash (ідентифікатор — orchestrator-autonomy.md §3.1); поле `model`
+# задачі її перекриває.
+a8_gemini_model: gemini-3.8-flash-high
+# Де на A8 лежить agy і його логін. ВІДОМО: `command -v agy` під agent →
+# /usr/local/bin/agy (вивід yurii, #233, 19.10); налаштування дозволів agy —
+# ~/.gemini/antigravity-cli/settings.json (install-agy-permissions.sh).
+# НЕ ПЕРЕВІРЕНО: чи agy — один самодостатній файл і чи вся автентифікація лежить
+# у ~/.gemini. Обидва питання закриває V23 (agy у контейнері відповідає) і вимір
+# у #78. Якщо agy тягне за собою теку з бібліотеками — її шлях сюди, у
+# a8_agy_extra_ro_paths: обгортка змонтує її лише для читання і лише для gemini.
+a8_agy_bin: /usr/local/bin/agy
+a8_agy_extra_ro_paths: []
+# Тека налаштувань і логіна agy на хості. У контейнер вона НЕ монтується:
+# тік робить її тимчасову копію на задачу, міняє в копії профіль дозволів на
+# «виконавець» і прибирає копію після агента (README, «Смуга виконавця»).
+a8_agy_config_dir: /home/agent/.gemini
+
 # ─── Прибирання docker (docker-prune.timer) ────────────────────────────────
 # Раніше — ручний юніт на A8 поза git (issue #117); 2026-10-11 він видалив образ
 # агента. Тепер юніт ставить роль, і prune пропускає образи з міткою
@@ -128,6 +147,7 @@ a8_task_timeout_s: 5400 # 90 хв на задачу; далі контейнер
 a8_oracle_timeout_s: 900 # 15 хв на прогін оракула
 a8_max_turns: 200 # як у tools/scripts/autorun.sh
 a8_default_model: sonnet # docs/15 §0: Opus — для проєктування, не для кожної задачі
+
 a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only: 600 agent
 # Режим (а) OQ-34: доки звужені набори дозволів для external/derived не
 # реалізовані й не покриті тестом, демон приймає лише human.
