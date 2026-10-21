@@ -461,9 +461,10 @@ function sheetErrorToProblem(e: ValidationError, dims: SheetDimensionsMm): Probl
  * early-return той самий код дублювався б двічі в `errors[]` (паритет з
  * Python `validate_sheet`, рядок «row is None → []»).
  *
- * Так само — матеріал поза групою рядка матриці для цієї товщини: →[]`
- * (issue #257 п.3). `validateExportBends` уже звітує `MATERIAL_NOT_ALLOWED`
- * для цього самого випадку; без early-return `validateSheet` нижче додав би
+ * Матеріал поза групою рядка матриці для цієї товщини (issue #257 п.3):
+ * `validateExportBends` уже звітує `MATERIAL_NOT_ALLOWED`, тож із результату
+ * `validateSheet` відкидаємо лише цей код (решта — зокрема перевищення габариту
+ * — лишається); інакше `validateSheet` нижче додав би
  * ТОЙ САМИЙ код удруге (власна перевірка групи у `sheet.ts`). Паритет —
  * Python `validate_sheet` (`validate/sheet.py`).
  */
@@ -472,8 +473,6 @@ export function validateExportSheet(body: ExportRequest, spec: BendMachineSpec):
   if (!dims) return [];
   const row = spec.capability_matrix.find((r) => r.thickness_mm === body.thickness_mm);
   if (!row) return [];
-  const group = spec.material_groups[row.group];
-  if (group && !group.members.includes(body.material_code)) return [];
   const result = validateSheet(
     {
       materialCode: body.material_code,
@@ -484,7 +483,12 @@ export function validateExportSheet(body: ExportRequest, spec: BendMachineSpec):
     spec,
   );
   if (result.valid) return [];
-  return result.errors.map((e) => sheetErrorToProblem(e, dims));
+  // Матеріал поза групою звітує validateExportBends (MATERIAL_NOT_ALLOWED) —
+  // тут відкидаємо лише його, а перевищення габариту лишається (#257 п.3;
+  // ранній return губив SHEET_EXCEEDS_MAX_LENGTH — контрприклади Argon до #273).
+  return result.errors
+    .filter((e) => e.code !== "sheet.material_not_in_group")
+    .map((e) => sheetErrorToProblem(e, dims));
 }
 
 interface HolesContext {

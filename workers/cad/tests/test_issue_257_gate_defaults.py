@@ -211,41 +211,102 @@ class TestHoleOrderIndependentOfBrokenEntry:
 
 class TestMaterialNotAllowedReportedOnce:
     """3: z_bracket t=10 stainless_304 (поза групою для цієї товщини) дає
-    РІВНО ОДИН MATERIAL_NOT_ALLOWED — sheet-гейт не дублює bend-гейт."""
+    РІВНО ОДИН MATERIAL_NOT_ALLOWED, а перевищення габариту НЕ губиться
+    (контрприклади Gemini 4 Argon до #273: ранній return придушував
+    SHEET_EXCEEDS_MAX_LENGTH). Розгортка 400+250+400 ≈ 1037.7 мм > 1000."""
 
-    def test_sheet_gate_не_додає_дубль(self) -> None:
-        params = {
-            "top_flange_mm": 60,
-            "bottom_flange_mm": 60,
-            "offset_mm": 40,
-            "bend_radius_mm": 5,
-            "bend_angle_deg": 90,
-            "width_mm": 100,
-        }
-        errors = validate_export_sheet("z_bracket", params, 10.0, "stainless_304")
-        assert not any(e["code"] == "MATERIAL_NOT_ALLOWED" for e in errors)
+    LONG = {
+        "top_flange_mm": 400,
+        "bottom_flange_mm": 400,
+        "offset_mm": 250,
+        "bend_radius_mm": 5,
+        "bend_angle_deg": 90,
+        "width_mm": 100,
+    }
 
-    def test_export_рівно_один_material_not_allowed(self, client: TestClient) -> None:
+    def test_sheet_gate_не_додає_дубль_і_звітує_габарит(self) -> None:
+        errors = validate_export_sheet("z_bracket", self.LONG, 10.0, "stainless_304")
+        codes = [e["code"] for e in errors]
+        assert "MATERIAL_NOT_ALLOWED" not in codes
+        assert "SHEET_EXCEEDS_MAX_LENGTH" in codes
+
+    def test_export_один_material_not_allowed_і_габарит(self, client: TestClient) -> None:
         res = client.post(
             "/export",
             json={
                 "template_slug": "z_bracket",
-                "parameters": {
-                    "top_flange_mm": 60,
-                    "bottom_flange_mm": 60,
-                    "offset_mm": 40,
-                    "bend_radius_mm": 5,
-                    "bend_angle_deg": 90,
-                    "width_mm": 100,
-                    "holes": [],
-                },
+                "parameters": {**self.LONG, "holes": []},
                 "thickness_mm": 10,
                 "material_code": "stainless_304",
             },
         )
         assert res.status_code == 422, res.text
-        detail = res.json()["detail"]
-        assert [e["code"] for e in detail].count("MATERIAL_NOT_ALLOWED") == 1
+        codes = [e["code"] for e in res.json()["detail"]]
+        assert codes.count("MATERIAL_NOT_ALLOWED") == 1
+        assert "SHEET_EXCEEDS_MAX_LENGTH" in codes
+
+
+class TestStringNumberInParameters:
+    """Контрприклади Argon до #273: число рядком у parameters (Pydantic приводить)
+    не має вимикати sheet-гейт."""
+
+    def test_wall_shelf_back_height_рядком_422(self, client: TestClient) -> None:
+        params = {
+            **WALL_SHELF_VALID_PARAMS,
+            "back_height_mm": "80",
+            "width_mm": 3000,
+            "bend_radius_mm": 5,
+        }
+        res = client.post(
+            "/export",
+            json={
+                "template_slug": "wall_shelf",
+                "parameters": params,
+                "thickness_mm": 8,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
+        assert any(e["code"] == "SHEET_EXCEEDS_MAX_LENGTH" for e in res.json()["detail"])
+
+
+class TestBrokenHoleAlone:
+    """Зіпсований отвір сам по собі — пропускається, а не рахується як 0 мм."""
+
+    @pytest.mark.parametrize(
+        "hole",
+        [
+            {
+                "leg": "A",
+                "distance_from_edge_mm": 20,
+                "distance_from_bend_mm": False,
+                "diameter_mm": 6,
+            },
+            {
+                "leg": "A",
+                "distance_from_edge_mm": 20,
+                "distance_from_bend_mm": 6.5,
+                "diameter_mm": False,
+            },
+            {
+                "leg": "A",
+                "distance_from_edge_mm": 20,
+                "distance_from_bend_mm": 30,
+                "diameter_mm": math.nan,
+            },
+            {
+                "leg": "A",
+                "distance_from_edge_mm": 20,
+                "distance_from_bend_mm": 30,
+                "diameter_mm": math.inf,
+            },
+        ],
+    )
+    def test_пропускається(self, hole: dict[str, object]) -> None:
+        errors = validate_holes(
+            "l_bracket", {"bend_radius_mm": 2.5, "holes": [hole]}, 2.0, "cold_rolled_steel"
+        )
+        assert errors == []
 
 
 class TestParamsWithDefaults:
@@ -260,8 +321,18 @@ class TestParamsWithDefaults:
         assert result["bend_angle_deg"] == 90
 
     def test_req_thickness_mm_перемагає_поле_в_parameters(self) -> None:
-        result = _params_with_defaults("wall_shelf", {**WALL_SHELF_VALID_PARAMS}, 8.0)
+        # Рецензія Flash до #273: без поля thickness_mm у parameters тест був порожнім.
+        result = _params_with_defaults(
+            "wall_shelf", {**WALL_SHELF_VALID_PARAMS, "thickness_mm": 99}, 8.0
+        )
         assert result["thickness_mm"] == 8.0
+
+    def test_поля_моделі_з_приведеними_типами_перемагають_сирі(self) -> None:
+        # Контрприклади Argon до #273: рядок "80" з parameters повертався в гейт.
+        result = _params_with_defaults(
+            "wall_shelf", {**WALL_SHELF_VALID_PARAMS, "back_height_mm": "80"}, 2.0
+        )
+        assert result["back_height_mm"] == 80.0
 
     def test_зберігає_сирі_поля_яких_немає_в_моделі(self) -> None:
         result = _params_with_defaults("l_bracket", VALID_PARAMS, 2.0)

@@ -124,16 +124,19 @@ def _params_with_defaults(
     `thickness_mm` у `parameters` (той самий порядок, що й у `_generate_*`).
 
     Невалідні parameters (модель кидає) → повертаємо parameters як є: 422
-    дасть генерація (`_generate_*`), як і зараз. Сирі поля, яких модель не
-    знає (напр. `holes` у l_bracket), зберігаються — `parameters` накладається
-    поверх дампу моделі.
+    дасть генерація (`_generate_*`), як і зараз. Поля моделі (з приведеними
+    типами й дефолтами, `thickness_mm` = req) мають пріоритет над сирими —
+    інакше рядок "80" з `parameters` повертався б у гейт, ламав арифметику
+    sheet-гейту (TypeError → []) і давав 200 замість 422 (контрприклади
+    Gemini 4 Argon до PR #273). Сирі поля, яких модель не знає (напр.
+    `holes` у l_bracket), зберігаються.
     """
     model_cls = _BUILD_PARAMS_BY_SLUG[slug]
     try:
         model = model_cls.model_validate({**parameters, "thickness_mm": thickness_mm})
     except Exception:  # noqa: BLE001
         return parameters
-    return {**model.model_dump(by_alias=True), **parameters}
+    return {**parameters, **model.model_dump(by_alias=True), "thickness_mm": thickness_mm}
 
 
 def _permalink_url(export_id: UUID | None) -> str | None:

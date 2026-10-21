@@ -97,6 +97,12 @@ def validate_holes(
         errors: list[HoleError] = []
         for idx, hole in enumerate(holes):
             try:
+                # bool — підклас int у Python (float(False) == 0.0): «false» у
+                # JSON — зіпсований отвір, а не 0 мм (контрприклади Argon, #273).
+                if isinstance(hole["diameter_mm"], bool) or isinstance(
+                    hole["distance_from_bend_mm"], bool
+                ):
+                    continue
                 diameter_mm = float(hole["diameter_mm"])
                 center_distance_mm = float(hole["distance_from_bend_mm"])
             except (KeyError, TypeError, ValueError):
