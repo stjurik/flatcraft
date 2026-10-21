@@ -361,19 +361,43 @@ run_suite() { # run_suite <local|ssh>
   teardown
 
   # 8e. --reset-pause знімає облік падінь, а паузу після трьох падінь знімає людина
-  # (CLAUDE.md §0 п.7; контрприклад 2, PR #272): через a8-ctl — відмова, нічого не
-  # змінено; локально на A8 — як і було.
+  # (CLAUDE.md §0 п.7; контрприклад 2, PR #272; рішення yurii 2026-10-21, «а»): лише
+  # адміністратор A8 через sudo. Через a8-ctl — відмова; локально без sudo — теж
+  # відмова (з 02.11 оркестратор працює на A8 локально). Нічого не змінено.
   setup
   task w1 >"$QD/failed/001-w1.json"
   call requeue --reset-pause w1 </dev/null
   if [[ "$MODE" == ssh ]]; then
-    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"знімає людина"* && "$(ctl .rc)" == 1 ]] &&
+    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"через a8-ctl заборонено"* && "$(ctl .rc)" == 1 ]] &&
       ok "$T requeue --reset-pause через a8-ctl → 1, нічого не змінено" || bad "$T --reset-pause через ssh: rc=$RC $ERR"
   else
-    [[ "$RC" == 0 && -e "$QD/001-w1.json" ]] && ok "$T requeue --reset-pause локально → 0, задача в черзі" ||
-      bad "$T --reset-pause локально: rc=$RC $OUT $ERR"
+    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"лише адміністратор"* && "$(ctl .rc)" == 1 ]] &&
+      ok "$T requeue --reset-pause локально без sudo → 1, нічого не змінено" || bad "$T --reset-pause без sudo: rc=$RC $OUT $ERR"
   fi
   teardown
+
+  # 8f. Адміністратор: `sudo a8-queue requeue --reset-pause` — задача повертається, а
+  # жодного файла root у черзі й журналах не лишається: a8-requeue.sh іде від імені
+  # власника черги. Потрібен sudo без пароля (на раннері GitHub є); немає — сказано
+  # вголос, а не «зелено».
+  if [[ "$MODE" == local ]]; then
+    if sudo -n true 2>/dev/null; then
+      setup
+      task w2 >"$QD/failed/001-w2.json"
+      RC=0
+      sudo -n env A8_CONFIG="$A8_CONFIG" A8_JOURNAL="$A8_JOURNAL" A8_GUARD="$A8_GUARD" \
+        A8_TICK_LOGIC="$A8_TICK_LOGIC" A8_REQUEUE="$A8_REQUEUE" \
+        "$BIN/a8-queue" requeue --reset-pause w2 </dev/null >"$ROOT/out" 2>"$ROOT/err" || RC=$?
+      rootfiles="$(sudo -n find "$ROOT" -user root 2>/dev/null)"
+      [[ "$RC" == 0 && -e "$QD/001-w2.json" && -z "$rootfiles" && "$(stat -c %U "$LOGS/ctl.log")" == "$(id -un)" ]] &&
+        ok "$T sudo a8-queue requeue --reset-pause → 0, задача в черзі, файлів root немає" ||
+        bad "$T --reset-pause через sudo: rc=$RC $(cat "$ROOT/out" "$ROOT/err"); файли root: [$rootfiles]"
+      sudo -n chown -R "$(id -un)" "$ROOT" 2>/dev/null
+      teardown
+    else
+      say "⚠ 8f НЕ ПЕРЕВІРЕНО: немає sudo без пароля — шлях адміністратора (sudo a8-queue requeue --reset-pause) не прогнано"
+    fi
+  fi
 
   # 9. Аргументи поза контрактом — відмова, нічого не змінено.
   setup
@@ -474,6 +498,10 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TES
   mutate queue "enqueue без lock" 's/  flock -w 30 7 \|\| die 3/  true || die 3/'
   mutate queue "розмір запису не обмежено" 's/\(\(size <= MAX_TASK_BYTES\)\) \|\| die 1/true || die 1/'
   mutate queue "--reset-pause через a8-ctl дозволено" 's/        \[\[ "\$VIA" != ssh \]\] \|\|\n          die 1/        true ||\n          die 1/'
+  mutate queue "--reset-pause без перевірки адміністратора" 's/        \(\(EUID == 0\)\) \|\|\n          die 1 "requeue --reset-pause — лише/        true ||\n          die 1 "requeue --reset-pause — лише/'
+  # Лише з sudo (сценарій 8f): без нього шлях адміністратора не ганяється.
+  sudo -n true 2>/dev/null &&
+    mutate queue "sudo-шлях requeue без зниження прав" 's/    run_as=\(runuser -u "\$owner" --\)/    run_as=()/'
   mutate queue "мітка постановки в секундах" 's/%H%M%S%NZ/%H%M%SZ/'
   mutate requeue "requeue повертає невідкладну в плановий потік" 's/  \[\[ "\$\(basename "\$taskfile"\)" == urgent-\* \]\] && destdir="\$URGENT"\n//'
   mutate requeue "requeue кладе другу невідкладну" 's/  if \[\[ "\$destdir" == "\$URGENT" \]\] && compgen -G "\$URGENT\/\*\.json" >\/dev\/null; then\n    skip "невідкладна, а/  if false; then\n    skip "невідкладна, а/'

@@ -28,7 +28,7 @@
 #                             встановлений роллю a8-requeue.sh: лише порожні гілки
 #                             й чисті worktree (усі його перевірки — там).
 #                             Невідкладна повертається в urgent/. --reset-pause —
-#                             лише локально: через a8-ctl відмова (див. нижче).
+#                             лише адміністратор A8 через sudo (див. нижче).
 #   pause | resume            плановий потік: на паузі тік бере лише urgent/.
 #                             Задачу, що вже йде, пауза не зупиняє — вона дограє
 #                             (рішення 19.10). Подія в runs.log — лише при зміні
@@ -42,13 +42,19 @@
 # (requeue пише туди сам a8-requeue.sh).
 #
 # ЧОГО НЕ РОБИТЬ. Не запускає тік, не знімає STOP і паузу після падінь (окрім
-# локального `requeue --reset-pause`, і то лише облік повернених задач), не змінює
-# денного ліміту, не читає вміст задач у done/ чи failed/ понад поле id.
+# `requeue --reset-pause` від адміністратора, і то лише облік повернених задач), не
+# змінює денного ліміту, не читає вміст задач у done/ чи failed/ понад поле id.
 #
-# --reset-pause ЧЕРЕЗ a8-ctl — ВІДМОВА. Пауза після трьох падінь — STOP-тригер
-# (CLAUDE.md §0 п.7): її знімає людина. Оркестратор, що сам знімає облік падінь,
-# міг би крутити зламану задачу до денного ліміту (контрприклад 2, PR #272).
-# Єдине дієслово, де транспорт має значення: via=ssh — це ключ оркестратора.
+# --reset-pause — ЛИШЕ АДМІНІСТРАТОР A8 (рішення yurii 2026-10-21, «а»). Пауза після
+# трьох падінь — STOP-тригер (CLAUDE.md §0 п.7): її знімає людина. Оркестратор, що
+# сам знімає облік падінь, міг би крутити зламану задачу до денного ліміту
+# (контрприклад 2, PR #272). Тому: через a8-ctl — відмова; локально — лише з
+# ефективним root (`sudo a8-queue requeue --reset-pause <id>…`), а не будь-який
+# локальний користувач — з 02.11 оркестратор теж працюватиме на A8 локально. Ознака —
+# $EUID (bash, лише для читання), а не SUDO_USER: змінну середовища підробить
+# кожен. Самі зміни черги й журналів root не робить: a8-requeue.sh іде від імені
+# власника теки черги (runuser), інакше в черзі й журналах лишились би файли root,
+# яких тік від agent не змінить.
 #
 # LOCK СТАНУ ЧЕРГИ — $A8_LOGS_DIR/queue.lock. Під ним enqueue перевіряє «id ще
 # немає, невідкладної немає» і пише; під ним же тік і a8-requeue.sh роблять кожне
@@ -99,6 +105,8 @@ ctl_log() {
     --arg ids "$log_ids" --argjson rc "$rc" --arg detail "$log_detail" \
     '{ts:$ts, via:$via, verb:$verb, ids:$ids, rc:$rc, detail:$detail}' \
     >>"$A8_LOGS_DIR/ctl.log" 2>/dev/null
+  # Виклик від root (sudo) не лишає ctl.log з власником root.
+  ((EUID != 0)) || chown --reference="$A8_LOGS_DIR" "$A8_LOGS_DIR/ctl.log" 2>/dev/null
   return "$rc"
 }
 trap ctl_log EXIT
@@ -309,7 +317,9 @@ do_requeue() {
     case "$a" in
       --reset-pause)
         [[ "$VIA" != ssh ]] ||
-          die 1 "requeue --reset-pause через a8-ctl заборонено: паузу після падінь знімає людина (CLAUDE.md §0 п.7) — локально на A8"
+          die 1 "requeue --reset-pause через a8-ctl заборонено: паузу після падінь знімає людина (CLAUDE.md §0 п.7)"
+        ((EUID == 0)) ||
+          die 1 "requeue --reset-pause — лише адміністратор A8: sudo a8-queue requeue --reset-pause <id>… (паузу після падінь знімає людина, CLAUDE.md §0 п.7)"
         flags=(--reset-pause)
         ;;
       -*) die 2 "requeue: невідомий прапорець '$a' (дозволено лише --reset-pause)" ;;
@@ -323,7 +333,14 @@ do_requeue() {
   [[ -r "$REQUEUE" ]] || die 2 "немає $REQUEUE — роль A8 не застосована?"
   # --remote і --dry-run сюди не пропускаються: перший копіював би скрипт на інший
   # хост, другий тут не потрібен (є status).
-  A8_CONFIG="$CONFIG" A8_JOURNAL="$JOURNAL" A8_GUARD="$GUARD" bash "$REQUEUE" "${flags[@]}" -- "${ids[@]}" || rc=$?
+  # Від root — з правами власника черги (див. --reset-pause у заголовку).
+  local run_as=() owner
+  if ((EUID == 0)); then
+    owner="$(stat -c %U -- "$Q")" || die 2 "не вдалося дізнатись власника $Q"
+    [[ "$owner" != root ]] || die 2 "черга $Q належить root — від чийого імені працювати, невідомо"
+    run_as=(runuser -u "$owner" --)
+  fi
+  "${run_as[@]}" env A8_CONFIG="$CONFIG" A8_JOURNAL="$JOURNAL" A8_GUARD="$GUARD" bash "$REQUEUE" "${flags[@]}" -- "${ids[@]}" || rc=$?
   case "$rc" in
     0) log_detail="ok" ;;
     1) log_detail="skip" ;;
