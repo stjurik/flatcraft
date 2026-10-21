@@ -370,65 +370,58 @@ run_suite() { # run_suite <local|ssh>
   teardown
 
   # 8e. --reset-pause знімає облік падінь, а паузу після трьох падінь знімає людина
-  # (CLAUDE.md §0 п.7; контрприклад 2, PR #272; рішення yurii 2026-10-21, «а»): лише
-  # адміністратор A8 через sudo. Через a8-ctl — відмова; локально без sudo — теж
-  # відмова (з 02.11 оркестратор працює на A8 локально). Нічого не змінено.
+  # (CLAUDE.md §0 п.7; контрприклад 2, PR #272; рішення yurii 2026-10-21): через
+  # a8-ctl — відмова, нічого не змінено; локально від власника черги (адміністратор:
+  # `sudo -u agent a8-queue …`) — справжня пауза знімається (контрприклад Argon 4).
   setup
   task w1 >"$QD/failed/001-w1.json"
+  for _ in 1 2 3; do
+    jq -nc '{ts:"2026-10-21T10:00:00Z", event:"run", task:"w1", source:"human", result:"failed", duration_s:1, model:"sonnet", note:""}' >>"$LOGS/runs.log"
+    echo failed >>"$LOGS/last-results"
+  done
+  grc_before=0
+  "$A8_GUARD" check >/dev/null 2>&1 || grc_before=$?
   call requeue --reset-pause w1 </dev/null
+  grc_after=0
+  "$A8_GUARD" check >/dev/null 2>&1 || grc_after=$?
   if [[ "$MODE" == ssh ]]; then
-    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"через a8-ctl заборонено"* && "$(ctl .rc)" == 1 ]] &&
-      ok "$T requeue --reset-pause через a8-ctl → 1, нічого не змінено" || bad "$T --reset-pause через ssh: rc=$RC $ERR"
+    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"через a8-ctl заборонено"* && "$(ctl .rc)" == 1 &&
+      "$grc_before" == 12 && "$grc_after" == 12 ]] &&
+      ok "$T requeue --reset-pause через a8-ctl → 1, пауза лишилась (guard 12), нічого не змінено" ||
+      bad "$T --reset-pause через ssh: rc=$RC guard $grc_before → $grc_after $ERR"
   else
-    [[ "$RC" == 1 && -e "$QD/failed/001-w1.json" && "$ERR" == *"лише адміністратор"* && "$(ctl .rc)" == 1 ]] &&
-      ok "$T requeue --reset-pause локально без sudo → 1, нічого не змінено" || bad "$T --reset-pause без sudo: rc=$RC $OUT $ERR"
+    [[ "$RC" == 0 && -e "$QD/001-w1.json" && "$grc_before" == 12 && "$grc_after" == 0 ]] &&
+      ok "$T requeue --reset-pause від власника черги → 0, пауза знята (guard 12 → 0), задача в черзі" ||
+      bad "$T --reset-pause локально: rc=$RC guard $grc_before → $grc_after $OUT $ERR"
   fi
   teardown
 
-  # 8f. Адміністратор: `sudo a8-queue requeue --reset-pause` — справжня пауза після
-  # трьох падінь задачі w2 знімається (a8-guard check 12 → 0), задача в черзі, а
-  # жодного файла root у теці тесту не лишається: a8-requeue.sh і ctl.log — від
-  # власника черги (контрприклади Argon 1 і 4, PR #272). Інші дієслова від root —
-  # відмова (Argon 3а). Потрібен sudo без пароля (на раннері GitHub є); немає —
-  # сказано вголос, а не «зелено».
+  # 8f. Від root — відмова для всіх дієслів, нічого не змінено й файлів root немає
+  # (рішення yurii 2026-10-21; контрприклади Argon 1, 3а, 3б). Потрібен sudo без
+  # пароля (на раннері GitHub є); немає — сказано вголос, а не «зелено».
   if [[ "$MODE" == local ]]; then
     if sudo -n true 2>/dev/null; then
-      sudo_q() { # sudo_q <аргументи a8-queue> → $RC, $OUT, $ERR
+      sudo_q() { # sudo_q <аргументи a8-queue> → $RC, $ERR
         RC=0
         sudo -n env A8_CONFIG="$A8_CONFIG" A8_JOURNAL="$A8_JOURNAL" A8_GUARD="$A8_GUARD" \
           A8_TICK_LOGIC="$A8_TICK_LOGIC" A8_REQUEUE="$A8_REQUEUE" \
           "$BIN/a8-queue" "$@" </dev/null >"$ROOT/out" 2>"$ROOT/err" || RC=$?
-        OUT="$(cat "$ROOT/out")" ERR="$(cat "$ROOT/err")"
+        ERR="$(cat "$ROOT/err")"
       }
       setup
       task w2 >"$QD/failed/001-w2.json"
-      for _ in 1 2 3; do
-        jq -nc '{ts:"2026-10-21T10:00:00Z", event:"run", task:"w2", source:"human", result:"failed", duration_s:1, model:"sonnet", note:""}' >>"$LOGS/runs.log"
-        echo failed >>"$LOGS/last-results"
-      done
-      grc_before=0
-      "$A8_GUARD" check >/dev/null 2>&1 || grc_before=$?
-      sudo_q requeue --reset-pause w2
-      grc_after=0
-      "$A8_GUARD" check >/dev/null 2>&1 || grc_after=$?
-      rootfiles="$(sudo -n find "$ROOT" -user root 2>/dev/null)"
-      [[ "$RC" == 0 && -e "$QD/001-w2.json" && "$grc_before" == 12 && "$grc_after" == 0 && -z "$rootfiles" &&
-        "$(stat -c %U "$LOGS/ctl.log")" == "$(id -un)" ]] &&
-        ok "$T sudo a8-queue requeue --reset-pause → 0, пауза знята (guard 12 → 0), задача в черзі, файлів root немає" ||
-        bad "$T --reset-pause через sudo: rc=$RC guard $grc_before → $grc_after $OUT $ERR; файли root: [$rootfiles]"
-      # Інші дієслова від root — відмова, і файлів root не лишається.
-      task w3 >"$QD/failed/001-w3.json"
       sudo_q status
       rc_status="$RC" err_status="$ERR"
-      sudo_q requeue w3
+      sudo_q requeue --reset-pause w2
       rootfiles="$(sudo -n find "$ROOT" -user root 2>/dev/null)"
-      [[ "$rc_status" == 1 && "$err_status" == *"лише requeue --reset-pause"* && "$RC" == 1 && -e "$QD/failed/001-w3.json" && -z "$rootfiles" ]] &&
-        ok "$T від root status і requeue без --reset-pause → 1, файлів root немає" ||
-        bad "$T інші дієслова від root: status rc=$rc_status, requeue rc=$RC $ERR; файли root: [$rootfiles]"
+      [[ "$rc_status" == 1 && "$err_status" == *"від root не працюю"* && "$RC" == 1 && -e "$QD/failed/001-w2.json" &&
+        ! -e "$LOGS/ctl.log" && -z "$rootfiles" ]] &&
+        ok "$T від root status і requeue --reset-pause → 1, нічого не змінено, файлів root немає" ||
+        bad "$T від root: status rc=$rc_status, requeue rc=$RC $ERR; файли root: [$rootfiles]"
       sudo -n chown -R "$(id -un)" "$ROOT" 2>/dev/null
       teardown
     else
-      say "⚠ 8f НЕ ПЕРЕВІРЕНО: немає sudo без пароля — шлях адміністратора (sudo a8-queue requeue --reset-pause) не прогнано"
+      say "⚠ 8f НЕ ПЕРЕВІРЕНО: немає sudo без пароля — відмову від root не прогнано"
     fi
   fi
 
@@ -531,16 +524,10 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TES
   mutate queue "enqueue без lock" 's/  flock -w 30 7 \|\| die 3/  true || die 3/'
   mutate queue "розмір запису не обмежено" 's/\(\(size <= MAX_TASK_BYTES\)\) \|\| die 1/true || die 1/'
   mutate queue "--reset-pause через a8-ctl дозволено" 's/        \[\[ "\$VIA" != ssh \]\] \|\|\n          die 1/        true ||\n          die 1/'
-  mutate queue "--reset-pause без перевірки адміністратора" 's/        \(\(EUID == 0\)\) \|\|\n          die 1 "requeue --reset-pause — лише/        true ||\n          die 1 "requeue --reset-pause — лише/'
-  # Лише з sudo (сценарій 8f): без нього шлях адміністратора не ганяється.
+  mutate queue "--reset-pause губиться" 's/        flags=\(--reset-pause\)/        flags=()/'
+  # Лише з sudo (сценарій 8f): без нього відмова від root не ганяється.
   sudo -n true 2>/dev/null &&
-    mutate queue "sudo-шлях requeue без зниження прав" 's/    run_as=\(runuser -u "\$owner" --\)/    run_as=()/'
-  sudo -n true 2>/dev/null &&
-    mutate queue "sudo: --reset-pause губиться" 's/        flags=\(--reset-pause\)/        flags=()/'
-  sudo -n true 2>/dev/null &&
-    mutate queue "sudo: ctl.log пише сам root" 's/printf \x27%s\\n\x27 "\$line" \| runuser -u "\$owner" -- sh -c \x27cat >>"\$1"\x27 sh "\$A8_LOGS_DIR\/ctl.log"/printf \x27%s\\n\x27 "\$line" >>"\$A8_LOGS_DIR\/ctl.log"/'
-  sudo -n true 2>/dev/null &&
-    mutate queue "sudo: від root будь-яке дієслово" 's/if \(\(EUID == 0\)\) && \[\[ "\$verb" != requeue/if false \&\& [[ "\$verb" != requeue/'
+    mutate queue "root дозволено" 's/\(\(EUID != 0\)\) \|\|\n  die 1 "від root не працюю/true ||\n  die 1 "від root не працюю/'
   mutate queue "мітка постановки в секундах" 's/%H%M%S%NZ/%H%M%SZ/'
   mutate requeue "requeue повертає невідкладну в плановий потік" 's/  \[\[ "\$\(basename "\$taskfile"\)" == urgent-\* \]\] && destdir="\$URGENT"\n//'
   mutate requeue "requeue кладе другу невідкладну" 's/  if \[\[ "\$destdir" == "\$URGENT" \]\] && urgent_busy; then\n    skip "невідкладна, а/  if false; then\n    skip "невідкладна, а/'

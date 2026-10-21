@@ -28,7 +28,7 @@
 #                             встановлений роллю a8-requeue.sh: лише порожні гілки
 #                             й чисті worktree (усі його перевірки — там).
 #                             Невідкладна повертається в urgent/. --reset-pause —
-#                             лише адміністратор A8 через sudo (див. нижче).
+#                             лише локально, не через a8-ctl (див. нижче).
 #   pause | resume            плановий потік: на паузі тік бере лише urgent/.
 #                             Задачу, що вже йде, пауза не зупиняє — вона дограє
 #                             (рішення 19.10). Подія в runs.log — лише при зміні
@@ -42,29 +42,26 @@
 # (requeue пише туди сам a8-requeue.sh).
 #
 # ЧОГО НЕ РОБИТЬ. Не запускає тік, не знімає STOP і паузу після падінь (окрім
-# `requeue --reset-pause` від адміністратора, і то лише облік повернених задач), не
-# змінює денного ліміту, не читає вміст задач у done/ чи failed/ понад поле id.
+# локального `requeue --reset-pause`, і то лише облік повернених задач), не змінює
+# денного ліміту, не читає вміст задач у done/ чи failed/ понад поле id.
 #
-# --reset-pause — ЛИШЕ АДМІНІСТРАТОР A8 (рішення yurii 2026-10-21, «а»). Пауза після
-# трьох падінь — STOP-тригер (CLAUDE.md §0 п.7): її знімає людина. Оркестратор, що
-# сам знімає облік падінь, міг би крутити зламану задачу до денного ліміту
-# (контрприклад 2, PR #272). Тому: через a8-ctl — відмова; локально — лише з
-# ефективним root (`sudo a8-queue requeue --reset-pause <id>…`), а не будь-який
-# локальний користувач — з 02.11 оркестратор теж працюватиме на A8 локально. Ознака —
-# $EUID (bash, лише для читання), а не SUDO_USER: змінну середовища підробить
-# кожен. Самі зміни черги й журналів root не робить: a8-requeue.sh і запис ctl.log
-# ідуть від імені власника теки (runuser), інакше в черзі й журналах лишились би
-# файли root, яких тік від agent не змінить, а root писав би в чужу теку, де agent
-# може підкласти симлінк (контрприклад Argon 1, PR #272). Від root дозволено ЛИШЕ
-# `requeue --reset-pause`: решту дієслів root виконав би від себе (файли root у
-# черзі, queue.lock, planned-paused; git у чужому репозиторії — «dubious
-# ownership»), тож для них — відмова (контрприклад Argon 3а).
+# --reset-pause — ЛИШЕ ЛОКАЛЬНО, ВІД ВЛАСНИКА ЧЕРГИ (рішення yurii 2026-10-21).
+# Пауза після трьох падінь — STOP-тригер (CLAUDE.md §0 п.7): її знімає людина.
+# Оркестратор, що сам знімає облік падінь, міг би крутити зламану задачу до денного
+# ліміту (контрприклад 2, PR #272). Тому через a8-ctl — відмова, а адміністратор
+# запускає `sudo -u agent a8-queue requeue --reset-pause <id>…`.
 #
-# ЦЕ ПРАВИЛО ДЛЯ ВИКЛИКІВ a8-queue, А НЕ МЕХАНІЧНА МЕЖА. a8-requeue.sh, a8-guard і
-# last-results належать agent: хто працює від agent, може зняти облік падінь і без
-# a8-queue. Межу дає те, що оркестратор отримує лише a8-queue (через a8-ctl, а з
-# 02.11 — локально без прав agent), а не оболонку agent. Механічна межа потребує
-# стану, що належить root, — окреме рішення (контрприклад Argon 2, PR #272).
+# ВІД ROOT — ВІДМОВА ДЛЯ ВСІХ ДІЄСЛІВ. Root виконав би їх від себе: файли root у
+# черзі, queue.lock і planned-paused, яких тік від agent не змінить; запис root у
+# теку agent, де agent може підкласти симлінк; git у чужому репозиторії — «dubious
+# ownership» (контрприклади Argon 1, 3а, 3б, PR #272). Запускай від власника черги.
+#
+# МЕЖА — ОКРЕМИЙ КОРИСТУВАЧ, А НЕ ЦЕЙ СКРИПТ. Перевірка via — це двері, а не
+# механічна межа: процес від agent прочитає й запише файли черги напряму, без
+# a8-queue (контрприклад Argon 2(1)). Межу дає окремий користувач orchestrator, для
+# якого a8-ctl — єдині двері до черги, і локально на A8 теж. Це ADR контракту A8
+# (спринт 02.11); доки його немає, оркестратор працює з чергою лише з T470 через
+# a8-ctl.
 #
 # LOCK СТАНУ ЧЕРГИ — $A8_LOGS_DIR/queue.lock. Під ним enqueue перевіряє «id ще
 # немає, невідкладної немає» і пише; під ним же тік і a8-requeue.sh роблять кожне
@@ -98,9 +95,6 @@ MAX_TASK_BYTES=65536
 verb="${1:-}"
 (($# > 0)) && shift
 args=("$@")
-# Від root поточна тека — тека адміністратора, недоступна власнику черги, від
-# імені якого далі йдуть runuser-виклики.
-((EUID != 0)) || cd /
 log_ids=""
 log_detail=""
 enq_tmp=""
@@ -114,19 +108,12 @@ ctl_log() {
   # того, як код виходу вже взято (окремий trap з `rm` підмінив би його кодом rm).
   [[ -z "$enq_tmp" ]] || rm -f -- "$enq_tmp"
   [[ -n "${A8_LOGS_DIR:-}" && -d "${A8_LOGS_DIR:-}" ]] || return "$rc"
-  local line owner
-  line="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg via "$VIA" --arg verb "$verb" \
+  # Від root — нічого не пише: відмова видна з коду й stderr (див. заголовок).
+  ((EUID != 0)) || return "$rc"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg via "$VIA" --arg verb "$verb" \
     --arg ids "$log_ids" --argjson rc "$rc" --arg detail "$log_detail" \
-    '{ts:$ts, via:$via, verb:$verb, ids:$ids, rc:$rc, detail:$detail}')"
-  if ((EUID != 0)); then
-    printf '%s\n' "$line" >>"$A8_LOGS_DIR/ctl.log" 2>/dev/null
-  else
-    # Від root — не писати самому в чужу теку (симлінк, власник root): дописує
-    # власник теки журналів. Тека root — запису немає зовсім.
-    owner="$(stat -c %U -- "$A8_LOGS_DIR" 2>/dev/null)"
-    [[ -z "$owner" || "$owner" == root ]] ||
-      printf '%s\n' "$line" | runuser -u "$owner" -- sh -c 'cat >>"$1"' sh "$A8_LOGS_DIR/ctl.log" 2>/dev/null
-  fi
+    '{ts:$ts, via:$via, verb:$verb, ids:$ids, rc:$rc, detail:$detail}' \
+    >>"$A8_LOGS_DIR/ctl.log" 2>/dev/null
   return "$rc"
 }
 trap ctl_log EXIT
@@ -141,6 +128,10 @@ usage() {
   sed -n '2,/^set -/{/^set -/!p}' "$0" | sed 's/^# \?//'
 }
 
+# ─── Від root — відмова, до будь-якого читання й запису (див. заголовок) ──────
+((EUID != 0)) ||
+  die 1 "від root не працюю — запускай від власника черги: sudo -u agent a8-queue …"
+
 # ─── Конфіг ─────────────────────────────────────────────────────────────────
 case "$verb" in
   -h | --help)
@@ -154,10 +145,6 @@ source "$CONFIG" || die 2 "не вдалося прочитати $CONFIG"
 for v in A8_QUEUE_DIR A8_LOGS_DIR A8_REPO_DIR A8_KILL_SWITCH; do
   [[ -n "${!v:-}" ]] || die 2 "у $CONFIG немає $v"
 done
-# Від root — лише `requeue --reset-pause` (див. --reset-pause у заголовку).
-if ((EUID == 0)) && [[ "$verb" != requeue || " ${args[*]} " != *" --reset-pause "* ]]; then
-  die 1 "від root (sudo) — лише requeue --reset-pause; решта дієслів — від власника черги: sudo -u agent a8-queue …"
-fi
 # Режим OQ-34 — з конфігу, як у тіку: інакше enqueue прийняв би те, що тік відхилить.
 export A8_SOURCES_ALLOWED
 Q="$A8_QUEUE_DIR"
@@ -347,8 +334,6 @@ do_requeue() {
       --reset-pause)
         [[ "$VIA" != ssh ]] ||
           die 1 "requeue --reset-pause через a8-ctl заборонено: паузу після падінь знімає людина (CLAUDE.md §0 п.7)"
-        ((EUID == 0)) ||
-          die 1 "requeue --reset-pause — лише адміністратор A8: sudo a8-queue requeue --reset-pause <id>… (паузу після падінь знімає людина, CLAUDE.md §0 п.7)"
         flags=(--reset-pause)
         ;;
       -*) die 2 "requeue: невідомий прапорець '$a' (дозволено лише --reset-pause)" ;;
@@ -362,14 +347,7 @@ do_requeue() {
   [[ -r "$REQUEUE" ]] || die 2 "немає $REQUEUE — роль A8 не застосована?"
   # --remote і --dry-run сюди не пропускаються: перший копіював би скрипт на інший
   # хост, другий тут не потрібен (є status).
-  # Від root — з правами власника черги (див. --reset-pause у заголовку).
-  local run_as=() owner
-  if ((EUID == 0)); then
-    owner="$(stat -c %U -- "$Q")" || die 2 "не вдалося дізнатись власника $Q"
-    [[ "$owner" != root ]] || die 2 "черга $Q належить root — від чийого імені працювати, невідомо"
-    run_as=(runuser -u "$owner" --)
-  fi
-  "${run_as[@]}" env A8_CONFIG="$CONFIG" A8_JOURNAL="$JOURNAL" A8_GUARD="$GUARD" bash "$REQUEUE" "${flags[@]}" -- "${ids[@]}" || rc=$?
+  A8_CONFIG="$CONFIG" A8_JOURNAL="$JOURNAL" A8_GUARD="$GUARD" bash "$REQUEUE" "${flags[@]}" -- "${ids[@]}" || rc=$?
   case "$rc" in
     0) log_detail="ok" ;;
     1) log_detail="skip" ;;
