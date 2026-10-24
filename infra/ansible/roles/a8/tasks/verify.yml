@@ -591,6 +591,115 @@
     success_msg: "backstop заборонених шляхів: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
     quiet: true
 
+# ─── V22. Дієслова черги (a8-queue) і ssh-обгортка (a8-ctl) ─────────────────
+# Копії на A8 = доведені в CI (a8-queue.test.sh, a8-requeue.test.sh); status
+# працює від agent; обгортка відмовляє на метасимволі, нічого не виконавши; рядок
+# authorized_keys для a8-ctl, якщо він уже є, — лише з restrict і command=.
+- name: V22a — checksums of the installed queue scripts
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    checksum_algorithm: sha256
+  loop: &a8_queue_scripts
+    - { src: a8-queue.sh, dest: /usr/local/bin/a8-queue }
+    - { src: a8-ctl.sh, dest: /usr/local/bin/a8-ctl }
+    - { src: a8-requeue.sh, dest: /usr/local/lib/a8/a8-requeue.sh }
+  register: a8_v_qs
+
+- name: V22b — checksums of the same scripts in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/{{ item.src }}"
+    checksum_algorithm: sha256
+  loop: *a8_queue_scripts
+  delegate_to: localhost
+  become: false
+  register: a8_v_qs_repo
+
+- name: V22c — queue scripts on A8 are byte-identical to the tested copies and owned by root
+  ansible.builtin.assert:
+    that:
+      - item.0.stat.exists
+      - item.0.stat.checksum == item.1.stat.checksum
+      - item.0.stat.pw_name == 'root'
+      - not item.0.stat.woth
+      - not item.0.stat.wgrp
+    fail_msg: >-
+      {{ item.0.item.dest }}: exists={{ item.0.stat.exists }},
+      sha256 A8={{ item.0.stat.checksum | default('—') }} repo={{ item.1.stat.checksum }},
+      власник={{ item.0.stat.pw_name | default('—') }}
+    quiet: true
+  loop: "{{ a8_v_qs.results | zip(a8_v_qs_repo.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item.dest }}"
+
+- name: V22d — a8-queue status runs as the agent
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-queue, status]
+  register: a8_v_qstatus
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22e — a8-ctl through ssh-style input refuses a second command
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-ctl]
+  environment:
+    SSH_ORIGINAL_COMMAND: "status; touch /tmp/a8-ctl-probe"
+  register: a8_v_ctl_deny
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22f — a8-ctl passes an allowed verb to a8-queue
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-ctl]
+  environment:
+    SSH_ORIGINAL_COMMAND: "status"
+  register: a8_v_ctl_status
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22g — stat the probe a refused command would have created
+  ansible.builtin.stat:
+    path: /tmp/a8-ctl-probe
+  register: a8_v_ctl_probe
+
+- name: V22h — read the agent's authorized_keys
+  ansible.builtin.slurp:
+    src: "{{ a8_agent_home }}/.ssh/authorized_keys"
+  register: a8_v_akeys
+  failed_when: false
+
+- name: V22i — status works locally and via the shim; shim refuses; a8-ctl key lines are restricted
+  vars:
+    a8_v_ctl_lines: >-
+      {{ ((a8_v_akeys.content | default('') | b64decode).splitlines())
+         | select('search', 'a8-ctl') | reject('match', '\s*#') | list }}
+    a8_v_ctl_note: "{{ 'ще не встановлено (крок yurii, #78)' if a8_v_ctl_lines | length == 0 else 'усі з restrict і command=' }}"
+  ansible.builtin.assert:
+    that:
+      - a8_v_qstatus.rc == 0
+      - "'черга:' in a8_v_qstatus.stdout"
+      - a8_v_ctl_deny.rc == 126
+      - "'ВІДХИЛЕНО' in a8_v_ctl_deny.stderr"
+      - not a8_v_ctl_probe.stat.exists
+      - a8_v_ctl_status.rc == 0
+      - "'черга:' in a8_v_ctl_status.stdout"
+      - a8_v_ctl_lines | reject('search', 'restrict') | list | length == 0
+      - a8_v_ctl_lines | reject('search', 'command="/usr/local/bin/a8-ctl"') | list | length == 0
+    fail_msg: >-
+      status rc={{ a8_v_qstatus.rc }} ({{ a8_v_qstatus.stderr | default('') }});
+      a8-ctl «status; touch …» rc={{ a8_v_ctl_deny.rc }}, probe={{ a8_v_ctl_probe.stat.exists }};
+      a8-ctl status rc={{ a8_v_ctl_status.rc }};
+      рядків authorized_keys з a8-ctl={{ a8_v_ctl_lines | length }} (кожен мусить мати restrict і command="/usr/local/bin/a8-ctl")
+    success_msg: >-
+      a8-queue status і a8-ctl status — 0, a8-ctl відмовляє на метасимволі;
+      ключів a8-ctl в authorized_keys: {{ a8_v_ctl_lines | length }} — {{ a8_v_ctl_note }}
+    quiet: true
+
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
 - name: V15a — ask the container for claude, uv and pnpm versions
   # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок

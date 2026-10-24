@@ -919,6 +919,40 @@ if [[ -f "$AGENT_DOCKERFILE" ]]; then
     violations+=("у фінальній стадії $AGENT_DOCKERFILE немає LABEL hart.keep=true — prune таймера видалить образ агента (issue #117)")
 fi
 
+# Інваріант 15 — ключ у authorized_keys агента роль ставить лише з restrict і command=.
+#
+# ЧОМУ. Ключ оркестратора (a8_ctl_pubkey, #231) дає вхід на A8 від імені agent —
+# того, хто володіє чергою і запускає контейнери. Без `command="…"` він давав би
+# повну оболонку, без `restrict` — pty і forwarding (тунель у мережу A8 повз
+# egress-фільтр). Межа «лише дієслова a8-ctl» тримається на цих двох словах у
+# рядку authorized_keys, тож кожна задача ролі, що пише цей файл, мусить їх мати.
+#
+# Як: блоки задач (після strip_comments), що згадують authorized_keys і пишуть
+# (lineinfile, blockinfile, copy, template, authorized_key). Читання (slurp у
+# verify.yml) не рахується. Живий стан — V22i.
+akey_blocks=""
+if [[ -d "$TASKS" ]]; then
+  mapfile -t akey_files < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+  for f in "${akey_files[@]}"; do
+    akey_blocks+="$(strip_comments "$f" | cut -f2- | awk -v f="${f#"$ROOT"/}" '
+      function flush() {
+        if (blk ~ /authorized_keys?/ && blk ~ /(lineinfile|blockinfile|copy|template|authorized_key):/) printf "%s\036", f ": " blk
+        blk = ""
+      }
+      /^- / { flush() }
+      { blk = blk $0 "\n" }
+      END { flush() }')"
+  done
+fi
+while IFS= read -r -d $'\036' blk; do
+  [[ -z "${blk//[[:space:]]/}" ]] && continue
+  name="$(grep -m1 -E 'name:' <<<"$blk" | sed -E 's/^[^:]*:[[:space:]]*- name:[[:space:]]*//; s/^[[:space:]]*- name:[[:space:]]*//')"
+  [[ "$blk" == *restrict* ]] ||
+    violations+=("задача ролі пише authorized_keys без restrict (ключ дасть pty і forwarding): ${blk%%:*} «$name»")
+  [[ "$blk" =~ command=\\?\"/usr/local/bin/ ]] ||
+    violations+=("задача ролі пише authorized_keys без command=\"/usr/local/bin/…\" (ключ дасть повну оболонку agent): ${blk%%:*} «$name»")
+done < <(printf '%s' "$akey_blocks")
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -929,4 +963,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile)"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command="

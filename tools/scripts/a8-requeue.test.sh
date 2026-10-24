@@ -807,7 +807,7 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   mutate "гілку не видаляє" 's/repo branch -D "\$branch" >\/dev\/null 2>&1 \|\| \{/true || {/'
   mutate "worktree не прибирається" 's/    repo worktree remove --force "\$wt" >\/dev\/null 2>&1 \|\| true\n    if \[\[ -e "\$wt" \]\]; then\n      rm -rf -- "\$wt" 2>\/dev\/null \|\| true\n    fi\n//'
   mutate "prune прибрано" 's/repo worktree prune >\/dev\/null 2>&1 \|\| \{/true || {/'
-  mutate "файл задачі не переїжджає" 's/  mv -n -- "\$taskfile" "\$Q\/" \|\| \{/  true || {/'
+  mutate "файл задачі не переїжджає" 's/  \{ mkdir -p -- "\$destdir" && mv -n -- "\$taskfile" "\$destdir\/"; \} \|\| rc=\$\?/  true || rc=\$?/'
   mutate "коміти на HEAD worktree не перевіряються" 's/    if \(\(n != 0\)\); then\n      skip "HEAD у/    if false; then\n      skip "HEAD у/'
   mutate "гілка в іншому worktree не враховується" 's/  if \[\[ -n "\$ELSEWHERE" \]\]; then/  if false; then/'
   mutate "незареєстрована тека не відсіюється" 's/    if \(\(!REG\)\); then/    if false; then/'

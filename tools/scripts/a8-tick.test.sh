@@ -238,6 +238,11 @@ if [[ "\$1" == image && "\$2" == inspect && "\${STOP_DURING:-}" == inspect ]] &&
   (( \$(grep -c 'image inspect' "$LOGS/docker-calls") >= 2 )); then
   echo "причина людини" >"$ROOT/STOP"
 fi
+# DURING_INSPECT_CMD: щось відбувається, поки тік пробує образ (крок 2a) — між
+# вибором кандидата і взяттям задачі (контрприклад Argon 5б, PR #272).
+if [[ "\$1" == image && "\$2" == inspect && -n "\${DURING_INSPECT_CMD:-}" ]]; then
+  bash -c "\$DURING_INSPECT_CMD"
+fi
 if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
   echo "Error response from daemon: No such image: \$3" >&2
   exit 1
@@ -278,6 +283,19 @@ with_oracle() { # with_oracle <id> <текст оракула>
     '{id:$id, source:"human", origin:"direction", oracle:$o, prompt:("do "+$id)}'
 }
 tick() { bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1; }
+# collating_locale — локаль, у якій «001_a» сортується РАНІШЕ за «001-z» (у C — навпаки):
+# так видно, чи тік сортує в C, а не в локалі машини. Немає такої — сценарій 22d
+# і його мутант не ганяються, і це друкується (не «зелено»).
+collating_locale() {
+  local l
+  for l in en_US.UTF-8 en_US.utf8 uk_UA.UTF-8 de_DE.UTF-8; do
+    [[ "$(printf '001-z\n001_a\n' | LC_ALL="$l" sort 2>/dev/null | head -n 1)" == 001_a ]] && {
+      echo "$l"
+      return 0
+    }
+  done
+  return 1
+}
 tick_rc() {
   local rc=0
   bash "$BIN/a8-tick" >>"$LOGS/tick.out" 2>&1 || rc=$?
@@ -1017,6 +1035,124 @@ EOF
   [[ "$(cat "$ROOT/STOP" 2>/dev/null)" == "причина людини" && "$(jl .event)" == env_broken ]] &&
     ok "STOP людини під час inspect не затерто" || bad "STOP затерто: $(cat "$ROOT/STOP" 2>/dev/null)"
   teardown
+
+  # 22a. Невідкладна (urgent/, a8-queue enqueue --urgent) береться ПЕРШОЮ, навіть
+  # коли в плановому потоці є старіша задача (рішення yurii 2026-10-19, #262).
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  tick
+  [[ "$(jl .task)" == u && -e "$QD/001-a.json" && -e "$QD/done/urgent-20261020T000000Z-u.json" ]] &&
+    ok "urgent/ береться першою, планова 001-a чекає" || bad "urgent першою: $(last); $(find "$QD" -name '*.json')"
+  teardown
+
+  # 22b. Плановий потік на паузі (a8-queue pause): планову не беремо, невідкладну —
+  # так. Тік на паузі мовчить: подія щотіку витісняла б записи прогонів (#231).
+  setup
+  enqueue 001-a "$(valid a)"
+  date -u +%FT%TZ >"$LOGS/planned-paused"
+  tick
+  [[ -e "$QD/001-a.json" && ! -s "$LOGS/runs.log" && ! -e "$LOGS/runner-calls" ]] &&
+    ! grep -q 'image inspect' "$LOGS/docker-calls" 2>/dev/null &&
+    ok "плановий потік на паузі → планову не взято, docker і обгортку не чіпали, runs.log порожній" ||
+    bad "пауза планового: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  tick
+  [[ "$(jl .task)" == u && "$(jl .result)" == no-credential && -e "$QD/001-a.json" ]] &&
+    ok "на паузі планового потоку невідкладна виконується, планова чекає" || bad "urgent на паузі: $(last)"
+  rm -f "$LOGS/planned-paused"
+  tick
+  [[ "$(jl .task)" == a ]] && ok "після resume планова виконується" || bad "після resume: $(last)"
+  teardown
+
+  # 22c. Невідкладну, яку не виконали (STOP на залежностях), тік повертає в urgent/,
+  # а не в плановий потік — інакше вона стала б у хвіст і на паузі не взялась би.
+  setup
+  mkdir -p "$QD/urgent"
+  valid u >"$QD/urgent/urgent-20261020T000000Z-u.json"
+  STOP_DURING=pnpm tick
+  [[ "$(jl .result)" == stopped && -e "$QD/urgent/urgent-20261020T000000Z-u.json" && -z "$(find "$QD" -maxdepth 1 -name '*.json')" ]] &&
+    ok "зупинена невідкладна повертається в urgent/" || bad "повернення urgent: $(last); $(find "$QD" -name '*.json')"
+  teardown
+
+  # 22e. Тік бере задачу (і переносить її далі) лише під queue.lock — тим самим, під
+  # яким a8-queue enqueue перевіряє теки (контрприклад 3, PR #272).
+  setup
+  enqueue 001-a "$(valid a)"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  qholder=$!
+  sleep 0.5
+  tick &
+  tpid=$!
+  sleep 1.5
+  early=1
+  [[ -e "$QD/001-a.json" ]] && early=0
+  wait "$tpid"
+  wait "$qholder"
+  [[ "$early" == 0 && "$(jl .task)" == a ]] && ok "тік чекає queue.lock і лише тоді бере задачу" ||
+    bad "тік без queue.lock: early=$early $(last)"
+  teardown
+
+  # 22f. Відхилений запис іде в rejected/ теж лише під queue.lock.
+  setup
+  echo '{"id":"bad"}' >"$QD/001-bad.json"
+  : >"$LOGS/queue.lock"
+  flock "$LOGS/queue.lock" sleep 3 &
+  qholder=$!
+  sleep 0.5
+  tick &
+  tpid=$!
+  sleep 1.5
+  early=1
+  [[ -e "$QD/001-bad.json" ]] && early=0
+  wait "$tpid"
+  wait "$qholder"
+  [[ "$early" == 0 && -e "$QD/rejected/001-bad.json" ]] && ok "відхилений запис переноситься в rejected/ лише під queue.lock" ||
+    bad "rejected без queue.lock: early=$early $(find "$QD" -name '*.json')"
+  teardown
+
+  # 22g/22h. Між вибором кандидата і взяттям (проба образу) плановий потік
+  # поставили на паузу чи з'явилась невідкладна — планову не беремо, наступний тік
+  # вибирає заново (контрприклад Argon 5б, PR #272).
+  setup
+  enqueue 001-a "$(valid a)"
+  DURING_INSPECT_CMD="date -u +%FT%TZ >'$LOGS/planned-paused'" tick
+  [[ -e "$QD/001-a.json" && ! -s "$LOGS/runs.log" && ! -e "$LOGS/runner-calls" ]] &&
+    ok "пауза з'явилась перед взяттям → планову не взято, обгортку не запущено" ||
+    bad "пауза перед взяттям: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  rm -f "$LOGS/planned-paused"
+  tick
+  [[ "$(jl .task)" == a ]] && ok "після resume планова виконується" || bad "після resume (22g): $(last)"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir -p "$QD/urgent"
+  valid u >"$ROOT/u.json"
+  DURING_INSPECT_CMD="cp '$ROOT/u.json' '$QD/urgent/urgent-20261021T000000Z-u.json'" tick
+  [[ -e "$QD/001-a.json" && -e "$QD/urgent/urgent-20261021T000000Z-u.json" && ! -s "$LOGS/runs.log" ]] &&
+    ok "невідкладна з'явилась перед взяттям → планову не взято" ||
+    bad "urgent перед взяттям: $(cat "$LOGS/runs.log" 2>/dev/null); $(find "$QD" -name '*.json')"
+  tick
+  [[ "$(jl .task)" == u && -e "$QD/001-a.json" ]] && ok "наступний тік бере невідкладну, планова чекає" || bad "наступний тік (22h): $(last)"
+  teardown
+
+  # 22d. Порядок черги не залежить від локалі машини (рецензія Flash, PR #272). До
+  # LC_ALL=C тік сортував у локалі A8: у en_US.UTF-8 `-` і `_` при порівнянні
+  # пропускаються, і «найстаріша» за назвою задача могла йти не першою.
+  if loc="$(collating_locale)"; then
+    setup
+    enqueue 001-z "$(valid z)"
+    enqueue 001_a "$(valid a)"
+    LC_ALL="$loc" tick
+    [[ "$(jl .task)" == z ]] && ok "у локалі $loc тік бере 001-z.json перед 001_a.json — порядок C" ||
+      bad "порядок за локаллю $loc: $(last)"
+    teardown
+  else
+    say "⚠ 22d НЕ ПЕРЕВІРЕНО: у системі немає локалі, де 001_a сортується раніше за 001-z (locale -a)"
+  fi
 }
 
 run_scenarios
@@ -1073,7 +1209,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "контейнер не вбивається при таймауті" 's/\[\[ "\$rc" == 124 \]\] && "\$DOCKER" kill[^\n]*\n//'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
-  mutate "відхилений запис лишається в черзі" 's/  mv "\$f" "\$Q\/rejected\/"\n//'
+  mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
   mutate "перевірку хука прибрано" 's/if \(\(hrc != 0\)\); then/if false; then/'
   mutate "case без гілки за замовчуванням" 's/  ok\) ;;\n  \*\)\n(.*?\n)*?    ;;\n(esac)/$2/'
   mutate "сироту не вбито" 's/  \[\[ -n "\$oid" \]\] && "\$DOCKER" kill[^\n]*\n//'
@@ -1132,6 +1268,19 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "серія env_broken не скидається" 's/if \[\[ -e "\$streak_file" \]\] && image_probe; then\n  rm -f "\$streak_file"\nfi\n//'
   mutate "inspect без timeout" 's/\$\(timeout "\$INSPECT_S" "\$DOCKER" image inspect/\$("\$DOCKER" image inspect/'
   mutate "STOP завжди про відсутній образ" 's/    \*\) kind=docker_unavailable ;;/    *) kind=image_missing ;;/'
+  # Невідкладні й пауза планового потоку (сценарії 22).
+  mutate "тік бере задачу без queue.lock" 's/exec 6>"\$A8_LOGS_DIR\/queue.lock"\nflock 6\n/exec 6>"\$A8_LOGS_DIR\/queue.lock"\n/'
+  mutate "тік бере планову, хоч з'явилась пауза" 's/  \{ \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] \|\| /  { false || /'
+  mutate "тік бере планову, хоч з'явилась невідкладна" 's/ \|\| compgen -G "\$Q\/urgent\/\*\.json" >\/dev\/null; \}; then/ || false; }; then/'
+  mutate "тік переносить задачі без queue.lock" 's/qmv\(\) \{ flock "\$A8_LOGS_DIR\/queue.lock" mv "\$@"; \}/qmv() { mv "\$@"; }/'
+  mutate "urgent/ не береться" 's/  find "\$Q\/urgent" -maxdepth 1 -type f -name \x27\*\.json\x27 \| LC_ALL=C sort\n//'
+  mutate "пауза планового потоку ігнорується" 's/  \[\[ -e "\$A8_LOGS_DIR\/planned-paused" \]\] && return 0\n//'
+  mutate "невідкладна повертається в плановий потік" 's/mv "\$claimed" "\$home\/"/mv "\$claimed" "\$Q\/"/'
+  if collating_locale >/dev/null; then
+    mutate "порядок планового потоку — у локалі машини" 's/(  find "\$Q" -maxdepth 1 -type f -name \x27\*\.json\x27 \| )LC_ALL=C sort\n\}/$1sort\n}/'
+  else
+    say "⚠ мутація «порядок планового потоку — у локалі машини» НЕ ганялась: немає відповідної локалі"
+  fi
   mutate "STOP людини затирається" 's/      set -o noclobber\n//'
   mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
