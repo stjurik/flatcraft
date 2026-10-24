@@ -56,12 +56,20 @@ A8_ORACLE_TIMEOUT=${ORACLE_TIMEOUT:-20}
 A8_MAX_TURNS=10
 A8_CONTAINER_IMAGE=hart-agent:test
 A8_DEFAULT_MODEL=sonnet
+A8_GEMINI_MODEL=gemini-flash-test
+A8_AGY_CONFIG_DIR=$ROOT/gemini
+A8_CONTAINER_HOME=$ROOT/chome
 A8_CLAUDE_TOKEN_FILE=$ROOT/token
 A8_PUSH_CREDENTIAL_KIND=${PUSH_KIND:-none}
 A8_PUSH_SSH_URL=$ROOT/origin.git
 A8_SOURCES_ALLOWED="${SOURCES_ALLOWED:-human}"
 ENV
   echo "tok" >"$ROOT/token"
+  # Тека agy на «хості»: профіль ширший за виконавця (write_file(*)) і «логін».
+  # Тік мусить скопіювати логін і ЗАМІНИТИ профіль у копії, хостову не чіпаючи.
+  mkdir -p "$ROOT/gemini/antigravity-cli"
+  echo '{"model":"x","permissions":{"allow":["write_file(*)"]}}' >"$ROOT/gemini/antigravity-cli/settings.json"
+  echo google-login >"$ROOT/gemini/oauth.json"
   render "$TICK_SRC" "$BIN/a8-tick"
   render "$ROLE/a8-guard.sh.j2" "$BIN/a8-guard"
   render "$ROLE/a8-journal.sh.j2" "$BIN/a8-journal"
@@ -99,6 +107,25 @@ exec 9>&-
 # би на демоні, який на останній задачі дня валить власний оракул кодом 11.
 "$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
+# Що бачить «контейнер» у середовищі: токен Claude, режим і теку agy (лише
+# факт наявності — значення в журнал не пишемо).
+echo "env ${1} executor=${A8_EXECUTOR:-none} token=${CLAUDE_CODE_OAUTH_TOKEN:+set} agy_home=${A8_AGY_HOME:+set}" >>"$CALLS"
+# Промпт багаторядковий, тож модель і лог — окремим рядком.
+if [[ "$1" == agy || "$1" == claude ]]; then
+  m="" lf="" prev=""
+  for a in "$@"; do
+    [[ "$prev" == --model ]] && m="$a"
+    [[ "$prev" == --log-file ]] && lf="$a"
+    prev="$a"
+  done
+  echo "args $1 model=$m log=$lf" >>"$CALLS"
+fi
+if [[ "$1" == agy ]]; then
+  cp "$A8_AGY_HOME/antigravity-cli/settings.json" "$PIDS/agy-settings-seen" 2>/dev/null
+  ls "$A8_AGY_HOME" >"$PIDS/agy-home-seen" 2>/dev/null
+  # У справжньому контейнері --log-file пише в копію, змонтовану на $HOME/.gemini.
+  echo "agy log" >"$A8_AGY_HOME/agy.log"
+fi
 # IMAGE_MISSING: образу немає — справжній `docker run` падає одразу (125).
 if [[ -n "${IMAGE_MISSING:-}" ]]; then
   echo "Unable to find image 'hart-agent:test' locally" >&2
@@ -199,6 +226,19 @@ case "${AGENT_MODE:-commit}" in
     echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'
     exit 1 ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
+  good)
+    # Робота, на якій оракул «grep GOOD» зелений.
+    echo GOOD >"$wt/result.txt"
+    git -C "$wt" add result.txt
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m good
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  touchtest)
+    # Виконавець «підправив» тест приймання — і разом із ним роботу.
+    mkdir -p "$wt/tests" && echo 'exit 0' >"$wt/tests/acc.test.sh"
+    echo GOOD >"$wt/result.txt"
+    git -C "$wt" add tests result.txt
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m weaken
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
   paused) exit 12 ;;
@@ -256,6 +296,7 @@ STUB
   export A8_GUARD="$BIN/a8-guard" A8_RUNNER="$BIN/a8-run-agent"
   export A8_JOURNAL="$BIN/a8-journal" A8_DOCKER="$BIN/docker"
   export A8_FORBIDDEN_CHECK="$HERE/check-forbidden-paths.sh"
+  export A8_AGY_EXECUTOR_TEMPLATE="$HERE/../agy/executor-permissions.json"
 }
 teardown() {
   # Процеси сценарію, яких тік не дочекався (убитий тік, «довга сесія»):
@@ -285,6 +326,163 @@ tick_rc() {
 }
 last() { tail -n 1 "$LOGS/runs.log"; }
 jl() { jq -r "$1" <<<"$(last)"; }
+
+# ─── 23. Смуга виконавця gemini (PR-B #262, orchestrator-autonomy.md §8) ───
+gem() { # gem <id> <оракул> [додаткові поля JSON] — задача виконавця gemini
+  local x="${3:-}"
+  jq -nc --arg id "$1" --arg o "$2" --argjson x "${x:-null}" \
+    '{id:$id, source:"human", origin:"direction", oracle:$o, prompt:("do "+$id), executor:"gemini"} + ($x // {})'
+}
+agent_env() { grep "^env $1 " "$LOGS/runner-calls" | tail -n 1; }
+run_executor_scenarios() {
+  # 23a. executor не задано → claude, як до смуги: токен Claude є, agy немає.
+  setup
+  enqueue 001-a "$(valid a)"
+  tick
+  grep -q "^run-agent claude -p" "$LOGS/runner-calls" && ! grep -q "^args agy" "$LOGS/runner-calls" &&
+    ok "executor не задано → запущено claude, agy — ні" || bad "без executor: $(grep run-agent "$LOGS/runner-calls" | tail -1)"
+  [[ "$(agent_env claude)" == "env claude executor=none token=set agy_home=" ]] &&
+    ok "контейнер claude: токен Claude є, теки agy немає" || bad "середовище claude: $(agent_env claude)"
+  [[ "$(jl .executor)" == claude && "$(jl .model)" == sonnet && "$(jl .result)" == no-credential ]] &&
+    ok "журнал: executor claude, модель claude за замовчуванням" || bad "журнал claude: $(last)"
+  teardown
+
+  # 23b. executor gemini → agy з моделлю Flash; токена Claude немає; профіль
+  # «виконавець» у копії, хостовий профіль не змінено; копія прибрана.
+  setup
+  enqueue 001-g "$(gem g true)"
+  tick
+  grep -qx "args agy model=gemini-flash-test log=$ROOT/chome/.gemini/agy.log" "$LOGS/runner-calls" &&
+    ! grep -q "^args claude" "$LOGS/runner-calls" &&
+    ok "executor gemini → запущено agy з моделлю Flash за замовчуванням, claude — ні" ||
+    bad "gemini: $(grep '^args' "$LOGS/runner-calls")"
+  [[ "$(agent_env agy)" == "env agy executor=gemini token= agy_home=set" ]] &&
+    ok "контейнер agy: токена Claude немає, тека agy є" || bad "середовище agy: $(agent_env agy)"
+  [[ "$(jq -c .permissions "$LOGS/agy-settings-seen" 2>/dev/null)" == \
+    "{\"allow\":[\"read_file($ROOT/wt/g)\",\"write_file($ROOT/wt/g)\",\"command(git)\",\"command(pnpm)\",\"command(uv)\"],\"deny\":[\"write_file(/tmp)\"]}" &&
+    "$(jq -r .model "$LOGS/agy-settings-seen")" == x ]] &&
+    ok "agy бачить профіль «виконавець»: читання й запис лише worktree задачі" ||
+    bad "профіль agy: $(cat "$LOGS/agy-settings-seen" 2>/dev/null)"
+  grep -qx oauth.json "$LOGS/agy-home-seen" 2>/dev/null && ok "логін agy скопійовано в теку для контейнера" ||
+    bad "логіна в копії немає: $(cat "$LOGS/agy-home-seen" 2>/dev/null)"
+  [[ "$(jq -c .permissions "$ROOT/gemini/antigravity-cli/settings.json")" == '{"allow":["write_file(*)"]}' ]] &&
+    ok "хостовий профіль agy не змінено" || bad "хостовий профіль змінено"
+  [[ ! -e "$LOGS/agy-run" || -z "$(ls -A "$LOGS/agy-run")" ]] && [[ -s "$LOGS/tasks/g.agy.log" ]] &&
+    ok "копію з логіном прибрано, лог agy збережено в tasks/" || bad "після agy: $(ls -R "$LOGS/agy-run" 2>&1 | head -3); лог: $(ls "$LOGS/tasks")"
+  [[ "$(jl .executor)" == gemini && "$(jl .model)" == gemini-flash-test && "$(jl .result)" == no-credential ]] &&
+    ok "журнал: executor gemini, модель Flash, задача прийнята" || bad "журнал gemini: $(last)"
+  teardown
+
+  # 23b-2. Поле model задачі перекриває Flash (Argon для пілоту).
+  setup
+  enqueue 001-g "$(gem g true '{"model":"gemini-4-argon-high"}')"
+  tick
+  grep -q "^args agy model=gemini-4-argon-high " "$LOGS/runner-calls" &&
+    ok "model задачі → agy з цією моделлю" || bad "model gemini: $(grep '^args' "$LOGS/runner-calls")"
+  teardown
+
+  # 23c. Оракул не бачить ні токена Claude, ні теки agy — для обох виконавців.
+  setup
+  enqueue 001-g "$(gem g true)"
+  tick
+  [[ "$(agent_env bash)" == "env bash executor=none token= agy_home=" ]] &&
+    ok "оракул задачі gemini: ні токена Claude, ні теки agy" || bad "середовище оракула (gemini): $(agent_env bash)"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  tick
+  [[ "$(agent_env bash)" == "env bash executor=none token= agy_home=" ]] &&
+    ok "оракул задачі claude: ні токена Claude, ні теки agy" || bad "середовище оракула (claude): $(agent_env bash)"
+  teardown
+
+  # 23d. Виконавець змінив файл тесту приймання → результат не прийнято: клас і
+  # деталь у журналі, оракул не запускався, push немає. Контроль — та сама
+  # задача з чесною роботою приймається.
+  setup
+  enqueue 001-g "$(gem g 'grep -q GOOD result.txt' '{"acceptance_tests":["tests/acc.test.sh"]}')"
+  AGENT_MODE=touchtest tick
+  [[ "$(jl .result)" == failed && "$(jl .exit_class)" == failed &&
+    "$(jl .detail)" == "acceptance-tests: tests/acc.test.sh " && "$(jl .oracle_rc)" == - &&
+    -e "$QD/failed/001-g.json" ]] &&
+    ok "змінено тест приймання → failed «acceptance-tests: tests/acc.test.sh», до оракула не дійшло" ||
+    bad "тест приймання змінено: $(last)"
+  grep -q "^tests/acc.test.sh$" "$LOGS/runner-calls" &&
+    ok "промпт виконавця називає тести приймання" || bad "у промпті немає переліку тестів приймання"
+  teardown
+  setup
+  enqueue 001-g "$(gem g 'grep -q GOOD result.txt' '{"acceptance_tests":["tests/acc.test.sh"]}')"
+  AGENT_MODE=good tick
+  [[ "$(jl .result)" == no-credential ]] && ok "контроль: тест приймання не чіпали → прийнято" || bad "контроль тестів приймання: $(last)"
+  teardown
+
+  # 23e. Оракул gemini червоний: перший раз — ще раз gemini, другий — claude.
+  # Дві попередні чужі failed у серії: спроби gemini не мають ні поставити
+  # паузу (третє «failed»), ні скинути серію («ok»).
+  setup
+  printf 'failed\nfailed\n' >"$LOGS/last-results"
+  enqueue 001-g "$(gem g 'grep -q GOOD result.txt' '{"model":"gemini-4-argon-high"}')"
+  AGENT_MODE=work tick
+  q="$QD/001-g.json"
+  [[ "$(jl .result)" == retry && "$(jl .executor)" == gemini && -e "$q" &&
+    "$(jq -c '[.executor, .oracle_failures, .model]' "$q")" == '["gemini",1,"gemini-4-argon-high"]' ]] &&
+    ok "оракул gemini червоний уперше → retry, у черзі знову gemini, oracle_failures 1" || bad "перше падіння gemini: $(last); $(cat "$q" 2>/dev/null)"
+  git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai-attempt/g/gemini-1 >/dev/null &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null && [[ ! -e "$ROOT/wt/g" ]] &&
+    ok "спробу збережено в ai-attempt/g/gemini-1, ai/g і worktree звільнено" || bad "гілки після першої спроби: $(git -C "$ROOT/repo" branch -a | tr '\n' ' ')"
+  [[ "$(cat "$LOGS/last-results")" == $'failed\nfailed' ]] && ok "перша спроба не пише в серію падінь" ||
+    bad "серія після першої спроби: $(tr '\n' ' ' <"$LOGS/last-results")"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == escalated && "$(jl .executor)" == gemini && -e "$q" &&
+    "$(jq -c '[.executor, .oracle_failures, has("model")]' "$q")" == '["claude",2,false]' ]] &&
+    ok "оракул gemini червоний удруге → escalated, у черзі executor claude, model прибрано" || bad "друге падіння gemini: $(last); $(cat "$q" 2>/dev/null)"
+  grep -q '"detail":"oracle rc=1; gemini, спроба 2 з 2 → executor claude; гілка спроби ai-attempt/g/gemini-2"' <<<"$(last)" &&
+    ok "журнал: причина й гілка спроби в detail" || bad "detail escalated: $(jl .detail)"
+  grc=0
+  "$BIN/a8-guard" check >/dev/null 2>&1 || grc=$?
+  [[ "$(cat "$LOGS/last-results")" == $'failed\nfailed' && "$grc" == 0 ]] && ! grep -q '"event":"paused"' "$LOGS/runs.log" &&
+    ok "переведення на claude не ставить паузу: серія та сама, guard → 0" || bad "пауза після переведення: $(tr '\n' ' ' <"$LOGS/last-results")"
+  n_agy="$(grep -c '^args agy' "$LOGS/runner-calls")"
+  AGENT_MODE=good tick
+  [[ "$(jl .executor)" == claude && "$(jl .model)" == sonnet && "$(jl .result)" == no-credential && -e "$QD/done/001-g.json" ]] &&
+    [[ "$(grep -c '^args agy' "$LOGS/runner-calls")" == "$n_agy" ]] &&
+    ok "третій тік — claude (модель claude), третьої спроби в agy немає" || bad "після переведення: $(last)"
+  teardown
+
+  # 23f. Задача claude з червоним оракулом — звичайне падіння, без повтору.
+  setup
+  enqueue 001-a "$(with_oracle a 'grep -q GOOD result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == failed && -e "$QD/failed/001-a.json" && "$(cat "$LOGS/last-results")" == failed ]] &&
+    ok "оракул claude червоний → failed, як і раніше (повтор лише для gemini)" || bad "claude з червоним оракулом: $(last)"
+  teardown
+
+  # 23g. Вивід agy цитує 401 Claude і падає → failed, а не STOP усієї черги.
+  setup
+  enqueue 001-g "$(gem g true)"
+  AGENT_MODE=auth tick
+  [[ "$(jl .result)" == failed && ! -e "$ROOT/STOP" ]] &&
+    ok "gemini: 401 Claude у виводі agy → failed, STOP не ставиться" || bad "gemini 401: $(last)"
+  teardown
+
+  # 23h. Профіль agy не зібрати (немає налаштувань на хості) → agy не
+  # запускається, копії не лишається, причина в журналі.
+  setup
+  rm -f "$ROOT/gemini/antigravity-cli/settings.json"
+  enqueue 001-g "$(gem g true)"
+  tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "agy-profile: "* ]] && ! grep -q '^args agy' "$LOGS/runner-calls" &&
+    [[ -z "$(ls -A "$LOGS/agy-run" 2>/dev/null)" ]] &&
+    ok "немає налаштувань agy → failed agy-profile, agy не запущено, копії немає" || bad "agy-profile: $(last)"
+  teardown
+
+  # 23i. Невідомий executor відхиляє і тік (поле названо).
+  setup
+  enqueue 001-x "$(jq -c '.executor = "codex"' <<<"$(valid x)")"
+  tick
+  [[ "$(jq -c .fields <<<"$(grep '"event":"reject"' "$LOGS/runs.log")")" == '["executor:invalid"]' && -e "$QD/rejected/001-x.json" ]] &&
+    ok "executor codex → reject [executor:invalid], файл у rejected/" || bad "executor codex: $(last)"
+  teardown
+}
 
 run_scenarios() {
   # 1. Kill switch → окремий стан, задача лишається в черзі.
@@ -1020,6 +1218,7 @@ EOF
 }
 
 run_scenarios
+run_executor_scenarios
 
 # КОНТРОЛЬ ПЕРЕД МУТАЦІЯМИ. Мутант вважається вбитим, якщо набір на ньому
 # падає. Якщо набір падає вже БЕЗ мутації, кожен мутант виглядає вбитим — і
@@ -1105,6 +1304,24 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
   mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
   mutate "no-commits від origin/main до HEAD" 's/rev-list --count "\$base\.\.\$tip"/rev-list --count origin\/main..HEAD/'
+  # Смуга виконавця gemini (сценарії 23).
+  mutate "executor ігнорується — завжди claude" 's/if \[\[ "\$executor" == gemini \]\]; then\n  # Токена/if false; then\n  # Токена/'
+  mutate "токен Claude і в контейнері agy" 's/\nrc=0\nif \[\[ "\$executor" == gemini \]\]; then\n/\nrc=0\nexport CLAUDE_CODE_OAUTH_TOKEN=tok\nif [[ "\$executor" == gemini ]]; then\n/'
+  mutate "тека agy і для оракула" 's/  A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home" \\\n    timeout/  export A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home"\n  timeout/'
+  mutate "копію з логіном agy не прибрано" 's/(  mv -f "\$agy_home\/agy\.log"[^\n]*\n)  rm -rf "\$agy_home"\n/$1/'
+  mutate "профіль виконавця не підставлено" 's/ &&\n    mv -f "\$asettings\.new" "\$asettings"\)/)/'
+  mutate "gemini з моделлю claude за замовчуванням" 's/model="\$\{model:-\$A8_GEMINI_MODEL\}"/model="\${model:-\$A8_DEFAULT_MODEL}"/'
+  mutate "backstop тестів приймання прибрано" 's/if ! aviol="/if false \&\& ! aviol="/'
+  mutate "тести приймання не названо в промпті" 's/\$\{tests:\+\n(?:.*\n){2}\}\n//'
+  mutate "друге падіння оракула — знову gemini" 's/if \(\(n >= 2\)\); then/if ((n >= 3)); then/'
+  mutate "перше падіння оракула — одразу claude" 's/if \(\(n >= 2\)\); then/if ((n >= 1)); then/'
+  mutate "спроба gemini пише failed у серію" 's/(  keep="ai-attempt\/\$id\/gemini-\$n"\n)/$1  "\$GUARD" record failed\n/'
+  mutate "спроба gemini скидає серію" 's/(  keep="ai-attempt\/\$id\/gemini-\$n"\n)/$1  "\$GUARD" record ok\n/'
+  mutate "model не прибрано при переведенні" 's/\.executor = "claude" \| del\(\.model\) \|/.executor = "claude" |/'
+  mutate "гілку спроби gemini видалено" 's/branch -m "\$branch" "\$keep"/branch -D "\$branch"/'
+  mutate "повтору gemini немає" 's/  \[\[ "\$executor" == gemini \]\] && gemini_retry "\$orc"\n//'
+  mutate "класифікатор не знає виконавця" 's/logic classify "\$rc" "\$out" "\$executor"/logic classify "\$rc" "\$out"/'
+  mutate "журнал без виконавця" 's/ executor="\$executor"\n/\n/'
   # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.
   mutate "STOP на залежностях як падіння" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n//'
   mutate "STOP на хуку як падіння" 's/  if \(\(hrc == 10\)\) \|\| stop_requested; then stop_task "під час перевірки хука"; fi\n//'

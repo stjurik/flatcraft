@@ -10,8 +10,12 @@
 # Використання (CLI — так їх кличе демон):
 #   a8-tick-logic.sh validate <task.json>        → "ok" (exit 0) | "reject <поля>" (exit 3)
 #   a8-tick-logic.sh guard-state <rc>            → ok | kill_switch | daily_limit | paused | guard_error
-#   a8-tick-logic.sh classify <rc> <log>         → "<клас> <деталь>"
+#   a8-tick-logic.sh classify <rc> <log> [виконавець] → "<клас> <деталь>"
 #   a8-tick-logic.sh should-pause <limit> <файл> → "pause" (exit 0) | "continue" (exit 1)
+#   a8-tick-logic.sh acceptance-violations <task.json> < змінені шляхи
+#                                                → зачеплені тести приймання (exit 1) | нічого (exit 0)
+#   a8-tick-logic.sh agy-settings <налаштування agy> <шаблон дозволів> <worktree>
+#                                                → налаштування з профілем «виконавець» (exit 0) | відмова (exit 1)
 #
 # Або `source` і виклик функцій a8_* напряму.
 set -uo pipefail
@@ -28,8 +32,18 @@ set -uo pipefail
 #            feedback (зворотний зв'язок користувачів і виробництва).
 #
 # Плюс oracle (docs/02: задача без оракула в роботу не береться), id і prompt.
+#
+# Необов'язкові поля смуги виконавця (orchestrator-autonomy.md §8, PR-B #262):
+#   executor         — хто виконує: gemini (agy) | claude. Немає поля — claude,
+#                      як до смуги. Порожній рядок чи інше значення — відмова:
+#                      «мабуть, claude» сховало б помилку в записі оркестратора.
+#   acceptance_tests — шляхи тестів приймання (від кореня репо). Їх пише Claude
+#                      до запуску; виконавцю правити їх заборонено (§8 п.1).
+#   oracle_failures  — скільки разів оракул червонів на виконавці gemini; пише
+#                      тік, не оркестратор (§8 п.4: на другому — claude).
 A8_SOURCES_KNOWN="human external derived"
 A8_ORIGINS_KNOWN="direction analytics feedback"
+A8_EXECUTORS_KNOWN="gemini claude"
 # Перевизначається лише тестом або свідомою зміною режиму OQ-34.
 A8_SOURCES_ALLOWED="${A8_SOURCES_ALLOWED:-human}"
 
@@ -53,7 +67,7 @@ a8_validate_task() {
   # Поле, що є, але не рядок (`"oracle": {}`), — не «порожнє», а невалідне:
   # `tostring` зробив би з нього непорожній текст і пропустив би задачу.
   local f
-  for f in id source origin oracle prompt; do
+  for f in id source origin oracle prompt executor; do
     if jq -e --arg k "$f" 'has($k) and (.[$k] | type) != "string"' "$file" >/dev/null; then
       reasons+=("$f:not-string")
     fi
@@ -96,6 +110,31 @@ a8_validate_task() {
   fi
   if [[ -z "${prompt//[[:space:]]/}" && " ${reasons[*]} " != *" prompt:not-string "* ]]; then
     reasons+=("prompt:missing")
+  fi
+
+  # Поля немає — claude. Є, але не з переліку (зокрема порожнє) — відмова.
+  if jq -e 'has("executor") and (.executor | type) == "string"' "$file" >/dev/null &&
+    ! _a8_in_list "$(jq -r '.executor' "$file")" "$A8_EXECUTORS_KNOWN"; then
+    reasons+=("executor:invalid")
+  fi
+
+  # Шлях тесту приймання — відносний, без `..` і без порожніх частин (тож і без
+  # провідного «/» — він дає порожню першу частину): інакше
+  # backstop порівнював би не ті рядки, що дає `git diff --name-only`, і
+  # мовчки нічого не захищав.
+  if jq -e 'has("acceptance_tests") and (.acceptance_tests | type) != "array"' "$file" >/dev/null; then
+    reasons+=("acceptance_tests:not-array")
+  elif jq -e '(.acceptance_tests // [])
+      | any(type != "string" or . == "" or test("\n")
+            or (rtrimstr("/") | split("/") | any(. == "" or . == "." or . == "..")))' \
+    "$file" >/dev/null; then
+    reasons+=("acceptance_tests:invalid")
+  fi
+
+  if jq -e 'has("oracle_failures") and
+      ((.oracle_failures | type) != "number" or .oracle_failures < 0 or .oracle_failures != (.oracle_failures | floor))' \
+    "$file" >/dev/null; then
+    reasons+=("oracle_failures:invalid")
   fi
 
   if ((${#reasons[@]} > 0)); then
@@ -144,8 +183,13 @@ a8_guard_state() {
 # обгортці (між перевіркою демона і запуском контейнера) — це стоп, не падіння.
 A8_SIG_401='Failed to authenticate. API Error: 401 Invalid bearer token'
 
+#
+# Виконавець gemini (agy): сигнатуру 401 Claude не шукаємо зовсім. У виводі agy
+# вона може бути лише цитатою (агент читав ADR-039), а STOP із ліками «claude
+# setup-token» тоді зупинив би чергу не з тієї причини. Сигнатур відмов самого
+# agy на A8 ще не бачили — тож усе, крім 0, для нього failed.
 a8_classify() {
-  local rc="$1" out="$2" res is_error=0 auth=0
+  local rc="$1" out="$2" executor="${3:-claude}" res is_error=0 auth=0
   # Останній JSON-об'єкт із полем is_error — результат прогону.
   # Порядково і толерантно: поруч із JSON-результатом бувають рядки stderr, а
   # звичайний `jq` на першому не-JSON рядку зупинився б і результату не знайшов.
@@ -161,6 +205,7 @@ a8_classify() {
     auth=1
   fi
 
+  [[ "$executor" == gemini ]] && auth=0
   if ((auth)); then
     echo "auth_stop 401"
     return
@@ -199,6 +244,65 @@ a8_should_pause() { # a8_should_pause <limit> <файл last-results>
   return 1
 }
 
+# ─── Тести приймання: backstop виконавця (§8 п.1) ──────────────────────────
+# a8_acceptance_violations <task.json> — на stdin змінені шляхи (як дає
+# `git diff --name-only`), на stdout — ті з них, що є тестами приймання задачі
+# або лежать у їхній теці. Є хоч один → exit 1. Поля немає → нічого не захищено,
+# exit 0: задача без переліку — така сама, як до смуги.
+a8_acceptance_violations() {
+  local file="$1" path t hit=0
+  local -a tests
+  mapfile -t tests < <(jq -r '(.acceptance_tests // [])[] | rtrimstr("/")' "$file")
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    for t in "${tests[@]}"; do
+      if [[ "$path" == "$t" || "$path" == "$t/"* ]]; then
+        echo "$path"
+        hit=1
+        break
+      fi
+    done
+  done
+  ((hit == 0))
+}
+
+# ─── Профіль agy «виконавець» ───────────────────────────────────────────────
+# a8_agy_settings <налаштування agy> <шаблон> <worktree> — друкує налаштування agy,
+# у яких розділ permissions ЗАМІНЕНО профілем з шаблону (@WT@ → worktree задачі).
+# Решту налаштувань (модель, довірені теки) не чіпає — так само, як
+# install-agy-permissions.sh для профілю рецензента.
+#
+# Охорона шаблону (fail closed — профіль ширший за задум не віддається):
+#   - читання і запис — рівно worktree задачі;
+#   - команди — лише command(<ім'я>) без `*` і пробілів, і не сам agy: agy, що
+#     запускає себе, обходить власні дозволи (install-agy-permissions.sh);
+#   - deny write_file(/tmp): agy пускає /tmp сам, без правила (зонд 2026-09-24).
+a8_agy_settings() {
+  local settings="$1" template="$2" wt="$3" want bad
+  [[ "$wt" == /* && "$wt" != *[\(\)\*\ ]* ]] || {
+    echo "відмова: worktree '$wt' — не абсолютний шлях або має ( ) * чи пробіл" >&2
+    return 1
+  }
+  [[ -f "$settings" ]] || { echo "відмова: немає налаштувань agy $settings" >&2; return 1; }
+  want="$(jq --arg wt "$wt" '{allow: [.allow[] | gsub("@WT@"; $wt)], deny: (.deny // [])}' "$template" 2>/dev/null)" || {
+    echo "відмова: шаблон $template не читається як JSON з allow" >&2
+    return 1
+  }
+  bad="$(jq -r --arg r "read_file($wt)" --arg w "write_file($wt)" '.allow[]
+    | select(. != $r and . != $w and (test("^command\\([A-Za-z0-9._-]+\\)$") | not))' <<<"$want")"
+  bad+="$(jq -r '.allow[] | select(. == "command(agy)")' <<<"$want")"
+  if [[ -n "$bad" ]]; then
+    echo "відмова: у шаблоні дозвіл ширший за «worktree + команди тестів»:" >&2
+    sed 's/^/  ✗ /' <<<"$bad" >&2
+    return 1
+  fi
+  jq -e '.deny | index("write_file(/tmp)") != null' <<<"$want" >/dev/null || {
+    echo "відмова: у шаблоні немає deny write_file(/tmp)" >&2
+    return 1
+  }
+  jq --argjson p "$want" '.permissions = $p' "$settings"
+}
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   cmd="${1:-}"
@@ -208,8 +312,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     guard-state) a8_guard_state "$@" ;;
     classify) a8_classify "$@" ;;
     should-pause) a8_should_pause "$@" ;;
+    acceptance-violations) a8_acceptance_violations "$@" ;;
+    agy-settings) a8_agy_settings "$@" ;;
     *)
-      echo "використання: $0 {validate|guard-state|classify|should-pause} ..." >&2
+      echo "використання: $0 {validate|guard-state|classify|should-pause|acceptance-violations|agy-settings} ..." >&2
       exit 1
       ;;
   esac

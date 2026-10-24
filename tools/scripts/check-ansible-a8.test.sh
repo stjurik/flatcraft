@@ -185,6 +185,18 @@ RUNNER_TASK_OK='---
 
 RUNNER_OK='#!/usr/bin/env bash
 /usr/local/bin/a8-guard check-run >&2
+OPT_ARGS=()
+case "${A8_EXECUTOR:-claude}" in
+  claude)
+    [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+    ;;
+  gemini)
+    if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      exit 2
+    fi
+    OPT_ARGS+=(-v "$A8_AGY_HOME:{{ a8_container_home }}/.gemini")
+    ;;
+esac
 exec docker run --rm \
   -w "$1" \
   hart-agent:test "$@"'
@@ -259,6 +271,46 @@ TASKS_OK='---
 # Тест 1 — здорове дерево → 0.
 make_tree "$tmproot/ok" "$PLAY_OK" "$TASKS_OK"
 assert_exit "здорова роль → 0" 0 "$tmproot/ok"
+
+# ─── Інваріант 16 — креденшали двох виконавців не перетинаються ────────────
+# Здорова роль ($RUNNER_OK) — 0; кожна зламана половина — рівно одне порушення.
+runner_tree() { # runner_tree <тека> <обгортка>
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+}
+runner_tree "$tmproot/x16a" "$RUNNER_OK"
+assert_exit "16: обгортка з гілками claude/gemini → 0" 0 "$tmproot/x16a"
+runner_tree "$tmproot/x16b" "${RUNNER_OK/case \"\$\{A8_EXECUTOR:-claude\}\" in/OPT_ARGS+=(-v \"\$A8_AGY_HOME:/h/.gemini\")
+case \"\$\{A8_EXECUTOR:-claude\}\" in}"
+assert_exit "16: тека agy монтується поза гілкою gemini → 1" 1 "$tmproot/x16b" "монтує теку agy поза гілкою gemini"
+runner_tree "$tmproot/x16c" "${RUNNER_OK/    OPT_ARGS+=(-v \"\$A8_AGY_HOME/    OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+    OPT_ARGS+=(-v \"\$A8_AGY_HOME}"
+assert_exit "16: токен Claude у гілці gemini → 1" 1 "$tmproot/x16c" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
+runner_tree "$tmproot/x16d" "${RUNNER_OK/      exit 2
+/      :
+}"
+assert_exit "16: gemini не відмовляє на токені Claude → 1" 1 "$tmproot/x16d" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
+runner_tree "$tmproot/x16e" "${RUNNER_OK/  gemini)/  gemini-off)}"
+# Тут порушень два: гілки немає, і монтування теки agy тепер поза нею.
+assert_exit "16: немає гілки gemini → 1" 1 "$tmproot/x16e"
+grep -qF "немає гілки gemini)" "$tmproot/out" ||
+  { echo "✗ 16: немає порушення «немає гілки gemini)»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+runner_tree "$tmproot/x16f" "$RUNNER_OK"
+printf '%s\n' '- name: probe' '  ansible.builtin.command:' '    argv:' '      - docker' '      - run' '      - -v' \
+  '      - "{{ a8_agy_config_dir }}:/root/.gemini"' >"$tmproot/x16f/infra/ansible/roles/a8/tasks/probe.yml"
+assert_exit "16: задача ролі монтує теку agy повз обгортку (argv) → 1" 1 "$tmproot/x16f" "монтує в контейнер не обгортка"
+runner_tree "$tmproot/x16g" "$RUNNER_OK"
+printf '%s\n' '- name: probe' '  ansible.builtin.shell: docker run -v {{ a8_agy_config_dir }}:/x img true' \
+  >"$tmproot/x16g/infra/ansible/roles/a8/tasks/probe.yml"
+assert_exit "16: задача ролі монтує теку agy повз обгортку (рядок) → 1" 1 "$tmproot/x16g" "монтує в контейнер не обгортка"
+runner_tree "$tmproot/x16h" "$RUNNER_OK"
+printf '%s\n' 'a8_container_home: /home/agent/container-home' 'a8_agy_config_dir: /home/agent/container-home/gemini' \
+  >>"$tmproot/x16h/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "16: тека agy всередині container-home → 1" 1 "$tmproot/x16h" "a8_agy_config_dir (/home/agent/container-home/gemini) лежить у a8_container_home"
+runner_tree "$tmproot/x16i" "$RUNNER_OK"
+printf '%s\n' 'a8_container_home: /home/agent/container-home' 'a8_agy_config_dir: /home/agent/container-home2' \
+  >>"$tmproot/x16i/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "16: схожий префікс (container-home2) — не всередині → 0" 0 "$tmproot/x16i"
 
 # Тест 2 — include_tasks у рядковій формі (вада 1, реальна: ok=2 у verify).
 make_tree "$tmproot/inc" "$PLAY_OK" '---
@@ -1588,6 +1640,52 @@ open(p, "w").write(s)
 PY2
 assert_exit "мутація 34: V20b резолвить ціль сам → 1" 1 "$mut" "іде не на адресу, яку пробував агент"
 cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
+
+# Мутації 40–43 — інваріант 16, креденшали двох виконавців (PR-B #262).
+RUNNER_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+# 40: токен Claude і в контейнер agy.
+python3 - "$mut/$RUNNER_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = '    OPT_ARGS+=(-v "$A8_AGY_HOME:'
+assert s.count(anchor) == 1, "фікстура застаріла: монтування теки agy виглядає інакше"
+s = s.replace(anchor, '    OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)\n' + anchor, 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 40: токен Claude у гілці gemini → 1" 1 "$mut" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
+cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
+# 41: тека agy — і для claude.
+python3 - "$mut/$RUNNER_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = 'case "${A8_EXECUTOR:-claude}" in\n'
+assert s.count(anchor) == 1, "фікстура застаріла: вибір виконавця виглядає інакше"
+s = s.replace(anchor, '[[ -n "${A8_AGY_HOME:-}" ]] && OPT_ARGS+=(-v "$A8_AGY_HOME:{{ a8_container_home }}/.gemini")\n' + anchor, 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 41: тека agy поза гілкою gemini → 1" 1 "$mut" "монтує теку agy поза гілкою gemini"
+cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
+# 42: gemini більше не відмовляє на токені Claude.
+python3 - "$mut/$RUNNER_T" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2 = re.sub(r'(    if \[\[ -n "\$\{CLAUDE_CODE_OAUTH_TOKEN:-\}" \]\]; then\n(?:      [^\n]*\n)*?)      exit 2\n', r'\1', s, count=1)
+assert s2 != s, "фікстура застаріла: відмова на токені виглядає інакше"
+open(p, "w").write(s2)
+PY2
+assert_exit "мутація 42: gemini не відмовляє на токені Claude → 1" 1 "$mut" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
+cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
+# 43: тека agy переїхала в container-home — її бачить і контейнер Claude.
+DEF_M="infra/ansible/roles/a8/defaults/main.yml"
+python3 - "$mut/$DEF_M" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2 = re.sub(r'^a8_agy_config_dir: .*$', 'a8_agy_config_dir: /home/agent/container-home/.gemini', s, count=1, flags=re.M)
+assert s2 != s, "фікстура застаріла: a8_agy_config_dir виглядає інакше"
+open(p, "w").write(s2)
+PY2
+assert_exit "мутація 43: тека agy у container-home → 1" 1 "$mut" "лежить у a8_container_home"
+cp "$REPO/$DEF_M" "$mut/$DEF_M"
 
 # Мутації 35–37 — інваріант 14, prune docker не чіпає образ агента (issue #117).
 PRUNE_T="infra/ansible/roles/a8/templates/docker-prune.service.j2"
