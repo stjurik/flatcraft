@@ -1115,6 +1115,56 @@ make_prune_tree "$tmproot/p15" "" "$DF_HEAD
 LABEL hart.keep=truer"
 assert_exit "інв.14: hart.keep=truer — не та мітка → 1" 1 "$tmproot/p15" "немає LABEL hart.keep=true"
 
+# ─── Інваріант 15: ключ у authorized_keys — лише з restrict і command= ───────
+akey_tree() { # akey_tree <тека> <вміст tasks/akey.yml>
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/tasks/akey.yml"
+}
+akey_tree "$tmproot/k1" '---
+- name: Authorize key
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: restrict,command="/usr/local/bin/a8-ctl" {{ k }}'
+assert_exit "інв.15: lineinfile з restrict і command= → 0" 0 "$tmproot/k1"
+
+akey_tree "$tmproot/k2" '---
+- name: Authorize key
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: command="/usr/local/bin/a8-ctl" {{ k }}'
+assert_exit "інв.15: без restrict → 1" 1 "$tmproot/k2" "без restrict"
+
+akey_tree "$tmproot/k3" '---
+- name: Authorize key
+  ansible.builtin.copy:
+    content: "restrict {{ k }}"
+    dest: /home/agent/.ssh/authorized_keys'
+assert_exit "інв.15: copy без command= → 1" 1 "$tmproot/k3" "без command="
+
+akey_tree "$tmproot/k4" '---
+- name: Authorize key
+  # restrict,command="/usr/local/bin/a8-ctl" — лише в коментарі
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: "{{ k }}"'
+assert_exit "інв.15: restrict і command= лише в коментарі → 1" 1 "$tmproot/k4"
+grep -qF "без restrict" "$tmproot/out" && grep -qF "без command=" "$tmproot/out" ||
+  { echo "✗ інв.15: очікував обидва порушення для k4"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+akey_tree "$tmproot/k5" '---
+- name: Read keys
+  ansible.builtin.slurp:
+    src: /home/agent/.ssh/authorized_keys'
+assert_exit "інв.15: лише читання (slurp) → 0" 0 "$tmproot/k5"
+
+akey_tree "$tmproot/k6" '---
+- name: Authorize key
+  ansible.posix.authorized_key:
+    user: agent
+    key: "{{ k }}"
+    key_options: restrict,command="/usr/local/bin/a8-ctl"'
+assert_exit "інв.15: модуль authorized_key з key_options restrict,command= → 0" 0 "$tmproot/k6"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -1631,6 +1681,31 @@ PY2
 assert_exit "мутація 37: роль не ставить юніти prune → 1" 1 "$mut"
 grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" ||
   { echo "✗ мутація 37: немає порушення «жодна задача ролі не ставить docker-prune.service»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
+# 38: ключ без restrict — pty і forwarding.
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "line: 'restrict,command=\"/usr/local/bin/a8-ctl\" "
+assert s.count(anchor) == 1, "фікстура застаріла: рядок ключа a8-ctl виглядає інакше"
+s = s.replace(anchor, "line: 'command=\"/usr/local/bin/a8-ctl\" ", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 38: ключ a8-ctl без restrict → 1" 1 "$mut" "без restrict"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# 39: ключ без command= — повна оболонка agent.
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "line: 'restrict,command=\"/usr/local/bin/a8-ctl\" "
+assert s.count(anchor) == 1, "фікстура застаріла: рядок ключа a8-ctl виглядає інакше"
+s = s.replace(anchor, "line: 'restrict ", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
 if [[ "$fail" -eq 0 ]]; then

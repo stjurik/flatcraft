@@ -16,7 +16,11 @@
 # a8-guard: їхню логіку тут НЕ дублюємо.
 #
 # СТАН ЗАДАЧІ = ТЕКА, у якій лежить її файл:
-#   <queue>/*.json      — чекає (береться найстаріша за іменем)
+#   <queue>/urgent/     — невідкладна: береться ПЕРШОЮ, навіть коли плановий
+#                         потік на паузі (a8-queue enqueue --urgent, рішення 19.10)
+#   <queue>/*.json      — плановий потік: чекає (береться найменша назва, LC_ALL=C);
+#                         на паузі ({{ a8_logs_dir }}/planned-paused, a8-queue
+#                         pause) — не береться
 #   <queue>/running/    — узята; якщо тік помер, наступний тік знайде її тут
 #   <queue>/done/       — агент ok І оракул зелений (далі push або no-credential)
 #   <queue>/failed/     — failed; причина — у журналі
@@ -55,7 +59,7 @@ FORBIDDEN="${A8_FORBIDDEN_CHECK:-/usr/local/lib/a8/check-forbidden-paths.sh}"
 WATCH_S="${A8_WATCH_INTERVAL_S:-5}"
 
 Q="$A8_QUEUE_DIR"
-mkdir -p "$Q/running" "$Q/done" "$Q/failed" "$Q/rejected" "$A8_LOGS_DIR/tasks"
+mkdir -p "$Q/running" "$Q/done" "$Q/failed" "$Q/rejected" "$Q/urgent" "$A8_LOGS_DIR/tasks"
 
 # Два тіки одночасно (таймер + ручний запуск) узяли б одну задачу двічі.
 exec 9>"$A8_LOGS_DIR/tick.lock"
@@ -65,6 +69,13 @@ flock -n 9 || {
 }
 
 logic() { bash "$LOGIC" "$@"; }
+# Кожне переміщення задачі між теками черги — під queue.lock, тим самим, під яким
+# a8-queue enqueue перевіряє «id ще немає, невідкладної немає» і пише, а
+# a8-requeue.sh повертає задачу. Інакше перевірка тек по черзі не була б знімком:
+# невідкладна, яку тік повертає з running/ в urgent/ посеред перевірки enqueue
+# --urgent, не знайшлася б ніде, і в urgent/ лягли б дві (контрприклад 3, PR #272).
+# Lock короткий — лише на mv; tick.lock тримається всю задачу, тому він окремий.
+qmv() { flock "$A8_LOGS_DIR/queue.lock" mv "$@"; }
 field() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$2"; }
 now() { date +%s; }
 
@@ -110,7 +121,7 @@ for orphan in "$Q"/running/*.json; do
     "попередній тік обірвався посеред задачі" \
     exit_class=failed detail=orphan origin="$(field origin "$orphan")" \
     oracle="$(field oracle "$orphan")" branch="ai/${oid}"
-  mv "$orphan" "$Q/failed/"
+  qmv "$orphan" "$Q/failed/"
 done
 
 # ─── 1. Запобіжники ────────────────────────────────────────────────────────
@@ -125,6 +136,16 @@ if [[ "$gstate" != ok ]]; then
 fi
 
 # ─── 2. Найстаріша ВАЛІДНА задача ──────────────────────────────────────────
+# Спершу urgent/, потім плановий потік — якщо він не на паузі. Пауза планового
+# потоку (a8-queue pause) не зупиняє ні невідкладну задачу, ні ту, що вже йде.
+# Сортування — LC_ALL=C: порядок назв не залежить від локалі машини (у
+# en_US.UTF-8 `-` і `_` при порівнянні пропускаються, і «найстаріша» назва
+# могла б бути не першою).
+candidates() {
+  find "$Q/urgent" -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort
+  [[ -e "$A8_LOGS_DIR/planned-paused" ]] && return 0
+  find "$Q" -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort
+}
 task=""
 while IFS= read -r f; do
   verdict="$(logic validate "$f")" && {
@@ -134,8 +155,8 @@ while IFS= read -r f; do
   # Fail closed: невалідний запис не виконується і не лишається в черзі, щоб
   # не відхилятись щотіку. Журнал називає САМЕ ТІ поля, що відхилили задачу.
   "$JOURNAL" reject "$(basename "$f" .json)" "${verdict#reject }"
-  mv "$f" "$Q/rejected/"
-done < <(find "$Q" -maxdepth 1 -type f -name '*.json' | sort)
+  qmv "$f" "$Q/rejected/"
+done < <(candidates)
 
 [[ -n "$task" ]] || exit 0
 
@@ -214,7 +235,22 @@ oracle_rc="-"
 # Узяти = перенести. Від цієї миті задача існує лише в running/ — жоден інший
 # тік її вже не побачить у черзі.
 claimed="$Q/running/$(basename "$task")"
+# Куди повертати задачу, яку не виконали (STOP, 401): туди ж, звідки взяли, —
+# невідкладна лишається невідкладною.
+home="$(dirname "$task")"
+# Узяти — під queue.lock, з повторною перевіркою. Між вибором кандидата (крок 2)
+# і цим місцем — проба образу й читання полів, до хвилини. Якщо за цей час
+# плановий потік поставили на паузу чи в urgent/ з'явилась задача, планову не
+# беремо: наступний тік вибере заново (контрприклад Argon 5б, PR #272).
+exec 6>"$A8_LOGS_DIR/queue.lock"
+flock 6
+if [[ "$home" == "$Q" ]] &&
+  { [[ -e "$A8_LOGS_DIR/planned-paused" ]] || compgen -G "$Q/urgent/*.json" >/dev/null; }; then
+  exec 6>&-
+  exit 0
+fi
 mv "$task" "$claimed"
+exec 6>&-
 started="$(now)"
 
 finish() { # finish <результат> <клас> <деталь> <куди>
@@ -222,9 +258,9 @@ finish() { # finish <результат> <клас> <деталь> <куди>
     exit_class="$2" detail="$3" origin="$origin" oracle="$oracle" \
     oracle_rc="$oracle_rc" branch="$branch" worktree="$wt"
   if [[ "$4" == queue ]]; then
-    mv "$claimed" "$Q/"
+    qmv "$claimed" "$home/"
   else
-    mv "$claimed" "$Q/$4/"
+    qmv "$claimed" "$Q/$4/"
   fi
 }
 

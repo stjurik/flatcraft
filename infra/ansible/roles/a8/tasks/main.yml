@@ -587,6 +587,64 @@
     group: root
     mode: "0755"
 
+- name: Install requeue script for failed tasks
+  # a8-requeue.sh (#234) — дієслово `requeue` в a8-queue кличе саме цю копію під
+  # root. Та сама копія, що доведена в CI (a8-requeue.test.sh); V22 звіряє суму.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-requeue.sh"
+    dest: /usr/local/lib/a8/a8-requeue.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install queue verbs and the ssh shim for them
+  # a8-queue — уся логіка дієслів status/enqueue/requeue/pause/resume, однаково
+  # для локального виклику й ssh (рішення yurii 2026-10-20). a8-ctl — лише
+  # forced-command ключа оркестратора: SSH_ORIGINAL_COMMAND → аргументи a8-queue.
+  # Ключ оркестратора роль кладе нижче, якщо задано a8_ctl_pubkey. V22 звіряє копії
+  # з репозиторієм і перевіряє, що обгортка відмовляє.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/{{ item }}.sh"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - a8-queue
+    - a8-ctl
+
+- name: Check the a8-ctl public key format
+  # Лише голий публічний ключ: тип, base64, необов'язковий коментар. Власні опції
+  # (`command=…`, `from=…`) чи другий рядок у змінній обійшли б restrict нижче.
+  ansible.builtin.assert:
+    that:
+      - a8_ctl_pubkey is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+=* ?[^\n\r]*$')
+    fail_msg: "a8_ctl_pubkey не схожий на рядок .pub (тип, base64, коментар) — ключ не ставлю"
+    quiet: true
+  when: a8_ctl_pubkey | length > 0
+
+- name: Ensure agent ssh directory exists for the a8-ctl key
+  ansible.builtin.file:
+    path: "{{ a8_agent_home }}/.ssh"
+    state: directory
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0700"
+  when: a8_ctl_pubkey | length > 0
+
+- name: Authorize the orchestrator key for a8-ctl only
+  # Рядок шукається за base64-частиною ключа: той самий ключ без restrict чи з
+  # іншою командою замінюється, а не дублюється. Інші ключі файла не чіпаються.
+  ansible.builtin.lineinfile:
+    path: "{{ a8_agent_home }}/.ssh/authorized_keys"
+    regexp: "{{ (a8_ctl_pubkey.split())[1] | regex_escape }}"
+    line: 'restrict,command="/usr/local/bin/a8-ctl" {{ a8_ctl_pubkey | trim }}'
+    create: true
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0600"
+  when: a8_ctl_pubkey | length > 0
+
 - name: Install queue tick
   ansible.builtin.template:
     src: a8-tick.sh.j2

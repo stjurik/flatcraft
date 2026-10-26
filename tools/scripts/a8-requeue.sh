@@ -11,8 +11,10 @@
 #
 # ЩО РОБИТЬ. Для кожного id, окремо від інших, лише коли ВСІ перевірки пройшли:
 #   1. у failed/ рівно один файл із полем .id == id;
-#   2. у running/ і в корені черги задачі з цим id немає, і в корені немає файла
-#      з такою самою назвою (mv мовчки затер би його);
+#   2. у running/, urgent/ і в корені черги задачі з цим id немає, і там, куди
+#      файл повертається, немає файла з такою самою назвою (mv мовчки затер би
+#      його); невідкладна (urgent-…) — лише коли в urgent/ порожньо (одночасно лише
+#      одна, рішення yurii 2026-10-19);
 #   3. origin/main свіжий (`git fetch` один раз на запуск — інакше перевірка
 #      комітів нижче порівнює з минулим);
 #   4. гілка ai/<id>, якщо є: 0 комітів понад origin/main, не заблокована
@@ -24,6 +26,10 @@
 # Тоді: worktree remove --force, прибрати залишок теки, worktree prune, branch -D,
 # файл задачі з failed/ у корінь черги, подія журналу `requeue`. Перевірка не
 # пройшла — для цього id нічого не змінено, рядок `SKIP <id>: <причина>`.
+# Невідкладна (назва urgent-…, a8-queue enqueue --urgent) повертається в urgent/, а
+# не в корінь: там вона стала б останньою з планових, на паузі планового потоку не
+# взялась би, а її префікс у running/ блокував би нову невідкладну (контрприклад 1,
+# PR #272). Назва файла не змінюється — задача повертається на своє місце в черзі.
 #
 # ЧОГО НЕ РОБИТЬ.
 #   - Не чіпає гілку з комітами і брудний worktree: це чиясь робота, а не залишок.
@@ -36,6 +42,10 @@
 # LOCK. Перед усім — `flock -n` на tick.lock, той самий файл, що й у тіку. Тік
 # працює (або інший requeue) — вихід 3, нічого не змінено. Lock тримається до
 # кінця: тік не візьме задачу, яку ми щойно повернули, посеред наших дій.
+# Саме переміщення файла — ще й під queue.lock, як кожне переміщення в тіку й
+# перевірка a8-queue enqueue: інакше enqueue, що перевіряє теки по черзі, не
+# знайшов би задачу, яку ми переносимо посеред його перевірки (контрприклад 3,
+# PR #272).
 #
 # --reset-pause. Кожне падіння записане в last-results рядком `failed`, а в runs.log —
 # рядком event=run з task і result=failed; три `failed` в кінці ставлять паузу
@@ -191,6 +201,7 @@ for t in jq flock git realpath timeout awk; do
   command -v "$t" >/dev/null || die "немає команди $t"
 done
 Q="$A8_QUEUE_DIR"
+URGENT="$Q/urgent"
 STATE="$A8_LOGS_DIR/last-results"
 [[ -d "$Q" ]] || die "немає теки черги $Q"
 git -C "$A8_REPO_DIR" rev-parse --git-dir >/dev/null 2>&1 || die "$A8_REPO_DIR — не git-репозиторій"
@@ -268,16 +279,24 @@ inspect_worktrees() {
   return 0
 }
 
+# urgent_busy — невідкладна вже є: чекає в urgent/ або йде (running/urgent-*, з
+# будь-яким id). Те саме правило, що в a8-queue enqueue --urgent (контрприклад
+# Argon 5а, PR #272): одночасно лише одна.
+urgent_busy() {
+  compgen -G "$URGENT/*.json" >/dev/null || compgen -G "$Q/running/urgent-*.json" >/dev/null
+}
+
 # ─── Одна задача: 0 — OK/WOULD, 1 — SKIP ────────────────────────────────────
 # Викликається в умові `if`, тож set -e тут не діє: кожну команду перевіряємо явно.
 process_id() {
   local id="$1" branch="ai/$1" bref="refs/heads/ai/$1"
-  local wt="$A8_WORKTREES_DIR/$1" wtr wdr taskfile destfile
+  local wt="$A8_WORKTREES_DIR/$1" wtr wdr taskfile destdir destfile
   local has_branch=0 has_wt=0 rc n st top head_ref removed=""
   skip() {
     printf 'SKIP %s: %s\n' "$id" "$*"
     return 1
   }
+  dest_label() { if [[ "$destdir" == "$URGENT" ]]; then echo urgent/; else echo черга; fi; }
 
   # 1. Рівно один файл у failed/.
   scan_dir "$Q/failed" "$id"
@@ -294,9 +313,12 @@ process_id() {
     return 1
   fi
   taskfile="${MATCHES[0]}"
-  destfile="$Q/$(basename "$taskfile")"
+  destdir="$Q"
+  [[ "$(basename "$taskfile")" == urgent-* ]] && destdir="$URGENT"
+  destfile="$destdir/$(basename "$taskfile")"
 
-  # 2. Ні в running/, ні в черзі. Файл, який не вдалося розібрати, міг бути саме ним.
+  # 2. Ні в running/, ні в urgent/, ні в черзі. Файл, який не вдалося розібрати, міг
+  # бути саме ним.
   scan_dir "$Q/running" "$id"
   if ((${#MATCHES[@]} > 0)); then
     skip "задача з таким id зараз у running/"
@@ -315,8 +337,21 @@ process_id() {
     skip "у черзі є файл, який не розібрано як JSON — не можу переконатися, що це не ця задача"
     return 1
   fi
+  scan_dir "$URGENT" "$id"
+  if ((${#MATCHES[@]} > 0)); then
+    skip "задача з таким id уже в urgent/ (${MATCHES[0]##*/})"
+    return 1
+  fi
+  if ((UNPARSED > 0)); then
+    skip "в urgent/ є файл, який не розібрано як JSON — не можу переконатися, що це не ця задача"
+    return 1
+  fi
   if [[ -e "$destfile" ]]; then
     skip "у черзі вже є файл ${destfile##*/} — перезапис затер би його"
+    return 1
+  fi
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
+    skip "невідкладна, а інша вже чекає в urgent/ чи йде — одночасно лише одна; поверни, коли та піде"
     return 1
   fi
 
@@ -426,7 +461,7 @@ process_id() {
   fi
 
   if ((dry)); then
-    printf 'WOULD %s: %s → черга; прибрав би:%s%s\n' "$id" "${taskfile##*/}" \
+    printf 'WOULD %s: %s → %s; прибрав би:%s%s\n' "$id" "${taskfile##*/}" "$(dest_label)" \
       "$( ((has_branch)) && echo " гілку $branch")" "$( ((has_wt)) && echo " worktree")"
     return 0
   fi
@@ -456,10 +491,26 @@ process_id() {
     }
     removed=" гілку $branch$removed"
   fi
-  mv -n -- "$taskfile" "$Q/" || {
+  # Під queue.lock (див. LOCK у заголовку). Перевірку «в urgent/ порожньо» —
+  # повторно, вже під lock'ом: enqueue --urgent міг поставити невідкладну, поки ми
+  # прибирали залишки.
+  if ! { exec 8>"$A8_LOGS_DIR/queue.lock"; } 2>/dev/null || ! flock -w 30 8; then
+    exec 8>&-
+    skip "ЧАСТКОВО: queue.lock не взято за 30 с — файл задачі лишився в failed/"
+    return 1
+  fi
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
+    exec 8>&-
+    skip "ЧАСТКОВО: поки прибирали залишки, з'явилась інша невідкладна — файл задачі лишився в failed/"
+    return 1
+  fi
+  rc=0
+  { mkdir -p -- "$destdir" && mv -n -- "$taskfile" "$destdir/"; } || rc=$?
+  exec 8>&-
+  if ((rc != 0)); then
     skip "ЧАСТКОВО: mv ${taskfile##*/} у чергу не вдався"
     return 1
-  }
+  fi
   if [[ -e "$taskfile" || ! -e "$destfile" ]]; then
     skip "ЧАСТКОВО: файл задачі не опинився в черзі"
     return 1
@@ -471,7 +522,7 @@ process_id() {
     echo "УВАГА $id: подію requeue в журнал не записано (a8-journal впав)" >&2
     journal_failed=1
   fi
-  printf 'OK %s: %s → черга; прибрано:%s\n' "$id" "${taskfile##*/}" "${removed:- нічого (залишків не було)}"
+  printf 'OK %s: %s → %s; прибрано:%s\n' "$id" "${taskfile##*/}" "$(dest_label)" "${removed:- нічого (залишків не було)}"
   return 0
 }
 
