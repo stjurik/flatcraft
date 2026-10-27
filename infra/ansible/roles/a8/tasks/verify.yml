@@ -872,6 +872,161 @@
       {{ (a8_v_cad.stdout_lines | default([''])) | last }}
     quiet: true
 
+# ─── V23. Смуга виконавця: креденшали двох виконавців не перетинаються ────
+# PR-B #262 (orchestrator-autonomy.md §8). Рішення yurii: креденшали Google —
+# лише в контейнер agy; у контейнері agy немає токена Claude, у контейнері Claude
+# — креденшалів Google. a8-run-agent.test.sh доводить це на аргументах docker,
+# інваріант 16 — на тексті шаблону; V23 — на живій машині, тим самим шляхом,
+# яким іде тік: обгортка, режим gemini, тимчасова копія теки agy.
+#
+# Заодно це ВИМІР, якого в git ще немає (README, «Смуга виконавця»): чи agy —
+# самодостатній файл і чи вся його автентифікація лежить у a8_agy_config_dir.
+# `agy models` у контейнері відповів — так; ні — stderr у fail_msg каже, чого
+# бракує.
+- name: V23a — checksum of the installed agy executor profile
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/agy-executor-permissions.json
+    checksum_algorithm: sha256
+  register: a8_v_agy_profile
+
+- name: V23a — checksum of the executor profile in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/agy/executor-permissions.json"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_agy_profile_repo
+
+- name: V23b — the Claude container sees neither agy nor its settings
+  # Режим за замовчуванням — той, у якому йдуть агент Claude, залежності, хук і
+  # оракул. Тека <container-home>/.gemini тут — порожня точка монтування з ролі.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - >-
+        command -v agy >/dev/null && echo AGY_VISIBLE || echo AGY_ABSENT;
+        find {{ a8_container_home }}/.gemini -mindepth 1 2>/dev/null | grep -q . && echo GEMINI_NOT_EMPTY || echo GEMINI_EMPTY;
+        test -e {{ a8_agy_config_dir }} && echo HOST_AGY_VISIBLE || echo HOST_AGY_HIDDEN
+  register: a8_v_claude_side
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V23 — agy container through the wrapper, with a throwaway settings copy
+  become: true
+  become_user: "{{ a8_agent_user }}"
+  block:
+    - name: V23c — fresh copy directory, as the tick makes it
+      ansible.builtin.file:
+        path: "{{ a8_logs_dir }}/agy-verify"
+        state: "{{ item }}"
+        mode: "0700"
+      loop: [absent, directory]
+
+    - name: V23c — copy the agy settings and login
+      ansible.builtin.command:
+        argv:
+          - cp
+          - -a
+          - "{{ a8_agy_config_dir }}/."
+          - "{{ a8_logs_dir }}/agy-verify/"
+      register: a8_v_agy_copy
+      changed_when: false
+      failed_when: false
+
+    - name: V23d — agy answers inside the container, and no Claude token is there
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_repo_dir }}"
+          - bash
+          - -c
+          - >-
+            printenv CLAUDE_CODE_OAUTH_TOKEN >/dev/null && echo CLAUDE_TOKEN_VISIBLE || echo CLAUDE_TOKEN_ABSENT;
+            test -e {{ a8_claude_token_file }} && echo TOKEN_FILE_VISIBLE || echo TOKEN_FILE_HIDDEN;
+            agy models && echo AGY_OK
+      environment:
+        A8_EXECUTOR: gemini
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify"
+      register: a8_v_gemini_side
+      changed_when: false
+      failed_when: false
+
+    - name: V23e — the wrapper refuses the agy container when a Claude token is in the environment
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_repo_dir }}"
+          - bash
+          - -c
+          - echo CONTAINER_STARTED
+      environment:
+        A8_EXECUTOR: gemini
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify"
+        CLAUDE_CODE_OAUTH_TOKEN: verify-not-a-token
+      register: a8_v_gemini_refuse
+      changed_when: false
+      failed_when: false
+  always:
+    - name: V23c — remove the settings copy (it holds the Google login)
+      ansible.builtin.file:
+        path: "{{ a8_logs_dir }}/agy-verify"
+        state: absent
+
+- name: V23f — the Claude token is nowhere in the container home that agy sees
+  # Контейнер agy бачить container-home (спільний $HOME). Якщо токен Claude колись
+  # опиниться там файлом, «не передали змінну» вже нічого не гарантує. rc 3 —
+  # токена немає чи не прочитати: перевірка не відбулась, і V23g так і скаже.
+  ansible.builtin.shell: |
+    t="$(cat {{ a8_claude_token_file }} 2>/dev/null)"
+    [ -n "$t" ] || exit 3
+    if grep -rqsF -- "$t" {{ a8_container_home }}; then exit 1; fi
+    exit 0
+  register: a8_v_token_in_home
+  changed_when: false
+  failed_when: false
+  no_log: true
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V23g — Google credentials only in the agy container, the Claude token only in the Claude container
+  ansible.builtin.assert:
+    that:
+      - a8_v_agy_profile.stat.exists
+      - a8_v_agy_profile.stat.checksum == a8_v_agy_profile_repo.stat.checksum
+      - a8_v_agy_profile.stat.pw_name == 'root'
+      - "'AGY_ABSENT' in a8_v_claude_side.stdout"
+      - "'GEMINI_EMPTY' in a8_v_claude_side.stdout"
+      - "'HOST_AGY_HIDDEN' in a8_v_claude_side.stdout"
+      - a8_v_agy_copy.rc == 0
+      - "'CLAUDE_TOKEN_ABSENT' in a8_v_gemini_side.stdout"
+      - "'TOKEN_FILE_HIDDEN' in a8_v_gemini_side.stdout"
+      - "'AGY_OK' in a8_v_gemini_side.stdout"
+      - a8_v_gemini_refuse.rc == 2
+      - "'CONTAINER_STARTED' not in a8_v_gemini_refuse.stdout"
+      - a8_v_token_in_home.rc == 0
+    fail_msg: >-
+      профіль виконавця: exists={{ a8_v_agy_profile.stat.exists }},
+      sha256 A8={{ a8_v_agy_profile.stat.checksum | default('—') }} repo={{ a8_v_agy_profile_repo.stat.checksum }};
+      контейнер Claude (rc={{ a8_v_claude_side.rc }}): {{ a8_v_claude_side.stdout_lines | default([]) | join(' ') }};
+      копія {{ a8_agy_config_dir }}: rc={{ a8_v_agy_copy.rc }} {{ a8_v_agy_copy.stderr | default('') }};
+      контейнер agy (rc={{ a8_v_gemini_side.rc }}): {{ (a8_v_gemini_side.stdout_lines | default([]))[-6:] | join(' | ') }};
+      stderr agy: {{ (a8_v_gemini_side.stderr_lines | default([]))[-6:] | join(' | ') }}
+      (agy не знайдено чи бракує бібліотеки — agy не самодостатній, його теку — в a8_agy_extra_ro_paths;
+      просить логін — автентифікація не лише в {{ a8_agy_config_dir }});
+      відмова з токеном Claude: rc={{ a8_v_gemini_refuse.rc }} (очікував 2);
+      токен Claude у {{ a8_container_home }}: rc={{ a8_v_token_in_home.rc }}
+      (0 — немає, 1 — Є, 3 — токен не прочитати, перевірку не виконано)
+    success_msg: >-
+      смуга виконавця: контейнер Claude не бачить agy і його теки; контейнер agy відповідає
+      (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
+      середовищі обгортка відмовляє (2); у container-home токена немає
+    quiet: true
+
 # ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────
 - name: V16a — feed a write command to a8-ro-shell
   ansible.builtin.command: /usr/local/bin/a8-ro-shell

@@ -45,6 +45,9 @@ export A8_SOURCES_ALLOWED
 # падіння безкоштовне, а повідомлення називає ліки.
 : "${A8_ORACLE_TIMEOUT:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 : "${A8_CONTAINER_IMAGE:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_GEMINI_MODEL:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_AGY_CONFIG_DIR:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_CONTAINER_HOME:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 
 # Точки підміни — ЛИШЕ для тесту (tools/scripts/a8-tick.test.sh). systemd-юніт
 # їх не задає, тож на A8 завжди діють шляхи за замовчуванням.
@@ -101,6 +104,12 @@ image_probe() {
 if [[ -e "$streak_file" ]] && image_probe; then
   rm -f "$streak_file"
 fi
+
+# Тимчасові копії налаштувань agy (крок 5) живуть лише під час агента. Тік,
+# убитий посеред задачі, лишив би копію з креденшалами Google на диску — її
+# прибирає наступний тік, уже під lock'ом. Задача виконавця gemini, на якій
+# червоніє оракул, повертається в чергу (gemini_retry нижче, §8 п.4).
+rm -rf "$A8_LOGS_DIR/agy-run"
 
 # ─── 0. Сирота з попереднього тіку ─────────────────────────────────────────
 # Файл у running/ при вільному lock означає: попередній тік помер посеред
@@ -219,14 +228,23 @@ id="$(field id "$task")"
 src="$(field source "$task")"
 origin="$(field origin "$task")"
 oracle="$(field oracle "$task")"
+# Виконавець (§8): поля немає — claude, як до смуги. `model` — для того
+# виконавця, що в `executor`; без нього кожен має свій дефолт.
+executor="$(field executor "$task")"
+executor="${executor:-claude}"
 model="$(field model "$task")"
-model="${model:-$A8_DEFAULT_MODEL}"
+if [[ "$executor" == gemini ]]; then
+  model="${model:-$A8_GEMINI_MODEL}"
+else
+  model="${model:-$A8_DEFAULT_MODEL}"
+fi
 branch="ai/$id"
 wt="$A8_WORKTREES_DIR/$id"
 log="$A8_LOGS_DIR/tasks/$id.log"
 # Вивід САМОГО claude — окремо від логу тіку: класифікатор не має бачити
 # вивід git/pnpm/check-hook-loud (знайдено незалежним рев'ю №2 демона).
 out="$A8_LOGS_DIR/tasks/$id.claude.json"
+[[ "$executor" == gemini ]] && out="$A8_LOGS_DIR/tasks/$id.agy.out"
 # `-`, а не 0: «до оракула не дійшло» і «оракул зелений» — різні факти, і в
 # журналі вони мусять виглядати по-різному. Дефолт 0 робив би кожну задачу,
 # що впала раніше, схожою на прийняту машиною.
@@ -256,7 +274,7 @@ started="$(now)"
 finish() { # finish <результат> <клас> <деталь> <куди>
   "$JOURNAL" append "$id" "$src" "$1" "$(($(now) - started))" "$model" "" \
     exit_class="$2" detail="$3" origin="$origin" oracle="$oracle" \
-    oracle_rc="$oracle_rc" branch="$branch" worktree="$wt"
+    oracle_rc="$oracle_rc" branch="$branch" worktree="$wt" executor="$executor"
   if [[ "$4" == queue ]]; then
     qmv "$claimed" "$home/"
   else
@@ -275,6 +293,45 @@ release_or_keep() {
     return 0
   fi
   return 1
+}
+
+# ─── Оракул gemini червоний: ще раз gemini або Claude (§8 п.4) ────────────
+# «Оракул упав двічі → задачу бере Claude, третьої спроби в agy немає.»
+#
+# Лічильник — поле `oracle_failures` у САМОМУ записі задачі: стан живе на диску
+# (ADR-039 §3), а не в пам'яті тіку. Перше падіння → задача повертається в
+# чергу, знову gemini, oracle_failures=1. Друге → executor: claude, поле `model`
+# прибрано (воно було для agy), oracle_failures=2.
+#
+# Чому без `record failed`: задача ще не завершена — вона в черзі і буде
+# виконана. «Три failed поспіль» — сигнал про зламане середовище; спроба
+# gemini, яку тік сам переводить далі, не має ні поставити чергу на паузу, ні
+# скинути серію чужих падінь (тому й не `record ok`). Денний ліміт спроба
+# витратила — `count` після агента вже був: кожен запуск рахується.
+#
+# Гілка спроби не видаляється: вона — доказ для людини й рецензента, і в ній
+# коміти. Тік ПЕРЕЙМЕНОВУЄ її в ai-attempt/<id>/gemini-<N> (простір імен поза
+# ai/, тож `a8-requeue` і перевірка «гілка ai/<id> уже є» її не бачать), а
+# worktree прибирає: наступна спроба стартує від свіжого origin/main, як будь-яка
+# задача. Не вдалося (така гілка вже є, git упав) — звичайне падіння оракула,
+# задача у failed/, гілка ai/<id> на місці.
+gemini_retry() { # gemini_retry <код оракула> — успіх: exit 0; ні — return 1
+  local n keep
+  n=$(($(jq -r '.oracle_failures // 0' "$claimed") + 1))
+  keep="ai-attempt/$id/gemini-$n"
+  git -C "$A8_REPO_DIR" rev-parse --verify --quiet "refs/heads/$keep" >/dev/null && return 1
+  git -C "$A8_REPO_DIR" worktree remove --force "$wt" >>"$log" 2>&1 || return 1
+  git -C "$A8_REPO_DIR" branch -m "$branch" "$keep" >>"$log" 2>&1 || return 1
+  if ((n >= 2)); then
+    jq --argjson n "$n" '.executor = "claude" | del(.model) | .oracle_failures = $n' \
+      "$claimed" >"$claimed.tmp" && mv -f "$claimed.tmp" "$claimed" || return 1
+    finish escalated escalated "oracle rc=$1; gemini, спроба $n з 2 → executor claude; гілка спроби $keep" queue
+  else
+    jq --argjson n "$n" '.oracle_failures = $n' "$claimed" >"$claimed.tmp" &&
+      mv -f "$claimed.tmp" "$claimed" || return 1
+    finish retry retry "oracle rc=$1; gemini, спроба $n з 2 → ще раз gemini; гілка спроби $keep" queue
+  fi
+  exit 0
 }
 
 fail_task() { # fail_task <деталь>
@@ -420,30 +477,77 @@ if stop_requested; then stop_task "перед агентом"; fi
 
 # ─── 5. Агент — лише через a8-run-agent ────────────────────────────────────
 # Формулювання пише СУПЕРВІЗОР; текст задачі — дані в ньому (OQ-34 п.3).
+# Тести приймання названо в самому промпті: заборону, про яку виконавець не
+# знає, він порушить не зі зла, а backstop (крок 6a) відхилить роботу.
+tests="$(jq -r '(.acceptance_tests // [])[]' "$claimed")"
 prompt="Працюй за CLAUDE.md §0.
 
 Оракул приймання цієї задачі: ${oracle}
 Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
-
+${tests:+
+Тести приймання — НЕ змінюй їх (зміна будь-якого — і результат відхилено):
+${tests}
+}
 ЗАДАЧА:
 $(field prompt "$claimed")"
+
+# Виконавець gemini: тимчасова копія теки налаштувань agy, у якій профіль
+# дозволів замінено на «виконавець» — читання й запис лише worktree задачі,
+# команди тестів (tools/agy/executor-permissions.json). Копія, а не тека з
+# хоста: (1) профіль рецензента на хості лишається недоторканим — агент у
+# контейнері не може його розширити; (2) agy може писати у свою теку (оновлення
+# токена), і це не потребує запису в хостову. Прибирається одразу після агента.
+# Шаблон профілю — копія під root, агент її не змінить.
+AGY_TEMPLATE="${A8_AGY_EXECUTOR_TEMPLATE:-/usr/local/lib/a8/agy-executor-permissions.json}"
+agy_home=""
+if [[ "$executor" == gemini ]]; then
+  agy_home="$A8_LOGS_DIR/agy-run/$id"
+  asettings="$agy_home/antigravity-cli/settings.json"
+  # Ланцюжок `&&`, а не `set -e`: у підоболонці в умові `if` bash ігнорує -e.
+  if ! aerr="$(umask 077 && mkdir -p "$agy_home" &&
+    cp -a "$A8_AGY_CONFIG_DIR/." "$agy_home/" 2>&1 &&
+    logic agy-settings "$asettings" "$AGY_TEMPLATE" "$wt" 2>&1 >"$asettings.new" &&
+    mv -f "$asettings.new" "$asettings")"; then
+    rm -rf "$agy_home"
+    printf '%s\n' "$aerr" >>"$log"
+    "$GUARD" count >/dev/null
+    fail_task "agy-profile: ${aerr%%$'\n'*}"
+    exit 0
+  fi
+fi
 
 export A8_CONTAINER_NAME="a8-$id"
 # Спостерігач — ДО токена: його підоболонці токен у середовищі ні до чого.
 watch_start "$A8_CONTAINER_NAME" "під час агента"
-# Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
-CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
-export CLAUDE_CODE_OAUTH_TOKEN
-
 rc=0
-timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
-  --model "$model" \
-  --settings "$wt/.claude/settings.autonomous.json" \
-  --dangerously-skip-permissions \
-  --max-turns "$A8_MAX_TURNS" \
-  --output-format json >"$out" 2>&1 || rc=$?
+if [[ "$executor" == gemini ]]; then
+  # Токена Claude тут немає і не має бути: обгортка в режимі gemini відмовляє,
+  # якщо бачить його в середовищі (a8-run-agent.test.sh). Режим і тека — лише
+  # в середовищі ЦЬОГО виклику: залежності, хук і оракул ідуть без них.
+  A8_EXECUTOR=gemini A8_AGY_HOME="$agy_home" \
+    timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" agy -p "$prompt" \
+    --model "$model" \
+    --log-file "$A8_CONTAINER_HOME/.gemini/agy.log" >"$out" 2>&1 || rc=$?
+fi
+# Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
+if [[ "$executor" == claude ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
+  export CLAUDE_CODE_OAUTH_TOKEN
+  timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
+    --model "$model" \
+    --settings "$wt/.claude/settings.autonomous.json" \
+    --dangerously-skip-permissions \
+    --max-turns "$A8_MAX_TURNS" \
+    --output-format json >"$out" 2>&1 || rc=$?
+fi
 watch_stop
 unset CLAUDE_CODE_OAUTH_TOKEN
+# Лог agy — доказ для людини (сигнатури відмов, мітка моделі); копія з
+# креденшалами — ні, і на диску вона не лишається.
+if [[ -n "$agy_home" ]]; then
+  mv -f "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
+  rm -rf "$agy_home"
+fi
 
 # `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент
 # працював би далі без нагляду, поки демон уже записав «failed timeout».
@@ -467,7 +571,7 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 "$GUARD" count >/dev/null
 
 # ─── 6. Класифікація ───────────────────────────────────────────────────────
-read -r cls detail < <(logic classify "$rc" "$out")
+read -r cls detail < <(logic classify "$rc" "$out" "$executor")
 # STOP або мітка спостерігача → зупинка, який би код не повернув контейнер:
 # 137 від `docker kill`, 0, якщо агент устиг закінчити, 10 від обгортки.
 # Без них 137 іде в класифікатор і стає падінням (OOM, чуже вбивство).
@@ -552,6 +656,19 @@ if ! changed="$(git --no-replace-objects -C "$wt" diff -z --name-only --no-renam
   exit 0
 fi
 
+# ─── 6a'. Тести приймання задачі — заборонені виконавцю (§8 п.1) ──────────
+# Тест і код від однієї моделі мають ту саму помилку в обох: виконавець, що
+# «виправив» тест приймання, робить оракул зеленим, не зробивши задачі. Тому
+# зміна будь-якого файла з `acceptance_tests` (зокрема видалення і перенесення
+# — diff той самий, `--no-renames`) відхиляє результат ДО оракула і push.
+# Діє для будь-якого виконавця: Claude, на якого задачу перевели, теж не пише
+# собі тест приймання. Падіння, а не повтор: це «запис поза смугою» (іспит §8).
+if ! aviol="$(printf '%s\n' "$changed" | logic acceptance-violations "$claimed" 2>&1)"; then
+  printf '%s\n' "$aviol" >>"$log"
+  fail_task "acceptance-tests: $(tr '\n' ' ' <<<"$aviol")"
+  exit 0
+fi
+
 # ─── 6b. Оракул приймання — доводить МАШИНА ────────────────────────────────
 # `ok` від моделі означає лише «сесія завершилась без помилки», а коміти —
 # лише «щось записано». ЩО саме записано, доводить оракул із запису черги.
@@ -589,6 +706,7 @@ if ((orc != 0)); then
   # червоний» там, де людина натиснула стоп, і звинуватив би агента в чужому
   # рішенні. Код 10 сам по собі тут не доказ: його може повернути й оракул.
   if stop_requested; then stop_task "під час оракула"; fi
+  [[ "$executor" == gemini ]] && gemini_retry "$orc"
   fail_task "oracle rc=$orc"
   exit 0
 fi

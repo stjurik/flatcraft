@@ -44,10 +44,51 @@ done
 #   A8_CONTAINER_NAME — ім'я контейнера, щоб при таймауті вбити САМЕ його
 #     (timeout убиває клієнт docker run, а не контейнер);
 #   CLAUDE_CODE_OAUTH_TOKEN — передається ІМЕНЕМ (`-e VAR`), значення docker
-#     бере з середовища: у аргументах процесу, видимих у `ps`, його немає.
+#     бере з середовища: у аргументах процесу, видимих у `ps`, його немає;
+#   A8_EXECUTOR — хто працює в контейнері: claude (за замовчуванням: агент
+#     Claude, залежності, хук, оракул) | gemini (agy, смуга виконавця §8);
+#   A8_AGY_HOME — лише для gemini: ТИМЧАСОВА копія теки налаштувань agy з
+#     профілем «виконавець», яку тік робить на задачу і прибирає після неї.
+#
+# КРЕДЕНШАЛИ НЕ ПЕРЕТИНАЮТЬСЯ (PR-B #262): у контейнері agy немає токена
+# Claude, у контейнері Claude немає креденшалів Google. Обидві половини — тут,
+# в одному місці, а не в дисципліні тіку:
+#   - claude: теки agy і самого agy в контейнері немає взагалі;
+#   - gemini: токен Claude у середовищі — ВІДМОВА, а не «просто не передати».
+#     Тік, який забув його прибрати, — це помилка, яку треба побачити, а не
+#     тихо обійти.
+# Код 2 — помилка виклику. 10/11/12 зайняті запобіжниками, і тік читає їх як
+# зупинку, а не як падіння.
 OPT_ARGS=()
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && OPT_ARGS+=(--name "$A8_CONTAINER_NAME")
-[[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+case "${A8_EXECUTOR:-claude}" in
+  claude)
+    [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+    ;;
+  gemini)
+    if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      echo "a8-run-agent: виконавець gemini, а в середовищі є CLAUDE_CODE_OAUTH_TOKEN — відмовляю" >&2
+      exit 2
+    fi
+    if [[ -z "${A8_AGY_HOME:-}" || ! -d "$A8_AGY_HOME" ]]; then
+      echo "a8-run-agent: виконавець gemini без теки налаштувань agy (A8_AGY_HOME='${A8_AGY_HOME:-}')" >&2
+      exit 2
+    fi
+    # Тека налаштувань — на $HOME/.gemini контейнера, де agy її шукає
+    # (~/.gemini/antigravity-cli/settings.json, install-agy-permissions.sh).
+    # Сам agy — з хоста, лише читання: в образі його немає (як його встановлено
+    # на A8 — README, «Смуга виконавця», вимір у #78).
+    OPT_ARGS+=(-v "$A8_AGY_HOME:{{ a8_container_home }}/.gemini")
+    OPT_ARGS+=(-v "{{ a8_agy_bin }}:/usr/local/bin/agy:ro")
+    for p in {{ a8_agy_extra_ro_paths | join(' ') }}; do
+      OPT_ARGS+=(-v "$p:$p:ro")
+    done
+    ;;
+  *)
+    echo "a8-run-agent: невідомий виконавець A8_EXECUTOR='$A8_EXECUTOR'" >&2
+    exit 2
+    ;;
+esac
 
 exec docker run --rm \
   "${OPT_ARGS[@]}" \
