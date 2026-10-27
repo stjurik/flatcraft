@@ -57,11 +57,13 @@ from flatcraft_cad.unfold import (
     unfold_z_bracket,
 )
 from flatcraft_cad.validate import (
+    sanitize_for_gates,
     validate_export,
     validate_export_holes,
     validate_export_perforation,
     validate_export_profile,
     validate_export_sheet,
+    validate_export_types,
 )
 
 PRESIGN_EXPIRES_SEC = 3600
@@ -371,8 +373,19 @@ def _build_app() -> FastAPI:
         # Issue #257 п.1: гейти рахують параметри ПІСЛЯ Pydantic-дефолтів
         # шаблону (bend_angle_deg/bend_radius_mm і т.п.), інакше вони сліпі до
         # того, що з повними параметрами відхиляють.
+        # Issue #274: тип перевіряється на СИРИХ `req.parameters`, ДО злиття з
+        # Pydantic-дефолтами — `_params_with_defaults` лояльно приводить
+        # bool/рядок-число до float (навіть якщо результат випадково валідний
+        # за діапазоном), тож перевірка типу після злиття пропустила б
+        # `bend_radius_mm: true`. Поля з помилкою типу нейтралізуються
+        # (`sanitize_for_gates`) перед тим, як потрапити у решту гейтів —
+        # інакше `validate/bend.py`/`validate/perforation.py` впали б на
+        # `float()` без try/except (500 замість 422).
+        type_errors = validate_export_types(req.template_slug, req.parameters)
         gate_params = _params_with_defaults(req.template_slug, req.parameters, req.thickness_mm)
+        gate_params = sanitize_for_gates(gate_params, type_errors)
         errors = [
+            *type_errors,
             *validate_export_profile(req.template_slug, gate_params, req.thickness_mm),
             *validate_export(req.template_slug, gate_params, req.thickness_mm, req.material_code),
             *validate_export_perforation(req.template_slug, gate_params),
