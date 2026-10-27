@@ -88,3 +88,133 @@ describe("enclosedShelfDefinition — validators (issue #237 п.2, render-gate A
     }
   });
 });
+
+// Доробка #275 (issue #237 п.2) — одне коло за рецензіями Flash і Argon Medium
+// (PR #275#issuecomment-6410942324). Argon-контрприклад 1: `unfold.py:799-805`
+// кидає `ValueError` при `flat_rib_y = height_mm - (t+r) <= 0`, а render-gate
+// цього не бачив — валідатори повертали `[]`.
+describe("enclosedShelfDefinition — stiffeningRibValidator (Argon-контрприклад 1)", () => {
+  const runValidators = (
+    params: (typeof enclosedShelfDefinition)["defaults"],
+    thicknessMm: number,
+  ) => enclosedShelfDefinition.validators.flatMap((v) => v(params, thicknessMm));
+
+  it("height_mm <= t+r (5 при t=2.5, r=2.5) → issue FLANGE_TOO_SHORT на stiffening_rib.height_mm", () => {
+    const issues = runValidators(
+      {
+        ...enclosedShelfDefinition.defaults,
+        bend_radius_mm: 2.5,
+        stiffening_rib: { height_mm: 5 },
+      },
+      2.5,
+    );
+    const ribIssue = issues.find((i) => i.field === "stiffening_rib.height_mm");
+    expect(ribIssue?.code).toBe("FLANGE_TOO_SHORT");
+    expect(ribIssue?.message).toBeTruthy();
+  });
+
+  it("height_mm > t+r (5.5 при t=2.5, r=2.5) → без issue на stiffening_rib.height_mm", () => {
+    const issues = runValidators(
+      {
+        ...enclosedShelfDefinition.defaults,
+        bend_radius_mm: 2.5,
+        stiffening_rib: { height_mm: 5.5 },
+      },
+      2.5,
+    );
+    expect(issues.filter((i) => i.field === "stiffening_rib.height_mm")).toEqual([]);
+  });
+
+  it("без ребра (stiffening_rib: null, дефолт) → без issue на stiffening_rib.height_mm", () => {
+    const issues = runValidators(enclosedShelfDefinition.defaults, 2.5);
+    expect(issues.filter((i) => i.field === "stiffening_rib.height_mm")).toEqual([]);
+  });
+});
+
+// Argon-контрприклади 2 і 3: `side_rect.w_mm` у `_enclosed_shelf_side_holes`
+// (`unfold.py:626-640`) — це `depth_mm - (t+r)`, не повний `depth_mm`;
+// `pitch <= hole_size` чи `margin < hole_size/2` дають отвори, що
+// зливаються/виходять за межі боковини.
+describe("enclosedShelfDefinition — sidePerforationValidator (Argon-контрприклади 2 і 3)", () => {
+  type Params = (typeof enclosedShelfDefinition)["defaults"];
+  type SidePerforation = NonNullable<Params["side_perforation"]>;
+
+  const perf = (hole: number, px: number, py: number, margin: number): SidePerforation => ({
+    hole_size_mm: hole,
+    pitch_x_mm: px,
+    pitch_y_mm: py,
+    margin_mm: margin,
+  });
+  const withPerf = (
+    sp: SidePerforation,
+    depth = 200,
+    r: Params["bend_radius_mm"] = 2.5,
+  ): Params => ({
+    ...enclosedShelfDefinition.defaults,
+    depth_mm: depth,
+    bend_radius_mm: r,
+    side_perforation: sp,
+  });
+  const runValidators = (params: Params, thicknessMm: number) =>
+    enclosedShelfDefinition.validators.flatMap((v) => v(params, thicknessMm));
+
+  it("2·margin_mm > depth_mm-(t+r) (margin 48, depth 100, t=2, r=2.5) → issue HOLES_NO_ROOM", () => {
+    const issues = runValidators(withPerf(perf(10, 20, 20, 48), 100), 2);
+    const issue = issues.find((i) => i.field === "side_perforation.margin_mm");
+    expect(issue?.code).toBe("HOLES_NO_ROOM");
+  });
+
+  it("межа 2·margin_mm = depth_mm-(t+r) (margin 49, depth 100, t=1, r=1) → без issue HOLES_NO_ROOM", () => {
+    const issues = runValidators(withPerf(perf(10, 20, 20, 49), 100, 1), 1);
+    expect(issues.some((i) => i.code === "HOLES_NO_ROOM")).toBe(false);
+  });
+
+  it("pitch_x_mm <= hole_size_mm (20<=20) → issue HOLES_OVERLAP на side_perforation.pitch_x_mm", () => {
+    const issues = runValidators(withPerf(perf(20, 20, 30, 20)), 2);
+    const issue = issues.find((i) => i.field === "side_perforation.pitch_x_mm");
+    expect(issue?.code).toBe("HOLES_OVERLAP");
+    expect(issue?.message).toBeTruthy();
+  });
+
+  it("pitch_y_mm <= hole_size_mm (20<=20) → issue HOLES_OVERLAP на side_perforation.pitch_y_mm", () => {
+    const issues = runValidators(withPerf(perf(20, 30, 20, 20)), 2);
+    const issue = issues.find((i) => i.field === "side_perforation.pitch_y_mm");
+    expect(issue?.code).toBe("HOLES_OVERLAP");
+  });
+
+  it("margin_mm < hole_size_mm/2 (hole 20, margin 5) → issue HOLES_OUT_OF_BOUNDS", () => {
+    const issues = runValidators(withPerf(perf(20, 30, 30, 5)), 2);
+    const issue = issues.find((i) => i.field === "side_perforation.margin_mm");
+    expect(issue?.code).toBe("HOLES_OUT_OF_BOUNDS");
+  });
+
+  it("межа margin_mm = hole_size_mm/2 (hole 20, margin 10) → без issue HOLES_OUT_OF_BOUNDS", () => {
+    const issues = runValidators(withPerf(perf(20, 30, 30, 10)), 2);
+    expect(issues.some((i) => i.code === "HOLES_OUT_OF_BOUNDS")).toBe(false);
+  });
+
+  it("валідна перфорація (10/20/20/20, depth 200) → без issue", () => {
+    expect(runValidators(withPerf(perf(10, 20, 20, 20)), 2)).toEqual([]);
+  });
+
+  it("нові issue — конкретний code (не INVALID_PARAMETER) і україномовне message", () => {
+    const UA = /[А-Яа-яІіЇїЄєҐґ]/;
+    const issues = [
+      ...runValidators(
+        {
+          ...enclosedShelfDefinition.defaults,
+          bend_radius_mm: 2.5,
+          stiffening_rib: { height_mm: 5 },
+        },
+        2.5,
+      ),
+      ...runValidators(withPerf(perf(20, 20, 20, 20)), 2),
+    ].filter((i) => i.field.startsWith("stiffening_rib") || i.field.startsWith("side_perforation"));
+    expect(issues.length).toBeGreaterThan(1);
+    for (const issue of issues) {
+      expect(issue.code).toBeTruthy();
+      expect(issue.code).not.toBe("INVALID_PARAMETER");
+      expect(issue.message ?? "").toMatch(UA);
+    }
+  });
+});
