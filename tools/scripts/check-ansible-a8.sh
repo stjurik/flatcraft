@@ -974,18 +974,19 @@ done < <(printf '%s' "$akey_blocks")
 #        лише цей список — тому кожен перелічено явно. uploadpack і receivepack
 #        `-c` не перекриває (git бере перше значення — з конфігу репо), тож кожен
 #        fetch несе --upload-pack=git-upload-pack, кожен push — --receive-pack.
-#   16d. `pnpm install` тіку пише хуки lefthook у викидну теку: .git/hooks лише
-#        для читання, і без цього кожна задача падала б на `deps`.
-#   16e. Хуки ставить роль: a8_git_hooks = хуки lefthook.yml. Інакше новий хук
-#        із lefthook.yml у контейнері тихо не існував би.
-#   16f. Зонд V23a пише в сам файл .git/config (`: >>`), а не `touch <файл>/…`:
+#   16d. Обгортка задає контейнеру core.hooksPath (GIT_CONFIG_*) на теку в
+#        container-home: .git/hooks лише для читання, і `prepare: lefthook
+#        install` при КОЖНОМУ pnpm install — тіку чи самого агента — падав би з
+#        EROFS. Не /tmp: /tmp кожного контейнера порожній, і git commit агента та
+#        check-hook-loud.sh лишились би без хуків.
+#   16e. Зонд V23a пише в сам файл .git/config (`: >>`), а не `touch <файл>/…`:
 #        той дає ENOTDIR при будь-яких правах — хибне «RO» (контрприклад 5).
+#        Зонд V23b звіряє .git/hooks до і після pnpm install агента.
 #
 # Перевірки вмикає сама роль, а не наявність файла: обгортка, що монтує
-# головний клон; задача, що ставить тік чи хуки. Так синтетичні дерева інших
+# головний клон; задача, що ставить тік. Так синтетичні дерева інших
 # інваріантів їх не чіпають, а роль без потрібного файла — червона.
 TICK_TPL="$ROLE/templates/a8-tick.sh.j2"
-HOOK_TPL="$ROLE/templates/a8-git-hook.sh.j2"
 VERIFY_Y="$TASKS/verify.yml"
 HGIT_REQUIRED=(
   core.hooksPath=/dev/null
@@ -1023,12 +1024,20 @@ if [[ -f "$RUNNER_TPL" ]] &&
   grep -qE '^[[:space:]]*exit[[:space:]]+[1-9]' <<<"$refusal" ||
     violations+=("a8-run-agent: перевірка .git головного клону не відмовляє (немає exit ≠ 0) — контейнер стартує без :ro (#276)")
 
-  # 16f
+  # 16d
+  for kv in GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath 'GIT_CONFIG_VALUE_0="{{ a8_container_home }}/'; do
+    grep -qF -- "-e $kv" <<<"$runner_code" ||
+      violations+=("a8-run-agent без -e $kv… — core.hooksPath контейнера не на теці в container-home: pnpm install упреться в .git/hooks :ro (EROFS) або коміти підуть без хуків (#276)")
+  done
+
+  # 16e
   if [[ -f "$VERIFY_Y" ]]; then
     grep -qF ': >> "{{ a8_repo_dir }}/.git/config"' "$VERIFY_Y" ||
       violations+=("verify.yml: немає зонда, що дописує в сам файл .git/config з контейнера (V23a, #276)")
     grep -qF '"{{ a8_repo_dir }}/.git/hooks/.a8probe"' "$VERIFY_Y" ||
       violations+=("verify.yml: немає зонда запису в .git/hooks з контейнера (V23a, #276)")
+    grep -qF 'echo HOOKS_UNCHANGED' "$VERIFY_Y" ||
+      violations+=("verify.yml: немає зонда, що pnpm install агента в контейнері не змінює .git/hooks (V23b, #276)")
     ! grep -qE '\.git/config/' "$VERIFY_Y" ||
       violations+=("verify.yml: запис у <файл>/… для .git/config дає ENOTDIR при будь-яких правах — хибне «RO» (#276, контрприклад 5)")
   else
@@ -1036,7 +1045,7 @@ if [[ -f "$RUNNER_TPL" ]] &&
   fi
 fi
 
-# 16b–16d
+# 16b–16c
 if role_installs a8-tick.sh.j2; then
   if [[ ! -f "$TICK_TPL" ]]; then
     violations+=("роль ставить a8-tick.sh.j2, але файла немає — перевірити git на хості нічим (#276)")
@@ -1089,33 +1098,6 @@ if role_installs a8-tick.sh.j2; then
     done < <(code_grep 'hgit[[:space:]]+push([[:space:]]|$)')
     [[ -n "$(code_grep 'hgit[[:space:]]+fetch([[:space:]]|$)')" && -n "$(code_grep 'hgit[[:space:]]+push([[:space:]]|$)')" ]] ||
       violations+=("a8-tick: не знайдено hgit fetch чи hgit push — перевірити --upload-pack/--receive-pack нічим (#276)")
-
-    # 16d
-    pnpm_lines="$(cut -f2- <<<"$tick_code" | grep -E 'pnpm[[:space:]]+install' || true)"
-    if [[ -z "$pnpm_lines" ]]; then
-      violations+=("a8-tick: не знайдено pnpm install — перевірити, куди lefthook пише хуки, нічим (#276)")
-    fi
-    while IFS= read -r l; do
-      [[ -z "$l" ]] && continue
-      [[ "$l" == *GIT_CONFIG_COUNT=1* && "$l" == *GIT_CONFIG_KEY_0=core.hooksPath* && "$l" == *GIT_CONFIG_VALUE_0=/tmp/* ]] ||
-        violations+=("a8-tick: pnpm install без GIT_CONFIG_*=core.hooksPath на викидну теку — lefthook install упреться в .git/hooks :ro, кожна задача впаде на deps (#276): $l")
-    done <<<"$pnpm_lines"
-  fi
-fi
-
-# 16e
-if role_installs a8-git-hook.sh.j2; then
-  [[ -f "$HOOK_TPL" ]] || violations+=("роль ставить a8-git-hook.sh.j2, але файла немає (#276)")
-  role_hooks="$(awk '/^a8_git_hooks:/ { on = 1; next } on && /^[^[:space:]-]/ { exit } on && /^[[:space:]]*-/ { sub(/^[[:space:]]*-[[:space:]]*/, ""); sub(/[[:space:]]+#.*$/, ""); print }' "$ROLE/defaults/main.yml" 2>/dev/null | LC_ALL=C sort)"
-  if [[ ! -f "$ROOT/lefthook.yml" ]]; then
-    violations+=("немає lefthook.yml — звірити a8_git_hooks нема з чим (#276)")
-  else
-    # Ключі верхнього рівня lefthook.yml, що є іменами хуків git (githooks(5)).
-    lh_hooks="$(grep -oE '^[a-z-]+:' "$ROOT/lefthook.yml" | tr -d ':' |
-      grep -xE 'applypatch-msg|pre-applypatch|post-applypatch|pre-commit|pre-merge-commit|prepare-commit-msg|commit-msg|post-commit|pre-rebase|post-checkout|post-merge|pre-push|post-rewrite|pre-auto-gc|reference-transaction|push-to-checkout|sendemail-validate|fsmonitor-watchman|post-index-change' |
-      LC_ALL=C sort || true)"
-    [[ -n "$role_hooks" && "$role_hooks" == "$lh_hooks" ]] ||
-      violations+=("a8_git_hooks ($(tr '\n' ' ' <<<"$role_hooks")) ≠ хуки lefthook.yml ($(tr '\n' ' ' <<<"$lh_hooks")) — у контейнері хуків ставить нікому (#276)")
   fi
 fi
 
@@ -1129,4 +1111,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки від ролі)"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home)"

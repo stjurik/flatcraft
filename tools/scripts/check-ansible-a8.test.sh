@@ -1178,8 +1178,6 @@ cp -r "$REPO/infra/docker" "$mut/infra/docker"
 mkdir -p "$mut/.github/workflows" "$mut/tools/scripts"
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
-# Еталон хуків для a8_git_hooks (інваріант 16e).
-cp "$REPO/lefthook.yml" "$mut/lefthook.yml"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -1714,7 +1712,6 @@ cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 # Кожна ламає один захист чинної ролі; скрипт мусить назвати саме його.
 RUN_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
 TICK_T="infra/ansible/roles/a8/templates/a8-tick.sh.j2"
-DEF_M="infra/ansible/roles/a8/defaults/main.yml"
 mut16() { # mut16 <назва> <файл відносно кореня> <було> <стало> <очікуване порушення>
   python3 - "$mut/$2" "$3" "$4" <<'PY2'
 import sys
@@ -1763,17 +1760,17 @@ mut16 "deploy_key push повз hgit" "$TICK_T" '      hgit push --receive-pack=
 mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$TICK_T" '  GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '  git "${HGIT_SAFE[@]}"' \
   "hgit без GIT_NO_REPLACE_OBJECTS=1"
 
-# 16d — pnpm install без викидної теки для хуків lefthook.
-mut16 "pnpm install пише хуки в .git/hooks" "$TICK_T" 'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/a8-lefthook-discard \
-  pnpm install' 'pnpm install' "pnpm install без GIT_CONFIG_*=core.hooksPath"
+# 16d — core.hooksPath контейнера: прибрано зовсім (pnpm install упреться в
+# .git/hooks :ro) або на /tmp (git commit агента й check-hook-loud — без хуків).
+mut16 "контейнер без core.hooksPath" "$RUN_T" '  -e GIT_CONFIG_KEY_0=core.hooksPath \
+' '' "без -e GIT_CONFIG_KEY_0=core.hooksPath"
+mut16 "core.hooksPath контейнера на /tmp" "$RUN_T" 'GIT_CONFIG_VALUE_0="{{ a8_container_home }}/.a8-git-hooks"' \
+  'GIT_CONFIG_VALUE_0="/tmp/a8-hooks"' 'без -e GIT_CONFIG_VALUE_0="{{ a8_container_home }}/'
 
-# 16e — роль ставить не всі хуки lefthook.yml.
-mut16 "a8_git_hooks без pre-push" "$DEF_M" '  - pre-commit
-  - pre-push
-' '  - pre-commit
-' "a8_git_hooks (pre-commit ) ≠ хуки lefthook.yml"
+# 16e — V23b не звіряє .git/hooks до і після pnpm install агента.
+mut16 "V23b без звірки .git/hooks" "$VERIFY_Y" ' && echo HOOKS_UNCHANGED &&' ' &&' "pnpm install агента в контейнері не змінює .git/hooks"
 
-# 16f — зонд V23a знову через `touch <файл>/…` (хибне «RO»).
+# 16e — зонд V23a знову через `touch <файл>/…` (хибне «RO»).
 mut16 "V23a пише в config як у теку" "$VERIFY_Y" 'if : >> "{{ a8_repo_dir }}/.git/config" 2>/dev/null; then' \
   'if touch "{{ a8_repo_dir }}/.git/config/.a8probe" 2>/dev/null; then' "дає ENOTDIR при будь-яких правах"
 

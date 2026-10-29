@@ -496,18 +496,12 @@ fi
 # Код 10 тут дає лише обгортка (`a8-guard check-run`): STOP з'явився, поки
 # ставились залежності чи йшов хук. Це зупинка, а не `failed deps`.
 #
-# Хуки ставить роль (tasks/main.yml, «Install git hooks»), а не `pnpm install`:
-# .git/hooks у контейнері лише для читання (#276). `prepare: lefthook install` у
-# package.json (і postinstall самого пакета lefthook) писав би туди й дістав би
-# EROFS, тобто кожна задача падала б на `deps`. `LEFTHOOK=0` цього НЕ знімає —
-# `lefthook install` 1.13.6 його ігнорує (виміряно). Тому лише для цього кроку
-# git у контейнері бачить core.hooksPath на викидну теку: lefthook пише хуки
-# туди, а коміти агента далі йдуть через хуки ролі. Змінна середовища діє лише
-# на цей процес — `check-hook-loud.sh` і `git commit` агента її не бачать.
-# Той самий рядок — у зонді V23b (verify.yml).
+# `prepare: lefthook install` ставить хуки не в .git/hooks (у контейнері вона
+# лише для читання, #276), а в теку container-home: core.hooksPath для всього
+# контейнера задає a8-run-agent. Саме звідти їх потім бачать check-hook-loud.sh
+# і git commit агента.
 drc=0
-"$RUNNER" "$wt" env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/a8-lefthook-discard \
-  pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
+"$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
 #
 # `--extra dev` — як у CI (ci.yml): pytest, mypy і ruff живуть саме там. Без нього
 # в контейнері немає pytest для оракула й ruff/mypy для pre-commit (V18e на A8

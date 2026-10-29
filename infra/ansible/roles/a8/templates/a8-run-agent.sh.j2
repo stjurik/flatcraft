@@ -42,8 +42,8 @@ done
 
 # .git/config і .git/hooks головного клону — лише для читання (#276). Тік на
 # хості (від agent, а через групу docker це root) кличе git у цьому клоні, і
-# хук чи ключ конфігу, записаний контейнером, виконався б там. Хуки ставить
-# роль; `pnpm install` тіку пише їх у викидну теку (a8-tick.sh, крок 4).
+# хук чи ключ конфігу, записаний контейнером, виконався б там. Хуки для git у
+# контейнері живуть не тут, а в container-home (core.hooksPath нижче).
 #
 # Лише головний клон, поза циклом вище: у worktree .git — файл `gitdir: …`, і
 # "$WORKTREE/.git/config" не існує ніколи (контрприклад 5). Config і hooks
@@ -95,6 +95,18 @@ exec docker run --rm \
   -e GIT_COMMITTER_NAME="{{ a8_git_author_name }}" \
   -e GIT_COMMITTER_EMAIL="{{ a8_git_author_email }}" \
   `# вимір №6 §4 п.3: без явної identity commit падає 128` \
+  -e GIT_CONFIG_COUNT=1 \
+  -e GIT_CONFIG_KEY_0=core.hooksPath \
+  -e GIT_CONFIG_VALUE_0="{{ a8_container_home }}/.a8-git-hooks" \
+  `# #276: .git/hooks головного клону тут лише для читання, а prepare:` \
+  `# lefthook install (package.json) і postinstall пакета lefthook пишуть хуки` \
+  `# при КОЖНОМУ pnpm install — і тіку, і самого агента. Без цього обидва` \
+  `# падали б з EROFS. LEFTHOOK=0 установку не вимикає (lefthook 1.13.6).` \
+  `# Тека — у container-home, а НЕ в /tmp: її бачать і git commit агента, і` \
+  `# check-hook-loud.sh, а /tmp кожного контейнера порожній — хуків не було б` \
+  `# зовсім (виміряно: check-hook-loud «pre-commit не встановлено», коміт без` \
+  `# хуків). Хуки в неї ставить pnpm install кроку 4 тіку. Тік на хості ці хуки` \
+  `# не виконує: hgit бере core.hooksPath=/dev/null.` \
   -e GIT_TERMINAL_PROMPT=0 \
   `# вимір №7: підстраховка. Несуча конструкція — ВІДСУТНІСТЬ -t нижче:` \
   `# з псевдотерміналом push зависає (exit 124), без нього падає одразу (128).` \

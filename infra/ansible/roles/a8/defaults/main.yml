@@ -42,12 +42,6 @@ a8_ro_paths:
   - infra/docker
   - .github
   - packages/db/src/migrations
-# Хуки git, які роль ставить у .git/hooks головного клону (#276): у контейнері
-# ця тека лише для читання, і `lefthook install` туди писати не може. Мусить
-# збігатися з хуками lefthook.yml — інваріант 16 у tools/scripts/check-ansible-a8.sh.
-a8_git_hooks:
-  - pre-commit
-  - pre-push
 a8_git_author_name: "hart agent"
 a8_git_author_email: "agent@hart.local"
 
