@@ -1,0 +1,29 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# Хук git `{{ item }}` головного клону A8. Ставить роль, а НЕ `lefthook install`
+# (#276): у контейнері агента .git/hooks лише для читання, тож `prepare` з
+# package.json сюди писати не може. Хук лише передає виклик lefthook — що саме
+# перевіряти, вирішує lefthook.yml у worktree.
+#
+# Тік на хості git-хуків не запускає зовсім (hgit: core.hooksPath=/dev/null).
+# Цей файл виконується в контейнері, на `git commit` агента.
+#
+# На відміну від хука, який генерує lefthook, тут немає тихого виходу з 0, якщо
+# lefthook не знайдено: коміт зупиняється. Тихий вихід — саме той декоративний
+# захист, який ловить tools/scripts/check-hook-loud.sh (вимір №7).
+if [ "$LEFTHOOK" = "0" ]; then
+  exit 0
+fi
+if [ -n "$LEFTHOOK_BIN" ]; then
+  exec "$LEFTHOOK_BIN" run "{{ item }}" "$@"
+fi
+if command -v lefthook >/dev/null 2>&1; then
+  exec lefthook run "{{ item }}" "$@"
+fi
+top="$(git rev-parse --show-toplevel)" || exit 1
+if [ -x "$top/node_modules/.bin/lefthook" ]; then
+  exec "$top/node_modules/.bin/lefthook" run "{{ item }}" "$@"
+fi
+echo "✗ {{ item }}: lefthook не знайдено ні в PATH, ні в $top/node_modules/.bin — коміт зупинено. Ліки: pnpm install у $top." >&2
+exit 1

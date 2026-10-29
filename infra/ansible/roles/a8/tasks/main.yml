@@ -653,6 +653,18 @@
     group: root
     mode: "0755"
 
+- name: Install git hooks of the main clone
+  # #276: .git/hooks головного клону в контейнері лише для читання (a8-run-agent),
+  # тож `pnpm install` ставити хуки більше не може — їх ставить роль, на хості.
+  # Список — a8_git_hooks; інваріант 16 звіряє його з lefthook.yml.
+  ansible.builtin.template:
+    src: a8-git-hook.sh.j2
+    dest: "{{ a8_repo_dir }}/.git/hooks/{{ item }}"
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0755"
+  loop: "{{ a8_git_hooks }}"
+
 - name: Install git askpass for token push
   ansible.builtin.template:
     src: a8-git-askpass.sh.j2
