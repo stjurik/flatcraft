@@ -1000,6 +1000,7 @@ HGIT_REQUIRED=(
   core.gitProxy=
   protocol.ext.allow=never
   core.alternateRefsCommand=
+  core.commitGraph=false
 )
 role_installs() { # role_installs <шаблон> — чи ставить його якась задача ролі
   [[ -d "$TASKS" ]] && grep -rqE "^[[:space:]]*src:[[:space:]]*\"?$1\"?[[:space:]]*$" "$TASKS"
@@ -1015,6 +1016,12 @@ if [[ -f "$RUNNER_TPL" ]] &&
     grep -qE -- "-v[[:space:]]+\"\\\$GITDIR/$what:\\\$GITDIR/$what:ro\"" <<<"$runner_code" ||
       violations+=("a8-run-agent не монтує .git/$what головного клону з :ro — контейнер підкладе те, що тік виконає на хості (#276)")
   done
+  # Сам .git — bind onto self (без :ro, агент туди пише), інакше `mv .git` з
+  # контейнера проходить і config/hooks :ro ні до чого (рецензія #290, п.1).
+  grep -qE -- '-v[[:space:]]+"\$GITDIR:\$GITDIR"' <<<"$runner_code" ||
+    violations+=("a8-run-agent не монтує саму .git (bind onto self) — rename .git з контейнера не дасть EBUSY, config/hooks :ro обходяться (#276)")
+  grep -qE -- '-v[[:space:]]+"\$GITDIR/worktrees:\$GITDIR/worktrees"' <<<"$runner_code" ||
+    violations+=("a8-run-agent не монтує .git/worktrees (bind onto self) — її підміняють симлінком на чужий gitdir (#276, контрприклад CX1)")
   # Відмова: if ! [[ … ]]; then … exit N; fi з усіма чотирма перевірками.
   refusal="$(awk '/^[[:space:]]*if ! \[\[.*\$GITDIR/ { on = 1 } on { print } on && /^[[:space:]]*fi[[:space:]]*$/ { exit }' <<<"$runner_code")"
   for frag in '-d "$GITDIR"' '! -L "$GITDIR"' '-f "$GITDIR/config"' '! -L "$GITDIR/config"' '-d "$GITDIR/hooks"' '! -L "$GITDIR/hooks"'; do

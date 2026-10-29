@@ -40,10 +40,19 @@ for base in "{{ a8_repo_dir }}" "$WORKTREE"; do
   done
 done
 
-# .git/config і .git/hooks головного клону — лише для читання (#276). Тік на
-# хості (від agent, а через групу docker це root) кличе git у цьому клоні, і
-# хук чи ключ конфігу, записаний контейнером, виконався б там. Хуки для git у
-# контейнері живуть не тут, а в container-home (core.hooksPath нижче).
+# Захист `.git` головного клону (#276). Тік на хості (від agent, а через групу
+# docker це root) кличе git у цьому клоні, тож хук чи ключ конфігу, записаний
+# контейнером, виконався б там. Хуки для git у контейнері живуть не тут, а в
+# container-home (core.hooksPath нижче).
+#
+#   - саму `.git` монтуємо bind onto self (без `:ro` — агент пише туди об'єкти,
+#     рефи, логи й свій worktree). Так `.git` стає точкою монтування, і
+#     `rename(.git)` з контейнера дає EBUSY: без цього контейнер робив би
+#     `mv .git .git-old` і клав свій `.git` (рецензія #290 — перевірено
+#     прогоном: config/hooks як підмонтування перейменуванню `.git` не
+#     заважають, EBUSY дає лише bind на саму `.git`). Те саме для `.git/worktrees`
+#     (якщо є): інакше її підміняють симлінком на чужий gitdir.
+#   - `.git/config` і `.git/hooks` — поверх, лише для читання.
 #
 # Лише головний клон, поза циклом вище: у worktree .git — файл `gitdir: …`, і
 # "$WORKTREE/.git/config" не існує ніколи (контрприклад 5). Config і hooks
@@ -51,7 +60,9 @@ done
 #
 # Шляху немає або він симлінк — відмова, контейнер не стартує: docker на
 # відсутній шлях сам створив би теку від root, а симлінк змонтував би не те.
-# Решту .git (commondir, alternates…) перевіряє hgit у тіку перед кожним git.
+# Решту .git (commondir, alternates…) і знімок identity перевіряє hgit у тіку.
+# Порядок -v не важить: docker монтує за зростанням довжини шляху, тож `.git`
+# лягає перед `.git/config`, `.git/hooks`, `.git/worktrees`.
 GITDIR="{{ a8_repo_dir }}/.git"
 if ! [[ -d "$GITDIR" && ! -L "$GITDIR" &&
   -f "$GITDIR/config" && ! -L "$GITDIR/config" &&
@@ -59,7 +70,12 @@ if ! [[ -d "$GITDIR" && ! -L "$GITDIR" &&
   echo "a8-run-agent: $GITDIR, $GITDIR/config чи $GITDIR/hooks відсутні або симлінк — контейнер не запускаю (#276)" >&2
   exit 1
 fi
-RO_ARGS+=(-v "$GITDIR/config:$GITDIR/config:ro" -v "$GITDIR/hooks:$GITDIR/hooks:ro")
+RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config:$GITDIR/config:ro" -v "$GITDIR/hooks:$GITDIR/hooks:ro")
+# .git/worktrees з'являється лише після першого `worktree add`; монтуємо, якщо є
+# і не симлінк (симлінк на місці теки відкинув би hgit у тіку, але сюди його теж
+# не пускаємо).
+[[ -d "$GITDIR/worktrees" && ! -L "$GITDIR/worktrees" ]] &&
+  RO_ARGS+=(-v "$GITDIR/worktrees:$GITDIR/worktrees")
 
 # Необов'язкові прапорці від демона (a8-tick):
 #   A8_CONTAINER_NAME — ім'я контейнера, щоб при таймауті вбити САМЕ його

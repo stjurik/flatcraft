@@ -868,6 +868,10 @@
               echo "OTHER hooks"
             fi
             touch "{{ a8_repo_dir }}/.git/info/.a8probe" && rm -f "{{ a8_repo_dir }}/.git/info/.a8probe" && echo CONTROL_WRITABLE
+            grep -qE " {{ a8_repo_dir }}/\.git " /proc/self/mountinfo && echo "MOUNT git" || echo "NOMOUNT git"
+            if [ -d "{{ a8_repo_dir }}/.git/worktrees" ]; then
+              grep -qE " {{ a8_repo_dir }}/\.git/worktrees " /proc/self/mountinfo && echo "MOUNT worktrees" || echo "NOMOUNT worktrees"
+            else echo "NO worktrees"; fi
       register: a8_v_gitro
       changed_when: false
       failed_when: false
@@ -939,11 +943,15 @@
       - "'EROFS config' in a8_v_gitro.stdout"
       - "'EROFS hooks' in a8_v_gitro.stdout"
       - "'CONTROL_WRITABLE' in a8_v_gitro.stdout"
+      - "'MOUNT git' in a8_v_gitro.stdout"
+      - "'NOMOUNT worktrees' not in a8_v_gitro.stdout"
     fail_msg: >-
       #276: {{ a8_v_gitro.stdout | replace('\n', ' ') }} (rc={{ a8_v_gitro.rc }}).
       WRITABLE — контейнер може підкласти хук чи ключ конфігу, який тік виконає на хості:
       перевір монтування :ro в `/usr/local/bin/a8-run-agent`. OTHER — запис не вдався з іншої причини,
       тобто вимір нічого не довів. Без CONTROL_WRITABLE — зламане монтування .git взагалі.
+      NOMOUNT git/worktrees — саму .git (чи .git/worktrees) не змонтовано bind onto self,
+      тож `mv .git` з контейнера пройде (EBUSY дає лише підмонтування; виміряно unshare -Urm).
       stderr: {{ a8_v_gitro.stderr | default('') }}
     success_msg: "{{ a8_v_gitro.stdout | replace('\n', ' ') }}"
     quiet: true

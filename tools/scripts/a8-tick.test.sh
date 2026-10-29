@@ -128,6 +128,9 @@ fi
 # «Контейнер» — цей процес. PID за ім'ям контейнера: заглушка docker на
 # `kill <ім'я>` убиває саме його, як справжній `docker kill` — свій контейнер.
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && echo $$ >"$PIDS/pid-$A8_CONTAINER_NAME"
+# Маркер «контейнер існує» для docker inspect (#290, ensure_container_gone):
+# живе, доки docker kill його не прибере (а з KILL_NEVER — не прибирає).
+[[ -n "${A8_CONTAINER_NAME:-}" ]] && : >"$PIDS/alive-$A8_CONTAINER_NAME"
 # STOP_DURING: людина створює STOP, поки йде цей етап; етап доходить до кінця,
 # а наступний старт контейнера отримує 10 від check-run.
 if [[ "$*" == *check-hook-loud* ]]; then
@@ -254,6 +257,26 @@ case "${AGENT_MODE:-commit}" in
         else
           mv "$REPO/.git" "$TMPR/realgit" && ln -s "$e" "$REPO/.git"
         fi ;;
+      evil-mvgit)
+        # Підміна всієї .git новою текою (новий inode) — як mv .git .git-old +
+        # свій .git (рецензія #290, п.1). Структурно .git валідна, тож
+        # git_unsafe_reason-перевірки симлінків/commondir проходять; ловить лише
+        # знімок identity (dev:inode .git + хеш config), зроблений до контейнера.
+        # Без живого фільтра: у тесті монтувань немає, і підмінена .git жила б
+        # до наступного тіку (на A8 цього не буде — bind .git і config :ro); тут
+        # доводимо саме спрацювання знімка на першому ж tick-у.
+        ci --allow-empty -m work
+        d="$REPO/.git"
+        mv "$d" "$d.old"
+        mkdir "$d"
+        cp -a "$d.old/." "$d/" ;;
+      evil-wtsymlink)
+        # .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1).
+        ci --allow-empty -m work
+        e="$TMPR/evilwt"
+        mkdir -p "$e"
+        [[ -d "$REPO/.git/worktrees" ]] && mv "$REPO/.git/worktrees" "$e/worktrees" || mkdir -p "$e/worktrees"
+        ln -s "$e/worktrees" "$REPO/.git/worktrees" ;;
       evil-alternates)
         ci --allow-empty -m work
         mkdir -p "$TMPR/alt/objects"
@@ -366,8 +389,17 @@ if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
   echo "Error response from daemon: No such image: \$3" >&2
   exit 1
 fi
-if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
-  kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
+# inspect <контейнер> (не image): існує, доки є маркер alive-. Так
+# ensure_container_gone (#290) бачить, що --rm контейнер зник після kill.
+if [[ "\$1" == inspect ]]; then
+  [[ -e "$LOGS/alive-\$2" ]] && exit 0 || exit 1
+fi
+if [[ "\$1" == kill ]]; then
+  # KILL_NEVER: kill «успішний», та контейнер лишається — імітує, що не зупинився.
+  if [[ -z "\${KILL_NEVER:-}" ]]; then
+    [[ -f "$LOGS/pid-\$2" ]] && kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
+    rm -f "$LOGS/alive-\$2"
+  fi
   [[ -n "\${DOCKER_RM_STOP:-}" ]] && rm -f "$ROOT/STOP"
 fi
 exit 0
@@ -1308,11 +1340,16 @@ EOF
     bad "23b конфіг: маркери [$(pwned)]; $(last)"
   teardown
 
-  # 23c. remote.origin.uploadpack і receivepack у .git/config (push задачі a,
-  # fetch задачі b).
+  # 23c. remote.origin.uploadpack і receivepack у .git/config. `git config`
+  # переписує config із новим inode, тож задачу a ловить знімок identity
+  # (fail closed). Пін --upload-pack/--receive-pack лишається потрібним і
+  # перевіряється задачею b: config у $REPO/.git залишається підміненим (на A8
+  # config :ro, тож так тривко не буває), і fetch/push задачі b ідуть по ньому —
+  # без пінів спрацювали б uploadpack/receivepack (мутанти нижче).
   two_ticks evil-pack
-  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == pushed && "$(jl .detail)" == pushed ]] && on_origin b &&
-    ok "23c: uploadpack і receivepack з конфігу не виконались, push і fetch пройшли" ||
+  [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"змінили identity"* &&
+    "$(jl .detail)" == pushed ]] && on_origin b &&
+    ok "23c: config із uploadpack/receivepack → задачу a спинив знімок, задача b запушена без маркерів" ||
     bad "23c pack: маркери [$(pwned)]; $r1; $(last)"
   teardown
 
@@ -1379,6 +1416,36 @@ EOF
   [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"не вдалось порахувати коміти"* && -e "$QD/failed/001-a.json" && -d "$ROOT/wt/a" ]] &&
     ok "23m: помилка rev-list → worktree лишився, задача у failed/ з поясненням" || bad "23m rev-list: $(last)"
   teardown
+
+  # 23n. Підміна всієї .git новою текою (mv .git .git-old + свій .git): знімок
+  # identity ловить зміну dev:inode/хешу — fail closed, нічого не запушено
+  # (рецензія #290, п.1). У тесті монтувань немає, тож rename проходить; на A8
+  # його не дасть bind самої .git (шар 1, зонд не тут — верифікується окремо).
+  two_ticks evil-mvgit
+  [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"змінили identity"* ]] &&
+    ! on_origin a && ok "23n: підміна .git → failed «змінили identity», нічого не виконано й не запушено" ||
+    bad "23n mvgit: маркери [$(pwned)]; $r1"
+  teardown
+
+  # 23o. .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1):
+  # git_unsafe_reason відкидає симлінк worktrees.
+  two_ticks evil-wtsymlink
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == *"worktrees — симлінк"* ]] && ! on_origin a &&
+    ok "23o: .git/worktrees-симлінк → failed з поясненням, нічого не виконано" || bad "23o wtsymlink: маркери [$(pwned)]; $r1"
+  teardown
+
+  # 23p. Таймаут + контейнер не зупинився (docker kill не вбив): тік НЕ кличе git,
+  # а робить fail closed зі STOP (рецензія #290, п.3). Інакше живий контейнер —
+  # вікно гонки над .git між перевіркою hgit і самим git.
+  TASK_TIMEOUT=1 setup
+  enqueue 001-a "$(valid a)"
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=hang tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"не зупинився"* && -s "$ROOT/STOP" && -d "$ROOT/wt/a" ]] &&
+    ! on_origin a && ok "23p: контейнер не зупинився → STOP, fail closed, git не чіпано, нічого не запушено" ||
+    bad "23p stuck: $(last); STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]"
+  # Прибрати завислий sleep агента (KILL_NEVER лишив його живим).
+  pkill -x -f "sleep $HANG_S" 2>/dev/null
+  teardown
 }
 
 run_scenarios
@@ -1432,7 +1499,9 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # що не розрізняє правильне і зламане, гірша за відсутню: вона додає рядок
   # «убита» і забирає увагу. Замість неї нижче — інваріант, який досі правда.
   mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 6\./\n\n# ─── 6./'
-  mutate "контейнер не вбивається при таймауті" 's/\[\[ "\$rc" == 124 \]\] && "\$DOCKER" kill[^\n]*\n//'
+  mutate "контейнер не вбивається при таймауті" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент"\nfi/:/'
+  mutate "таймаут не переконується, що контейнер зник" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент"\nfi/[[ "\$rc" == 124 ]] \&\& "\$DOCKER" kill "\$A8_CONTAINER_NAME" >\/dev\/null 2>\&1/'
+  mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
@@ -1526,6 +1595,9 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/'
   mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/'
   mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/'
+  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//'
+  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//'
+  mutate "знімок identity не робиться" 's/\nsnapshot_git\n/\n/'
   mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/'
   mutate "причину відмови hgit не видно в журналі" 's/  \[\[ -s "\$unsafe" \]\] && detail=[^\n]*\n//'
   # Повні імена посилань.

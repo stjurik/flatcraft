@@ -1733,15 +1733,20 @@ mut16 ".git/hooks без :ro" "$RUN_T" '-v "$GITDIR/hooks:$GITDIR/hooks:ro"' '-v
   "не монтує .git/hooks головного клону з :ro"
 mut16 "немає відмови, коли шляху немає" "$RUN_T" '  exit 1
 fi
-RO_ARGS+=(-v "$GITDIR/config' 'fi
-RO_ARGS+=(-v "$GITDIR/config' "не відмовляє (немає exit ≠ 0)"
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' 'fi
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' "не відмовляє (немає exit ≠ 0)"
 mut16 "відмова без перевірки симлінка config" "$RUN_T" '-f "$GITDIR/config" && ! -L "$GITDIR/config" &&' '-f "$GITDIR/config" &&' \
   "немає перевірки '! -L \"\$GITDIR/config\"'"
+mut16 ".git не bind onto self" "$RUN_T" 'RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config' 'RO_ARGS+=(-v "$GITDIR/config' \
+  "не монтує саму .git (bind onto self)"
+mut16 ".git/worktrees не bind onto self" "$RUN_T" '-v "$GITDIR/worktrees:$GITDIR/worktrees"' '-v "$GITDIR/wt-skip:x"' \
+  "не монтує .git/worktrees (bind onto self)"
 
 # 16c — кожен ключ hgit окремо: частину з них жоден динамічний сценарій
 # спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
 for kv in core.hooksPath=/dev/null core.fsmonitor=false core.sshCommand=ssh core.askPass= credential.helper= \
-  diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand=; do
+  diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand= \
+  core.commitGraph=false; do
   mut16 "hgit без -c $kv" "$TICK_T" "  -c $kv
 " "" "HGIT_SAFE без -c $kv"
 done

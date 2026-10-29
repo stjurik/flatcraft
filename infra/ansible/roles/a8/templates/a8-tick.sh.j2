@@ -75,28 +75,43 @@ logic() { bash "$LOGIC" "$@"; }
 # контейнер агента бачить на запис разом із .git: без цієї обгортки хук чи ключ
 # конфігу, підкладений контейнером, виконався б тут, поза allowlist мережі.
 #
-# Захист у три шари, і кожен закриває те, чого не закриває інший:
-#   1. a8-run-agent монтує .git/config і .git/hooks лише для читання.
-#   2. Перевірки нижче (fail closed). Файл, якого в клоні немає, змонтувати
-#      наперед не можна, а git знайде його сам: .git/commondir переводить git на
-#      чужу теку з чужими config і hooks (виміряно на git 2.43 —
-#      alias і post-checkout звідти спрацювали); alternates, grafts і shallow
-#      підміняють історію та об'єкти. refs/replace вимикає GIT_NO_REPLACE_OBJECTS.
-#   3. `-c` для кожного ключа, що виконує команду або підміняє, куди йде git.
-#      Крім uploadpack і receivepack: для них git бере ПЕРШЕ значення, тобто з
-#      конфігу репозиторію, а `-c` лише друкує «more than one uploadpack given,
-#      using the first» (виміряно на git 2.43). Їх фіксують опції самих команд:
+# Захист у чотири шари, і кожен закриває те, чого не закриває інший:
+#   1. a8-run-agent монтує саму `.git` (bind onto self) — тоді `rename(.git)` з
+#      контейнера дає EBUSY, бо це точка монтування; `.git/config` і `.git/hooks`
+#      (і `.git/worktrees`, якщо є) — поверх, лише для читання. Без шару 1
+#      контейнер робив би `mv .git .git-old` і клав свій `.git` (перевірено
+#      рецензією #290: без bind самого `.git` перейменування проходить, навіть
+#      коли config/hooks — підмонтування; EBUSY дає лише bind на саму `.git`).
+#   2. Перевірки git_unsafe_reason (fail closed). Файл, якого в клоні немає,
+#      змонтувати наперед не можна, а git знайде його сам: `.git/commondir`
+#      переводить git на чужу теку з чужими config і hooks (виміряно на git 2.43);
+#      симлінк `.git`/`config`/`hooks`/`worktrees` — те саме; alternates, grafts і
+#      shallow підміняють історію та об'єкти (refs/replace вимикає
+#      GIT_NO_REPLACE_OBJECTS). ПЛЮС знімок identity: тік перед першим контейнером
+#      запам'ятовує dev:inode `.git`, `.git/config`, `.git/hooks` і хеш `config`
+#      (`snapshot_git`); якщо після контейнера щось із цього інше — fail closed.
+#      Знімок ловить підміну `.git` навіть там, де шару 1 чомусь немає.
+#   3. `-c` для кожного ключа, що виконує команду або підміняє, куди йде git,
+#      і `core.commitGraph=false` — підроблений `.git/objects/info/commit-graph`
+#      міг би збрехати `diff`/`rev-list` про дерево коміту (контрприклад Argon
+#      CX2, #290); з вимкненим графом git читає самі об'єкти. Крім uploadpack і
+#      receivepack: для них git бере ПЕРШЕ значення, тобто з конфігу репозиторію,
+#      а `-c` лише друкує «more than one uploadpack given, using the first»
+#      (виміряно на git 2.43). Їх фіксують опції самих команд:
 #      `fetch --upload-pack=git-upload-pack`, `push --receive-pack=git-receive-pack`.
 #
-# ЧОМУ ПЕРЕВІРКА НЕ МАЄ ГОНКИ. Тік викликає git лише тоді, коли контейнера немає:
-# `docker run --rm` у a8-run-agent закінчується разом із процесом агента, а тік
-# чекає його кінця. Між перевіркою і git контейнер нічого змінити не може.
+# ЧОМУ ПЕРЕВІРКА НЕ МАЄ ГОНКИ. Тік викликає git лише тоді, коли контейнера немає.
+# `docker run --rm` у a8-run-agent закінчується разом із процесом агента; а якщо
+# агента вбито по таймауту, тік спершу ПЕРЕКОНУЄТЬСЯ, що контейнер зник
+# (`ensure_container_gone`), і лише тоді кличе git. Доти поміж перевіркою і git
+# жоден процес контейнера не живе, щоб змінити `.git` (рецензія #290: раніше код
+# `docker kill` проковтувався, і живий контейнер лишав вікно гонки).
 #
 # МЕЖА. `include.path`, `includeIf` і `filter.<будь-що>.*` через `-c` не
 # обнулити: файлові include розкриваються під час читання конфігу, а фільтр
-# може мати будь-яке ім'я. Від них захищають шари 1 і 2, а не цей список.
-# Порожній `diff.external` git не знімає, а пробує запустити «» і падає —
-# тобто нічого не виконує; diff тіку все одно `--name-only`, без зовнішнього diff.
+# може мати будь-яке ім'я. Від них захищають шари 1 і 2 (config `:ro` + знімок),
+# а не цей список. Порожній `diff.external` git не знімає, а пробує запустити «»
+# і падає — тобто нічого не виконує; diff тіку все одно `--name-only`.
 #
 # `-C "$A8_REPO_DIR"` вшито в обгортку: після контейнера git не працює в
 # теці worktree. Контейнер міг переписати "$wt/.git" (файл `gitdir: …`) на
@@ -118,10 +133,25 @@ HGIT_SAFE=(
   -c core.gitProxy=
   -c protocol.ext.allow=never
   -c core.alternateRefsCommand=
+  -c core.commitGraph=false
 )
 # credential.helper — порожній, бо тік на помічника не покладається: fetch іде
 # анонімно, push — через GIT_SSH_COMMAND (deploy_key) або GIT_ASKPASS
 # (token_file). Помічник із конфігу репозиторію тут лише шкодив би.
+
+# Знімок identity .git — dev:inode трьох шляхів і хеш config. `mv .git .git-old`
+# міняє dev:inode `.git`; підміна config міняє хеш. Легка робота агента (коміт у
+# worktree) цього не чіпає: config і hooks — `:ro`, а нові об'єкти/рефи inode
+# самої теки `.git` не змінюють. Порожній рядок від stat/sha (шлях зник) теж не
+# збігається зі знімком — отже теж fail closed.
+git_snapshot=""
+git_identity() {
+  local g="$A8_REPO_DIR/.git"
+  stat -c '%d:%i' "$g" "$g/config" "$g/hooks" 2>/dev/null
+  sha256sum "$g/config" 2>/dev/null | cut -d' ' -f1
+}
+snapshot_git() { git_snapshot="$(git_identity)"; }
+
 git_unsafe_reason() { # друкує причину, якщо .git головного клону довіряти не можна
   local g="$A8_REPO_DIR/.git" f
   if [[ -L "$g" || ! -d "$g" ]]; then
@@ -132,6 +162,10 @@ git_unsafe_reason() { # друкує причину, якщо .git головн�
     echo ".git/config — не звичайний файл або симлінк"
   elif [[ -L "$g/hooks" || ! -d "$g/hooks" ]]; then
     echo ".git/hooks — не тека або симлінк"
+  elif [[ -L "$g/worktrees" ]]; then
+    echo ".git/worktrees — симлінк (чужий gitdir через worktree add)"
+  elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
+    echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
   else
     for f in objects/info/alternates info/grafts shallow; do
       if [[ -e "$g/$f" || -L "$g/$f" ]]; then
@@ -158,6 +192,33 @@ hgit() {
 # --urgent, не знайшлася б ніде, і в urgent/ лягли б дві (контрприклад 3, PR #272).
 # Lock короткий — лише на mv; tick.lock тримається всю задачу, тому він окремий.
 qmv() { flock "$A8_LOGS_DIR/queue.lock" mv "$@"; }
+# Після таймауту: вбити контейнер і ПЕРЕКОНАТИСЬ, що він зник, перш ніж тік далі
+# кличе git (#290). `timeout` убиває лише клієнт `docker run`, не контейнер;
+# раніше код `docker kill` проковтувався, і живий контейнер лишав вікно, у якому
+# він ще міг міняти `.git` між перевіркою hgit і самим git. `docker run --rm`
+# прибирає контейнер, коли той справді зупинився, тож чекаємо, доки inspect
+# перестане його бачити. Не зник за відведені спроби → 1 (тік робить fail closed).
+ensure_container_gone() { # ensure_container_gone <ім'я контейнера>
+  local c="$1" i
+  "$DOCKER" kill "$c" >/dev/null 2>&1
+  for i in $(seq 1 "${A8_KILL_WAIT_TRIES:-10}"); do
+    "$DOCKER" inspect "$c" >/dev/null 2>&1 || return 0
+    sleep "${A8_KILL_WAIT_S:-1}"
+  done
+  return 1
+}
+# STOP зі зрозумілою причиною й fail closed, коли контейнер не вдалося зупинити:
+# живий контейнер — зламане/скомпрометоване середовище, і git на хості чіпати не
+# можна. noclobber — не затираємо причину, яку людина могла вписати сама.
+container_stuck() { # container_stuck <ім'я контейнера> <коли>
+  (
+    set -o noclobber
+    printf 'Контейнер %s не зупинився після таймауту (%s), %s. Можливо, ще живий — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
+      "$1" "$2" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+  ) 2>/dev/null
+  fail_task "таймаут: контейнер $1 не зупинився — git не чіпаю"
+  exit 0
+}
 field() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$2"; }
 now() { date +%s; }
 
@@ -487,6 +548,10 @@ if [[ -z "$base" || ! -f "$wt/.git" ||
   fail_task "worktree не на origin/main"
   exit 0
 fi
+# Знімок identity `.git` — ТУТ, після останнього довіреного git і ПЕРЕД першим
+# контейнером (крок 4 `pnpm install` уже в контейнері). Далі кожен hgit звіряє:
+# якщо контейнер підмінив `.git`/`config`/`hooks`, наступний виклик — fail closed.
+snapshot_git
 
 # ─── 4. Залежності і гучний pre-commit ─────────────────────────────────────
 # Залежності — у worktree, бо node_modules і venv між worktree не шаруються
@@ -558,9 +623,12 @@ timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
 watch_stop
 unset CLAUDE_CODE_OAUTH_TOKEN
 
-# `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент
-# працював би далі без нагляду, поки демон уже записав «failed timeout».
-[[ "$rc" == 124 ]] && "$DOCKER" kill "$A8_CONTAINER_NAME" >/dev/null 2>&1
+# `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент працював би
+# далі без нагляду. Вбиваємо контейнер і переконуємось, що він зник, перш ніж
+# нижче кликати git (#290): живий контейнер — вікно гонки над `.git`.
+if [[ "$rc" == 124 ]] && ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+  container_stuck "$A8_CONTAINER_NAME" "агент"
+fi
 
 # Лічимо ПІСЛЯ запуску. Причина була в тому, що обгортка кликала `a8-guard
 # check`, і лічильник, збільшений до запуску, зупинив би останню дозволену
@@ -701,7 +769,10 @@ orc=0
 watch_start "$oracle_container" "під час оракула"
 timeout "$A8_ORACLE_TIMEOUT" "$RUNNER" "$wt" bash -c "$oracle" >>"$log" 2>&1 || orc=$?
 watch_stop
-[[ "$orc" == 124 ]] && "$DOCKER" kill "$oracle_container" >/dev/null 2>&1
+# Як і в агента: контейнер оракула має зникнути, перш ніж тік далі кличе git (#290).
+if [[ "$orc" == 124 ]] && ! ensure_container_gone "$oracle_container"; then
+  container_stuck "$oracle_container" "оракул"
+fi
 oracle_rc="$orc"
 
 if ((orc != 0)); then
