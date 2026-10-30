@@ -1708,6 +1708,77 @@ PY2
 assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
+# Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).
+# Кожна ламає один захист чинної ролі; скрипт мусить назвати саме його.
+RUN_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+TICK_T="infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+mut16() { # mut16 <назва> <файл відносно кореня> <було> <стало> <очікуване порушення>
+  python3 - "$mut/$2" "$3" "$4" <<'PY2'
+import sys
+p, old, new = sys.argv[1:4]
+s = open(p).read()
+assert s.count(old) == 1, "фікстура застаріла: " + old[:60]
+open(p, "w").write(s.replace(old, new, 1))
+PY2
+  assert_exit "мутація 16/#276: $1 → 1" 1 "$mut"
+  grep -qF -- "$5" "$tmproot/out" ||
+    { echo "✗ мутація 16/#276: $1 — немає порушення «$5»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+  cp "$REPO/$2" "$mut/$2"
+}
+
+# 16a — обгортка.
+mut16 ".git/config без :ro" "$RUN_T" '-v "$GITDIR/config:$GITDIR/config:ro"' '-v "$GITDIR/config:$GITDIR/config"' \
+  "не монтує .git/config головного клону з :ro"
+mut16 ".git/hooks без :ro" "$RUN_T" '-v "$GITDIR/hooks:$GITDIR/hooks:ro"' '-v "$GITDIR/hooks:$GITDIR/hooks"' \
+  "не монтує .git/hooks головного клону з :ro"
+mut16 "немає відмови, коли шляху немає" "$RUN_T" '  exit 1
+fi
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' 'fi
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' "не відмовляє (немає exit ≠ 0)"
+mut16 "відмова без перевірки симлінка config" "$RUN_T" '-f "$GITDIR/config" && ! -L "$GITDIR/config" &&' '-f "$GITDIR/config" &&' \
+  "немає перевірки '! -L \"\$GITDIR/config\"'"
+mut16 ".git не bind onto self" "$RUN_T" 'RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config' 'RO_ARGS+=(-v "$GITDIR/config' \
+  "не монтує саму .git (bind onto self)"
+mut16 ".git/worktrees не bind onto self" "$RUN_T" '-v "$GITDIR/worktrees:$GITDIR/worktrees"' '-v "$GITDIR/wt-skip:x"' \
+  "не монтує .git/worktrees (bind onto self)"
+
+# 16c — кожен ключ hgit окремо: частину з них жоден динамічний сценарій
+# спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
+for kv in core.hooksPath=/dev/null core.fsmonitor=false core.sshCommand=ssh core.askPass= credential.helper= \
+  diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand= \
+  core.commitGraph=false; do
+  mut16 "hgit без -c $kv" "$TICK_T" "  -c $kv
+" "" "HGIT_SAFE без -c $kv"
+done
+mut16 "fetch без --upload-pack" "$TICK_T" 'hgit fetch --quiet --upload-pack=git-upload-pack' 'hgit fetch --quiet' \
+  "hgit fetch без --upload-pack=git-upload-pack"
+mut16 "push без --receive-pack" "$TICK_T" 'hgit push --receive-pack=git-receive-pack origin' 'hgit push origin' \
+  "hgit push без --receive-pack=git-receive-pack"
+
+# 16b — git поза hgit, git у worktree, обгортка без GIT_NO_REPLACE_OBJECTS.
+mut16 "push знову з worktree" "$TICK_T" '      hgit push --receive-pack=git-receive-pack origin "$tip' \
+  '      git -C "$wt" push origin "$tip' "git поза обгорткою hgit"
+mut16 "diff знову з worktree" "$TICK_T" 'changed="$(hgit diff -z' 'changed="$(git --no-replace-objects -C "$wt" diff -z' \
+  'git із -C "$wt"'
+mut16 "deploy_key push повз hgit" "$TICK_T" '      hgit push --receive-pack=git-receive-pack "$A8_PUSH_SSH_URL"' \
+  '      git -C "$A8_REPO_DIR" push "$A8_PUSH_SSH_URL"' "git поза обгорткою hgit"
+mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$TICK_T" '  GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '  git "${HGIT_SAFE[@]}"' \
+  "hgit без GIT_NO_REPLACE_OBJECTS=1"
+
+# 16d — core.hooksPath контейнера: прибрано зовсім (pnpm install упреться в
+# .git/hooks :ro) або на /tmp (git commit агента й check-hook-loud — без хуків).
+mut16 "контейнер без core.hooksPath" "$RUN_T" '  -e GIT_CONFIG_KEY_0=core.hooksPath \
+' '' "без -e GIT_CONFIG_KEY_0=core.hooksPath"
+mut16 "core.hooksPath контейнера на /tmp" "$RUN_T" 'GIT_CONFIG_VALUE_0="{{ a8_container_home }}/.a8-git-hooks"' \
+  'GIT_CONFIG_VALUE_0="/tmp/a8-hooks"' 'без -e GIT_CONFIG_VALUE_0="{{ a8_container_home }}/'
+
+# 16e — V23b не звіряє .git/hooks до і після pnpm install агента.
+mut16 "V23b без звірки .git/hooks" "$VERIFY_Y" ' && echo HOOKS_UNCHANGED &&' ' &&' "pnpm install агента в контейнері не змінює .git/hooks"
+
+# 16e — зонд V23a знову через `touch <файл>/…` (хибне «RO»).
+mut16 "V23a пише в config як у теку" "$VERIFY_Y" 'if : >> "{{ a8_repo_dir }}/.git/config" 2>/dev/null; then' \
+  'if touch "{{ a8_repo_dir }}/.git/config/.a8probe" 2>/dev/null; then' "дає ENOTDIR при будь-яких правах"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"
 else
