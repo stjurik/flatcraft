@@ -8,6 +8,7 @@
  */
 import { TEMPLATE_REGISTRY } from "@flatcraft/templates";
 import {
+  ENCLOSED_SHELF_DEFAULT_PARAMETERS,
   PERFORATED_PANEL_DEFAULT_PARAMETERS,
   type PerforatedPanelParameters,
 } from "@flatcraft/types";
@@ -100,5 +101,44 @@ describe("RegistryTemplateEditor — wall_shelf, refine повної схеми"
 
   it.each([0, 5])("front_lip_mm = %i → повідомлення refine немає", (lip) => {
     expect(renderShelf(lip)).not.toContain(REFINE_MSG);
+  });
+});
+
+// Доробка #275 (Flash #1, PR #275#issuecomment-6410942324): `schemaValidator`
+// у `enclosedShelfDefinition.validators` дублює `def.schema.safeParse`, тож
+// без дедупу за `field` той самий constraint показувався двічі — одним рядком
+// з `zodErrorStrings` (`"width_mm: ..."`) і ще раз з `defIssues` (сирий
+// `issue.message`, без префіксу поля).
+describe("RegistryTemplateEditor — enclosed_shelf, без дублю Zod-помилки в банері (#275)", () => {
+  const enclosedShelf = TEMPLATE_REGISTRY.enclosed_shelf;
+
+  it("width_mm: 50 (< min 300) → один <li> у банері, не два", () => {
+    const html = renderToString(
+      <RegistryTemplateEditor
+        def={enclosedShelf}
+        value={{ ...ENCLOSED_SHELF_DEFAULT_PARAMETERS, width_mm: 50 }}
+        onChange={noop}
+        thicknessMm={2}
+      />,
+    );
+    expect(html).toContain('data-testid="validation-errors"');
+    expect(html.match(/<li[ >]/g)?.length).toBe(1);
+  });
+
+  it("stiffening_rib.height_mm занадто мале для гибу → issue показано (не Zod-дубль)", () => {
+    const html = renderToString(
+      <RegistryTemplateEditor
+        def={enclosedShelf}
+        value={{
+          ...ENCLOSED_SHELF_DEFAULT_PARAMETERS,
+          bend_radius_mm: 2.5,
+          stiffening_rib: { height_mm: 5 },
+        }}
+        onChange={noop}
+        thicknessMm={2.5}
+      />,
+    );
+    expect(html).toContain('data-testid="validation-errors"');
+    expect(html.match(/<li[ >]/g)?.length).toBe(1);
   });
 });

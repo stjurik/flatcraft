@@ -71,6 +71,17 @@ export interface TemplateStudioProps<T extends Record<string, unknown>> {
    * існував. Caller ↔ T consistency гарантована на site of каструвальника.
    */
   readonly schema: z.ZodTypeAny;
+  /**
+   * `def.validators` (ADR-033 §1, ADR-026 render-gate) — issue #275: раніше
+   * `exportDisabled` ігнорував їх і рахував лише `SLUGS_WITH_PROFILE`/
+   * `SLUGS_WITH_PERFORATION` (легасі-шлях для шаблонів до Registry), тож
+   * `enclosed_shelf` (поза обома сетами) дозволяв експорт при issues з
+   * `def.validators` (напр. вироджене ребро жорсткості) — 3D-рендер-гейт уже
+   * ховав сцену (`RegistryTemplateViewport`), а кнопка лишалась активною і
+   * експорт падав 500 у воркері. Undefined → `[]` (зворотна сумісність,
+   * прямі unit-тести `TemplateStudio` без `RegistryTemplateStudio`-обгортки).
+   */
+  readonly validators?: ReadonlyArray<(params: T, thicknessMm: number) => readonly ProblemError[]>;
   /** testId на root container — `${slug}-studio` за конвенцією. */
   readonly testId: string;
   /** Editor — рендериться у лівій колонці; знає, як побудувати поля для T. */
@@ -136,6 +147,7 @@ export function TemplateStudio<T extends Record<string, unknown>>({
   renderEditor,
   renderViewport,
   product,
+  validators,
 }: TemplateStudioProps<T>) {
   // Phase 3.0 PR 4: у product-mode initialParameters — це resolved start
   // (fixed + defaults). Setter merge'ить з fixed щоразу, щоб user не міг
@@ -216,23 +228,33 @@ export function TemplateStudio<T extends Record<string, unknown>>({
     } as unknown as Parameters<typeof validatePerforation>[0]);
   }, [templateSlug, parameters]);
 
+  const defIssues = useMemo<readonly ProblemError[]>(() => {
+    if (!validators) return [];
+    return validators.flatMap((validator) => validator(parameters, material.thicknessMm));
+  }, [validators, parameters, material.thicknessMm]);
+
   // Ключова метрика R-10 (docs/11 §8): який constraint блокує найчастіше.
   // Шлемо при зміні первинного constraint'а; скидаємо, коли помилок нема.
   useEffect(() => {
     const code =
       firstIssueCode(matrixIssues) ??
       firstIssueCode(profileIssues) ??
-      firstIssueCode(perforationIssues);
+      firstIssueCode(perforationIssues) ??
+      firstIssueCode(defIssues);
     if (code === undefined) {
       lastConstraintRef.current = undefined;
     } else if (code !== lastConstraintRef.current) {
       lastConstraintRef.current = code;
       track("validation_error_shown", { template: templateSlug, constraint: code });
     }
-  }, [matrixIssues, profileIssues, perforationIssues, templateSlug]);
+  }, [matrixIssues, profileIssues, perforationIssues, defIssues, templateSlug]);
 
   const exportDisabled =
-    !isValid || matrixIssues.length > 0 || profileIssues.length > 0 || perforationIssues.length > 0;
+    !isValid ||
+    matrixIssues.length > 0 ||
+    profileIssues.length > 0 ||
+    perforationIssues.length > 0 ||
+    defIssues.length > 0;
 
   return (
     <div data-testid={testId} className="flex flex-col gap-4">
