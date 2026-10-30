@@ -77,6 +77,16 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
     [def.validators, value, thicknessMm],
   );
 
+  // Поля, на які вже є Zod-помилка з `zodErrorStrings` (однаковий `field` =
+  // `issue.path.join(".")`) — дедуп, щоб один і той самий constraint не
+  // показувався двічі різними рядками, коли `def.validators` містить
+  // валідатор поверх тієї ж `def.schema` (напр. `enclosed_shelf`
+  // `schemaValidator`, issue #275 Flash #1).
+  const zodErrorFields = useMemo(() => {
+    if (validation.success) return new Set<string>();
+    return new Set(validation.error.issues.map((i) => i.path.join(".")));
+  }, [validation]);
+
   const matrixIssues = useMemo(() => {
     if (!materialCode || !def.capabilities.includes("bends")) return [];
     return bendMatrixIssues({
@@ -93,10 +103,12 @@ export function RegistryTemplateEditor<Params extends Record<string, unknown>>({
   const allErrors = useMemo(
     () => [
       ...matrixIssues.map((issue) => issue.message ?? issue.code),
-      ...defIssues.map((issue) => issue.message ?? issue.code),
+      ...defIssues
+        .filter((issue) => !zodErrorFields.has(issue.field))
+        .map((issue) => issue.message ?? issue.code),
       ...zodErrorStrings,
     ],
-    [matrixIssues, defIssues, zodErrorStrings],
+    [matrixIssues, defIssues, zodErrorFields, zodErrorStrings],
   );
 
   const extraControls = def.ui.extraControls ?? [];
