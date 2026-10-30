@@ -180,6 +180,18 @@ hgit() {
   why="$(git_unsafe_reason)"
   if [[ -n "$why" ]]; then
     [[ -s "${unsafe:-/dev/null}" ]] || printf '%s\n' "$why" >"${unsafe:-/dev/null}"
+    # Зміна identity `.git` ПІСЛЯ знімка — це підміна контейнером, не просто
+    # зламаний клон: STOP усієї черги (рецензія #290 коло 2), інакше підмінена
+    # `.git` без bind-монтування дожила б до наступного тіку. Решта причин
+    # (симлінк, commondir…) може бути й на першому тіку до будь-якого контейнера
+    # — там лише fail цієї задачі. noclobber: причину людини не затираємо.
+    if [[ "$why" == *"змінили identity"* ]]; then
+      (
+        set -o noclobber
+        printf '.git головного клону підмінено під час задачі %s (%s): %s. git на хості зупинено. Ліки: перевірити %s, відновити клон, зняти %s.\n' \
+          "${id:-?}" "$(date -u +%FT%TZ)" "$why" "$A8_REPO_DIR" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+      ) 2>/dev/null
+    fi
     echo "a8-tick: небезпечний .git: $why — git не запущено" >&2
     return 125
   fi
@@ -210,12 +222,18 @@ ensure_container_gone() { # ensure_container_gone <ім'я контейнера>
 # STOP зі зрозумілою причиною й fail closed, коли контейнер не вдалося зупинити:
 # живий контейнер — зламане/скомпрометоване середовище, і git на хості чіпати не
 # можна. noclobber — не затираємо причину, яку людина могла вписати сама.
-container_stuck() { # container_stuck <ім'я контейнера> <коли>
+container_stuck() { # container_stuck <ім'я контейнера> <коли> <count|nocount>
   (
     set -o noclobber
     printf 'Контейнер %s не зупинився після таймауту (%s), %s. Можливо, ще живий — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
       "$1" "$2" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
   ) 2>/dev/null
+  # Задачу зараховуємо в денний ліміт і фіксуємо таймаут у журналі (рецензія #290
+  # коло 2): вона дійшла до контейнера й витратила бюджет. На шляху агента
+  # лічильник ще не чіпали — рахуємо тут; на шляху оракула його вже збільшено
+  # до запуску, тож повторно не рахуємо. oracle_rc=124 — сигнатура таймауту.
+  [[ "${3:-}" == count ]] && "$GUARD" count >/dev/null
+  oracle_rc=124
   fail_task "таймаут: контейнер $1 не зупинився — git не чіпаю"
   exit 0
 }
@@ -436,7 +454,10 @@ release_or_keep() {
     keep_why="гілка має коміти"
     return 1
   fi
-  hgit worktree remove --force "$wt" >>"$log" 2>&1
+  if ! hgit worktree remove --force "$wt" >>"$log" 2>&1; then
+    keep_why="worktree remove не вдався — гілку й worktree лишаю"
+    return 1
+  fi
   hgit branch -D "$branch" >>"$log" 2>&1
   return 0
 }
@@ -627,7 +648,7 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 # далі без нагляду. Вбиваємо контейнер і переконуємось, що він зник, перш ніж
 # нижче кликати git (#290): живий контейнер — вікно гонки над `.git`.
 if [[ "$rc" == 124 ]] && ! ensure_container_gone "$A8_CONTAINER_NAME"; then
-  container_stuck "$A8_CONTAINER_NAME" "агент"
+  container_stuck "$A8_CONTAINER_NAME" "агент" count
 fi
 
 # Лічимо ПІСЛЯ запуску. Причина була в тому, що обгортка кликала `a8-guard
@@ -771,7 +792,7 @@ timeout "$A8_ORACLE_TIMEOUT" "$RUNNER" "$wt" bash -c "$oracle" >>"$log" 2>&1 || 
 watch_stop
 # Як і в агента: контейнер оракула має зникнути, перш ніж тік далі кличе git (#290).
 if [[ "$orc" == 124 ]] && ! ensure_container_gone "$oracle_container"; then
-  container_stuck "$oracle_container" "оракул"
+  container_stuck "$oracle_container" "оракул" nocount
 fi
 oracle_rc="$orc"
 

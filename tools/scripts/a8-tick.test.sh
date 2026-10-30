@@ -262,14 +262,38 @@ case "${AGENT_MODE:-commit}" in
         # свій .git (рецензія #290, п.1). Структурно .git валідна, тож
         # git_unsafe_reason-перевірки симлінків/commondir проходять; ловить лише
         # знімок identity (dev:inode .git + хеш config), зроблений до контейнера.
-        # Без живого фільтра: у тесті монтувань немає, і підмінена .git жила б
-        # до наступного тіку (на A8 цього не буде — bind .git і config :ro); тут
-        # доводимо саме спрацювання знімка на першому ж tick-у.
+        # Живий фільтр у підміненій .git: якби наступний тік її успадкував,
+        # smudge виконався б на хості. Знімок ловить підміну на першому тіку й
+        # ставить STOP (рецензія #290 коло 2) — тож наступний тік задачу не бере,
+        # і маркер smudge не з'являється.
         ci --allow-empty -m work
         d="$REPO/.git"
         mv "$d" "$d.old"
         mkdir "$d"
-        cp -a "$d.old/." "$d/" ;;
+        cp -a "$d.old/." "$d/"
+        git --git-dir="$d" config filter.x.smudge "$EVIL/smudge"
+        mkdir -p "$d/info" && echo '* filter=x' >"$d/info/attributes" ;;
+      evil-commitgraph)
+        # Підроблений .git/objects/info/commit-graph (контрприклад Argon CX2):
+        # коміт додає заборонений infra/x, але в CDAT графа OID кореневого дерева
+        # tip підмінено на дерево бази. `diff --name-only base tip` з увімкненим
+        # графом бере дерево з CDAT → infra/x НЕ видно (backstop обходиться).
+        # Ловить лише -c core.commitGraph=false (git читає сам об'єкт коміту).
+        # Знімок identity не чіпається: файл у objects/info/, не config/.git-inode.
+        mkdir -p "$wt/infra" && echo x >"$wt/infra/x" && git -C "$wt" add infra/x
+        ci -m forbidden
+        btree="$(git -C "$REPO" rev-parse "refs/remotes/origin/main^{tree}")"
+        ttree="$(git -C "$wt" rev-parse "HEAD^{tree}")"
+        git -C "$REPO" commit-graph write --reachable >/dev/null 2>&1
+        # commit-graph write створює файл 0444; контейнер володіє .git/objects і
+        # знімає захист запису перед підробкою (інакше patch падає PermissionError).
+        chmod u+w "$REPO/.git/objects/info/commit-graph"
+        python3 -c 'import sys,hashlib
+p,t,b=sys.argv[1],bytes.fromhex(sys.argv[2]),bytes.fromhex(sys.argv[3])
+d=bytearray(open(p,"rb").read()); body=d[:-20]; i=body.find(t)
+assert i!=-1 and body.find(t,i+20)==-1
+body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest())' \
+          "$REPO/.git/objects/info/commit-graph" "$ttree" "$btree" ;;
       evil-wtsymlink)
         # .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1).
         ci --allow-empty -m work
@@ -1332,25 +1356,32 @@ EOF
   teardown
 
   # 23b. core.fsmonitor і core.sshCommand у .git/config (fetch і worktree add
-  # другого тіку викликали б fsmonitor; sshCommand тут не спрацює — локальний
-  # origin, його тримає статична перевірка).
+  # запис у .git/config (fsmonitor, sshCommand) переписує файл із новим inode,
+  # тож знімок identity ловить задачу a і ставить STOP черги (рецензія #290
+  # коло 2) — задача b не стартує. На A8 config :ro, тож такий запис неможливий
+  # узагалі; самі ключі (core.fsmonitor=false, core.sshCommand) тримає статична
+  # перевірка check-ansible-a8.
   two_ticks evil-config
-  [[ -z "$(pwned)" && "$(jl .detail)" == pushed ]] && on_origin b &&
-    ok "23b: core.fsmonitor і core.sshCommand з конфігу не виконались, чиста задача запушена" ||
-    bad "23b конфіг: маркери [$(pwned)]; $(last)"
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch && -e "$QD/002-b.json" ]] && ! on_origin a; then
+    ok "23b: запис у config → задачу a спинив знімок + STOP, задача b не стартує, нічого не виконано"
+  else
+    bad "23b конфіг: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
   teardown
 
-  # 23c. remote.origin.uploadpack і receivepack у .git/config. `git config`
-  # переписує config із новим inode, тож задачу a ловить знімок identity
-  # (fail closed). Пін --upload-pack/--receive-pack лишається потрібним і
-  # перевіряється задачею b: config у $REPO/.git залишається підміненим (на A8
-  # config :ro, тож так тривко не буває), і fetch/push задачі b ідуть по ньому —
-  # без пінів спрацювали б uploadpack/receivepack (мутанти нижче).
+  # 23c. remote.origin.uploadpack і receivepack у .git/config — так само: `git
+  # config` міняє inside config, знімок ловить задачу a і ставить STOP. Піни
+  # --upload-pack/--receive-pack тримає статична перевірка (на A8 config :ro).
   two_ticks evil-pack
-  [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"змінили identity"* &&
-    "$(jl .detail)" == pushed ]] && on_origin b &&
-    ok "23c: config із uploadpack/receivepack → задачу a спинив знімок, задача b запушена без маркерів" ||
-    bad "23c pack: маркери [$(pwned)]; $r1; $(last)"
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch ]] && ! on_origin a; then
+    ok "23c: запис uploadpack/receivepack у config → знімок + STOP, нічого не виконано й не запушено"
+  else
+    bad "23c pack: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
   teardown
 
   # 23d. .git/commondir на чужий .git — fail closed з поясненням, і наступна
@@ -1417,14 +1448,19 @@ EOF
     ok "23m: помилка rev-list → worktree лишився, задача у failed/ з поясненням" || bad "23m rev-list: $(last)"
   teardown
 
-  # 23n. Підміна всієї .git новою текою (mv .git .git-old + свій .git): знімок
-  # identity ловить зміну dev:inode/хешу — fail closed, нічого не запушено
-  # (рецензія #290, п.1). У тесті монтувань немає, тож rename проходить; на A8
-  # його не дасть bind самої .git (шар 1, зонд не тут — верифікується окремо).
+  # 23n. Підміна всієї .git новою текою (mv .git .git-old + свій .git з фільтром):
+  # знімок identity ловить зміну dev:inode/хешу на першому тіку → fail closed +
+  # STOP усієї черги (рецензія #290 коло 2). Тому наступний тік задачу b НЕ бере,
+  # і smudge з підміненої .git не виконується. У тесті монтувань немає, тож
+  # rename проходить; на A8 його не дасть bind самої .git (шар 1, зонд V23c).
   two_ticks evil-mvgit
-  [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"змінили identity"* ]] &&
-    ! on_origin a && ok "23n: підміна .git → failed «змінили identity», нічого не виконано й не запушено" ||
-    bad "23n mvgit: маркери [$(pwned)]; $r1"
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch && -e "$QD/002-b.json" ]] && ! on_origin a; then
+    ok "23n: підміна .git → failed «змінили identity» + STOP; наступний тік не бере задачу, smudge не виконано"
+  else
+    bad "23n mvgit: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
   teardown
 
   # 23o. .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1):
@@ -1440,12 +1476,33 @@ EOF
   TASK_TIMEOUT=1 setup
   enqueue 001-a "$(valid a)"
   A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=hang tick
-  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"не зупинився"* && -s "$ROOT/STOP" && -d "$ROOT/wt/a" ]] &&
-    ! on_origin a && ok "23p: контейнер не зупинився → STOP, fail closed, git не чіпано, нічого не запушено" ||
-    bad "23p stuck: $(last); STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]"
+  cnt="$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null)"
+  # Задача зарахована в денний ліміт і таймаут зафіксовано (oracle_rc=124) —
+  # рецензія #290 коло 2.
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"не зупинився"* && -s "$ROOT/STOP" && -d "$ROOT/wt/a" &&
+    "$cnt" == 1 && "$(jl .oracle_rc)" == 124 ]] &&
+    ! on_origin a && ok "23p: контейнер не зупинився → STOP, git не чіпано, задача порахована (count=1, oracle_rc=124), нічого не запушено" ||
+    bad "23p stuck: $(last); cnt=$cnt; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]"
   # Прибрати завислий sleep агента (KILL_NEVER лишив його живим).
   pkill -x -f "sleep $HANG_S" 2>/dev/null
   teardown
+
+  # 23q. Підроблений commit-graph ховає infra/x від backstop diff (контрприклад
+  # Argon CX2). На de95bb1 (без -c core.commitGraph=false) diff бере дерево з
+  # графа → infra/x не видно → задача пушить заборонене. З фіксом git читає сам
+  # об'єкт коміту → infra/x видно → forbidden-paths. python3 — залежність тесту.
+  if command -v python3 >/dev/null 2>&1; then
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(valid a)"
+    AGENT_MODE=evil-commitgraph tick
+    [[ "$(jl .result)" == failed && "$(jl .detail)" == forbidden-paths:*infra/x* ]] &&
+      ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null 2>&1 &&
+      ok "23q: підроблений commit-graph не ховає infra/x від backstop (core.commitGraph=false)" ||
+      bad "23q commitgraph: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+    teardown
+  else
+    say "⚠ 23q НЕ ПЕРЕВІРЕНО: немає python3 для підробки commit-graph"
+  fi
 }
 
 run_scenarios
@@ -1499,9 +1556,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # що не розрізняє правильне і зламане, гірша за відсутню: вона додає рядок
   # «убита» і забирає увагу. Замість неї нижче — інваріант, який досі правда.
   mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 6\./\n\n# ─── 6./'
-  mutate "контейнер не вбивається при таймауті" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент"\nfi/:/'
-  mutate "таймаут не переконується, що контейнер зник" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент"\nfi/[[ "\$rc" == 124 ]] \&\& "\$DOCKER" kill "\$A8_CONTAINER_NAME" >\/dev\/null 2>\&1/'
+  mutate "контейнер не вбивається при таймауті" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/:/'
+  mutate "таймаут не переконується, що контейнер зник" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/[[ "\$rc" == 124 ]] \&\& "\$DOCKER" kill "\$A8_CONTAINER_NAME" >\/dev\/null 2>\&1/'
   mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
+  mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
+  mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
+  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
@@ -1516,7 +1576,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "сирота не записана як failed" 's/  "\$GUARD" count >\/dev\/null\n  "\$GUARD" record failed\n/  "\$GUARD" count >\/dev\/null\n/'
   mutate "guard_error виходить з 0" 's/\[\[ "\$gstate" == guard_error \]\] && exit 1/[[ "\$gstate" == guard_error ]] \&\& exit 0/'
   mutate "stopped як failed" 's/  stopped\)\n    if release_or_keep; then/  stopped)\n    fail_task stopped; exit 0\n    if release_or_keep; then/'
-  mutate "порожню гілку не прибрано" 's/  hgit worktree remove --force "\$wt" >>"\$log" 2>&1\n  hgit branch -D "\$branch" >>"\$log" 2>&1\n//'
+  mutate "порожню гілку не прибрано" 's/  if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n    keep_why=[^\n]*\n    return 1\n  fi\n  hgit branch -D "\$branch" >>"\$log" 2>&1\n  return 0/  return 0/'
   mutate "невідомий kind → ok" 's/    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"/    finish ok ok unknown done/'
   mutate "push не перевіряється" 's/      hgit push --receive-pack=git-receive-pack origin/      true || hgit push --receive-pack=git-receive-pack origin/'
   mutate "класифікатор на спільному лозі" 's/logic classify "\$rc" "\$out"/logic classify "\$rc" "\$log"/'
@@ -1575,7 +1635,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   else
     say "⚠ мутація «порядок планового потоку — у локалі машини» НЕ ганялась: немає відповідної локалі"
   fi
-  mutate "STOP людини затирається" 's/      set -o noclobber\n//'
+  mutate "STOP людини затирається" 's/^      set -o noclobber\n//m'
   mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
   mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
@@ -1586,9 +1646,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # sshCommand, gitProxy, diff.external, credential.helper, protocol.ext,
   # alternateRefsCommand) тримає статична перевірка — check-ansible-a8.test.sh.
   mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//'
-  mutate "hgit без core.fsmonitor=false" 's/  -c core\.fsmonitor=false\n//'
-  mutate "fetch без --upload-pack" 's/hgit fetch --quiet --upload-pack=git-upload-pack/hgit fetch --quiet/'
-  mutate "push без --receive-pack" 's/hgit push --receive-pack=git-receive-pack origin/hgit push origin/'
+  # core.fsmonitor, --upload-pack, --receive-pack динамічно не вбити: сценарії,
+  # що міняли config (23b/23c), тепер спиняє знімок+STOP до того, як git-тіку
+  # дійде до цих ключів. Їх тримає статична перевірка (check-ansible-a8.test.sh:
+  # per-key мутанти HGIT_SAFE + --upload-pack/--receive-pack). core.hooksPath
+  # лишається динамічним — його вбиває 23a (evil-hooks config не чіпає, STOP не
+  # спрацьовує, хук виконався б на worktree add/push).
   # Перевірки .git перед кожним git.
   mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//'
   mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/'
@@ -1596,6 +1659,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/'
   mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/'
   mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//'
+  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//'
   mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//'
   mutate "знімок identity не робиться" 's/\nsnapshot_git\n/\n/'
   mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/'

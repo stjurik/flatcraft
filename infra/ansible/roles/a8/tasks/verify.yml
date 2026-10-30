@@ -944,7 +944,7 @@
       - "'EROFS hooks' in a8_v_gitro.stdout"
       - "'CONTROL_WRITABLE' in a8_v_gitro.stdout"
       - "'MOUNT git' in a8_v_gitro.stdout"
-      - "'NOMOUNT worktrees' not in a8_v_gitro.stdout"
+      - "'MOUNT worktrees' in a8_v_gitro.stdout"
     fail_msg: >-
       #276: {{ a8_v_gitro.stdout | replace('\n', ' ') }} (rc={{ a8_v_gitro.rc }}).
       WRITABLE — контейнер може підкласти хук чи ключ конфігу, який тік виконає на хості:
