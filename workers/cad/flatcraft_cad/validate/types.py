@@ -16,10 +16,22 @@
 і діапазон, і кастомний валідатор моделі. Рядок-число ("5", "15") — єдиний
 виняток: це валідне число (паритет з Pydantic-коерсією і тестами #257
 TestStringNumberInParameters), решта гейтів бачить його приведеним.
+
+Доробка 049 (issue #274, рецензія Flash на PR #287): «число» тут — лише
+СКІНЧЕННЕ число. `float("nan")`/`float("inf")`/`float("-inf")` не кидають
+винятку (й Python JSON-парсер за замовчуванням так само пропускає літерали
+`NaN`/`Infinity`/`-Infinity`), тож без `math.isfinite` нескінченне чи NaN
+значення мовчки проходило б цей гейт як число — і падало б у гейти нижче
+(`validate/sheet.py` зокрема) без захисту. Також перевіряється ФОРМА
+контейнерів: `holes` має бути списком об'єктів (не рядком/числом/об'єктом;
+елемент — об'єктом, не чимось іншим), `side_perforation`/`stiffening_rib` —
+об'єктом або `null`. Без цього `holes: "not-a-list"`/`holes: [123]` мовчки
+ковталися б (holes.py ітерує й пропускає зіпсоване — тихо, без 422).
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -103,21 +115,32 @@ class ParameterTypeError:
     detail: str
 
 
-def _is_number(value: Any) -> bool:
-    """`bool` — НЕ число тут, хоч Python/Pydantic і трактують його як int/float
+def _parsed_float(value: Any) -> float | None:
+    """`None` — значення взагалі не число (навіть як рядок). `bool` — НЕ
+    число тут, хоч Python/Pydantic і трактують його як int/float
     (контрприклади Argon: `true` у `pitch_x_mm`/`bend_angle_deg` не має
-    мовчки ставати 1.0). Рядок-число ("5", "15", навіть "-2.5") — число."""
+    мовчки ставати 1.0). Рядок-число ("5", "15", навіть "-2.5") — число,
+    `float()` розбирає і його."""
     if isinstance(value, bool):
-        return False
+        return None
     if isinstance(value, (int, float)):
-        return True
+        return float(value)
     if isinstance(value, str):
         try:
-            float(value)
+            return float(value)
         except ValueError:
-            return False
-        return True
-    return False
+            return None
+    return None
+
+
+def _is_number(value: Any) -> bool:
+    """Доробка 049 (issue #274, рецензія Flash): `float()` розбирає і
+    "nan"/"inf"/"-inf" (будь-яким регістром), а JSON-парсер Python за
+    замовчуванням пропускає літерали `NaN`/`Infinity`/`-Infinity` без
+    помилки — тож без `math.isfinite` нескінченне чи NaN значення мовчки
+    проходило б як «число»."""
+    parsed = _parsed_float(value)
+    return parsed is not None and math.isfinite(parsed)
 
 
 def _type_label(value: Any) -> str:
@@ -129,8 +152,30 @@ def _type_label(value: Any) -> str:
         return "список"
     if isinstance(value, dict):
         return "об'єкт"
+    parsed = _parsed_float(value)
+    if parsed is not None and not math.isfinite(parsed):
+        return "нескінченне або NaN значення"
     if isinstance(value, str):
         return "рядок, який не є числом"
+    return type(value).__name__
+
+
+def _shape_label(value: Any) -> str:
+    """Для помилок форми контейнера (`holes`/`side_perforation`/
+    `stiffening_rib`) — на відміну від `_type_label`, тут не йдеться про
+    «число», тож рядок/число підписуються без згадки про число."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "логічне значення (true/false)"
+    if isinstance(value, list):
+        return "список"
+    if isinstance(value, dict):
+        return "об'єкт"
+    if isinstance(value, str):
+        return "рядок"
+    if isinstance(value, (int, float)):
+        return "число"
     return type(value).__name__
 
 
@@ -144,14 +189,26 @@ def _field_error(value: Any, field: str) -> ParameterTypeError | None:
     )
 
 
+def _container_error(field: str, value: Any, expected: str) -> ParameterTypeError:
+    return ParameterTypeError(
+        code=TYPE_ERROR_CODE,
+        field=field,
+        detail=f"Параметр «{field}» має бути {expected}, отримано: {_shape_label(value)}.",
+    )
+
+
 def validate_types(template_slug: str, parameters: dict[str, Any]) -> list[ParameterTypeError]:
     """Перевіряє типи числових полів (верхній рівень + holes[]/side_perforation/
-    stiffening_rib). Порожній список → усі присутні числові поля — числа.
+    stiffening_rib) і форму контейнерів (`holes` — список об'єктів,
+    `side_perforation`/`stiffening_rib` — об'єкт). Порожній список → усі
+    присутні числові поля — числа, усі присутні контейнери — правильної форми.
 
     Перевіряється лише те, що ПРИСУТНЄ у `parameters` (`field in parameters`,
     не `.get`): відсутнє поле — питання Pydantic-дефолту чи обов'язковості,
-    не типу, і цей гейт у нього не лізе. Присутнє явне `null` — так, помилка
-    типу (воно в переліку BAD, не «поле не задано»).
+    не типу, і цей гейт у нього не лізе. Присутнє явне `null` — для числового
+    поля це помилка типу (воно в переліку BAD, не «поле не задано»); для
+    контейнера `null` — як і раніше, валідне «немає» (паритет з `None`-дефолтом
+    `side_perforation`/`stiffening_rib` у моделі enclosed_shelf).
     """
     errors: list[ParameterTypeError] = []
 
@@ -162,25 +219,34 @@ def validate_types(template_slug: str, parameters: dict[str, Any]) -> list[Param
                 errors.append(err)
 
     hole_fields = HOLE_LIST_NUMERIC_FIELDS.get(template_slug)
-    holes = parameters.get("holes")
-    if hole_fields and isinstance(holes, list):
-        for idx, hole in enumerate(holes):
-            if not isinstance(hole, dict):
-                continue
-            for field in hole_fields:
-                if field in hole:
-                    err = _field_error(hole[field], f"holes.{idx}.{field}")
-                    if err is not None:
-                        errors.append(err)
+    if hole_fields and "holes" in parameters:
+        holes = parameters["holes"]
+        if holes is not None:
+            if not isinstance(holes, list):
+                errors.append(_container_error("holes", holes, "списком"))
+            else:
+                for idx, hole in enumerate(holes):
+                    if not isinstance(hole, dict):
+                        errors.append(_container_error(f"holes.{idx}", hole, "об'єктом"))
+                        continue
+                    for field in hole_fields:
+                        if field in hole:
+                            err = _field_error(hole[field], f"holes.{idx}.{field}")
+                            if err is not None:
+                                errors.append(err)
 
     for obj_name, obj_fields in NESTED_OBJECT_NUMERIC_FIELDS.get(template_slug, {}).items():
-        obj = parameters.get(obj_name)
-        if isinstance(obj, dict):
-            for field in obj_fields:
-                if field in obj:
-                    err = _field_error(obj[field], f"{obj_name}.{field}")
-                    if err is not None:
-                        errors.append(err)
+        if obj_name in parameters:
+            obj = parameters[obj_name]
+            if obj is not None:
+                if not isinstance(obj, dict):
+                    errors.append(_container_error(obj_name, obj, "об'єктом"))
+                else:
+                    for field in obj_fields:
+                        if field in obj:
+                            err = _field_error(obj[field], f"{obj_name}.{field}")
+                            if err is not None:
+                                errors.append(err)
 
     return errors
 
@@ -193,22 +259,45 @@ def validate_export_types(template_slug: str, parameters: dict[str, Any]) -> lis
 def sanitize_for_gates(
     parameters: dict[str, Any], type_errors: list[dict[str, str]]
 ) -> dict[str, Any]:
-    """Нейтралізує значення полів ВЕРХНЬОГО РІВНЯ, що провалили перевірку
-    типу, замінюючи їх на `None` у НОВОМУ dict (оригінал не мутується).
+    """Нейтралізує значення полів, що провалили перевірку типу чи форми,
+    замінюючи їх на `None` у НОВОМУ dict (оригінал не мутується).
 
-    Решта гейтів (`validate/bend.py`, `validate/perforation.py`) читає ці
-    поля через `parameters.get(...)` і трактує `None` як «поле відсутнє» —
-    рано повертає `[]` замість падіння на `float("not-a-number")`/
-    `float([1, 2])` (там немає try/except, на відміну від profile.py/sheet.py,
-    де пряме читання вже обгорнуте). Вкладені поля (`holes[].*`,
-    `side_perforation.*`, `stiffening_rib.*`) тут не чіпаються — гейти, що їх
-    читають, уже безпечно пропускають зіпсовані значення (bool-перевірка й
-    try/except у `validate/holes.py`, зовнішній try/except у
-    `validate/sheet.py::_sheet_dimensions_mm`).
+    ВЕРХНІЙ РІВЕНЬ (поле без крапки, напр. `bend_radius_mm`, `holes`,
+    `stiffening_rib`): решта гейтів (`validate/bend.py`,
+    `validate/perforation.py`) читає ці поля через `parameters.get(...)` і
+    трактує `None` як «поле відсутнє» — рано повертає `[]` замість падіння на
+    `float("not-a-number")`/`float([1, 2])` (там немає try/except, на відміну
+    від profile.py/sheet.py, де пряме читання вже обгорнуте).
+
+    ВКЛАДЕНІ поля об'єктів (`side_perforation.*`, `stiffening_rib.*`) теж
+    нейтралізуються — доробка 049 (issue #274, рецензія Flash): `float("inf")`
+    не кидає винятку, тож `stiffening_rib.height_mm: "inf"` без нейтралізації
+    доходило до `validate/sheet.py::_sheet_dimensions_mm` (`float()` без
+    `isfinite`) і давало побічний `SHEET_EXCEEDS_MAX_LENGTH` з «inf мм» поряд
+    з `INVALID_PARAMETER_TYPE`. Елементи `holes[]` з помилкою форми
+    (`holes.<idx>` — елемент не об'єкт) тут НЕ чіпаються: `validate/holes.py`
+    вже безпечно пропускає нечисловий/не-dict елемент (TypeError на
+    `hole["diameter_mm"]` ловиться власним try/except модуля), а поля
+    `holes[].*` (`holes.<idx>.<field>`) теж не нейтралізуються — там же
+    `math.isfinite`-перевірка вже стоїть ПЕРЕД порівнянням.
     """
     bad_top_level_fields = {e["field"] for e in type_errors if "." not in e["field"]}
-    if not bad_top_level_fields:
+    bad_nested_fields: dict[str, set[str]] = {}
+    for error in type_errors:
+        head, sep, tail = error["field"].partition(".")
+        if sep and head != "holes":
+            bad_nested_fields.setdefault(head, set()).add(tail)
+
+    if not bad_top_level_fields and not bad_nested_fields:
         return parameters
-    return {
+
+    sanitized = {
         key: (None if key in bad_top_level_fields else value) for key, value in parameters.items()
     }
+    for obj_name, bad_leaf_fields in bad_nested_fields.items():
+        obj = sanitized.get(obj_name)
+        if isinstance(obj, dict):
+            sanitized[obj_name] = {
+                leaf: (None if leaf in bad_leaf_fields else value) for leaf, value in obj.items()
+            }
+    return sanitized

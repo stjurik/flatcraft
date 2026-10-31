@@ -7,6 +7,7 @@ Phase 2.10: підтримка multiple slugs (l_bracket, z_bracket).
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -15,8 +16,11 @@ from typing import Any, Literal
 from uuid import UUID
 
 import boto3
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from flatcraft_cad.export.dxf import (
     export_corner_angle_dxf,
@@ -101,6 +105,18 @@ class ExportRequest(BaseModel):
     # API (apps/api) уже завжди його передає (Zod-схема вимагає). Відсутнє
     # поле → 422 від Pydantic-схеми цього ExportRequest.
     material_code: str
+
+    @field_validator("thickness_mm", mode="before")
+    @classmethod
+    def _thickness_mm_must_not_be_bool(cls, value: Any) -> Any:
+        """Доробка 049 (issue #274, рецензія Flash на PR #287): Pydantic
+        лояльно коерсує `bool` у `1.0`/`0.0` для `float`-поля (той самий
+        контрприклад Argon, що й для числових полів у `parameters` —
+        `validate/types.py::_is_number`), тож `thickness_mm: true` без цієї
+        перевірки тихо ставало товщиною 1 мм замість 422."""
+        if isinstance(value, bool):
+            raise ValueError("thickness_mm має бути числом, не логічним значенням (true/false).")
+        return value
 
 
 _BUILD_PARAMS_BY_SLUG: dict[TemplateSlug, type[BaseModel]] = {
@@ -358,9 +374,44 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
     return dxf, pdf
 
 
+def _json_safe(value: Any) -> Any:
+    """Доробка 049 (issue #274, рецензія Flash на PR #287): рекурсивно
+    замінює NaN/±Infinity рядком перед JSON-серіалізацією 422-відповіді.
+
+    `thickness_mm` як JSON-літерал `NaN`/`Infinity` коректно провалює
+    Pydantic-обмеження `gt`/`le` (422), але `RequestValidationError.errors()`
+    ехо-ить сире значення у `input` того самого error dict. Starlette
+    `JSONResponse.render` викликає `json.dumps(..., allow_nan=False)` —
+    без санітизації нескінченне/NaN значення в `detail` валить ВІДПОВІДЬ
+    (не запит) у 500 ДО того, як клієнт побачить задуманий 422.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            return "NaN"
+        return "Infinity" if value > 0 else "-Infinity"
+    if isinstance(value, dict):
+        return {key: _json_safe(v) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def _build_app() -> FastAPI:
     init_sentry()  # ADR-032: no-op без SENTRY_DSN (dev/CI/тести)
     app = FastAPI(title="flatcraft-cad", version="0.0.0")
+
+    @app.exception_handler(RequestValidationError)
+    def _on_request_validation_error(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Паритет з дефолтним хендлером FastAPI (той самий shape `detail`),
+        але з `_json_safe` — інакше NaN/Infinity у сирому вхідному значенні
+        (`thickness_mm`) валить саму 422-відповідь у 500 (докладніше —
+        `_json_safe`)."""
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _json_safe(jsonable_encoder(exc.errors()))},
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
