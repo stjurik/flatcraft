@@ -311,6 +311,33 @@ class TestEnclosedОбєктНеправильноїФорми:
         assert res.status_code == 200, res.text
 
 
+class TestЦілеЗаМежамиFloat:
+    """JSON-ціле на 401 цифру (10**400) — Python `int`, а `float()` на ньому
+    кидає OverflowError (не inf, як `float("1e400")`). Без перехоплення —
+    500 з гейта типів (контрприклад Argon 1, PR #295)."""
+
+    HUGE = 10**400
+
+    def test_верхнє_поле(self, client: TestClient) -> None:
+        res = _export(client, "l_bracket", {**VALID_PARAMS, "legA_mm": self.HUGE})
+        assert res.status_code == 422, res.text
+        assert "legA_mm" in _fields_by_code(res.json()["detail"], TYPE_CODE), res.text
+
+    def test_отвір(self, client: TestClient) -> None:
+        hole = {**GOOD_HOLE, "distance_from_bend_mm": self.HUGE}
+        res = _export(client, "l_bracket", {**VALID_PARAMS, "holes": [hole]})
+        assert res.status_code == 422, res.text
+        detail = res.json()["detail"]
+        assert "holes.0.distance_from_bend_mm" in _fields_by_code(detail, TYPE_CODE), res.text
+
+    def test_вкладений_обєкт(self, client: TestClient) -> None:
+        params = {**ENCLOSED_SHELF_VALID_PARAMS, "stiffening_rib": {"height_mm": self.HUGE}}
+        res = _export(client, "enclosed_shelf", params)
+        assert res.status_code == 422, res.text
+        detail = res.json()["detail"]
+        assert "stiffening_rib.height_mm" in _fields_by_code(detail, TYPE_CODE), res.text
+
+
 class TestThicknessMm:
     """`thickness_mm` (корінь тіла, не `parameters`) — той самий дефект:
     `bool` коерсується у 1.0/0.0, NaN/Infinity валить 422-відповідь у 500."""

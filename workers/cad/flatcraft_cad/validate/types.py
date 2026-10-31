@@ -124,7 +124,13 @@ def _parsed_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        try:
+            return float(value)
+        except OverflowError:
+            # JSON-ціле за межами float (10**400): `float()` кидає, а не дає
+            # inf, як `float("1e400")`. Для гейта це те саме «не скінченне» —
+            # INVALID_PARAMETER_TYPE, а не 500 (контрприклад Argon 1, PR #295).
+            return math.inf
     if isinstance(value, str):
         try:
             return float(value)
@@ -276,19 +282,29 @@ def sanitize_for_gates(
     `isfinite`) і давало побічний `SHEET_EXCEEDS_MAX_LENGTH` з «inf мм» поряд
     з `INVALID_PARAMETER_TYPE`. Елементи `holes[]` з помилкою форми
     (`holes.<idx>` — елемент не об'єкт) тут НЕ чіпаються: `validate/holes.py`
-    вже безпечно пропускає нечисловий/не-dict елемент (TypeError на
-    `hole["diameter_mm"]` ловиться власним try/except модуля), а поля
-    `holes[].*` (`holes.<idx>.<field>`) теж не нейтралізуються — там же
-    `math.isfinite`-перевірка вже стоїть ПЕРЕД порівнянням.
+    вже безпечно пропускає не-dict елемент (TypeError на `hole["diameter_mm"]`
+    ловиться власним try/except модуля).
+
+    ПОЛЯ ОТВОРІВ (`holes.<idx>.<field>`) нейтралізуються так само, як вкладені
+    поля об'єктів: `validate/holes.py` ловить лише KeyError/TypeError/ValueError,
+    а JSON-ціле за межами float (10**400) дає там `OverflowError` → 500
+    (контрприклад Argon 1, PR #295). `None` holes.py пропускає як зіпсований отвір.
     """
     bad_top_level_fields = {e["field"] for e in type_errors if "." not in e["field"]}
     bad_nested_fields: dict[str, set[str]] = {}
+    bad_hole_fields: dict[int, set[str]] = {}
     for error in type_errors:
         head, sep, tail = error["field"].partition(".")
-        if sep and head != "holes":
+        if not sep:
+            continue
+        if head == "holes":
+            idx, sep2, leaf = tail.partition(".")
+            if sep2 and idx.isdigit():
+                bad_hole_fields.setdefault(int(idx), set()).add(leaf)
+        else:
             bad_nested_fields.setdefault(head, set()).add(tail)
 
-    if not bad_top_level_fields and not bad_nested_fields:
+    if not bad_top_level_fields and not bad_nested_fields and not bad_hole_fields:
         return parameters
 
     sanitized = {
@@ -300,4 +316,12 @@ def sanitize_for_gates(
             sanitized[obj_name] = {
                 leaf: (None if leaf in bad_leaf_fields else value) for leaf, value in obj.items()
             }
+    holes = sanitized.get("holes")
+    if bad_hole_fields and isinstance(holes, list):
+        sanitized["holes"] = [
+            {leaf: (None if leaf in bad_hole_fields[i] else v) for leaf, v in hole.items()}
+            if i in bad_hole_fields and isinstance(hole, dict)
+            else hole
+            for i, hole in enumerate(holes)
+        ]
     return sanitized
