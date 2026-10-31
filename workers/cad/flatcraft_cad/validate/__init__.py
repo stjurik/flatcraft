@@ -26,22 +26,32 @@ from flatcraft_cad.validate.sheet import (
     validate_export_sheet,
     validate_sheet,
 )
+from flatcraft_cad.validate.types import (
+    ParameterTypeError,
+    sanitize_for_gates,
+    validate_export_types,
+    validate_types,
+)
 
 __all__ = [
     "BendError",
     "HoleError",
+    "ParameterTypeError",
     "PerforationError",
     "ProfileError",
     "SheetError",
     "load_spec",
+    "sanitize_for_gates",
     "validate_bend",
     "validate_export",
     "validate_export_holes",
     "validate_export_perforation",
     "validate_export_profile",
     "validate_export_sheet",
+    "validate_export_types",
     "validate_holes",
     "validate_perforation",
     "validate_profile",
     "validate_sheet",
+    "validate_types",
 ]
