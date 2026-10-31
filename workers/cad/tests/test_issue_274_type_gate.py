@@ -33,22 +33,24 @@ TYPE_CODE = "INVALID_PARAMETER_TYPE"
 
 
 @pytest.fixture(autouse=True)
-def _s3_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Паритет з test_server.py — moto перехоплює boto3, ENV-и лише placeholder."""
+def _s3_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """moto — на КОЖЕН тест, не лише на валідні: на мутанті (код до 049) зіпсоване
+    значення доходить до вивантаження в S3, і без mock тест ішов у справжню мережу —
+    на A8 (egress за allowlist) висів до таймауту оракула (049, рецензія Flash #295)."""
     monkeypatch.delenv("S3_ENDPOINT", raising=False)
     monkeypatch.setenv("S3_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "test")
     monkeypatch.setenv("S3_BUCKET", "flatcraft-test")
     monkeypatch.setenv("S3_REGION", "us-east-1")
+    with mock_aws():
+        yield
 
 
 @pytest.fixture
-def aws_with_bucket() -> Iterator[None]:
-    """moto перехоплює всі boto3 виклики у scope. Створюємо bucket для тестів."""
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="flatcraft-test")
-        yield
+def aws_with_bucket() -> None:
+    """Створює bucket для тестів; moto вже активний з `_s3_env`."""
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="flatcraft-test")
 
 
 @pytest.fixture
