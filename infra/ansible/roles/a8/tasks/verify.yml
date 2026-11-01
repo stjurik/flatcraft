@@ -795,6 +795,8 @@
       failed_when: false
 
     - name: V18b — create a throwaway worktree at origin/main
+      # Повне ім'я посилання, як у тіку (#276): коротке `origin/main` стає
+      # неоднозначним, щойно в .git з'являється refs/tags/origin/main.
       ansible.builtin.command:
         argv:
           - git
@@ -805,7 +807,7 @@
           - --quiet
           - --detach
           - "{{ a8_worktrees_dir }}/verify-cad"
-          - origin/main
+          - refs/remotes/origin/main^{commit}
       changed_when: false
 
     - name: V18b — which commit is under test
@@ -834,6 +836,69 @@
           - -c
           - (cd workers/cad && uv sync --extra dev --quiet) && echo SYNC_OK && uv run --directory workers/cad pytest tests/templates/test_registry.py -q
       register: a8_v_cad
+      changed_when: false
+      failed_when: false
+
+    - name: V23a — .git/config and .git/hooks of the main clone are read-only inside the container
+      # #276. Поведінка, не прапорець: пробуємо писати з контейнера, і причина
+      # відмови мусить бути саме EROFS. Для файла — дописування в сам файл, а НЕ
+      # `touch <файл>/.a8probe`: той дає ENOTDIR при будь-яких правах і звітував
+      # би «RO» про файл, доступний на запис (контрприклад 5). Контроль — запис у
+      # .git/info: решта .git записувана, інакше git агента не закомітив би.
+      # Запуск — на worktree, як у тіку, а не на головному клоні.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - |
+            if : >> "{{ a8_repo_dir }}/.git/config" 2>/dev/null; then
+              echo "WRITABLE config"
+            elif ( : >> "{{ a8_repo_dir }}/.git/config" ) 2>&1 | grep -q "Read-only file system"; then
+              echo "EROFS config"
+            else
+              echo "OTHER config"
+            fi
+            if touch "{{ a8_repo_dir }}/.git/hooks/.a8probe" 2>/dev/null; then
+              rm -f "{{ a8_repo_dir }}/.git/hooks/.a8probe"; echo "WRITABLE hooks"
+            elif touch "{{ a8_repo_dir }}/.git/hooks/.a8probe" 2>&1 | grep -q "Read-only file system"; then
+              echo "EROFS hooks"
+            else
+              echo "OTHER hooks"
+            fi
+            touch "{{ a8_repo_dir }}/.git/info/.a8probe" && rm -f "{{ a8_repo_dir }}/.git/info/.a8probe" && echo CONTROL_WRITABLE
+            grep -qE " {{ a8_repo_dir }}/\.git " /proc/self/mountinfo && echo "MOUNT git" || echo "NOMOUNT git"
+            if [ -d "{{ a8_repo_dir }}/.git/worktrees" ]; then
+              grep -qE " {{ a8_repo_dir }}/\.git/worktrees " /proc/self/mountinfo && echo "MOUNT worktrees" || echo "NOMOUNT worktrees"
+            else echo "NO worktrees"; fi
+      register: a8_v_gitro
+      changed_when: false
+      failed_when: false
+
+    - name: V23b — the agent runs pnpm install itself, then the loud hook and git commit in the worktree
+      # Звичайна робота агента не зламалась від .git/hooks лише для читання.
+      # `pnpm install` — БЕЗ жодних змінних, як його запустив би сам агент: хуки
+      # lefthook іде ставити в теку container-home (core.hooksPath від
+      # a8-run-agent), тож rc=0, а .git/hooks не змінився — це звіряє сума вмісту
+      # до і після. Далі — перевірка хука і коміт із хуками з тієї теки. `uv sync`
+      # не повторюємо: V18c щойно зробив його в цьому ж worktree, через ту саму
+      # обгортку з тими самими монтуваннями. Маркери розділяють, на якому кроці
+      # зупинилось. Коміт — на відокремленому HEAD викидного worktree; V18d
+      # прибирає його разом із деревом.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - >-
+            find "{{ a8_repo_dir }}/.git/hooks" -type f -exec sha256sum {} + | sort > /tmp/a8-hooks-before &&
+            pnpm install --frozen-lockfile && echo PNPM_OK &&
+            find "{{ a8_repo_dir }}/.git/hooks" -type f -exec sha256sum {} + | sort | cmp -s - /tmp/a8-hooks-before && echo HOOKS_UNCHANGED &&
+            bash tools/scripts/check-hook-loud.sh && echo HOOK_OK &&
+            git commit -q --allow-empty -m "a8 verify V23b" && echo COMMIT_OK
+      register: a8_v_gitwork
       changed_when: false
       failed_when: false
   always:
@@ -870,6 +935,42 @@
       test_registry.py у контейнері агента: rc=0 на {{ a8_v_cad_sha.stdout }}
       (fetch {{ 'OK' if a8_v_cad_fetch.rc == 0 else 'не вдався, локальний origin/main' }}) —
       {{ (a8_v_cad.stdout_lines | default([''])) | last }}
+    quiet: true
+
+- name: V23c — .git/config and .git/hooks give EROFS inside the container, the rest of .git is writable
+  ansible.builtin.assert:
+    that:
+      - "'EROFS config' in a8_v_gitro.stdout"
+      - "'EROFS hooks' in a8_v_gitro.stdout"
+      - "'CONTROL_WRITABLE' in a8_v_gitro.stdout"
+      - "'MOUNT git' in a8_v_gitro.stdout"
+      - "'MOUNT worktrees' in a8_v_gitro.stdout"
+    fail_msg: >-
+      #276: {{ a8_v_gitro.stdout | replace('\n', ' ') }} (rc={{ a8_v_gitro.rc }}).
+      WRITABLE — контейнер може підкласти хук чи ключ конфігу, який тік виконає на хості:
+      перевір монтування :ro в `/usr/local/bin/a8-run-agent`. OTHER — запис не вдався з іншої причини,
+      тобто вимір нічого не довів. Без CONTROL_WRITABLE — зламане монтування .git взагалі.
+      NOMOUNT git/worktrees — саму .git (чи .git/worktrees) не змонтовано bind onto self,
+      тож `mv .git` з контейнера пройде (EBUSY дає лише підмонтування; виміряно unshare -Urm).
+      stderr: {{ a8_v_gitro.stderr | default('') }}
+    success_msg: "{{ a8_v_gitro.stdout | replace('\n', ' ') }}"
+    quiet: true
+
+- name: V23d — the agent's ordinary work survives read-only .git/hooks
+  ansible.builtin.assert:
+    that:
+      - a8_v_gitwork.rc == 0
+      - "'HOOKS_UNCHANGED' in a8_v_gitwork.stdout"
+      - "'COMMIT_OK' in a8_v_gitwork.stdout"
+    fail_msg: >-
+      rc={{ a8_v_gitwork.rc }}; дійшло до:
+      {{ ['PNPM_OK', 'HOOKS_UNCHANGED', 'HOOK_OK', 'COMMIT_OK'] | select('in', a8_v_gitwork.stdout) | list | join(', ') or 'нічого' }}.
+      Без PNPM_OK і з EROFS у хвості — `lefthook install` пише в .git/hooks:
+      перевір `-e GIT_CONFIG_*` (core.hooksPath) у `/usr/local/bin/a8-run-agent`.
+      PNPM_OK без HOOKS_UNCHANGED — .git/hooks змінився з контейнера, тобто вона не :ro.
+      Без HOOK_OK — у теці хуків container-home немає хука від lefthook.
+      Хвіст stderr: {{ (a8_v_gitwork.stderr_lines | default([]))[-5:] | join(' | ') }}
+    success_msg: "pnpm install агента — rc=0, .git/hooks не змінився; check-hook-loud і git commit у worktree через `a8-run-agent` — OK (uv sync — V18c)"
     quiet: true
 
 # ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────

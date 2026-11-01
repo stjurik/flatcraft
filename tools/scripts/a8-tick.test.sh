@@ -76,6 +76,19 @@ ENV
   git -C "$ROOT/seed" push -q origin main
   git clone -q "$ROOT/origin.git" "$ROOT/repo"
 
+  # Підкладні команди контейнера-шкідника (#276, сценарії 23): кожна, якщо її
+  # виконає git тіку (не «контейнер» — у нього A8_IN_CONTAINER), лишає маркер у
+  # $ROOT/pwn. upload/receive-pack пропускають роботу далі, щоб fetch і push
+  # самі по собі не падали.
+  mkdir -p "$ROOT/pwn" "$ROOT/evil"
+  for n in post-checkout pre-push fsmonitor ssh; do
+    printf '#!/bin/sh\n[ -n "$A8_IN_CONTAINER" ] || touch "%s/%s"\nexit 0\n' "$ROOT/pwn" "$n" >"$ROOT/evil/$n"
+  done
+  printf '#!/bin/sh\n[ -n "$A8_IN_CONTAINER" ] || touch "%s/smudge"\ncat\n' "$ROOT/pwn" >"$ROOT/evil/smudge"
+  printf '#!/bin/sh\n[ -n "$A8_IN_CONTAINER" ] || touch "%s/uploadpack"\nexec git upload-pack "$@"\n' "$ROOT/pwn" >"$ROOT/evil/up"
+  printf '#!/bin/sh\n[ -n "$A8_IN_CONTAINER" ] || touch "%s/receivepack"\nexec git receive-pack "$@"\n' "$ROOT/pwn" >"$ROOT/evil/recv"
+  chmod +x "$ROOT"/evil/*
+
   # Заглушка a8-run-agent. Поведінка — зі змінних AGENT_MODE / HOOK_RC.
   # Шлях журналу викликів ВШИТИЙ, а не зі змінної: A8_LOGS_DIR у середовище
   # заглушки не експортується, і перевірка «claude не викликано» мовчки
@@ -87,9 +100,17 @@ STOPFILE="$ROOT/STOP"
 AGENT_STARTED="$ROOT/agent-started"
 HANG_S="$HANG_S"
 PIDS="$LOGS"
+REPO="$ROOT/repo"
+ORIGIN="$ROOT/origin.git"
+EVIL="$ROOT/evil"
+TMPR="$ROOT"
 STUB
   cat >>"$BIN/a8-run-agent" <<'STUB'
 wt="$1"; shift
+# Усе, що запущено звідси, — «контейнер». Підкладні команди сценаріїв 23 за
+# цією змінною відрізняють контейнер від тіку: виконатись у контейнері їм не
+# заборонено (там вони й так у владі агента), заборонено — на хості.
+export A8_IN_CONTAINER=1
 # Лок тіку (fd 9) заглушці ні до чого. «Довга сесія», убита спостерігачем,
 # лишає осиротілий `sleep`, і з успадкованим fd 9 він тримав би лок — наступний
 # тік отримав би busy. У справжньому контейнері процес обгортки вмирає разом
@@ -107,13 +128,16 @@ fi
 # «Контейнер» — цей процес. PID за ім'ям контейнера: заглушка docker на
 # `kill <ім'я>` убиває саме його, як справжній `docker kill` — свій контейнер.
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && echo $$ >"$PIDS/pid-$A8_CONTAINER_NAME"
+# Маркер «контейнер існує» для docker inspect (#290, ensure_container_gone):
+# живе, доки docker kill його не прибере (а з KILL_NEVER — не прибирає).
+[[ -n "${A8_CONTAINER_NAME:-}" ]] && : >"$PIDS/alive-$A8_CONTAINER_NAME"
 # STOP_DURING: людина створює STOP, поки йде цей етап; етап доходить до кінця,
 # а наступний старт контейнера отримує 10 від check-run.
 if [[ "$*" == *check-hook-loud* ]]; then
   [[ "${STOP_DURING:-}" == hook ]] && touch "$STOPFILE"
   exit "${HOOK_RC:-0}"
 fi
-if [[ "$1" == pnpm ]]; then
+if [[ "$*" == *"pnpm install"* ]]; then
   [[ "${STOP_DURING:-}" == pnpm ]] && touch "$STOPFILE"
   exit "${DEPS_RC:-0}"
 fi
@@ -198,6 +222,148 @@ case "${AGENT_MODE:-commit}" in
     touch "$STOPFILE"
     echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'
     exit 1 ;;
+  evil-*)
+    # #276: контейнер-шкідник. Агент робить звичайну роботу і підкладає в .git
+    # головного клону те, що git ТІКУ на хості виконав би або чим підмінив би
+    # дані. Записи в .git/config і .git/hooks — імітація виходу за межу
+    # монтування :ro (тут монтувань немає). Кожен підкладений хук чи команда,
+    # якщо спрацює, лишає маркер у $TMPR/pwn — тест вимагає їх 0.
+    ci() { git -C "$wt" -c user.email=a@a -c user.name=a commit -q "$@"; }
+    case "$AGENT_MODE" in
+      evil-hooks)
+        ci --allow-empty -m work
+        for h in post-checkout pre-push; do cp "$EVIL/$h" "$REPO/.git/hooks/$h"; done ;;
+      evil-config)
+        ci --allow-empty -m work
+        git -C "$REPO" config core.fsmonitor "$EVIL/fsmonitor"
+        git -C "$REPO" config core.sshCommand "$EVIL/ssh" ;;
+      evil-pack)
+        ci --allow-empty -m work
+        git -C "$REPO" config remote.origin.uploadpack "$EVIL/up"
+        git -C "$REPO" config remote.origin.receivepack "$EVIL/recv" ;;
+      evil-commondir | evil-symlink)
+        # Чужий .git: копія справжнього з власним конфігом (alias, фільтр на всі
+        # файли, receivepack) і хуками.
+        ci --allow-empty -m work
+        e="$TMPR/evilgit"
+        cp -r "$REPO/.git" "$e"
+        git --git-dir="$e" config alias.pwn "![ -n \"\$A8_IN_CONTAINER\" ] || touch $TMPR/pwn/alias"
+        git --git-dir="$e" config filter.x.smudge "$EVIL/smudge"
+        git --git-dir="$e" config remote.origin.receivepack "$EVIL/recv"
+        mkdir -p "$e/info" && echo '* filter=x' >"$e/info/attributes"
+        for h in post-checkout pre-push; do cp "$EVIL/$h" "$e/hooks/$h"; done
+        if [[ "$AGENT_MODE" == evil-commondir ]]; then
+          echo "$e" >"$REPO/.git/commondir"
+        else
+          mv "$REPO/.git" "$TMPR/realgit" && ln -s "$e" "$REPO/.git"
+        fi ;;
+      evil-mvgit)
+        # Підміна всієї .git новою текою (новий inode) — як mv .git .git-old +
+        # свій .git (рецензія #290, п.1). Структурно .git валідна, тож
+        # git_unsafe_reason-перевірки симлінків/commondir проходять; ловить лише
+        # знімок identity (dev:inode .git + хеш config), зроблений до контейнера.
+        # Живий фільтр у підміненій .git: якби наступний тік її успадкував,
+        # smudge виконався б на хості. Знімок ловить підміну на першому тіку й
+        # ставить STOP (рецензія #290 коло 2) — тож наступний тік задачу не бере,
+        # і маркер smudge не з'являється.
+        ci --allow-empty -m work
+        d="$REPO/.git"
+        mv "$d" "$d.old"
+        mkdir "$d"
+        cp -a "$d.old/." "$d/"
+        git --git-dir="$d" config filter.x.smudge "$EVIL/smudge"
+        mkdir -p "$d/info" && echo '* filter=x' >"$d/info/attributes" ;;
+      evil-commitgraph)
+        # Підроблений .git/objects/info/commit-graph (контрприклад Argon CX2):
+        # коміт додає заборонений infra/x, але в CDAT графа OID кореневого дерева
+        # tip підмінено на дерево бази. `diff --name-only base tip` з увімкненим
+        # графом бере дерево з CDAT → infra/x НЕ видно (backstop обходиться).
+        # Ловить лише -c core.commitGraph=false (git читає сам об'єкт коміту).
+        # Знімок identity не чіпається: файл у objects/info/, не config/.git-inode.
+        mkdir -p "$wt/infra" && echo x >"$wt/infra/x" && git -C "$wt" add infra/x
+        ci -m forbidden
+        btree="$(git -C "$REPO" rev-parse "refs/remotes/origin/main^{tree}")"
+        ttree="$(git -C "$wt" rev-parse "HEAD^{tree}")"
+        git -C "$REPO" commit-graph write --reachable >/dev/null 2>&1
+        # commit-graph write створює файл 0444; контейнер володіє .git/objects і
+        # знімає захист запису перед підробкою (інакше patch падає PermissionError).
+        chmod u+w "$REPO/.git/objects/info/commit-graph"
+        python3 -c 'import sys,hashlib
+p,t,b=sys.argv[1],bytes.fromhex(sys.argv[2]),bytes.fromhex(sys.argv[3])
+d=bytearray(open(p,"rb").read()); body=d[:-20]; i=body.find(t)
+assert i!=-1 and body.find(t,i+20)==-1
+body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest())' \
+          "$REPO/.git/objects/info/commit-graph" "$ttree" "$btree" ;;
+      evil-wtsymlink)
+        # .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1).
+        ci --allow-empty -m work
+        e="$TMPR/evilwt"
+        mkdir -p "$e"
+        [[ -d "$REPO/.git/worktrees" ]] && mv "$REPO/.git/worktrees" "$e/worktrees" || mkdir -p "$e/worktrees"
+        ln -s "$e/worktrees" "$REPO/.git/worktrees" ;;
+      evil-alternates)
+        ci --allow-empty -m work
+        mkdir -p "$TMPR/alt/objects"
+        echo "$TMPR/alt/objects" >"$REPO/.git/objects/info/alternates" ;;
+      evil-grafts)
+        ci --allow-empty -m work
+        git -C "$wt" rev-parse HEAD >"$REPO/.git/info/grafts" ;;
+      evil-shallow)
+        ci --allow-empty -m work
+        git -C "$wt" rev-parse HEAD >"$REPO/.git/shallow" ;;
+      evil-wtdiff | evil-wtpush)
+        # "$wt/.git" → власний gitdir: об'єкти — через alternates зі справжніх,
+        # конфіг із receivepack і origin, хук pre-push.
+        if [[ "$AGENT_MODE" == evil-wtdiff ]]; then
+          mkdir -p "$wt/infra" && echo x >"$wt/infra/x" && git -C "$wt" add infra/x
+          ci -m forbidden
+        else
+          ci --allow-empty -m work
+        fi
+        f="$(git -C "$wt" rev-parse HEAD)"
+        fg="$TMPR/fakegit"
+        git init -q --bare "$fg"
+        echo "$REPO/.git/objects" >"$fg/objects/info/alternates"
+        git --git-dir="$fg" update-ref "refs/heads/ai/$(basename "$wt")" "$f"
+        git --git-dir="$fg" symbolic-ref HEAD "refs/heads/ai/$(basename "$wt")"
+        git --git-dir="$fg" config core.bare false
+        git --git-dir="$fg" config remote.origin.url "$ORIGIN"
+        git --git-dir="$fg" config remote.origin.receivepack "$EVIL/recv"
+        cp "$EVIL/pre-push" "$fg/hooks/pre-push"
+        if [[ "$AGENT_MODE" == evil-wtdiff ]]; then
+          # Під SHA забороненого коміту — чистий коміт (дерево бази): git не
+          # перераховує хеш об'єкта, читаючи його для diff.
+          c="$(git --git-dir="$fg" -c user.email=a@a -c user.name=a commit-tree "HEAD~1^{tree}" -p HEAD~1 -m clean)"
+          mkdir -p "$fg/objects/${f:0:2}"
+          cp "$fg/objects/${c:0:2}/${c:2}" "$fg/objects/${f:0:2}/${f:2}"
+        fi
+        echo "gitdir: $fg" >"$wt/.git" ;;
+      evil-tag)
+        # Неоднозначне `origin/main`: тег і гілка з цим іменем на коміті з
+        # забороненим файлом поверх бази.
+        ci --allow-empty -m work
+        x="$(echo x | git -C "$REPO" hash-object -w --stdin)"
+        t="$(printf '100644 blob %s\tx\n' "$x" | git -C "$REPO" mktree)"
+        t="$(printf '040000 tree %s\tinfra\n100644 blob %s\tCLAUDE.md\n' "$t" \
+          "$(git -C "$REPO" rev-parse refs/remotes/origin/main:CLAUDE.md)" | git -C "$REPO" mktree)"
+        m="$(git -C "$REPO" -c user.email=a@a -c user.name=a commit-tree "$t" -p refs/remotes/origin/main -m evil)"
+        git -C "$REPO" update-ref refs/tags/origin/main "$m"
+        git -C "$REPO" update-ref refs/heads/origin/main "$m" ;;
+      evil-moveorigin401)
+        # Гілка з роботою, origin/main пересунуто на неї, і 401: «0 комітів від
+        # origin/main» стерло б гілку й повернуло задачу в чергу.
+        ci --allow-empty -m work
+        git -C "$wt" update-ref refs/remotes/origin/main HEAD
+        echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'
+        exit 1 ;;
+      evil-delbranch)
+        # Коміт є, гілки вже немає: rev-list падає. Помилка — не «0 комітів».
+        ci --allow-empty -m work
+        git -C "$wt" checkout -q --detach
+        git -C "$wt" update-ref -d "refs/heads/ai/$(basename "$wt")"
+        exit 12 ;;
+    esac
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
@@ -247,8 +413,17 @@ if [[ "\$1" == image && "\$2" == inspect && -n "\${IMAGE_MISSING:-}" ]]; then
   echo "Error response from daemon: No such image: \$3" >&2
   exit 1
 fi
-if [[ "\$1" == kill && -f "$LOGS/pid-\$2" ]]; then
-  kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
+# inspect <контейнер> (не image): існує, доки є маркер alive-. Так
+# ensure_container_gone (#290) бачить, що --rm контейнер зник після kill.
+if [[ "\$1" == inspect ]]; then
+  [[ -e "$LOGS/alive-\$2" ]] && exit 0 || exit 1
+fi
+if [[ "\$1" == kill ]]; then
+  # KILL_NEVER: kill «успішний», та контейнер лишається — імітує, що не зупинився.
+  if [[ -z "\${KILL_NEVER:-}" ]]; then
+    [[ -f "$LOGS/pid-\$2" ]] && kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
+    rm -f "$LOGS/alive-\$2"
+  fi
   [[ -n "\${DOCKER_RM_STOP:-}" ]] && rm -f "$ROOT/STOP"
 fi
 exit 0
@@ -1153,6 +1328,181 @@ EOF
   else
     say "⚠ 22d НЕ ПЕРЕВІРЕНО: у системі немає локалі, де 001_a сортується раніше за 001-z (locale -a)"
   fi
+
+  # ─── 23. Контейнер-шкідник (#276) ─────────────────────────────────────────
+  # Агент задачі a, крім роботи, підкладає в .git головного клону те, що git ТІКУ
+  # на хості виконав би (хук, ключ конфігу, чужий commondir) або чим підмінив би
+  # дані (gitdir worktree, неоднозначне origin/main). Задача b — чиста, і тік
+  # бере її ДРУГИМ: fetch і worktree add в одному тіку йдуть до контейнера, тож
+  # post-checkout і fsmonitor спрацювали б лише на наступному (контрприклад 4).
+  # Кожен прийом — окремий сценарій: інакше перевірка commondir закрила б усі
+  # прийоми разом, і мутанти ключів hgit вижили б.
+  pwned() { find "$ROOT/pwn" -type f -printf '%f ' 2>/dev/null; }
+  on_origin() { git -C "$ROOT/origin.git" rev-parse -q --verify "refs/heads/ai/$1" >/dev/null; }
+  two_ticks() { # two_ticks <режим агента задачі a>
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(valid a)"
+    enqueue 002-b "$(valid b)"
+    AGENT_MODE="$1" tick
+    r1="$(last)"
+    AGENT_MODE=commit tick
+  }
+
+  # 23a. Хуки post-checkout і pre-push у .git/hooks.
+  two_ticks evil-hooks
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == pushed && "$(jl .detail)" == pushed ]] && on_origin a && on_origin b &&
+    ok "23a: підкладені post-checkout і pre-push не виконались, обидві задачі запушено" ||
+    bad "23a хуки: маркери [$(pwned)]; $r1; $(last)"
+  teardown
+
+  # 23b. core.fsmonitor і core.sshCommand у .git/config (fetch і worktree add
+  # запис у .git/config (fsmonitor, sshCommand) переписує файл із новим inode,
+  # тож знімок identity ловить задачу a і ставить STOP черги (рецензія #290
+  # коло 2) — задача b не стартує. На A8 config :ro, тож такий запис неможливий
+  # узагалі; самі ключі (core.fsmonitor=false, core.sshCommand) тримає статична
+  # перевірка check-ansible-a8.
+  two_ticks evil-config
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch && -e "$QD/002-b.json" ]] && ! on_origin a; then
+    ok "23b: запис у config → задачу a спинив знімок + STOP, задача b не стартує, нічого не виконано"
+  else
+    bad "23b конфіг: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
+  teardown
+
+  # 23c. remote.origin.uploadpack і receivepack у .git/config — так само: `git
+  # config` міняє inside config, знімок ловить задачу a і ставить STOP. Піни
+  # --upload-pack/--receive-pack тримає статична перевірка (на A8 config :ro).
+  two_ticks evil-pack
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch ]] && ! on_origin a; then
+    ok "23c: запис uploadpack/receivepack у config → знімок + STOP, нічого не виконано й не запушено"
+  else
+    bad "23c pack: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
+  teardown
+
+  # 23d. .git/commondir на чужий .git — fail closed з поясненням, і наступна
+  # задача теж, доки людина не прибере.
+  two_ticks evil-commondir
+  [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"небезпечний .git: .git/commondir"* &&
+    "$(jl .result)" == failed && "$(jl .detail)" == *"небезпечний .git: .git/commondir"* && -e "$QD/failed/001-a.json" ]] && ! on_origin a &&
+    ! on_origin b && ok "23d: commondir → обидві задачі failed «небезпечний .git: .git/commondir…», нічого не виконано й не запушено" ||
+    bad "23d commondir: маркери [$(pwned)]; $r1; $(last)"
+  teardown
+
+  # 23e. .git — симлінк на чужий .git.
+  two_ticks evil-symlink
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == *"небезпечний .git: .git — не тека"* &&
+    "$(jl .detail)" == *"небезпечний .git: .git — не тека"* ]] && ! on_origin a &&
+    ok "23e: .git-симлінк → failed з поясненням, нічого не виконано" || bad "23e симлінк: маркери [$(pwned)]; $r1; $(last)"
+  teardown
+
+  # 23f–23h. alternates, grafts, shallow — підміна історії й об'єктів: fail closed.
+  for m in alternates grafts shallow; do
+    two_ticks "evil-$m"
+    [[ "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"небезпечний .git: .git/"*"$m"* ]] && ! on_origin a &&
+      ok "23: $m → failed «небезпечний .git: …$m…», нічого не запушено" || bad "23 $m: $r1"
+    teardown
+  done
+
+  # 23i. "$wt/.git" на власний gitdir, у якому під SHA забороненого коміту —
+  # чистий: diff у worktree не побачив би infra/x, push із клону віддав би його.
+  two_ticks evil-wtdiff
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == forbidden-paths:*infra/x* ]] && ! on_origin a && on_origin b &&
+    ok "23i: підмінений gitdir worktree не ховає заборонений файл від backstop'а" ||
+    bad "23i wt diff: маркери [$(pwned)]; $r1; $(last)"
+  teardown
+
+  # 23j. Той самий підмінений gitdir з pre-push і receivepack — push іде з клону.
+  two_ticks evil-wtpush
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == pushed ]] && on_origin a &&
+    ok "23j: push не з worktree — pre-push і receivepack підміненого gitdir не виконались" ||
+    bad "23j wt push: маркери [$(pwned)]; $r1"
+  teardown
+
+  # 23k. refs/tags/origin/main і refs/heads/origin/main на коміті з infra/x:
+  # чиста задача b стоїть на справжньому origin/main і пушиться без infra/x.
+  two_ticks evil-tag
+  [[ "$(jl .detail)" == pushed ]] && on_origin b &&
+    ! git -C "$ROOT/origin.git" cat-file -e refs/heads/ai/b:infra/x 2>/dev/null &&
+    ok "23k: неоднозначне origin/main — задача b на справжній базі, infra/x не запушено" || bad "23k тег: $(last)"
+  teardown
+
+  # 23l. origin/main пересунуто на гілку з роботою + 401: гілку не стерто.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=evil-moveorigin401 tick
+  [[ "$(jl .result)" == auth_stop && "$(jl .detail)" == *"гілка має коміти"* && -e "$QD/failed/001-a.json" && -d "$ROOT/wt/a" ]] &&
+    git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
+    ok "23l: коміти рахуються від бази тіку — гілку з роботою не стерто, задача у failed/" || bad "23l origin/main: $(last)"
+  teardown
+
+  # 23m. Гілки вже немає, rev-list падає: це не «0 комітів».
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=evil-delbranch tick
+  [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"не вдалось порахувати коміти"* && -e "$QD/failed/001-a.json" && -d "$ROOT/wt/a" ]] &&
+    ok "23m: помилка rev-list → worktree лишився, задача у failed/ з поясненням" || bad "23m rev-list: $(last)"
+  teardown
+
+  # 23n. Підміна всієї .git новою текою (mv .git .git-old + свій .git з фільтром):
+  # знімок identity ловить зміну dev:inode/хешу на першому тіку → fail closed +
+  # STOP усієї черги (рецензія #290 коло 2). Тому наступний тік задачу b НЕ бере,
+  # і smudge з підміненої .git не виконується. У тесті монтувань немає, тож
+  # rename проходить; на A8 його не дасть bind самої .git (шар 1, зонд V23c).
+  two_ticks evil-mvgit
+  if [[ -z "$(pwned)" && "$(jq -r .result <<<"$r1")" == failed &&
+    "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch && -e "$QD/002-b.json" ]] && ! on_origin a; then
+    ok "23n: підміна .git → failed «змінили identity» + STOP; наступний тік не бере задачу, smudge не виконано"
+  else
+    bad "23n mvgit: маркери [$(pwned)]; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
+  teardown
+
+  # 23o. .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1):
+  # git_unsafe_reason відкидає симлінк worktrees.
+  two_ticks evil-wtsymlink
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == *"worktrees — симлінк"* ]] && ! on_origin a &&
+    ok "23o: .git/worktrees-симлінк → failed з поясненням, нічого не виконано" || bad "23o wtsymlink: маркери [$(pwned)]; $r1"
+  teardown
+
+  # 23p. Таймаут + контейнер не зупинився (docker kill не вбив): тік НЕ кличе git,
+  # а робить fail closed зі STOP (рецензія #290, п.3). Інакше живий контейнер —
+  # вікно гонки над .git між перевіркою hgit і самим git.
+  TASK_TIMEOUT=1 setup
+  enqueue 001-a "$(valid a)"
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=hang tick
+  cnt="$(cat "$LOGS/counter-$(date -u +%Y-%m-%d)" 2>/dev/null)"
+  # Задача зарахована в денний ліміт і таймаут зафіксовано (oracle_rc=124) —
+  # рецензія #290 коло 2.
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"не зупинився"* && -s "$ROOT/STOP" && -d "$ROOT/wt/a" &&
+    "$cnt" == 1 && "$(jl .oracle_rc)" == 124 ]] &&
+    ! on_origin a && ok "23p: контейнер не зупинився → STOP, git не чіпано, задача порахована (count=1, oracle_rc=124), нічого не запушено" ||
+    bad "23p stuck: $(last); cnt=$cnt; STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]"
+  # Прибрати завислий sleep агента (KILL_NEVER лишив його живим).
+  pkill -x -f "sleep $HANG_S" 2>/dev/null
+  teardown
+
+  # 23q. Підроблений commit-graph ховає infra/x від backstop diff (контрприклад
+  # Argon CX2). На de95bb1 (без -c core.commitGraph=false) diff бере дерево з
+  # графа → infra/x не видно → задача пушить заборонене. З фіксом git читає сам
+  # об'єкт коміту → infra/x видно → forbidden-paths. python3 — залежність тесту.
+  if command -v python3 >/dev/null 2>&1; then
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(valid a)"
+    AGENT_MODE=evil-commitgraph tick
+    [[ "$(jl .result)" == failed && "$(jl .detail)" == forbidden-paths:*infra/x* ]] &&
+      ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null 2>&1 &&
+      ok "23q: підроблений commit-graph не ховає infra/x від backstop (core.commitGraph=false)" ||
+      bad "23q commitgraph: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+    teardown
+  else
+    say "⚠ 23q НЕ ПЕРЕВІРЕНО: немає python3 для підробки commit-graph"
+  fi
 }
 
 run_scenarios
@@ -1206,7 +1556,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # що не розрізняє правильне і зламане, гірша за відсутню: вона додає рядок
   # «убита» і забирає увагу. Замість неї нижче — інваріант, який досі правда.
   mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 6\./\n\n# ─── 6./'
-  mutate "контейнер не вбивається при таймауті" 's/\[\[ "\$rc" == 124 \]\] && "\$DOCKER" kill[^\n]*\n//'
+  mutate "контейнер не вбивається при таймауті" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/:/'
+  mutate "таймаут не переконується, що контейнер зник" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/[[ "\$rc" == 124 ]] \&\& "\$DOCKER" kill "\$A8_CONTAINER_NAME" >\/dev\/null 2>\&1/'
+  mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
+  mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
+  mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
+  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//'
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
@@ -1216,14 +1571,14 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "залежності не ставляться" 's/if \(\(drc != 0\)\); then/if false; then/'
   mutate "режим OQ-34 не експортовано" 's/\nexport A8_SOURCES_ALLOWED\n/\n/'
   mutate "flock прибрано" 's/flock -n 9 \|\| \{/true || {/'
-  mutate "merge-base guard прибрано" 's/if \[\[ "\$\(git -C "\$wt" rev-parse HEAD 2>\/dev\/null\)" != [^\n]*\]\]; then/if false; then/'
-  mutate "падіння fetch ігнорується" 's/if ! git -C "\$A8_REPO_DIR" fetch/if ! true || git -C "\$A8_REPO_DIR" fetch/'
+  mutate "merge-base guard прибрано" 's/if \[\[ -z "\$base" \|\| ! -f "\$wt\/\.git" \|\|\n[^\n]*\]\]; then/if false; then/'
+  mutate "падіння fetch ігнорується" 's/if ! hgit fetch/if ! true || hgit fetch/'
   mutate "сирота не записана як failed" 's/  "\$GUARD" count >\/dev\/null\n  "\$GUARD" record failed\n/  "\$GUARD" count >\/dev\/null\n/'
   mutate "guard_error виходить з 0" 's/\[\[ "\$gstate" == guard_error \]\] && exit 1/[[ "\$gstate" == guard_error ]] \&\& exit 0/'
   mutate "stopped як failed" 's/  stopped\)\n    if release_or_keep; then/  stopped)\n    fail_task stopped; exit 0\n    if release_or_keep; then/'
-  mutate "порожню гілку не прибрано" 's/  if \[\[ "\$\(git -C "\$A8_REPO_DIR" rev-list --count "origin\/main\.\.\$branch"[^\n]*\n    git -C "\$A8_REPO_DIR" worktree remove[^\n]*\n    git -C "\$A8_REPO_DIR" branch -D[^\n]*\n/  if true; then\n/'
+  mutate "порожню гілку не прибрано" 's/  if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n    keep_why=[^\n]*\n    return 1\n  fi\n  hgit branch -D "\$branch" >>"\$log" 2>&1\n  return 0/  return 0/'
   mutate "невідомий kind → ok" 's/    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"/    finish ok ok unknown done/'
-  mutate "push не перевіряється" 's/git -C "\$wt" -c credential.helper= push origin/true || git -C "\$wt" -c credential.helper= push origin/'
+  mutate "push не перевіряється" 's/      hgit push --receive-pack=git-receive-pack origin/      true || hgit push --receive-pack=git-receive-pack origin/'
   mutate "класифікатор на спільному лозі" 's/logic classify "\$rc" "\$out"/logic classify "\$rc" "\$log"/'
   mutate "оракул не проганяється" 's/timeout "\$A8_ORACLE_TIMEOUT" "\$RUNNER" "\$wt" bash -c "\$oracle" >>"\$log" 2>&1 \|\| orc=\$\?/orc=0/'
   mutate "червоний оракул ігнорується" 's/if \(\(orc != 0\)\); then/if false; then/'
@@ -1236,11 +1591,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "backstop не викликає скрипт" 's/\| bash "\$FORBIDDEN" 2>&1\)/| true 2>\&1)/'
   mutate "backstop від origin/main, а не від бази" 's/--no-renames "\$base" "\$tip"/--no-renames origin\/main "\$tip"/'
   mutate "backstop без --no-renames" 's/--name-only --no-renames "/--name-only "/'
-  mutate "backstop перевіряє HEAD, а не гілку" 's/rev-parse --verify --quiet "refs\/heads\/\$branch\^\{commit\}"/rev-parse --verify --quiet HEAD/'
-  mutate "backstop бачить підміну git replace" 's/git --no-replace-objects -C "\$wt" diff/git -C "\$wt" diff/'
+  mutate "backstop перевіряє HEAD, а не гілку" 's/tip="\$\(hgit rev-parse --verify --quiet "refs\/heads\/\$branch\^\{commit\}"\)"/tip="\$(git -C "\$wt" rev-parse --verify --quiet HEAD)"/'
   mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
   mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
-  mutate "no-commits від origin/main до HEAD" 's/rev-list --count "\$base\.\.\$tip"/rev-list --count origin\/main..HEAD/'
+  mutate "no-commits від бази до HEAD worktree" 's/ncommits="\$\(hgit rev-list --count "\$base\.\.\$tip" 2>>"\$log"\)"/ncommits="\$(git -C "\$wt" rev-list --count "\$base..HEAD")"/'
   # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.
   mutate "STOP на залежностях як падіння" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n//'
   mutate "STOP на хуку як падіння" 's/  if \(\(hrc == 10\)\) \|\| stop_requested; then stop_task "під час перевірки хука"; fi\n//'
@@ -1281,11 +1635,44 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   else
     say "⚠ мутація «порядок планового потоку — у локалі машини» НЕ ганялась: немає відповідної локалі"
   fi
-  mutate "STOP людини затирається" 's/      set -o noclobber\n//'
+  mutate "STOP людини затирається" 's/^      set -o noclobber\n//m'
   mutate "збій запису серії ігнорується" 's/    streak="\$A8_CONSECUTIVE_FAILURE_LIMIT"\n/    :\n/'
   mutate "STOP на першому ж збої" 's/streak >= A8_CONSECUTIVE_FAILURE_LIMIT/streak >= 1/'
   mutate "перевіряється не той образ" 's/image inspect "\$A8_CONTAINER_IMAGE"/image inspect node:22/'
   mutate "зупинка рахується як падіння" 's/stop_task\(\) \{ # stop_task[^\n]*\n/$&  "\$GUARD" record failed\n/'
+  # Git на хості не виконує підкладене контейнером (#276, сценарії 23). Кожен
+  # захист — окрема мутація: кожен закриває свій прийом.
+  # Ключі hgit, які сценарії змушують спрацювати. Решту (pager, editor, askPass,
+  # sshCommand, gitProxy, diff.external, credential.helper, protocol.ext,
+  # alternateRefsCommand) тримає статична перевірка — check-ansible-a8.test.sh.
+  mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//'
+  # core.fsmonitor, --upload-pack, --receive-pack динамічно не вбити: сценарії,
+  # що міняли config (23b/23c), тепер спиняє знімок+STOP до того, як git-тіку
+  # дійде до цих ключів. Їх тримає статична перевірка (check-ansible-a8.test.sh:
+  # per-key мутанти HGIT_SAFE + --upload-pack/--receive-pack). core.hooksPath
+  # лишається динамічним — його вбиває 23a (evil-hooks config не чіпає, STOP не
+  # спрацьовує, хук виконався б на worktree add/push).
+  # Перевірки .git перед кожним git.
+  mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//'
+  mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/'
+  mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/'
+  mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/'
+  mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/'
+  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//'
+  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//'
+  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//'
+  mutate "знімок identity не робиться" 's/\nsnapshot_git\n/\n/'
+  mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/'
+  mutate "причину відмови hgit не видно в журналі" 's/  \[\[ -s "\$unsafe" \]\] && detail=[^\n]*\n//'
+  # Повні імена посилань.
+  mutate "worktree add від короткого origin/main" 's/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" origin\/main/'
+  mutate "база від короткого origin/main" 's/base="\$\(hgit rev-parse --verify --quiet "refs\/remotes\/origin\/main\^\{commit\}"\)"/base="\$(hgit rev-parse --verify --quiet origin\/main)"/'
+  # release_or_keep.
+  mutate "release_or_keep: помилка rev-list як 0 комітів" 's/  if ! cnt="\$\(hgit rev-list --count "\$base\.\.refs\/heads\/\$branch" 2>>"\$log"\)"; then/  cnt="\$(hgit rev-list --count "\$base..refs\/heads\/\$branch" 2>>"\$log" || echo 0)"\n  if false; then/'
+  mutate "release_or_keep рахує від origin/main" 's/rev-list --count "\$base\.\.refs\/heads\/\$branch"/rev-list --count "refs\/remotes\/origin\/main..refs\/heads\/\$branch"/'
+  # Після контейнера git не працює в "$wt".
+  mutate "push з worktree" 's/      hgit push --receive-pack=git-receive-pack origin "\$tip:refs\/heads\/\$branch"/      git -C "\$wt" push origin "\$tip:refs\/heads\/\$branch"/'
+  mutate "diff backstop'а з worktree" 's/changed="\$\(hgit diff -z/changed="\$(git --no-replace-objects -C "\$wt" diff -z/'
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"
