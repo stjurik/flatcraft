@@ -127,6 +127,18 @@
     - "{{ a8_queue_dir }}"
     - "{{ a8_container_home }}" # вимір №6 §4 п.2: $HOME мусить бути записуваним
 
+- name: Create the mount point for the agy settings copy in the container home
+  # Обгортка в режимі gemini монтує ТИМЧАСОВУ копію налаштувань agy на
+  # <container-home>/.gemini. Без цієї теки docker створив би її сам — від root,
+  # побічним ефектом на хості. Тека лишається порожньою: що б агент Claude у
+  # неї не поклав, у контейнері agy її перекриває копія.
+  ansible.builtin.file:
+    path: "{{ a8_container_home }}/.gemini"
+    state: directory
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0700"
+
 - name: Create role config directory
   ansible.builtin.file:
     path: "{{ a8_config_dir }}"
@@ -575,6 +587,18 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Install agy executor permission profile
+  # Крок 5 тіку: профіль дозволів agy для виконавця gemini — читання й запис
+  # лише worktree задачі, команди тестів. Копія під root — агент не може її
+  # розширити; охорону шаблону робить a8-tick-logic.sh agy-settings, V23 у
+  # verify звіряє контрольну суму з репозиторієм.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/agy/executor-permissions.json"
+    dest: /usr/local/lib/a8/agy-executor-permissions.json
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Install forbidden-paths backstop
   # Крок 6a тіку: diff задачі проти заборонених шляхів CLAUDE.md §6.1, до
