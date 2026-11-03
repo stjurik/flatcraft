@@ -134,7 +134,15 @@ HGIT_SAFE=(
   -c protocol.ext.allow=never
   -c core.alternateRefsCommand=
   -c core.commitGraph=false
+  -c gc.auto=0
+  -c maintenance.auto=false
 )
+# gc.auto=0 + maintenance.auto=false — жоден git тіку не має права запускати
+# фоновий `gc --auto`/maintenance (#292, рецензія #290 коло 3 п.1). Вимірено на
+# git 2.43: `git worktree prune` (яке gc викликає) йде за симлінком, покладеним
+# усередину `.git/worktrees/`, і стирає ВМІСТ теки-цілі симлінка. Саму пастку
+# ловить git_unsafe_reason (нижче) ще до запуску git; ці ключі — другий шар:
+# навіть якби якийсь виклик проскочив, авто-gc→prune не відпрацює.
 # credential.helper — порожній, бо тік на помічника не покладається: fetch іде
 # анонімно, push — через GIT_SSH_COMMAND (deploy_key) або GIT_ASKPASS
 # (token_file). Помічник із конфігу репозиторію тут лише шкодив би.
@@ -164,6 +172,12 @@ git_unsafe_reason() { # друкує причину, якщо .git головн�
     echo ".git/hooks — не тека або симлінк"
   elif [[ -L "$g/worktrees" ]]; then
     echo ".git/worktrees — симлінк (чужий gitdir через worktree add)"
+  elif [[ -d "$g/worktrees" ]] && find "$g/worktrees" -maxdepth 1 -type l -print -quit 2>/dev/null | grep -q .; then
+    # Симлінк УСЕРЕДИНІ .git/worktrees/ (не сама тека). Легітимний запис worktree
+    # — завжди тека; симлінк кладе контейнер. git worktree prune (зокрема через
+    # gc --auto після fetch) пішов би за ним і стер теку-ціль (#292, відтворено
+    # на git 2.43). Законні записи (теку створює `worktree add` тіку) не чіпаємо.
+    echo ".git/worktrees/ містить симлінк — git worktree prune стер би теку-ціль"
   elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
     echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
   else
@@ -384,6 +398,11 @@ model="$(field model "$task")"
 model="${model:-$A8_DEFAULT_MODEL}"
 branch="ai/$id"
 wt="$A8_WORKTREES_DIR/$id"
+# Ім'я контейнера агента відоме одразу за id і потрібне раніше за крок 5: STOP на
+# залежностях/хуку (крок 4) теж іде через release_or_keep → ensure_container_gone
+# (#291), а воно читає $A8_CONTAINER_NAME. Під `set -u` незадана змінна там убила
+# б тік без запису в журнал. Оракул пізніше перевизначає її на свій контейнер.
+export A8_CONTAINER_NAME="a8-$id"
 log="$A8_LOGS_DIR/tasks/$id.log"
 # Вивід САМОГО claude — окремо від логу тіку: класифікатор не має бачити
 # вивід git/pnpm/check-hook-loud (знайдено незалежним рев'ю №2 демона).
@@ -446,6 +465,23 @@ finish() { # finish <результат> <клас> <деталь> <куди>
 keep_why=""
 release_or_keep() {
   local cnt
+  # #291: перш ніж чіпати git на хості (hgit нижче), переконатись, що контейнер
+  # агента зник. release_or_keep — єдина точка, де шлях зупинки (stop_task,
+  # auth_stop, клас stopped) запускає git після контейнера. На цих шляхах
+  # `docker run --rm` міг ще не прибрати контейнер (137 від watcher) або сам
+  # docker-клієнт міг упасти — живий контейнер устиг би підмінити .git чи $wt
+  # між hgit-перевіркою і git. Не зник → STOP (черга вже спинена kill switch'ем
+  # на цих шляхах, тут лише фіксуємо причину), гілку й worktree лишаємо, git не
+  # чіпаємо. noclobber — не затираємо причину, яку людина могла вписати.
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    (
+      set -o noclobber
+      printf 'Контейнер %s не зник при завершенні задачі %s (%s) — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
+        "$A8_CONTAINER_NAME" "${id:-?}" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    ) 2>/dev/null
+    keep_why="контейнер $A8_CONTAINER_NAME не зник — git на хості не чіпаю"
+    return 1
+  fi
   if ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
     keep_why="не вдалось порахувати коміти гілки — гілку й worktree лишаю"
     return 1
@@ -623,11 +659,14 @@ prompt="Працюй за CLAUDE.md §0.
 
 Оракул приймання цієї задачі: ${oracle}
 Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
+ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${branch}: незакомічена робота не йде ні в
+перевірки, ні в push, і задача впаде. Не завершуй хід в очікуванні фонової команди —
+спершу дочекайся її й закоміть результат.
 
 ЗАДАЧА:
 $(field prompt "$claimed")"
 
-export A8_CONTAINER_NAME="a8-$id"
+# A8_CONTAINER_NAME задано й експортовано вище (одразу за id).
 # Спостерігач — ДО токена: його підоболонці токен у середовищі ні до чого.
 watch_start "$A8_CONTAINER_NAME" "під час агента"
 # Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
@@ -724,6 +763,45 @@ ncommits=""
 [[ -n "$tip" ]] && ncommits="$(hgit rev-list --count "$base..$tip" 2>>"$log")"
 if [[ -z "$tip" || -z "$ncommits" || "$ncommits" == 0 ]]; then
   fail_task "no-commits"
+  exit 0
+fi
+
+# ─── 6-чисте. Робоче дерево $wt тотожне комітові $tip ─────────────────────
+# #294: оракул (6b) ганяє РОБОЧЕ ДЕРЕВО $wt, а backstop (6a) і push (7) — КОМІТ
+# $tip. Незакомічена (або закомічена не в $tip — відокремлений HEAD) робота
+# агента зеленить оракул, але назовні йде $tip: перевірили не те, що запушили.
+# На 049 так і сталось — агент лишив роботу незакоміченою, оракул на ній зелений,
+# а в гілці був лише стартовий cherry-pick. Тому ТУТ, до backstop і оракула,
+# вимагаємо: дерево $wt (трековані + неігноровані untracked) == дерево $tip.
+#
+# ЯК — без git у "$wt" (інваріант #276: $wt/.git контейнер міг підмінити). Усе
+# з ГОЛОВНОГО клону через hgit, лише з іншим робочим деревом (--work-tree="$wt")
+# і тимчасовим індексом (GIT_INDEX_FILE): read-tree "$tip" кладе в індекс базу
+# (щоб трековані-але-ігноровані файли з $tip лишились трекованими), add -A
+# переносить у індекс фактичний стан $wt (зміни, видалення, нові; ігноровані за
+# .gitignore не чіпає — .gitignore НЕ міняємо), write-tree дає дерево $wt. Якщо
+# воно != дереву $tip — робота агента не в $tip. `status --porcelain` тут
+# недостатній: він порівнює з HEAD/індексом самого worktree, які агент міг
+# зсунути (відокремлений HEAD, --assume-unchanged); ми ж звіряємо саме з $tip.
+#
+# $wt НЕ чіпаємо — брудне дерево лишається доказом для людини (як release_or_keep).
+cleanidx="$A8_LOGS_DIR/tasks/$id.cleanidx"
+rm -f "$cleanidx"
+wttree=""
+if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$tip" >>"$log" 2>&1 &&
+  GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >>"$log" 2>&1; then
+  wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>>"$log")"
+fi
+rm -f "$cleanidx"
+if [[ -z "$wttree" ]]; then
+  # Побудувати дерево не вдалось (hgit відмовив на небезпечному .git, read-tree
+  # чи write-tree упали) — fail closed, не пускаємо непевне до push.
+  fail_task "clean-tree: не вдалось побудувати дерево $wt"
+  exit 0
+fi
+if [[ "$wttree" != "$(hgit rev-parse --verify --quiet "$tip^{commit}^{tree}")" ]]; then
+  dirty="$(hgit diff-tree -r --name-only --no-commit-id "$tip" "$wttree" 2>>"$log" | LC_ALL=C sort | tr '\n' ' ')"
+  fail_task "незакомічені зміни агента: ${dirty% }"
   exit 0
 fi
 

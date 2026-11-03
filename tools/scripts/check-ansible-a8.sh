@@ -1001,6 +1001,8 @@ HGIT_REQUIRED=(
   protocol.ext.allow=never
   core.alternateRefsCommand=
   core.commitGraph=false
+  gc.auto=0
+  maintenance.auto=false
 )
 role_installs() { # role_installs <шаблон> — чи ставить його якась задача ролі
   [[ -d "$TASKS" ]] && grep -rqE "^[[:space:]]*src:[[:space:]]*\"?$1\"?[[:space:]]*$" "$TASKS"

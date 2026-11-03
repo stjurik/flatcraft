@@ -1746,7 +1746,7 @@ mut16 ".git/worktrees не bind onto self" "$RUN_T" '-v "$GITDIR/worktrees:$GITD
 # спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
 for kv in core.hooksPath=/dev/null core.fsmonitor=false core.sshCommand=ssh core.askPass= credential.helper= \
   diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand= \
-  core.commitGraph=false; do
+  core.commitGraph=false gc.auto=0 maintenance.auto=false; do
   mut16 "hgit без -c $kv" "$TICK_T" "  -c $kv
 " "" "HGIT_SAFE без -c $kv"
 done
