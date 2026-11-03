@@ -471,6 +471,9 @@ STUB
   export A8_GUARD="$BIN/a8-guard" A8_RUNNER="$BIN/a8-run-agent"
   export A8_JOURNAL="$BIN/a8-journal" A8_DOCKER="$BIN/docker"
   export A8_FORBIDDEN_CHECK="$HERE/check-forbidden-paths.sh"
+  # Спільна обгортка git (#291): тік її сорсить. Мутант-прогін lib підставляє
+  # мутований файл через A8_GIT_LIB_UNDER_TEST; інакше — репова копія.
+  export A8_GIT_LIB="${A8_GIT_LIB_UNDER_TEST:-$HERE/a8-git-lib.sh}"
 }
 teardown() {
   # Процеси сценарію, яких тік не дочекався (убитий тік, «довга сесія»):
@@ -1618,23 +1621,36 @@ run_scenarios
 # сценарії, що тримаються на `chmod`, друкував усі мутації вбитими, і вцілілу
 # знайшла аж CI. Контроль обов'язковий (docs/16 §8.1) — тут він механізм, а не
 # звичка.
-if [[ -z "${A8_TICK_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
+if [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
   echo
   echo "✗ мутації НЕ ганялись: базовий набір червоний (див. ✗ вище)."
   echo "  На червоному базисі кожен мутант «вбитий» за визначенням, тож результат"
   echo "  був би хибно-зеленим. Полагодь базис і запусти знову."
-elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
+elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   # Мутанти незалежні (кожен прогін — власні mktemp-теки), тож ганяємо їх
   # паралельно: послідовно набір ішов би ~6 хв на кожен PR.
   MUTDIR="$(mktemp -d)"
   trap 'rm -rf "$MUTDIR"' EXIT
   n=0
-  mutate() { # mutate <назва> <perl-вираз>
+  mutate() { # mutate <назва> <perl-вираз> [lib]
+    # Третій аргумент «lib» мутує спільний a8-git-lib.sh (обгортка hgit, перевірки
+    # .git, HGIT_SAFE — усе, що виїхало з тіку у #291), а тік рендериться чистим і
+    # сорсить мутований lib через A8_GIT_LIB_UNDER_TEST. Без прапорця — як було:
+    # мутуємо сам шаблон тіку.
     n=$((n + 1))
-    local m="$MUTDIR/$n.sh"
+    local src m runvar
+    if [[ "${3:-}" == lib ]]; then
+      src="$HERE/a8-git-lib.sh"
+      m="$MUTDIR/$n.lib.sh"
+      runvar="A8_GIT_LIB_UNDER_TEST=$m"
+    else
+      src="$ROLE/a8-tick.sh.j2"
+      m="$MUTDIR/$n.sh"
+      runvar="A8_TICK_UNDER_TEST=$m"
+    fi
     echo "$1" >"$MUTDIR/$n.name"
-    perl -0pe "$2" "$ROLE/a8-tick.sh.j2" >"$m"
-    if cmp -s "$m" "$ROLE/a8-tick.sh.j2"; then
+    perl -0pe "$2" "$src" >"$m"
+    if cmp -s "$m" "$src"; then
       echo "stale" >"$MUTDIR/$n.res"
       return
     fi
@@ -1643,7 +1659,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
       return
     fi
     (
-      if QUIET=1 A8_TICK_UNDER_TEST="$m" bash "$0" >/dev/null 2>&1; then
+      if QUIET=1 env "$runvar" bash "$0" >/dev/null 2>&1; then
         echo "survived" >"$MUTDIR/$n.res"
       else
         echo "killed" >"$MUTDIR/$n.res"
@@ -1665,7 +1681,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
   mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
   mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
-  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//'
+  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
@@ -1753,7 +1769,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # Ключі hgit, які сценарії змушують спрацювати. Решту (pager, editor, askPass,
   # sshCommand, gitProxy, diff.external, credential.helper, protocol.ext,
   # alternateRefsCommand) тримає статична перевірка — check-ansible-a8.test.sh.
-  mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//'
+  mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//' lib
   # core.fsmonitor, --upload-pack, --receive-pack динамічно не вбити: сценарії,
   # що міняли config (23b/23c), тепер спиняє знімок+STOP до того, як git-тіку
   # дійде до цих ключів. Їх тримає статична перевірка (check-ansible-a8.test.sh:
@@ -1761,20 +1777,20 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # лишається динамічним — його вбиває 23a (evil-hooks config не чіпає, STOP не
   # спрацьовує, хук виконався б на worktree add/push).
   # Перевірки .git перед кожним git.
-  mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//'
-  mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/'
-  mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/'
-  mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/'
-  mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/'
-  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//'
+  mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//' lib
+  mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/' lib
+  mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/' lib
+  mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/' lib
+  mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/' lib
+  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//' lib
   # #292: симлінк-запис УСЕРЕДИНІ .git/worktrees/ (пастка для worktree prune).
-  mutate "hgit не бачить симлінк-запис у worktrees" 's/elif \[\[ -d "\$g\/worktrees" \]\] && find "\$g\/worktrees" -maxdepth 1 -type l -print -quit 2>\/dev\/null \| grep -q \.; then/elif false; then/'
-  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//'
+  mutate "hgit не бачить симлінк-запис у worktrees" 's/elif \[\[ -d "\$g\/worktrees" \]\] && find "\$g\/worktrees" -maxdepth 1 -type l -print -quit 2>\/dev\/null \| grep -q \.; then/elif false; then/' lib
+  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//' lib
   # gc.auto=0 / maintenance.auto=false — як і решта ключів, що їх жоден
   # динамічний сценарій не смикає: статичний інваріант 16c у check-ansible-a8.
-  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//'
+  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//' lib
   mutate "знімок identity не робиться" 's/\nsnapshot_git\n/\n/'
-  mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/'
+  mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/' lib
   mutate "причину відмови hgit не видно в журналі" 's/  \[\[ -s "\$unsafe" \]\] && detail=[^\n]*\n//'
   # Повні імена посилань.
   mutate "worktree add від короткого origin/main" 's/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" origin\/main/'

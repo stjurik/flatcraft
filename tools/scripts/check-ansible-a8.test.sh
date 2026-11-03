@@ -1178,6 +1178,11 @@ cp -r "$REPO/infra/docker" "$mut/infra/docker"
 mkdir -p "$mut/.github/workflows" "$mut/tools/scripts"
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
+# Спільна обгортка git і скрипти на хості (інваріант 16, #291): check-ansible
+# звіряє HGIT_SAFE і «git тільки через hgit» саме в цих копіях.
+cp "$REPO/tools/scripts/a8-git-lib.sh" "$mut/tools/scripts/a8-git-lib.sh"
+cp "$REPO/tools/scripts/a8-requeue.sh" "$mut/tools/scripts/a8-requeue.sh"
+cp "$REPO/tools/scripts/a8-queue.sh" "$mut/tools/scripts/a8-queue.sh"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -1712,6 +1717,8 @@ cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 # Кожна ламає один захист чинної ролі; скрипт мусить назвати саме його.
 RUN_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
 TICK_T="infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+GIT_LIB_T="tools/scripts/a8-git-lib.sh"
+REQUEUE_T="tools/scripts/a8-requeue.sh"
 mut16() { # mut16 <назва> <файл відносно кореня> <було> <стало> <очікуване порушення>
   python3 - "$mut/$2" "$3" "$4" <<'PY2'
 import sys
@@ -1742,18 +1749,25 @@ mut16 ".git не bind onto self" "$RUN_T" 'RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$G
 mut16 ".git/worktrees не bind onto self" "$RUN_T" '-v "$GITDIR/worktrees:$GITDIR/worktrees"' '-v "$GITDIR/wt-skip:x"' \
   "не монтує .git/worktrees (bind onto self)"
 
-# 16c — кожен ключ hgit окремо: частину з них жоден динамічний сценарій
-# спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
+# 16c — кожен ключ hgit окремо (у спільному a8-git-lib.sh, #291): частину з них
+# жоден динамічний сценарій спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
 for kv in core.hooksPath=/dev/null core.fsmonitor=false core.sshCommand=ssh core.askPass= credential.helper= \
   diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand= \
   core.commitGraph=false gc.auto=0 maintenance.auto=false; do
-  mut16 "hgit без -c $kv" "$TICK_T" "  -c $kv
+  mut16 "hgit без -c $kv" "$GIT_LIB_T" "  -c $kv
 " "" "HGIT_SAFE без -c $kv"
 done
 mut16 "fetch без --upload-pack" "$TICK_T" 'hgit fetch --quiet --upload-pack=git-upload-pack' 'hgit fetch --quiet' \
   "hgit fetch без --upload-pack=git-upload-pack"
 mut16 "push без --receive-pack" "$TICK_T" 'hgit push --receive-pack=git-receive-pack origin' 'hgit push origin' \
   "hgit push без --receive-pack=git-receive-pack"
+# #291: requeue і queue теж ходять у git тільки через hgit; fetch requeue — з --upload-pack.
+mut16 "requeue git повз hgit" "$REQUEUE_T" 'hgit rev-parse --git-dir' 'git -C "$A8_REPO_DIR" rev-parse --git-dir' \
+  "a8-requeue: git поза обгорткою hgit"
+mut16 "requeue fetch без --upload-pack" "$REQUEUE_T" 'hgit fetch --quiet --upload-pack=git-upload-pack origin main' \
+  'hgit fetch --quiet origin main' "a8-requeue: hgit fetch без --upload-pack=git-upload-pack"
+mut16 "queue git повз hgit" "tools/scripts/a8-queue.sh" 'hgit show-ref --verify --quiet "refs/heads/ai/$id"' \
+  'git -C "$A8_REPO_DIR" show-ref --verify --quiet "refs/heads/ai/$id"' "a8-queue: git поза обгорткою hgit"
 
 # 16b — git поза hgit, git у worktree, обгортка без GIT_NO_REPLACE_OBJECTS.
 mut16 "push знову з worktree" "$TICK_T" '      hgit push --receive-pack=git-receive-pack origin "$tip' \
@@ -1762,8 +1776,8 @@ mut16 "diff знову з worktree" "$TICK_T" 'changed="$(hgit diff -z' 'changed
   'git із -C "$wt"'
 mut16 "deploy_key push повз hgit" "$TICK_T" '      hgit push --receive-pack=git-receive-pack "$A8_PUSH_SSH_URL"' \
   '      git -C "$A8_REPO_DIR" push "$A8_PUSH_SSH_URL"' "git поза обгорткою hgit"
-mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$TICK_T" '  GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '  git "${HGIT_SAFE[@]}"' \
-  "hgit без GIT_NO_REPLACE_OBJECTS=1"
+mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$GIT_LIB_T" '    GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '    git "${HGIT_SAFE[@]}"' \
+  "git без GIT_NO_REPLACE_OBJECTS=1"
 
 # 16d — core.hooksPath контейнера: прибрано зовсім (pnpm install упреться в
 # .git/hooks :ro) або на /tmp (git commit агента й check-hook-loud — без хуків).

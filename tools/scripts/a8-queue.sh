@@ -85,6 +85,7 @@ set -uo pipefail
 
 CONFIG="${A8_CONFIG:-/etc/a8/a8.env}"
 LOGIC="${A8_TICK_LOGIC:-/usr/local/lib/a8/a8-tick-logic.sh}"
+GIT_LIB="${A8_GIT_LIB:-/usr/local/lib/a8/a8-git-lib.sh}"
 REQUEUE="${A8_REQUEUE:-/usr/local/lib/a8/a8-requeue.sh}"
 JOURNAL="${A8_JOURNAL:-/usr/local/bin/a8-journal}"
 GUARD="${A8_GUARD:-/usr/local/bin/a8-guard}"
@@ -145,6 +146,11 @@ source "$CONFIG" || die 2 "не вдалося прочитати $CONFIG"
 for v in A8_QUEUE_DIR A8_LOGS_DIR A8_REPO_DIR A8_KILL_SWITCH; do
   [[ -n "${!v:-}" ]] || die 2 "у $CONFIG немає $v"
 done
+# Спільна обгортка git на хості (#291): show-ref гілки йде через hgit — ті самі
+# перевірки .git і -c, що в тіку. Контейнер бачить .git головного клону на запис.
+# shellcheck source=tools/scripts/a8-git-lib.sh
+[[ -r "$GIT_LIB" ]] || die 2 "немає $GIT_LIB — обгортки hgit немає"
+source "$GIT_LIB" || die 2 "не вдалося прочитати $GIT_LIB"
 # Режим OQ-34 — з конфігу, як у тіку: інакше enqueue прийняв би те, що тік відхилить.
 export A8_SOURCES_ALLOWED
 Q="$A8_QUEUE_DIR"
@@ -283,10 +289,11 @@ do_enqueue() {
   # «гілка вже існує» (a8-tick, крок 3) і записав би `failed`.
   # Помилка git (не «гілки немає», а, скажімо, «dubious ownership») — не «вільно».
   grc=0
-  git -C "$A8_REPO_DIR" show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null || grc=$?
+  hgit show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null || grc=$?
   case "$grc" in
     0) die 1 "гілка ai/$id уже є в $A8_REPO_DIR — тік на ній упав би; новий id або a8-queue requeue" ;;
     1) ;;
+    125) die 2 "git на хості не запущено: небезпечний .git головного клону — не можу перевірити гілку ai/$id" ;;
     *) die 2 "git show-ref не вдався (код $grc) — не можу перевірити гілку ai/$id; у черзі нічого" ;;
   esac
   if ((urgent)); then

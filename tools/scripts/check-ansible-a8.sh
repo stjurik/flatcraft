@@ -987,6 +987,9 @@ done < <(printf '%s' "$akey_blocks")
 # головний клон; задача, що ставить тік. Так синтетичні дерева інших
 # інваріантів їх не чіпають, а роль без потрібного файла — червона.
 TICK_TPL="$ROLE/templates/a8-tick.sh.j2"
+GIT_LIB="$ROOT/tools/scripts/a8-git-lib.sh"
+REQUEUE_SH="$ROOT/tools/scripts/a8-requeue.sh"
+QUEUE_SH="$ROOT/tools/scripts/a8-queue.sh"
 VERIFY_Y="$TASKS/verify.yml"
 HGIT_REQUIRED=(
   core.hooksPath=/dev/null
@@ -1054,60 +1057,83 @@ if [[ -f "$RUNNER_TPL" ]] &&
   fi
 fi
 
-# 16b–16c
+# 16b–16c (#276, #291). Обгортка hgit + HGIT_SAFE живуть у спільному
+# a8-git-lib.sh; тік, a8-requeue.sh і a8-queue.sh її сорсять і git на хості
+# викликають ТІЛЬКИ через hgit — жодного голого git, жодного git -C "$wt".
 if role_installs a8-tick.sh.j2; then
-  if [[ ! -f "$TICK_TPL" ]]; then
-    violations+=("роль ставить a8-tick.sh.j2, але файла немає — перевірити git на хості нічим (#276)")
+  # git у позиції команди: на початку, після ; & | ( { $( ! і if/elif/while/until/then/do/else,
+  # з необов'язковими VAR=… і command/exec/env попереду.
+  git_cmd_re='(^|[;&|({!]|\$\(|(if|elif|while|until|then|do|else)[[:space:]])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:]]*)[[:space:]]+)*(timeout[[:space:]]+("[^"]*"|[^[:space:]]+)[[:space:]]+)?((command|exec|env)[[:space:]]+)?\\?["'"'"']?git["'"'"']?([[:space:]]|$)'
+  # code_grep <код> <RE> → «рядок: код» для рядків strip_comments, де код матчить RE.
+  code_grep() { RE="$2" awk -F'\t' '$2 ~ ENVIRON["RE"] { print $1 ": " $2 }' <<<"$1"; }
+  if [[ ! -f "$GIT_LIB" ]]; then
+    violations+=("немає tools/scripts/a8-git-lib.sh — спільної обгортки hgit немає (#291)")
   else
-    tick_code="$(strip_comments "$TICK_TPL")"
-    # git у позиції команди: на початку, після ; & | ( { $( ! і if/elif/while/until/then/do/else, з
-    # необов'язковими VAR=… і command/exec/env попереду.
-    git_cmd_re='(^|[;&|({!]|\$\(|(if|elif|while|until|then|do|else)[[:space:]])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:]]*)[[:space:]]+)*((command|exec|env)[[:space:]]+)?\\?["'"'"']?git["'"'"']?([[:space:]]|$)'
-    # «рядок: код» — номер рядка шаблону, як у решті повідомлень.
-    code_grep() { RE="$1" awk -F'\t' '$2 ~ ENVIRON["RE"] { print $1 ": " $2 }' <<<"$tick_code"; }
-    git_lines="$(code_grep "$git_cmd_re")"
-    hgit_exec="$(grep -F '"${HGIT_SAFE[@]}"' <<<"$git_lines" || true)"
-    while IFS= read -r hit; do
-      [[ -z "$hit" ]] && continue
-      [[ "$hit" == *'"${HGIT_SAFE[@]}"'* ]] && continue
-      violations+=("a8-tick: git поза обгорткою hgit (без -c безпечних ключів і перевірок .git, #276): ${TICK_TPL#"$ROOT"/}:$hit")
-    done <<<"$git_lines"
-    if [[ -z "$hgit_exec" ]]; then
-      violations+=("a8-tick: немає рядка, що запускає git з \"\${HGIT_SAFE[@]}\" — обгортки hgit немає (#276)")
-    elif [[ "$(grep -c '' <<<"$hgit_exec")" != 1 ]]; then
-      violations+=("a8-tick: git з \"\${HGIT_SAFE[@]}\" запускається не в одному місці — обгортка мусить бути одна (#276)")
-    else
-      [[ "$hgit_exec" == *GIT_NO_REPLACE_OBJECTS=1* ]] ||
-        violations+=("a8-tick: hgit без GIT_NO_REPLACE_OBJECTS=1 — git replace підмінить вміст для diff backstop'а (#276)")
-      [[ "$hgit_exec" == *'-C "$A8_REPO_DIR"'* ]] ||
-        violations+=("a8-tick: hgit не вшиває -C \"\$A8_REPO_DIR\" — git після контейнера пішов би в підмінений gitdir (#276)")
+    # 16c — exec git у спільному lib. Їх рівно стільки, скільки гілок hgit (з
+    # timeout і без), і КОЖЕН мусить нести GIT_NO_REPLACE_OBJECTS, HGIT_SAFE і
+    # -C "$A8_REPO_DIR" — жодного необгорнутого git у самому lib (#276, #291).
+    lib_code="$(strip_comments "$GIT_LIB")"
+    lib_git="$(code_grep "$lib_code" "$git_cmd_re")"
+    if ! grep -qF '"${HGIT_SAFE[@]}"' <<<"$lib_git"; then
+      violations+=("a8-git-lib: немає рядка, що запускає git з \"\${HGIT_SAFE[@]}\" — обгортки hgit немає (#291)")
     fi
     while IFS= read -r hit; do
       [[ -z "$hit" ]] && continue
-      violations+=("a8-tick: git із -C \"\$wt\" — gitdir worktree контейнер міг підмінити (#276): ${TICK_TPL#"$ROOT"/}:$hit")
-    done < <(code_grep '-C[[:space:]]+"?[$][{]?wt([^A-Za-z0-9_]|$)')
-
-    # 16c — ключі HGIT_SAFE, рядок за рядком, з точним значенням.
-    hgit_safe="$(awk '/^HGIT_SAFE=\(/ { on = 1; next } on && /^\)/ { exit } on' "$TICK_TPL" | sed -E 's/[[:space:]]+#.*$//')"
+      [[ "$hit" == *'"${HGIT_SAFE[@]}"'* ]] ||
+        violations+=("a8-git-lib: git без \"\${HGIT_SAFE[@]}\" — без безпечних -c (#276): $hit")
+      [[ "$hit" == *GIT_NO_REPLACE_OBJECTS=1* ]] ||
+        violations+=("a8-git-lib: git без GIT_NO_REPLACE_OBJECTS=1 — git replace підмінить вміст для diff backstop'а (#276): $hit")
+      [[ "$hit" == *'-C "$A8_REPO_DIR"'* ]] ||
+        violations+=("a8-git-lib: git без -C \"\$A8_REPO_DIR\" — git після контейнера пішов би в підмінений gitdir (#276): $hit")
+    done <<<"$lib_git"
+    # 16c — ключі HGIT_SAFE, рядок за рядком, з точним значенням (у lib).
+    hgit_safe="$(awk '/^HGIT_SAFE=\(/ { on = 1; next } on && /^\)/ { exit } on' "$GIT_LIB" | sed -E 's/[[:space:]]+#.*$//')"
     for kv in "${HGIT_REQUIRED[@]}"; do
       grep -qE "^[[:space:]]*-c[[:space:]]+${kv//./\\.}[[:space:]]*$" <<<"$hgit_safe" ||
-        violations+=("a8-tick: HGIT_SAFE без -c $kv — цей ключ виконує команду або підміняє, куди йде git (#276)")
+        violations+=("a8-git-lib: HGIT_SAFE без -c $kv — цей ключ виконує команду або підміняє, куди йде git (#276)")
     done
+  fi
 
-    # 16c — fetch і push: програма на тому боці задана опцією, не конфігом.
+  # 16b — у кожному скрипті на хості git ТІЛЬКИ через hgit: жодного голого git у
+  # позиції команди (окрім самого lib), жодного git -C "$wt" (#276, #291).
+  for pair in "a8-tick:$TICK_TPL" "a8-requeue:$REQUEUE_SH" "a8-queue:$QUEUE_SH"; do
+    cl="${pair%%:*}"
+    cf="${pair#*:}"
+    [[ -f "$cf" ]] || continue
+    cc="$(strip_comments "$cf")"
     while IFS= read -r hit; do
       [[ -z "$hit" ]] && continue
-      [[ "$hit" == *"--upload-pack=git-upload-pack"* ]] ||
-        violations+=("a8-tick: hgit fetch без --upload-pack=git-upload-pack — remote.origin.uploadpack із конфігу репо виконається на хості (#276): ${TICK_TPL#"$ROOT"/}:$hit")
-    done < <(code_grep 'hgit[[:space:]]+fetch([[:space:]]|$)')
+      violations+=("$cl: git поза обгорткою hgit (без -c безпечних ключів і перевірок .git, #276/#291): ${cf#"$ROOT"/}:$hit")
+    done < <(code_grep "$cc" "$git_cmd_re")
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("$cl: git із -C \"\$wt\" — gitdir worktree контейнер міг підмінити (#276): ${cf#"$ROOT"/}:$hit")
+    done < <(code_grep "$cc" '-C[[:space:]]+"?[$][{]?wt([^A-Za-z0-9_]|$)')
+  done
+
+  # 16c — fetch/push: програму на тому боці задає опція, не конфіг. Фетчать тік
+  # і requeue; push — лише тік.
+  if [[ -f "$TICK_TPL" ]]; then
+    tick_code="$(strip_comments "$TICK_TPL")"
     while IFS= read -r hit; do
       [[ -z "$hit" ]] && continue
       [[ "$hit" == *"--receive-pack=git-receive-pack"* ]] ||
-        violations+=("a8-tick: hgit push без --receive-pack=git-receive-pack — remote.origin.receivepack із конфігу репо виконається на хості (#276): ${TICK_TPL#"$ROOT"/}:$hit")
-    done < <(code_grep 'hgit[[:space:]]+push([[:space:]]|$)')
-    [[ -n "$(code_grep 'hgit[[:space:]]+fetch([[:space:]]|$)')" && -n "$(code_grep 'hgit[[:space:]]+push([[:space:]]|$)')" ]] ||
+        violations+=("a8-tick: hgit push без --receive-pack=git-receive-pack — remote.origin.receivepack із конфігу репо виконається на хості (#276): $hit")
+    done < <(code_grep "$tick_code" 'hgit[[:space:]]+push([[:space:]]|$)')
+    [[ -n "$(code_grep "$tick_code" 'hgit[[:space:]]+fetch([[:space:]]|$)')" && -n "$(code_grep "$tick_code" 'hgit[[:space:]]+push([[:space:]]|$)')" ]] ||
       violations+=("a8-tick: не знайдено hgit fetch чи hgit push — перевірити --upload-pack/--receive-pack нічим (#276)")
   fi
+  for pair in "a8-tick:$TICK_TPL" "a8-requeue:$REQUEUE_SH"; do
+    cl="${pair%%:*}"
+    cf="${pair#*:}"
+    [[ -f "$cf" ]] || continue
+    cc="$(strip_comments "$cf")"
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      [[ "$hit" == *"--upload-pack=git-upload-pack"* ]] ||
+        violations+=("$cl: hgit fetch без --upload-pack=git-upload-pack — remote.origin.uploadpack із конфігу репо виконається на хості (#276): $hit")
+    done < <(code_grep "$cc" 'hgit[[:space:]]+fetch([[:space:]]|$)')
+  done
 fi
 
 if [[ ${#violations[@]} -gt 0 ]]; then
