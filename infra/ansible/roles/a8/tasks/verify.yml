@@ -929,15 +929,13 @@
       failed_when: false
   always:
     - name: V18d — remove the throwaway worktree
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - remove
-          - --force
-          - "{{ a8_worktrees_dir }}/verify-cad"
+      # #291 (рецензія #299): git на хості — лише через спільний hgit, як V18a.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
       failed_when: false
 

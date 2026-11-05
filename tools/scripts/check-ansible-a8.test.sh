@@ -1776,6 +1776,21 @@ mut16 "diff знову з worktree" "$TICK_T" 'changed="$(hgit diff -z' 'changed
   'git із -C "$wt"'
 mut16 "deploy_key push повз hgit" "$TICK_T" '      hgit push --receive-pack=git-receive-pack "$A8_PUSH_SSH_URL"' \
   '      git -C "$A8_REPO_DIR" push "$A8_PUSH_SSH_URL"' "git поза обгорткою hgit"
+mut16 "V18d знову голим git на хості" "infra/ansible/roles/a8/tasks/verify.yml" '      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env' '      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"' \
+  "git на хості поза hgit (argv починається з git"
 mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$GIT_LIB_T" '    GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '    git "${HGIT_SAFE[@]}"' \
   "git без GIT_NO_REPLACE_OBJECTS=1"
 

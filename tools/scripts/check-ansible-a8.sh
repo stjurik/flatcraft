@@ -1111,6 +1111,18 @@ if role_installs a8-tick.sh.j2; then
     done < <(code_grep "$cc" '-C[[:space:]]+"?[$][{]?wt([^A-Za-z0-9_]|$)')
   done
 
+  # 16b (yml) — git на хості в задачах ролі: список argv, що починається з голого
+  # `git`, іде повз hgit (рецензія #299: V18d так прибирав worktree). git у
+  # контейнері запускається через a8-run-agent і сюди не потрапляє.
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("задачі ролі: git на хості поза hgit (argv починається з git, #291): ${tf#"$ROOT"/}:$hit")
+    done < <(awk '/argv:[[:space:]]*$/ { a = FNR; next }
+      a && FNR == a + 1 { if ($0 ~ /^[[:space:]]*-[[:space:]]+git[[:space:]]*$/) print FNR; a = 0 }' "$tf")
+  done
+
   # 16c — fetch/push: програму на тому боці задає опція, не конфіг. Фетчать тік
   # і requeue; push — лише тік.
   if [[ -f "$TICK_TPL" ]]; then

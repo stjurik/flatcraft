@@ -1073,7 +1073,7 @@ EOF
     ok "STOP перед push: оракул зелений, на origin нічого, деталь «перед push»" || bad "STOP перед push: $(last)"
   teardown
 
-  # 20k. STOP посеред сесії, але контейнер агента не зник (docker kill не вбив):
+  # 20n. STOP посеред сесії, але контейнер агента не зник (docker kill не вбив):
   # release_or_keep (спільна точка для stop_task/auth_stop/stopped) НЕ кличе git
   # на хості, доки живий контейнер міг би підмінити .git чи $wt (#291, рецензія
   # #290 коло 3 п.2). Fail closed: STOP уже є (створив агент), гілку й worktree
@@ -1085,8 +1085,8 @@ EOF
     "$(jl .detail)" == *"не повертаю в чергу"* && -e "$QD/failed/001-a.json" ]] && no_failures &&
     git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/a >/dev/null && [[ -d "$ROOT/wt/a" ]] &&
     ! on_origin a &&
-    ok "20k: контейнер не зник на шляху зупинки → release_or_keep не чіпає git, гілку й worktree лишено, нічого не запушено" ||
-    bad "20k stuck-on-stop: $(last); failed/: $(ls "$QD/failed" 2>/dev/null); wt: $([[ -d "$ROOT/wt/a" ]] && echo є || echo нема)"
+    ok "20n: контейнер не зник на шляху зупинки → release_or_keep не чіпає git, гілку й worktree лишено, нічого не запушено" ||
+    bad "20n stuck-on-stop: $(last); failed/: $(ls "$QD/failed" 2>/dev/null); wt: $([[ -d "$ROOT/wt/a" ]] && echo є || echo нема)"
   teardown
 
   # 20l. 401 разом зі STOP: причина 401 важливіша — auth_stop, і файл STOP
