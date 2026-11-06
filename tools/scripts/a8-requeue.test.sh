@@ -69,6 +69,7 @@ ENV
   git clone -q "$ROOT/origin.git" "$REPO"
 
   export A8_CONFIG="$ETC/a8.env" A8_JOURNAL="$BIN/a8-journal" A8_GUARD="$BIN/a8-guard"
+  export A8_GIT_LIB="$HERE/a8-git-lib.sh"
 }
 teardown() {
   # Утримувач lock'а, якщо лишився: у його рядку запуску є $ROOT.
@@ -264,6 +265,19 @@ run_scenarios() {
   [[ $RC -eq 1 && "$OUT" == *"SKIP u:"* && "$OUT" == *"SKIP t:"* && "$OUT" == *"брудний"* ]] &&
     ok "брудний worktree (невідстежений і змінений файл) → SKIP" || bad "брудний: rc=$RC $OUT"
   [[ "$(fingerprint)" == "$fp" && -f "$WT/u/new.txt" ]] && ok "робота у worktree збережена" || bad "брудний worktree зачеплено"
+  teardown
+
+  # 3b. Контейнер-шкідник: симлінк УСЕРЕДИНІ .git/worktrees/ головного клону
+  # (#291/#292). requeue ходить у git ТІЛЬКИ через спільний hgit, тож небезпечну
+  # .git ловить git_unsafe_reason одразу на старті — задачу й гілку не чіпає.
+  setup
+  mkfailed e
+  mkbranch e
+  ln -s "$ROOT" "$REPO/.git/worktrees/evil"
+  run_rq e
+  [[ $RC -ne 0 && "$OUT" == *"небезпечна .git"* && -f "$QD/failed/001-e.json" ]] && branch_exists e &&
+    ok "небезпечна .git головного клону → requeue відмовив, задачу й гілку не чіпано" ||
+    bad "небезпечна .git: rc=$RC $OUT"
   teardown
 
   # 4. Задачі немає у failed/: невідомий id, id лише в done/, чужий id у failed/.
@@ -782,7 +796,7 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
     while (($(jobs -rp | wc -l) >= 4)); do sleep 0.2; done
   }
   mutate "перевірку комітів гілки прибрано" 's/if \(\(n != 0\)\); then\n      skip "на гілці/if false; then\n      skip "на гілці/'
-  mutate "перевірку брудного worktree прибрано" 's/if \[\[ -n "\$st" \]\]; then/if false; then/'
+  mutate "перевірку брудного worktree прибрано" 's/    if \[\[ "\$wttree" != "\$\(hgit rev-parse --verify --quiet "\$WT_HEAD\^\{commit\}\^\{tree\}"\)" \]\]; then/    if false; then/'
   mutate "reset прибирає всі кінцеві failed" 's/ && r < k\)/)/'
   mutate "reset: старий алгоритм (K = скільки повернуто)" 's/  ATTR="\$\(jq -r \.c <<<"\$res"\)"/  ATTR=\$#/'
   mutate "reset: лік не зупиняє ok чи чужа задача" 's/            else \.done = true\n            end/            else .\n            end/'
@@ -792,7 +806,9 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   mutate "reset: runs.log нуль падінь теж знімає" 's/    elif \(\(ATTR == 0\)\); then/    elif false; then/'
   mutate "reset не зупиняється на ok" 's/          break\n/          i--; continue\n/'
   mutate "без flock" 's/if ! flock -n 9; then/if false; then/'
-  mutate "fetch не виконується" 's/if ! timeout 120 git -C "\$A8_REPO_DIR" fetch --quiet origin main 9>&-; then/if false; then/'
+  mutate "fetch не виконується" 's/if ! HGIT_TIMEOUT=120 hgit fetch --quiet --upload-pack=git-upload-pack origin main; then/if false; then/'
+  # #291: стартова перевірка git повз спільний hgit (голий git на небезпечній .git).
+  mutate "стартова перевірка git повз hgit" 's/hgit rev-parse --git-dir >\/dev\/null 2>&1 \|\| die/git -C "\$A8_REPO_DIR" rev-parse --git-dir >\/dev\/null 2>&1 || die/'
   mutate "падіння fetch ігнорується" 's/  die "git fetch origin main не вдався/  echo "git fetch origin main не вдався/'
   mutate "running/ не перевіряється" 's/if \(\(\$\{#MATCHES\[@\]\} > 0\)\); then\n    skip "задача з таким id зараз у running\//if false; then\n    skip "задача з таким id зараз у running\//'
   mutate "нерозібраний running/ не рахується" 's/  if \(\(UNPARSED > 0\)\); then\n    skip "у running\//  if false; then\n    skip "у running\//'
@@ -824,8 +840,8 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   mutate "--remote не прибирає файл" 's/  trap cleanup_remote EXIT\n//'
   mutate "назва файла від хоста не перевіряється" 's/  \[\[ -n "\$made" \]\] \|\| die[^\n]*\n//'
   mutate "хост з дефісом дозволено" 's/  \[\[ "\$remote" =~ \^\[A-Za-z0-9\][^\n]*\n//'
-  mutate "чужа гілка в worktree не відсіюється" 's/        if \[\[ "\$head_ref" != "\$bref" \]\]; then/        if false; then/'
-  mutate "відокремлений HEAD вважається чужою гілкою" 's/      1\) ;; # відокремлений HEAD[^\n]*\n/      1)\n        skip "x"\n        return 1\n        ;;\n/'
+  mutate "чужа гілка в worktree не відсіюється" 's/    if \[\[ -n "\$WT_HEADREF" && "\$WT_HEADREF" != "\$bref" \]\]; then/    if false; then/'
+  mutate "відокремлений HEAD вважається чужою гілкою" 's/    if \[\[ -n "\$WT_HEADREF" && "\$WT_HEADREF" != "\$bref" \]\]; then/    if [[ "\$WT_HEADREF" != "\$bref" ]]; then/'
   mutate "банер: береться перший збіг" 's/tail -n 1 \|\| true/head -n 1 || true/'
   mutate "банер: уся відповідь як назва" 's/ \| grep -E \x27[^\x27]*\x27 \| tail -n 1 \|\| true//'
   mutate "код 255 від ssh не змінюється" 's/  \(\(rc == 255\)\) && die[^\n]*\n//'

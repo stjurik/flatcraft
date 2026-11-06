@@ -591,6 +591,39 @@
     success_msg: "backstop заборонених шляхів: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
     quiet: true
 
+# ─── V24. Спільна обгортка git на хості (a8-git-lib.sh, #291) ───────────────
+- name: V24a — checksum of the installed host-git wrapper
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/a8-git-lib.sh
+    checksum_algorithm: sha256
+  register: a8_v_gitlib
+
+- name: V24b — checksum of the wrapper in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/a8-git-lib.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_gitlib_repo
+
+- name: V24c — hgit wrapper on A8 is byte-identical to the tested copy and owned by root
+  # Тік, a8-queue і a8-requeue сорсять саме цей файл. Інша копія або копія, яку
+  # може змінити agent, означала б, що зелений a8-tick.test.sh/a8-requeue.test.sh
+  # нічого не каже про перевірки .git на A8.
+  ansible.builtin.assert:
+    that:
+      - a8_v_gitlib.stat.exists
+      - a8_v_gitlib.stat.checksum == a8_v_gitlib_repo.stat.checksum
+      - a8_v_gitlib.stat.pw_name == 'root'
+      - not a8_v_gitlib.stat.woth
+      - not a8_v_gitlib.stat.wgrp
+    fail_msg: >-
+      /usr/local/lib/a8/a8-git-lib.sh: exists={{ a8_v_gitlib.stat.exists }},
+      sha256 A8={{ a8_v_gitlib.stat.checksum | default('—') }} repo={{ a8_v_gitlib_repo.stat.checksum }},
+      власник={{ a8_v_gitlib.stat.pw_name | default('—') }}
+    success_msg: "обгортка hgit: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
+    quiet: true
+
 # ─── V22. Дієслова черги (a8-queue) і ssh-обгортка (a8-ctl) ─────────────────
 # Копії на A8 = доведені в CI (a8-queue.test.sh, a8-requeue.test.sh); status
 # працює від agent; обгортка відмовляє на метасимволі, нічого не виконавши; рядок
@@ -750,26 +783,26 @@
   become_user: "{{ a8_agent_user }}"
   block:
     - name: V18a — drop a leftover worktree registration from an interrupted run
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - remove
-          - --force
-          - "{{ a8_worktrees_dir }}/verify-cad"
+      # #291: git на хості ТІЛЬКИ через спільний hgit — ті самі перевірки .git і
+      # безпечні -c, що в тіку. hgit вшиває -C "$A8_REPO_DIR".
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: &a8_v_hgit_env
+        A8_REPO_DIR: "{{ a8_repo_dir }}"
+        A8_KILL_SWITCH: "{{ a8_kill_switch_path }}"
       changed_when: false
       failed_when: false
 
     - name: V18a — prune stale worktree registrations
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - prune
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree prune
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
 
     - name: V18a — remove a leftover directory without registration
@@ -780,16 +813,14 @@
     - name: V18b — fetch origin/main, as the tick does before a task
       # Без fetch тест ішов би на тому origin/main, що лишився від останнього
       # тіку. Невдалий fetch не валить перевірку: тест піде на локальному
-      # origin/main, і V18e про це скаже.
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - fetch
-          - --quiet
-          - origin
-          - main
+      # origin/main, і V18e про це скаже. --upload-pack як у тіку (#276): програму
+      # на тому боці задає опція, а не remote.origin.uploadpack із конфігу репо.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit fetch --quiet --upload-pack=git-upload-pack origin main
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       register: a8_v_cad_fetch
       changed_when: false
       failed_when: false
@@ -797,28 +828,23 @@
     - name: V18b — create a throwaway worktree at origin/main
       # Повне ім'я посилання, як у тіку (#276): коротке `origin/main` стає
       # неоднозначним, щойно в .git з'являється refs/tags/origin/main.
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - add
-          - --quiet
-          - --detach
-          - "{{ a8_worktrees_dir }}/verify-cad"
-          - refs/remotes/origin/main^{commit}
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree add --quiet --detach {{ a8_worktrees_dir }}/verify-cad 'refs/remotes/origin/main^{commit}'
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
 
     - name: V18b — which commit is under test
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_worktrees_dir }}/verify-cad"
-          - rev-parse
-          - --short
-          - HEAD
+      # Той самий коміт, що й у detached worktree, але з ГОЛОВНОГО клону за
+      # посиланням — не `git -C "$wt"` (підмінний gitdir worktree, #291).
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit rev-parse --short 'refs/remotes/origin/main^{commit}'
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       register: a8_v_cad_sha
       changed_when: false
 
@@ -903,15 +929,13 @@
       failed_when: false
   always:
     - name: V18d — remove the throwaway worktree
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - remove
-          - --force
-          - "{{ a8_worktrees_dir }}/verify-cad"
+      # #291 (рецензія #299): git на хості — лише через спільний hgit, як V18a.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
       failed_when: false
 

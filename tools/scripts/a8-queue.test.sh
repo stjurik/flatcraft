@@ -78,6 +78,7 @@ ENV
   export A8_CONFIG="$ETC/a8.env" A8_JOURNAL="$BIN/a8-journal" A8_GUARD="$BIN/a8-guard"
   export A8_TICK_LOGIC="$HERE/a8-tick-logic.sh" A8_REQUEUE="$REQUEUE_SRC"
   export A8_QUEUE_BIN="$BIN/a8-queue"
+  export A8_GIT_LIB="$HERE/a8-git-lib.sh"
   unset A8_CTL_VIA SSH_ORIGINAL_COMMAND
 }
 teardown() {
@@ -211,6 +212,18 @@ run_suite() { # run_suite <local|ssh>
   task c4 >"$QD/running/001-c4.json"
   call enqueue < <(task c4)
   [[ "$RC" == 1 && "$ERR" == *"(running)"* && -z "$(qfiles)" ]] && ok "$T id уже в running/ → 1" || bad "$T running: rc=$RC $ERR"
+  teardown
+
+  # 5c. Контейнер підклав симлінк усередину .git/worktrees/ головного клону
+  # (#291/#292). enqueue звіряє гілку через спільний hgit (не голий git), тож
+  # небезпечну .git ловить git_unsafe_reason → показ-реф не біжить, у чергу нічого.
+  setup
+  mkdir -p "$REPO/.git/worktrees"
+  ln -s "$ROOT" "$REPO/.git/worktrees/evil"
+  call enqueue < <(task c5)
+  [[ "$RC" == 2 && -z "$(qfiles)" && "$ERR" == *"небезпечний .git"* ]] &&
+    ok "$T небезпечна .git головного клону → enqueue відмовив (код 2), у черзі нічого" ||
+    bad "$T небезпечна .git: rc=$RC files=[$(qfiles)] $ERR"
   teardown
 
   # 6. --urgent: в urgent/, лише одна одночасно.
@@ -514,7 +527,9 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TES
   mutate queue "enqueue без валідації" 's/verdict="\$\(bash "\$LOGIC" validate "\$tmp"\)" \|\|/verdict=ok ||/'
   mutate queue "enqueue пише поза чергу" 's/  dest="\$tmpdir\/\$name"/  dest="\$A8_LOGS_DIR\/\$name"/'
   mutate queue "дублікат id приймається" 's/  \[\[ -z "\$where" \]\] \|\| die 1/  true || die 1/'
-  mutate queue "гілка ai\/<id> не перевіряється" 's/  git -C "\$A8_REPO_DIR" show-ref --verify --quiet "refs\/heads\/ai\/\$id" 2>\/dev\/null \|\| grc=\$\?/  grc=1/'
+  mutate queue "гілка ai\/<id> не перевіряється" 's/  hgit show-ref --verify --quiet "refs\/heads\/ai\/\$id" 2>\/dev\/null \|\| grc=\$\?/  grc=1/'
+  # #291: show-ref гілки повз спільний hgit (голий git на небезпечній .git).
+  mutate queue "show-ref гілки повз hgit" 's/  hgit show-ref --verify --quiet "refs\/heads\/ai\/\$id"/  git -C "\$A8_REPO_DIR" show-ref --verify --quiet "refs\/heads\/ai\/\$id"/'
   mutate queue "невідкладних кілька" 's/    if \[\[ "\$\(count_json "\$URGENT"\)" != 0 \]\]; then/    if false; then/'
   mutate queue "--urgent у плановий потік" 's/    tmpdir="\$URGENT"/    tmpdir="\$Q"/'
   mutate queue "pause пише подію щоразу" 's/  if \[\[ -e "\$PAUSE_FLAG" \]\]; then\n    log_detail="already"/  if false; then\n    log_detail="already"/'

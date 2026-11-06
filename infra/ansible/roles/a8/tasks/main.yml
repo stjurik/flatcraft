@@ -576,6 +576,18 @@
     group: root
     mode: "0755"
 
+- name: Install the shared host-git wrapper (hgit)
+  # Єдина обгортка git на хості (#276, #291): перевірки .git + безпечні -c +
+  # знімок identity. Сорситься тіком, a8-queue, a8-requeue (і verify V18) — одна
+  # копія, а не копія в кожному. Та сама, що доведена в CI (a8-tick.test.sh її
+  # мутує); V24 у verify звіряє контрольну суму з репозиторієм, як V14 для логіки.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-git-lib.sh"
+    dest: /usr/local/lib/a8/a8-git-lib.sh
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install forbidden-paths backstop
   # Крок 6a тіку: diff задачі проти заборонених шляхів CLAUDE.md §6.1, до
   # оракула і push. Копія під root — агент не може її змінити; V19 у verify

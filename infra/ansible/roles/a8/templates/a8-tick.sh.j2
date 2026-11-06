@@ -70,133 +70,15 @@ flock -n 9 || {
 
 logic() { bash "$LOGIC" "$@"; }
 
-# ─── hgit: єдиний шлях до git на хості (#276) ──────────────────────────────
-# Тік працює на хості від agent, а через групу docker це root. Головний клон
-# контейнер агента бачить на запис разом із .git: без цієї обгортки хук чи ключ
-# конфігу, підкладений контейнером, виконався б тут, поза allowlist мережі.
-#
-# Захист у чотири шари, і кожен закриває те, чого не закриває інший:
-#   1. a8-run-agent монтує саму `.git` (bind onto self) — тоді `rename(.git)` з
-#      контейнера дає EBUSY, бо це точка монтування; `.git/config` і `.git/hooks`
-#      (і `.git/worktrees`, якщо є) — поверх, лише для читання. Без шару 1
-#      контейнер робив би `mv .git .git-old` і клав свій `.git` (перевірено
-#      рецензією #290: без bind самого `.git` перейменування проходить, навіть
-#      коли config/hooks — підмонтування; EBUSY дає лише bind на саму `.git`).
-#   2. Перевірки git_unsafe_reason (fail closed). Файл, якого в клоні немає,
-#      змонтувати наперед не можна, а git знайде його сам: `.git/commondir`
-#      переводить git на чужу теку з чужими config і hooks (виміряно на git 2.43);
-#      симлінк `.git`/`config`/`hooks`/`worktrees` — те саме; alternates, grafts і
-#      shallow підміняють історію та об'єкти (refs/replace вимикає
-#      GIT_NO_REPLACE_OBJECTS). ПЛЮС знімок identity: тік перед першим контейнером
-#      запам'ятовує dev:inode `.git`, `.git/config`, `.git/hooks` і хеш `config`
-#      (`snapshot_git`); якщо після контейнера щось із цього інше — fail closed.
-#      Знімок ловить підміну `.git` навіть там, де шару 1 чомусь немає.
-#   3. `-c` для кожного ключа, що виконує команду або підміняє, куди йде git,
-#      і `core.commitGraph=false` — підроблений `.git/objects/info/commit-graph`
-#      міг би збрехати `diff`/`rev-list` про дерево коміту (контрприклад Argon
-#      CX2, #290); з вимкненим графом git читає самі об'єкти. Крім uploadpack і
-#      receivepack: для них git бере ПЕРШЕ значення, тобто з конфігу репозиторію,
-#      а `-c` лише друкує «more than one uploadpack given, using the first»
-#      (виміряно на git 2.43). Їх фіксують опції самих команд:
-#      `fetch --upload-pack=git-upload-pack`, `push --receive-pack=git-receive-pack`.
-#
-# ЧОМУ ПЕРЕВІРКА НЕ МАЄ ГОНКИ. Тік викликає git лише тоді, коли контейнера немає.
-# `docker run --rm` у a8-run-agent закінчується разом із процесом агента; а якщо
-# агента вбито по таймауту, тік спершу ПЕРЕКОНУЄТЬСЯ, що контейнер зник
-# (`ensure_container_gone`), і лише тоді кличе git. Доти поміж перевіркою і git
-# жоден процес контейнера не живе, щоб змінити `.git` (рецензія #290: раніше код
-# `docker kill` проковтувався, і живий контейнер лишав вікно гонки).
-#
-# МЕЖА. `include.path`, `includeIf` і `filter.<будь-що>.*` через `-c` не
-# обнулити: файлові include розкриваються під час читання конфігу, а фільтр
-# може мати будь-яке ім'я. Від них захищають шари 1 і 2 (config `:ro` + знімок),
-# а не цей список. Порожній `diff.external` git не знімає, а пробує запустити «»
-# і падає — тобто нічого не виконує; diff тіку все одно `--name-only`.
-#
-# `-C "$A8_REPO_DIR"` вшито в обгортку: після контейнера git не працює в
-# теці worktree. Контейнер міг переписати "$wt/.git" (файл `gitdir: …`) на
-# власний gitdir зі своїм конфігом, хуками й об'єктами. Посилання й об'єкти в
-# worktree і головному клоні спільні, тож усе потрібне є тут, за повними
-# SHA (`base`, `tip`).
-#
-# Порушення пише причину в "$unsafe" (його читає finish) і повертає 125:
-# git не запускається зовсім, задача стає failed з поясненням.
-HGIT_SAFE=(
-  -c core.hooksPath=/dev/null
-  -c core.fsmonitor=false
-  -c core.sshCommand=ssh
-  -c core.askPass=
-  -c credential.helper=
-  -c diff.external=
-  -c core.pager=cat
-  -c core.editor=false
-  -c core.gitProxy=
-  -c protocol.ext.allow=never
-  -c core.alternateRefsCommand=
-  -c core.commitGraph=false
-)
-# credential.helper — порожній, бо тік на помічника не покладається: fetch іде
-# анонімно, push — через GIT_SSH_COMMAND (deploy_key) або GIT_ASKPASS
-# (token_file). Помічник із конфігу репозиторію тут лише шкодив би.
-
-# Знімок identity .git — dev:inode трьох шляхів і хеш config. `mv .git .git-old`
-# міняє dev:inode `.git`; підміна config міняє хеш. Легка робота агента (коміт у
-# worktree) цього не чіпає: config і hooks — `:ro`, а нові об'єкти/рефи inode
-# самої теки `.git` не змінюють. Порожній рядок від stat/sha (шлях зник) теж не
-# збігається зі знімком — отже теж fail closed.
-git_snapshot=""
-git_identity() {
-  local g="$A8_REPO_DIR/.git"
-  stat -c '%d:%i' "$g" "$g/config" "$g/hooks" 2>/dev/null
-  sha256sum "$g/config" 2>/dev/null | cut -d' ' -f1
-}
-snapshot_git() { git_snapshot="$(git_identity)"; }
-
-git_unsafe_reason() { # друкує причину, якщо .git головного клону довіряти не можна
-  local g="$A8_REPO_DIR/.git" f
-  if [[ -L "$g" || ! -d "$g" ]]; then
-    echo ".git — не тека або симлінк"
-  elif [[ -e "$g/commondir" || -L "$g/commondir" ]]; then
-    echo ".git/commondir існує — git узяв би config і hooks з іншої теки"
-  elif [[ -L "$g/config" || ! -f "$g/config" ]]; then
-    echo ".git/config — не звичайний файл або симлінк"
-  elif [[ -L "$g/hooks" || ! -d "$g/hooks" ]]; then
-    echo ".git/hooks — не тека або симлінк"
-  elif [[ -L "$g/worktrees" ]]; then
-    echo ".git/worktrees — симлінк (чужий gitdir через worktree add)"
-  elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
-    echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
-  else
-    for f in objects/info/alternates info/grafts shallow; do
-      if [[ -e "$g/$f" || -L "$g/$f" ]]; then
-        echo ".git/$f існує — підміняє історію чи об'єкти"
-        return 0
-      fi
-    done
-  fi
-}
-hgit() {
-  local why
-  why="$(git_unsafe_reason)"
-  if [[ -n "$why" ]]; then
-    [[ -s "${unsafe:-/dev/null}" ]] || printf '%s\n' "$why" >"${unsafe:-/dev/null}"
-    # Зміна identity `.git` ПІСЛЯ знімка — це підміна контейнером, не просто
-    # зламаний клон: STOP усієї черги (рецензія #290 коло 2), інакше підмінена
-    # `.git` без bind-монтування дожила б до наступного тіку. Решта причин
-    # (симлінк, commondir…) може бути й на першому тіку до будь-якого контейнера
-    # — там лише fail цієї задачі. noclobber: причину людини не затираємо.
-    if [[ "$why" == *"змінили identity"* ]]; then
-      (
-        set -o noclobber
-        printf '.git головного клону підмінено під час задачі %s (%s): %s. git на хості зупинено. Ліки: перевірити %s, відновити клон, зняти %s.\n' \
-          "${id:-?}" "$(date -u +%FT%TZ)" "$why" "$A8_REPO_DIR" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
-      ) 2>/dev/null
-    fi
-    echo "a8-tick: небезпечний .git: $why — git не запущено" >&2
-    return 125
-  fi
-  GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}" -C "$A8_REPO_DIR" "$@"
-}
+# ─── hgit: єдиний шлях до git на хості (#276, #291) ────────────────────────
+# Обгортка git (перевірки .git + безпечні -c + знімок identity) живе у спільному
+# a8-git-lib.sh — одна копія на всі скрипти A8 (тік, requeue, queue, verify).
+# Деталі й МЕЖА — у шапці lib. Викликач дає: unsafe (файл причини, finish читає),
+# id, A8_REPO_DIR, A8_KILL_SWITCH; знімок identity заповнює snapshot_git (нижче,
+# перед першим контейнером). fetch/push додають --upload-pack/--receive-pack самі.
+# shellcheck source=tools/scripts/a8-git-lib.sh
+source "${A8_GIT_LIB:-/usr/local/lib/a8/a8-git-lib.sh}" ||
+  { echo "a8-tick: немає a8-git-lib.sh — відмовляю" >&2; exit 1; }
 # Кожне переміщення задачі між теками черги — під queue.lock, тим самим, під яким
 # a8-queue enqueue перевіряє «id ще немає, невідкладної немає» і пише, а
 # a8-requeue.sh повертає задачу. Інакше перевірка тек по черзі не була б знімком:
@@ -384,6 +266,11 @@ model="$(field model "$task")"
 model="${model:-$A8_DEFAULT_MODEL}"
 branch="ai/$id"
 wt="$A8_WORKTREES_DIR/$id"
+# Ім'я контейнера агента відоме одразу за id і потрібне раніше за крок 5: STOP на
+# залежностях/хуку (крок 4) теж іде через release_or_keep → ensure_container_gone
+# (#291), а воно читає $A8_CONTAINER_NAME. Під `set -u` незадана змінна там убила
+# б тік без запису в журнал. Оракул пізніше перевизначає її на свій контейнер.
+export A8_CONTAINER_NAME="a8-$id"
 log="$A8_LOGS_DIR/tasks/$id.log"
 # Вивід САМОГО claude — окремо від логу тіку: класифікатор не має бачити
 # вивід git/pnpm/check-hook-loud (знайдено незалежним рев'ю №2 демона).
@@ -446,6 +333,23 @@ finish() { # finish <результат> <клас> <деталь> <куди>
 keep_why=""
 release_or_keep() {
   local cnt
+  # #291: перш ніж чіпати git на хості (hgit нижче), переконатись, що контейнер
+  # агента зник. release_or_keep — єдина точка, де шлях зупинки (stop_task,
+  # auth_stop, клас stopped) запускає git після контейнера. На цих шляхах
+  # `docker run --rm` міг ще не прибрати контейнер (137 від watcher) або сам
+  # docker-клієнт міг упасти — живий контейнер устиг би підмінити .git чи $wt
+  # між hgit-перевіркою і git. Не зник → STOP (черга вже спинена kill switch'ем
+  # на цих шляхах, тут лише фіксуємо причину), гілку й worktree лишаємо, git не
+  # чіпаємо. noclobber — не затираємо причину, яку людина могла вписати.
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    (
+      set -o noclobber
+      printf 'Контейнер %s не зник при завершенні задачі %s (%s) — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
+        "$A8_CONTAINER_NAME" "${id:-?}" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    ) 2>/dev/null
+    keep_why="контейнер $A8_CONTAINER_NAME не зник — git на хості не чіпаю"
+    return 1
+  fi
   if ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
     keep_why="не вдалось порахувати коміти гілки — гілку й worktree лишаю"
     return 1
@@ -623,11 +527,14 @@ prompt="Працюй за CLAUDE.md §0.
 
 Оракул приймання цієї задачі: ${oracle}
 Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
+ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${branch}: незакомічена робота не йде ні в
+перевірки, ні в push, і задача впаде. Не завершуй хід в очікуванні фонової команди —
+спершу дочекайся її й закоміть результат.
 
 ЗАДАЧА:
 $(field prompt "$claimed")"
 
-export A8_CONTAINER_NAME="a8-$id"
+# A8_CONTAINER_NAME задано й експортовано вище (одразу за id).
 # Спостерігач — ДО токена: його підоболонці токен у середовищі ні до чого.
 watch_start "$A8_CONTAINER_NAME" "під час агента"
 # Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
@@ -724,6 +631,45 @@ ncommits=""
 [[ -n "$tip" ]] && ncommits="$(hgit rev-list --count "$base..$tip" 2>>"$log")"
 if [[ -z "$tip" || -z "$ncommits" || "$ncommits" == 0 ]]; then
   fail_task "no-commits"
+  exit 0
+fi
+
+# ─── 6-чисте. Робоче дерево $wt тотожне комітові $tip ─────────────────────
+# #294: оракул (6b) ганяє РОБОЧЕ ДЕРЕВО $wt, а backstop (6a) і push (7) — КОМІТ
+# $tip. Незакомічена (або закомічена не в $tip — відокремлений HEAD) робота
+# агента зеленить оракул, але назовні йде $tip: перевірили не те, що запушили.
+# На 049 так і сталось — агент лишив роботу незакоміченою, оракул на ній зелений,
+# а в гілці був лише стартовий cherry-pick. Тому ТУТ, до backstop і оракула,
+# вимагаємо: дерево $wt (трековані + неігноровані untracked) == дерево $tip.
+#
+# ЯК — без git у "$wt" (інваріант #276: $wt/.git контейнер міг підмінити). Усе
+# з ГОЛОВНОГО клону через hgit, лише з іншим робочим деревом (--work-tree="$wt")
+# і тимчасовим індексом (GIT_INDEX_FILE): read-tree "$tip" кладе в індекс базу
+# (щоб трековані-але-ігноровані файли з $tip лишились трекованими), add -A
+# переносить у індекс фактичний стан $wt (зміни, видалення, нові; ігноровані за
+# .gitignore не чіпає — .gitignore НЕ міняємо), write-tree дає дерево $wt. Якщо
+# воно != дереву $tip — робота агента не в $tip. `status --porcelain` тут
+# недостатній: він порівнює з HEAD/індексом самого worktree, які агент міг
+# зсунути (відокремлений HEAD, --assume-unchanged); ми ж звіряємо саме з $tip.
+#
+# $wt НЕ чіпаємо — брудне дерево лишається доказом для людини (як release_or_keep).
+cleanidx="$A8_LOGS_DIR/tasks/$id.cleanidx"
+rm -f "$cleanidx"
+wttree=""
+if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$tip" >>"$log" 2>&1 &&
+  GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >>"$log" 2>&1; then
+  wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>>"$log")"
+fi
+rm -f "$cleanidx"
+if [[ -z "$wttree" ]]; then
+  # Побудувати дерево не вдалось (hgit відмовив на небезпечному .git, read-tree
+  # чи write-tree упали) — fail closed, не пускаємо непевне до push.
+  fail_task "clean-tree: не вдалось побудувати дерево $wt"
+  exit 0
+fi
+if [[ "$wttree" != "$(hgit rev-parse --verify --quiet "$tip^{commit}^{tree}")" ]]; then
+  dirty="$(hgit diff-tree -r --name-only --no-commit-id "$tip" "$wttree" 2>>"$log" | LC_ALL=C sort | tr '\n' ' ')"
+  fail_task "незакомічені зміни агента: ${dirty% }"
   exit 0
 fi
 
