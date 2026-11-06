@@ -163,6 +163,25 @@ case "${AGENT_MODE:-commit}" in
     git -C "$wt" add result.txt
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  dirty)
+    # #294: стартовий коміт (ncommits=1 пройде крок 6), далі — НЕЗАКОМІЧЕНА
+    # робота: модифікований трекований CLAUDE.md (M) + новий untracked
+    # result.txt (??), як на 049. Оракул на $wt зеленіє (result.txt є), але
+    # дерево $wt != $tip (там лише порожній стартовий коміт).
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m start
+    echo changed >>"$wt/CLAUDE.md"
+    echo MARKER >"$wt/result.txt"
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  dirty-detach)
+    # #294 / контрприклад 1б: робота закомічена на ВІДОКРЕМЛЕНОМУ HEAD, гілка
+    # (tip) лишилась на стартовому коміті. `status --porcelain` порожній, але
+    # дерево $wt = C2 (має result.txt) != $tip.
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m start
+    echo MARKER >"$wt/result.txt"
+    git -C "$wt" add result.txt
+    git -C "$wt" checkout -q --detach
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m c2
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
   stopafter)
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
     touch "$STOPFILE"
@@ -216,6 +235,13 @@ case "${AGENT_MODE:-commit}" in
     # Те саме, але комітів ще немає.
     touch "$STOPFILE"
     sleep "$HANG_S" ;;
+  stopexit)
+    # Агент створює STOP і одразу завершується сам (без таймауту й без kill
+    # спостерігача). Маркер alive- лишається — імітує контейнер, якого --rm ще
+    # не прибрав, коли тік уже кличе release_or_keep (#291). З KILL_NEVER і
+    # повторний kill у ensure_container_gone його не прибирає.
+    touch "$STOPFILE"
+    echo '{"type":"result","is_error":false,"result":"stopped"}' ;;
   oom) exit 137 ;;
   authstop)
     # 401, а людина саме створила STOP.
@@ -301,6 +327,15 @@ body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest(
         mkdir -p "$e"
         [[ -d "$REPO/.git/worktrees" ]] && mv "$REPO/.git/worktrees" "$e/worktrees" || mkdir -p "$e/worktrees"
         ln -s "$e/worktrees" "$REPO/.git/worktrees" ;;
+      evil-wtentry)
+        # Симлінк УСЕРЕДИНІ .git/worktrees/ на чужу теку з канаркою (#292,
+        # рецензія #290 коло 3 п.1). `git worktree prune` (через gc --auto на
+        # fetch) пішов би за ним і стер вміст теки-цілі. Сама тека .git/worktrees
+        # лишається текою — цим цей вектор відрізняється від evil-wtsymlink.
+        ci --allow-empty -m work
+        mkdir -p "$REPO/.git/worktrees" "$TMPR/victim"
+        echo CANARY >"$TMPR/victim/canary"
+        ln -s "$TMPR/victim" "$REPO/.git/worktrees/evil" ;;
       evil-alternates)
         ci --allow-empty -m work
         mkdir -p "$TMPR/alt/objects"
@@ -436,6 +471,9 @@ STUB
   export A8_GUARD="$BIN/a8-guard" A8_RUNNER="$BIN/a8-run-agent"
   export A8_JOURNAL="$BIN/a8-journal" A8_DOCKER="$BIN/docker"
   export A8_FORBIDDEN_CHECK="$HERE/check-forbidden-paths.sh"
+  # Спільна обгортка git (#291): тік її сорсить. Мутант-прогін lib підставляє
+  # мутований файл через A8_GIT_LIB_UNDER_TEST; інакше — репова копія.
+  export A8_GIT_LIB="${A8_GIT_LIB_UNDER_TEST:-$HERE/a8-git-lib.sh}"
 }
 teardown() {
   # Процеси сценарію, яких тік не дочекався (убитий тік, «довга сесія»):
@@ -861,8 +899,23 @@ EOF
   forbidden_case rename "CLAUDE.md перейменовано в notes.md"
   # 19d. Diff від SHA бази, а не від origin/main, який агент може пересунути.
   forbidden_case moveorigin "origin/main пересунуто на заборонений коміт"
-  # 19e. Перевіряється те, що пушиться (гілка), а не HEAD.
-  forbidden_case detach "гілка на забороненому, HEAD — на чистому"
+  # 19e. HEAD відв'язано від гілки: гілка лишилась на забороненому коміті, а
+  # робоче дерево (detached HEAD) — на чистому поруч. Оцінюється те, що
+  # пушиться (гілка $tip), а не HEAD $wt: перевірка чистоти дерева (крок
+  # 6-чисте, перед backstop) звіряє дерево $wt з комітом гілки $tip і ловить
+  # розбіжність як незакомічену роботу. Мутант «backstop перевіряє HEAD, а не
+  # гілку» зсуває $tip на HEAD — тоді дерева збігаються, а push віддав би чистий
+  # HEAD у гілку (ai/a на origin): цей самий сценарій його і вбиває.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=detach tick
+  if [[ "$(jl .result)" == failed && "$(jl .detail)" == "незакомічені зміни агента: infra/x" ]] &&
+    ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null; then
+    ok "гілка на забороненому, HEAD на чистому → failed «незакомічені зміни агента», на origin нічого"
+  else
+    bad "detach: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a || echo немає)"
+  fi
+  teardown
   # 19f. `git replace` підміняє вміст для diff, але не для push.
   forbidden_case replace "заборонений коміт підмінено через git replace"
   # 19h. Кирилиця й лапки в імені — `git diff` без -z бере шлях у лапки.
@@ -1018,6 +1071,22 @@ EOF
   [[ "$(jl .detail)" == *"перед push"* && "$(jl .oracle_rc)" == 0 ]] &&
     ! git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a >/dev/null &&
     ok "STOP перед push: оракул зелений, на origin нічого, деталь «перед push»" || bad "STOP перед push: $(last)"
+  teardown
+
+  # 20n. STOP посеред сесії, але контейнер агента не зник (docker kill не вбив):
+  # release_or_keep (спільна точка для stop_task/auth_stop/stopped) НЕ кличе git
+  # на хості, доки живий контейнер міг би підмінити .git чи $wt (#291, рецензія
+  # #290 коло 3 п.2). Fail closed: STOP уже є (створив агент), гілку й worktree
+  # лишаємо недоторканими, деталь каже «контейнер не зник», на origin нічого.
+  setup
+  enqueue 001-a "$(valid a)"
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=stopexit tick
+  [[ "$(jl .result)" == stopped && "$(jl .detail)" == *"контейнер a8-a не зник"* &&
+    "$(jl .detail)" == *"не повертаю в чергу"* && -e "$QD/failed/001-a.json" ]] && no_failures &&
+    git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/a >/dev/null && [[ -d "$ROOT/wt/a" ]] &&
+    ! on_origin a &&
+    ok "20n: контейнер не зник на шляху зупинки → release_or_keep не чіпає git, гілку й worktree лишено, нічого не запушено" ||
+    bad "20n stuck-on-stop: $(last); failed/: $(ls "$QD/failed" 2>/dev/null); wt: $([[ -d "$ROOT/wt/a" ]] && echo є || echo нема)"
   teardown
 
   # 20l. 401 разом зі STOP: причина 401 важливіша — auth_stop, і файл STOP
@@ -1470,6 +1539,18 @@ EOF
     ok "23o: .git/worktrees-симлінк → failed з поясненням, нічого не виконано" || bad "23o wtsymlink: маркери [$(pwned)]; $r1"
   teardown
 
+  # 23t. Симлінк УСЕРЕДИНІ .git/worktrees/ (не сама тека) на чужу теку з канаркою
+  # (#292, рецензія #290 коло 3 п.1). Відтворено на git 2.43: `git worktree
+  # prune` (зокрема через gc --auto на fetch) іде за таким симлінком і стирає
+  # ВМІСТ теки-цілі. git_unsafe_reason відкидає симлінк-запис до запуску git;
+  # законний запис worktree (тека, яку створює `worktree add` тіку) не чіпає.
+  two_ticks evil-wtentry
+  [[ -z "$(pwned)" && "$(jq -r .detail <<<"$r1")" == *"worktrees/ містить симлінк"* && -f "$ROOT/victim/canary" ]] &&
+    ! on_origin a &&
+    ok "23t: симлінк у .git/worktrees/ → failed, prune не стер канарку, нічого не виконано" ||
+    bad "23t wtentry: маркери [$(pwned)]; канарка $([[ -f "$ROOT/victim/canary" ]] && echo ціла || echo СТЕРТА); r1=$r1"
+  teardown
+
   # 23p. Таймаут + контейнер не зупинився (docker kill не вбив): тік НЕ кличе git,
   # а робить fail closed зі STOP (рецензія #290, п.3). Інакше живий контейнер —
   # вікно гонки над .git між перевіркою hgit і самим git.
@@ -1503,6 +1584,32 @@ EOF
   else
     say "⚠ 23q НЕ ПЕРЕВІРЕНО: немає python3 для підробки commit-graph"
   fi
+
+  # 23r. #294: незакомічена робота (M трекованого CLAUDE.md + ?? result.txt).
+  # Оракул на $wt зелений, але дерево $wt != $tip → clean-tree → failed
+  # «незакомічені зміни», оракул НЕ запускався (oracle_rc=-), нічого не
+  # запушено, робота лишилась у $wt. На main тік запушив би гілку без роботи.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=dirty tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"незакомічені зміни агента"* &&
+    "$(jl .detail)" == *result.txt* && "$(jl .detail)" == *CLAUDE.md* &&
+    "$(jl .oracle_rc)" == "-" && -f "$ROOT/wt/a/result.txt" ]] && ! on_origin a &&
+    ok "23r: незакомічена робота (M+??) → failed «незакомічені зміни», оракул не біг, нічого не запушено, \$wt цілий" ||
+    bad "23r dirty: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+  teardown
+
+  # 23s. #294 / контрприклад 1б: коміт на відокремленому HEAD — `status` порожній,
+  # але дерево $wt != $tip. Плоский `status --porcelain` це пропустив би;
+  # звірка з $tip ловить.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q MARKER result.txt')"
+  AGENT_MODE=dirty-detach tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"незакомічені зміни агента"* &&
+    "$(jl .detail)" == *result.txt* && "$(jl .oracle_rc)" == "-" ]] && ! on_origin a &&
+    ok "23s: робота на відокремленому HEAD (status порожній) → clean-tree ловить, нічого не запушено" ||
+    bad "23s detach: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+  teardown
 }
 
 run_scenarios
@@ -1514,23 +1621,36 @@ run_scenarios
 # сценарії, що тримаються на `chmod`, друкував усі мутації вбитими, і вцілілу
 # знайшла аж CI. Контроль обов'язковий (docs/16 §8.1) — тут він механізм, а не
 # звичка.
-if [[ -z "${A8_TICK_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
+if [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
   echo
   echo "✗ мутації НЕ ганялись: базовий набір червоний (див. ✗ вище)."
   echo "  На червоному базисі кожен мутант «вбитий» за визначенням, тож результат"
   echo "  був би хибно-зеленим. Полагодь базис і запусти знову."
-elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
+elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   # Мутанти незалежні (кожен прогін — власні mktemp-теки), тож ганяємо їх
   # паралельно: послідовно набір ішов би ~6 хв на кожен PR.
   MUTDIR="$(mktemp -d)"
   trap 'rm -rf "$MUTDIR"' EXIT
   n=0
-  mutate() { # mutate <назва> <perl-вираз>
+  mutate() { # mutate <назва> <perl-вираз> [lib]
+    # Третій аргумент «lib» мутує спільний a8-git-lib.sh (обгортка hgit, перевірки
+    # .git, HGIT_SAFE — усе, що виїхало з тіку у #291), а тік рендериться чистим і
+    # сорсить мутований lib через A8_GIT_LIB_UNDER_TEST. Без прапорця — як було:
+    # мутуємо сам шаблон тіку.
     n=$((n + 1))
-    local m="$MUTDIR/$n.sh"
+    local src m runvar
+    if [[ "${3:-}" == lib ]]; then
+      src="$HERE/a8-git-lib.sh"
+      m="$MUTDIR/$n.lib.sh"
+      runvar="A8_GIT_LIB_UNDER_TEST=$m"
+    else
+      src="$ROLE/a8-tick.sh.j2"
+      m="$MUTDIR/$n.sh"
+      runvar="A8_TICK_UNDER_TEST=$m"
+    fi
     echo "$1" >"$MUTDIR/$n.name"
-    perl -0pe "$2" "$ROLE/a8-tick.sh.j2" >"$m"
-    if cmp -s "$m" "$ROLE/a8-tick.sh.j2"; then
+    perl -0pe "$2" "$src" >"$m"
+    if cmp -s "$m" "$src"; then
       echo "stale" >"$MUTDIR/$n.res"
       return
     fi
@@ -1539,7 +1659,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
       return
     fi
     (
-      if QUIET=1 A8_TICK_UNDER_TEST="$m" bash "$0" >/dev/null 2>&1; then
+      if QUIET=1 env "$runvar" bash "$0" >/dev/null 2>&1; then
         echo "survived" >"$MUTDIR/$n.res"
       else
         echo "killed" >"$MUTDIR/$n.res"
@@ -1561,7 +1681,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
   mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
   mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
-  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//'
+  mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
@@ -1577,6 +1697,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "guard_error виходить з 0" 's/\[\[ "\$gstate" == guard_error \]\] && exit 1/[[ "\$gstate" == guard_error ]] \&\& exit 0/'
   mutate "stopped як failed" 's/  stopped\)\n    if release_or_keep; then/  stopped)\n    fail_task stopped; exit 0\n    if release_or_keep; then/'
   mutate "порожню гілку не прибрано" 's/  if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n    keep_why=[^\n]*\n    return 1\n  fi\n  hgit branch -D "\$branch" >>"\$log" 2>&1\n  return 0/  return 0/'
+  # #291: release_or_keep не переконується, що контейнер зник, перед git на хості.
+  mutate "release_or_keep не чекає контейнера" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then/  if false; then/'
   mutate "невідомий kind → ok" 's/    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"/    finish ok ok unknown done/'
   mutate "push не перевіряється" 's/      hgit push --receive-pack=git-receive-pack origin/      true || hgit push --receive-pack=git-receive-pack origin/'
   mutate "класифікатор на спільному лозі" 's/logic classify "\$rc" "\$out"/logic classify "\$rc" "\$log"/'
@@ -1595,6 +1717,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   mutate "push незакріпленої гілки" 's/"\$tip:refs\/heads\/\$branch"/"\$branch:\$branch"/g'
   mutate "backstop без -z" 's/diff -z --name-only/diff --name-only/'
   mutate "no-commits від бази до HEAD worktree" 's/ncommits="\$\(hgit rev-list --count "\$base\.\.\$tip" 2>>"\$log"\)"/ncommits="\$(git -C "\$wt" rev-list --count "\$base..HEAD")"/'
+  # #294: перевірку чистоти дерева прибрано — незакомічена робота проходить до push.
+  mutate "перевірку чистоти дерева прибрано" 's/if \[\[ "\$wttree" != "\$\(hgit rev-parse --verify --quiet "\$tip\^\{commit\}\^\{tree\}"\)" \]\]; then/if false; then/'
   # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.
   mutate "STOP на залежностях як падіння" 's/  if \(\(drc == 10\)\) \|\| stop_requested; then stop_task "під час залежностей"; fi\n//'
   mutate "STOP на хуку як падіння" 's/  if \(\(hrc == 10\)\) \|\| stop_requested; then stop_task "під час перевірки хука"; fi\n//'
@@ -1645,7 +1769,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # Ключі hgit, які сценарії змушують спрацювати. Решту (pager, editor, askPass,
   # sshCommand, gitProxy, diff.external, credential.helper, protocol.ext,
   # alternateRefsCommand) тримає статична перевірка — check-ansible-a8.test.sh.
-  mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//'
+  mutate "hgit без core.hooksPath=/dev/null" 's/  -c core\.hooksPath=\/dev\/null\n//' lib
   # core.fsmonitor, --upload-pack, --receive-pack динамічно не вбити: сценарії,
   # що міняли config (23b/23c), тепер спиняє знімок+STOP до того, як git-тіку
   # дійде до цих ключів. Їх тримає статична перевірка (check-ansible-a8.test.sh:
@@ -1653,16 +1777,20 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" ]]; then
   # лишається динамічним — його вбиває 23a (evil-hooks config не чіпає, STOP не
   # спрацьовує, хук виконався б на worktree add/push).
   # Перевірки .git перед кожним git.
-  mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//'
-  mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/'
-  mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/'
-  mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/'
-  mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/'
-  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//'
-  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//'
-  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//'
+  mutate "hgit не бачить commondir" 's/  elif \[\[ -e "\$g\/commondir" \|\| -L "\$g\/commondir" \]\]; then\n[^\n]*\n//' lib
+  mutate "hgit не бачить симлінк .git" 's/if \[\[ -L "\$g" \|\| ! -d "\$g" \]\]; then/if [[ ! -d "\$g" ]]; then/' lib
+  mutate "hgit не бачить alternates" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in info\/grafts shallow;/' lib
+  mutate "hgit не бачить grafts" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates shallow;/' lib
+  mutate "hgit не бачить shallow" 's/for f in objects\/info\/alternates info\/grafts shallow;/for f in objects\/info\/alternates info\/grafts;/' lib
+  mutate "hgit не бачить симлінк worktrees" 's/  elif \[\[ -L "\$g\/worktrees" \]\]; then\n[^\n]*\n//' lib
+  # #292: симлінк-запис УСЕРЕДИНІ .git/worktrees/ (пастка для worktree prune).
+  mutate "hgit не бачить симлінк-запис у worktrees" 's/elif \[\[ -d "\$g\/worktrees" \]\] && find "\$g\/worktrees" -maxdepth 1 -type l -print -quit 2>\/dev\/null \| grep -q \.; then/elif false; then/' lib
+  mutate "hgit без core.commitGraph=false" 's/  -c core\.commitGraph=false\n//' lib
+  # gc.auto=0 / maintenance.auto=false — як і решта ключів, що їх жоден
+  # динамічний сценарій не смикає: статичний інваріант 16c у check-ansible-a8.
+  mutate "знімок identity не звіряється" 's/  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n[^\n]*\n//' lib
   mutate "знімок identity не робиться" 's/\nsnapshot_git\n/\n/'
-  mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/'
+  mutate "hgit без GIT_NO_REPLACE_OBJECTS" 's/  GIT_NO_REPLACE_OBJECTS=1 git "\$\{HGIT_SAFE/  git "\${HGIT_SAFE/' lib
   mutate "причину відмови hgit не видно в журналі" 's/  \[\[ -s "\$unsafe" \]\] && detail=[^\n]*\n//'
   # Повні імена посилань.
   mutate "worktree add від короткого origin/main" 's/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" origin\/main/'
