@@ -52,6 +52,9 @@ esac
 if [ "${STUB_SCOPE:-0}" = 1 ]; then
   echo x >"$STUB_WT/rogue-from-test.txt"
 fi
+if [ -n "${STUB_APPEND:-}" ]; then
+  echo "дописано agy" >>"$STUB_APPEND"
+fi
 echo "Вердикт: ✅ готово"
 EOS
 chmod +x "$TMP/bin/agy"
@@ -118,6 +121,20 @@ check "межі: stdout «межі: ПОРУШЕНО»" "$ok8"
 row3="$TMP/logs/scope1.row.md"
 if [ -f "$row3" ] && grep -qF 'межі ПОРУШЕНО' "$row3"; then ok9=1; else ok9=0; fi
 check "межі: рядок журналу містить «межі ПОРУШЕНО»" "$ok9"
+
+# 4. Межі на не-ASCII шляху (рецензія #307): файл з кириличною назвою брудний ДО
+#    виклику, agy дописує в нього → rc=3. Без core.quotePath=false git бере шлях у
+#    вісімкові лапки, sha_of бачить MISSING і до, і після — зміна непомітна.
+reset_calls
+printf 'до\n' >"$TMP/wt/тест.md"
+git -C "$TMP/wt" add -- "тест.md" && git -C "$TMP/wt" -c user.name=t -c user.email=t@t commit -q -m cyr
+printf 'брудний до виклику\n' >>"$TMP/wt/тест.md"
+c4="$(ctx cyr)"
+STUB_APPEND="$TMP/wt/тест.md" "$SCRIPT" "$TMP/wt" "$c4" gemini-3.8-flash-high cyr1 >/dev/null 2>&1
+rc=$?
+git -C "$TMP/wt" checkout -q -- "тест.md"
+[ "$rc" = 3 ] && ok10=1 || ok10=0
+check "межі: дописування в брудний не-ASCII файл → rc=3" "$ok10"
 
 if [ "$FAIL" = 0 ]; then
   echo "Усі тести пройдено"

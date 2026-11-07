@@ -103,7 +103,8 @@ UA_FILE="$LOGS/$LABEL.usage-after"
 ROW_FILE="$LOGS/$LABEL.row.md"
 
 for f in "$OUT_FILE" "$LOG_FILE" "$UB_FILE" "$UA_FILE" "$ROW_FILE"; do
-  [[ -e "$f" ]] && refuse "у AGY_CALL_LOGS уже є «$f» — не перезаписую"
+  # -L: битий симлінк з цим іменем запис пішов би через нього (#307).
+  [[ -e "$f" || -L "$f" ]] && refuse "у AGY_CALL_LOGS уже є «$f» — не перезаписую"
 done
 
 mkdir -p "$LOGS" || refuse "не вдалось створити AGY_CALL_LOGS «$LOGS»"
@@ -140,7 +141,9 @@ porcelain_path() {
 snapshot() {
   local -n out_hashes="$1"
   local -n out_status="$2"
-  out_status="$(git -C "$WORKTREE" status --porcelain --untracked-files=all 2>/dev/null)"
+  # core.quotePath=false: інакше не-ASCII шлях іде у вісімкових лапках, sha_of
+  # бачить MISSING до й після — дописування в уже брудний файл непомітне (#307).
+  out_status="$(git -c core.quotePath=false -C "$WORKTREE" status --porcelain --untracked-files=all 2>/dev/null)"
   local line path
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -160,8 +163,8 @@ extract_quota() { # extract_quota <usage-файл> <пул> — тижневий
   ' "$1" 2>/dev/null
 }
 
-# Крок 2: /usage ДО виклику.
-"$AGY_BIN" -p "/usage" >"$UB_FILE" 2>&1
+# Крок 2: /usage ДО виклику. timeout: завислий /usage інакше тримав би скрипт без кінця (#307).
+timeout 120 "$AGY_BIN" -p "/usage" >"$UB_FILE" 2>&1
 QUOTA_BEFORE="$(extract_quota "$UB_FILE" "$POOL")"
 
 # Крок 3: знімок дерева ДО виклику.
@@ -195,7 +198,7 @@ else
 fi
 
 # Крок 6: /usage ПІСЛЯ виклику.
-"$AGY_BIN" -p "/usage" >"$UA_FILE" 2>&1
+timeout 120 "$AGY_BIN" -p "/usage" >"$UA_FILE" 2>&1
 QUOTA_AFTER="$(extract_quota "$UA_FILE" "$POOL")"
 
 # Крок 7: файл контексту — транзитний, прибираємо (якщо не попросили лишити).
