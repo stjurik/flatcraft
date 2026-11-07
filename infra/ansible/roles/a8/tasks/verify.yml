@@ -733,6 +733,50 @@
       ключів a8-ctl в authorized_keys: {{ a8_v_ctl_lines | length }} — {{ a8_v_ctl_note }}
     quiet: true
 
+# V22j–k. Двері a8-ctl може закрити sshd ще до перевірки ключа. 2026-11-07 так
+# і сталося: ручний `AllowUsers yurii` на A8 відкидав `agent` («not listed in
+# AllowUsers»), а V22i був зелений, бо дивиться лише на authorized_keys. Роль
+# sshd свідомо не чіпає (main.yml, шапка), тож тут — лише читання: ефективна
+# конфігурація sshd для користувача agent (`sshd -T -C …`). Рішення — за станом
+# машини, а не за змінною play'ю (інваріант 7): якщо в authorized_keys є рядок
+# a8-ctl, agent мусить проходити AllowUsers. Паролі вимкнено за будь-якого стану.
+- name: V22j — effective sshd configuration for the agent (read-only)
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -T
+      - -C
+      - "user={{ a8_agent_user }},host=localhost,addr=127.0.0.1"
+  register: a8_v_sshd_agent
+  changed_when: false
+  failed_when: false
+
+- name: V22k — sshd lets the agent in when an a8-ctl key is installed; passwords are off
+  vars:
+    a8_v_ctl_keys: >-
+      {{ ((a8_v_akeys.content | default('') | b64decode).splitlines())
+         | select('search', 'a8-ctl') | reject('match', '\s*#') | list }}
+    a8_v_sshd_lines: "{{ a8_v_sshd_agent.stdout_lines | default([]) }}"
+    a8_v_allowusers: "{{ a8_v_sshd_lines | select('match', '^allowusers ') | list }}"
+    a8_v_agent_allowed: >-
+      {{ a8_v_allowusers | length == 0
+         or (a8_v_allowusers | select('search', '(^allowusers | )' ~ a8_agent_user ~ '(@| |$)') | list | length > 0) }}
+  ansible.builtin.assert:
+    that:
+      - a8_v_sshd_agent.rc == 0
+      - "'passwordauthentication no' in a8_v_sshd_lines"
+      - a8_v_ctl_keys | length == 0 or a8_v_agent_allowed | bool
+    fail_msg: >-
+      sshd -T rc={{ a8_v_sshd_agent.rc }} ({{ a8_v_sshd_agent.stderr | default('') }});
+      ключів a8-ctl={{ a8_v_ctl_keys | length }}; AllowUsers={{ a8_v_allowusers }};
+      паролі={{ 'вимкнено' if 'passwordauthentication no' in a8_v_sshd_lines else 'УВІМКНЕНО' }}.
+      Ключ a8-ctl є, а sshd не пускає {{ a8_agent_user }} — двері закриті до перевірки ключа
+      (docs/19 §B.2: AllowUsers має містити {{ a8_agent_user }}).
+    success_msg: >-
+      sshd: паролі вимкнено; ключів a8-ctl {{ a8_v_ctl_keys | length }};
+      {{ a8_agent_user }} {{ 'проходить AllowUsers' if a8_v_agent_allowed | bool else 'НЕ проходить AllowUsers (ключа ще немає)' }}
+    quiet: true
+
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
 - name: V15a — ask the container for claude, uv and pnpm versions
   # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
