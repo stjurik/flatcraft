@@ -83,8 +83,9 @@ digest_date="$(date -u -d "$DIGEST_NOW" +%F)"
 mkdir -p "$DIGEST_OUT" || die "не створено $DIGEST_OUT"
 FILE="$DIGEST_OUT/digest-$digest_date.md"
 
-# Чорновик (лишилось ЗАПОВНИТИ) можна перезаписати; завершений — ні.
-if [[ -f "$FILE" ]] && ! grep -q "$PLACEHOLDER" "$FILE"; then
+# Чорновик (лишилось ЗАПОВНИТИ) можна перезаписати; завершений — ні. -x: заповнювач —
+# окремий рядок (нижче), тож слово в назві PR чи issue чорновика не робить (рецензія #308).
+if [[ -f "$FILE" ]] && ! grep -qx "$PLACEHOLDER" "$FILE"; then
   die "$FILE вже завершено (без «$PLACEHOLDER») — не перезаписую" 2
 fi
 
@@ -118,8 +119,10 @@ if ((pr_rc != 0)); then
 else
   pr_tsv="$(jq -r '.[] | [
       (.number|tostring), (.isDraft|tostring), .mergeable, .mergeStateStatus,
+      # length > 0: порожній список перевірок (CI ще не стартував) — не «зелений»;
+      # без цього all([]) дає true (рецензія #308).
       (([.statusCheckRollup[]?.conclusion]
-        | all(. as $c | ["SUCCESS","SKIPPED","NEUTRAL"] | index($c) != null))
+        | length > 0 and all(. as $c | ["SUCCESS","SKIPPED","NEUTRAL"] | index($c) != null))
        | tostring),
       .title
     ] | @tsv' <<<"$pr_out")" || die "gh pr list — не JSON"
@@ -310,7 +313,7 @@ trap - EXIT
 echo "$FILE"
 
 if [[ -n "$PUBLISH_N" ]]; then
-  if grep -q "$PLACEHOLDER" "$FILE"; then
+  if grep -qx "$PLACEHOLDER" "$FILE"; then
     die "у зведенні лишилось «$PLACEHOLDER» — публікація відмовлена" 3
   fi
   "$SAFE_PUBLISH" gh "$FILE" issue comment "$PUBLISH_N" --repo "$HART_INBOX"

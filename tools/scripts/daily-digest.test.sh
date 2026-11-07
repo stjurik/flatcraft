@@ -37,7 +37,11 @@ case "$*" in
  {"number":403,"title":"fix: конфлікт","isDraft":false,"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY",
   "statusCheckRollup":[{"conclusion":"SUCCESS"}]},
  {"number":404,"title":"fix: червоний CI","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
-  "statusCheckRollup":[{"conclusion":"FAILURE"}]}]
+  "statusCheckRollup":[{"conclusion":"FAILURE"}]},
+ {"number":405,"title":"docs: шаблон ЗАПОВНИТИ у формі","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
+  "statusCheckRollup":[{"conclusion":"SUCCESS"}]},
+ {"number":406,"title":"feat: CI ще не стартував","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
+  "statusCheckRollup":[]}]
 J
   ;;
   *"issue list"*) cat <<'J'
@@ -138,6 +142,9 @@ if grep -qF -- '- #401 feat: готовий' <<<"$rm_sec" && grep -qF -- '- #402
 else
   bad "«Готово до merge»: $rm_sec"
 fi
+# Рецензія #308: PR без жодної перевірки (порожній statusCheckRollup) — не «зелений».
+! grep -q '#406' <<<"$rm_sec" && ok "PR без перевірок CI не потрапляє в «Готово до merge»" ||
+  bad "PR #406 без перевірок у «Готово до merge»: $rm_sec"
 st_sec="$(sec 'Стан' "$D1")"
 grep -q '#403' <<<"$st_sec" && grep -q '#404' <<<"$st_sec" && ok "не готові PR названо в «Стан»" ||
   bad "«Стан» не згадує неготові PR: $st_sec"
