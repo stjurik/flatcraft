@@ -160,6 +160,21 @@ is_create "$T/pub-$((p0 + 1)).args" || bad "повторна спроба — н
 awk -F'\t' '$1 == "flaky" && $3 ~ /^[0-9]+$/ { f = 1 } END { exit !f }' "$T/fc/classes.tsv" ||
   bad "після успішного повтору номер issue не записано в реєстр"
 
+# Реєстр без кінцевого \n (правка руками): count бачить останній клас, register і add
+# не приклеюють рядок до попереднього (рецензія #313).
+mkdir -p "$T/nl"
+printf 'a-cls\tперший\t-\nb-cls\tостанній\t-' >"$T/nl/classes.tsv"
+printf '2026-11-01\tb-cls\tраз\thttps://e.org/1' >"$T/nl/cases.tsv"
+[[ "$(FAIL_CLASSES_DIR="$T/nl" run count | cut -f1 | tr '\n' ' ')" == "a-cls b-cls " ]] &&
+  ok "count без кінцевого \\n бачить останній клас" || bad "count без кінцевого \\n губить останній клас"
+FAIL_CLASSES_DIR="$T/nl" run register c-cls "третій" >/dev/null
+[[ "$(awk -F'\t' 'NF != 3 { b++ } END { print NR + 0, b + 0 }' "$T/nl/classes.tsv")" == "3 0" ]] &&
+  ok "register без кінцевого \\n — окремий рядок" || bad "register приклеїв клас до попереднього рядка"
+FAIL_CLASSES_DIR="$T/nl" run add b-cls "два" https://e.org/2 >/dev/null
+[[ "$(awk -F'\t' 'NF != 4 { b++ } END { print NR + 0, b + 0 }' "$T/nl/cases.tsv")" == "2 0" ]] &&
+  ok "add без кінцевого \\n — окремий рядок" || bad "add приклеїв випадок до попереднього рядка"
+[[ "$(FAIL_CLASSES_DIR="$T/nl" run count b-cls)" == 2 ]] && ok "count b-cls = 2" || bad "count b-cls ≠ 2"
+
 if ((fail == 0)); then
   echo "Усі тести пройдено"
   exit 0

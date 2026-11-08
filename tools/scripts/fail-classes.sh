@@ -66,6 +66,13 @@ usage() {
   die "використання: fail-classes.sh add <клас> <опис> <посилання> | count [<клас>] | register <клас> <назва>"
 }
 
+# Реєстр можуть правити руками (редактор без кінцевого \n). Без цього `read` губить
+# останній рядок, а дописаний рядок приклеюється до попереднього (рецензія #313).
+end_with_nl() { # end_with_nl <файл> — дописує \n, якщо непорожній файл ним не закінчується
+  [[ -s "$1" ]] || return 0
+  [[ -z "$(tail -c 1 "$1")" ]] || printf '\n' >>"$1"
+}
+
 has_tab_or_nl() { # has_tab_or_nl <текст> — 0, якщо текст має TAB чи \n (псує TSV)
   case "$1" in
     *$'\t'* | *$'\n'*) return 0 ;;
@@ -120,6 +127,7 @@ do_add() {
   class_issue="$(class_field "$class" 3)"
   date="$(date -u +%Y-%m-%d)"
 
+  end_with_nl "$CASES" || die "add: не вдалося дописати cases.tsv"
   printf '%s\t%s\t%s\t%s\n' "$date" "$class" "$desc" "$link" >>"$CASES" ||
     die "add: не вдалося дописати cases.tsv"
   n="$(case_count "$class")"
@@ -182,7 +190,7 @@ update_class_issue() { # update_class_issue <клас> <номер issue>
 do_count() {
   if (($# == 0)); then
     local class n
-    while IFS=$'\t' read -r class _ _; do
+    while IFS=$'\t' read -r class _ _ || [[ -n "$class" ]]; do
       [[ -n "$class" ]] || continue
       n="$(case_count "$class")"
       printf '%s\t%s\n' "$class" "$n"
@@ -202,6 +210,7 @@ do_register() {
   ! class_exists "$class" || die "register: клас «$class» уже зареєстровано"
   [[ -n "$name" ]] || die "register: назва порожня"
   has_tab_or_nl "$name" && die "register: назва містить TAB чи перевід рядка"
+  end_with_nl "$CLASSES" || die "register: не вдалося дописати classes.tsv"
   printf '%s\t%s\t-\n' "$class" "$name" >>"$CLASSES" || die "register: не вдалося дописати classes.tsv"
 }
 
