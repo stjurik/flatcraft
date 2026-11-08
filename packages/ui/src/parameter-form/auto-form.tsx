@@ -63,6 +63,17 @@ const FIELDSET_CLASS = "mb-6 rounded-md border border-border bg-bg-elevated p-4 
 const LEGEND_CLASS = "px-2 text-base font-semibold text-fg";
 
 /**
+ * #264: кожна пара полів у рядку сітки — власний subgrid (label-рядок +
+ * поле-рядок), щоб висота назви в одній колонці не зсувала поле в іншій:
+ * `auto_auto` на рядку-парі дає спільні для обох колонок рядкові треки,
+ * а FIELD_SHELL_CLASS (нижче) успадковує їх через `grid-template-rows:subgrid`.
+ */
+const FIELD_ROW_CLASS =
+  "grid grid-cols-1 gap-x-3 gap-y-1.5 sm:grid-cols-2 sm:[grid-template-rows:auto_auto]";
+const FIELD_SHELL_CLASS =
+  "flex flex-col gap-1.5 text-sm sm:grid sm:row-span-2 sm:items-start sm:[grid-template-rows:subgrid]";
+
+/**
  * Generic auto-form: будує controlled-форму з Zod-схеми. Phase 2.12
  * рендерить поля згрупованими у `<fieldset>` за метаданими з Zod
  * `.describe("group:G|label:L")` (див. ADR-017). Дефолтна група
@@ -119,66 +130,96 @@ export function AutoForm<TValues extends Record<string, unknown>>({
 
   return (
     <div data-testid="auto-form" className="flex flex-col">
-      {Array.from(grouped.entries()).map(([groupName, fields]) => (
-        <fieldset
-          key={groupName}
-          data-testid={`auto-form-group-${groupName}`}
-          className={FIELDSET_CLASS}
-        >
-          <legend className={LEGEND_CLASS}>{groupName}</legend>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {fields.map((d) => {
-              const fieldValue = value[d.name];
-              const fieldErrors = errors?.[d.name] ?? [];
-              const override = renderField?.(d, fieldValue);
-              if (override !== undefined) {
+      {Array.from(grouped.entries()).map(([groupName, fields]) => {
+        // #264: override-поля (renderField) лишаються на весь рядок самі;
+        // решта — парами по 2 в один sm:grid-cols-2 рядок, щоб FIELD_SHELL_CLASS
+        // міг узяти спільні label/control-треки через subgrid саме в межах пари.
+        const items = fields.map((d) => {
+          const fieldValue = value[d.name];
+          return { d, fieldValue, override: renderField?.(d, fieldValue) };
+        });
+        const rows: (typeof items)[] = [];
+        let pending: typeof items = [];
+        for (const item of items) {
+          if (item.override !== undefined) {
+            if (pending.length > 0) {
+              rows.push(pending);
+              pending = [];
+            }
+            rows.push([item]);
+            continue;
+          }
+          pending.push(item);
+          if (pending.length === 2) {
+            rows.push(pending);
+            pending = [];
+          }
+        }
+        if (pending.length > 0) rows.push(pending);
+
+        return (
+          <fieldset
+            key={groupName}
+            data-testid={`auto-form-group-${groupName}`}
+            className={FIELDSET_CLASS}
+          >
+            <legend className={LEGEND_CLASS}>{groupName}</legend>
+            <div className="flex flex-col gap-3">
+              {rows.map((row) => {
+                const rowKey = row.map((item) => item.d.name).join("+");
+                const [onlyItem] = row;
+                if (row.length === 1 && onlyItem && onlyItem.override !== undefined) {
+                  return <div key={rowKey}>{onlyItem.override}</div>;
+                }
                 return (
-                  <div key={d.name} className="sm:col-span-2">
-                    {override}
+                  <div key={rowKey} className={FIELD_ROW_CLASS}>
+                    {row.map(({ d, fieldValue }) => {
+                      const fieldErrors = errors?.[d.name] ?? [];
+                      const label = labels?.[d.name] ?? d.label ?? d.name;
+                      if (d.kind === "number") {
+                        return (
+                          <NumberInput
+                            key={d.name}
+                            descriptor={d}
+                            label={label}
+                            value={typeof fieldValue === "number" ? fieldValue : 0}
+                            onChange={(v) => setField(d.name, v)}
+                            errors={fieldErrors}
+                          />
+                        );
+                      }
+                      if (d.kind === "enum") {
+                        return (
+                          <EnumSelect
+                            key={d.name}
+                            descriptor={d}
+                            label={label}
+                            value={fieldValue as number | string}
+                            onChange={(v) => setField(d.name, v)}
+                            errors={fieldErrors}
+                          />
+                        );
+                      }
+                      if (d.kind === "literal") {
+                        return <LiteralDisplay key={d.name} descriptor={d} label={label} />;
+                      }
+                      return (
+                        <p
+                          key={d.name}
+                          data-testid={`auto-form-unsupported-${d.name}`}
+                          className="text-fg-muted text-xs"
+                        >
+                          {label}: {d.reason}
+                        </p>
+                      );
+                    })}
                   </div>
                 );
-              }
-              const label = labels?.[d.name] ?? d.label ?? d.name;
-              if (d.kind === "number") {
-                return (
-                  <NumberInput
-                    key={d.name}
-                    descriptor={d}
-                    label={label}
-                    value={typeof fieldValue === "number" ? fieldValue : 0}
-                    onChange={(v) => setField(d.name, v)}
-                    errors={fieldErrors}
-                  />
-                );
-              }
-              if (d.kind === "enum") {
-                return (
-                  <EnumSelect
-                    key={d.name}
-                    descriptor={d}
-                    label={label}
-                    value={fieldValue as number | string}
-                    onChange={(v) => setField(d.name, v)}
-                    errors={fieldErrors}
-                  />
-                );
-              }
-              if (d.kind === "literal") {
-                return <LiteralDisplay key={d.name} descriptor={d} label={label} />;
-              }
-              return (
-                <p
-                  key={d.name}
-                  data-testid={`auto-form-unsupported-${d.name}`}
-                  className="text-fg-muted text-xs"
-                >
-                  {label}: {d.reason}
-                </p>
-              );
-            })}
-          </div>
-        </fieldset>
-      ))}
+              })}
+            </div>
+          </fieldset>
+        );
+      })}
     </div>
   );
 }
@@ -194,7 +235,7 @@ function FieldShell({ name, label, errors, children }: FieldShellProps) {
   const hasError = errors.length > 0;
   return (
     <label
-      className="flex flex-col gap-1.5 text-sm"
+      className={FIELD_SHELL_CLASS}
       htmlFor={`param-${name}`}
       data-testid={`field-${name}`}
       data-invalid={hasError ? "true" : "false"}
@@ -287,7 +328,7 @@ interface LiteralDisplayProps {
 
 function LiteralDisplay({ descriptor, label }: LiteralDisplayProps) {
   return (
-    <div className="flex flex-col gap-1.5 text-sm" data-testid={`literal-${descriptor.name}`}>
+    <div className={FIELD_SHELL_CLASS} data-testid={`literal-${descriptor.name}`}>
       <span className="text-fg font-medium">{label}</span>
       <span className="min-h-tap border-border bg-surface-muted text-fg-subtle rounded-sm border px-3 py-2">
         {String(descriptor.value)}
