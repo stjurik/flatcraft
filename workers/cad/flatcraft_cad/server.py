@@ -63,6 +63,7 @@ from flatcraft_cad.unfold import (
 from flatcraft_cad.validate import (
     sanitize_for_gates,
     validate_export,
+    validate_export_enclosed_shelf,
     validate_export_holes,
     validate_export_perforation,
     validate_export_profile,
@@ -361,16 +362,23 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
 
     k_factor = _k_factor_or_422(req, params.bend_radius_mm)
-    _ = build_enclosed_shelf(params)  # 3D-валідація геометрії, у PDF поки не вживаємо
-    unfolded = unfold_enclosed_shelf(params, k_factor)
-    dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
-    pdf = export_enclosed_shelf_pdf(
-        params,
-        unfolded,
-        tmpdir / "out.pdf",
-        permalink_url=_permalink_url(req.export_id),
-        material_label=req.material_code,
-    ).read_bytes()
+    # issue #283: build/unfold кидають ValueError на геометрично невалідних
+    # розмірах (замале ребро, занадто короткі боковини) — поза pre-гейтом
+    # (validate_export_enclosed_shelf — не вичерпна умова, лише відоме
+    # підмноження правил) це давало 500, а не 422.
+    try:
+        _ = build_enclosed_shelf(params)  # 3D-валідація геометрії, у PDF поки не вживаємо
+        unfolded = unfold_enclosed_shelf(params, k_factor)
+        dxf = export_enclosed_shelf_dxf(unfolded, tmpdir / "out.dxf").read_bytes()
+        pdf = export_enclosed_shelf_pdf(
+            params,
+            unfolded,
+            tmpdir / "out.pdf",
+            permalink_url=_permalink_url(req.export_id),
+            material_label=req.material_code,
+        ).read_bytes()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc
     return dxf, pdf
 
 
@@ -440,6 +448,7 @@ def _build_app() -> FastAPI:
             *validate_export_profile(req.template_slug, gate_params, req.thickness_mm),
             *validate_export(req.template_slug, gate_params, req.thickness_mm, req.material_code),
             *validate_export_perforation(req.template_slug, gate_params),
+            *validate_export_enclosed_shelf(req.template_slug, gate_params, req.thickness_mm),
             *validate_export_sheet(
                 req.template_slug, gate_params, req.thickness_mm, req.material_code
             ),
