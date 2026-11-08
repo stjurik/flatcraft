@@ -241,18 +241,22 @@ function FieldShell({ name, label, errors, children }: FieldShellProps) {
       data-invalid={hasError ? "true" : "false"}
     >
       <span className="text-fg font-medium">{label}</span>
-      {children}
-      {hasError ? (
-        <ul
-          id={`param-${name}-error`}
-          data-testid={`field-error-${name}`}
-          className="text-danger text-xs"
-        >
-          {errors.map((msg) => (
-            <li key={msg}>{msg}</li>
-          ))}
-        </ul>
-      ) : null}
+      {/* Поле й помилка — одна комірка control-треку: subgrid має рівно 2 рядки,
+          і третій дочірній елемент ліг би в останній трек поверх поля. */}
+      <div className="flex flex-col gap-1.5">
+        {children}
+        {hasError ? (
+          <ul
+            id={`param-${name}-error`}
+            data-testid={`field-error-${name}`}
+            className="text-danger text-xs"
+          >
+            {errors.map((msg) => (
+              <li key={msg}>{msg}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </label>
   );
 }
