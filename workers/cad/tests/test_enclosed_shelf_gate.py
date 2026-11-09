@@ -92,6 +92,18 @@ class TestEnclosedShelfGateUnit:
         )
         assert any(e.code == "MARGIN_TOO_SMALL" for e in errs)
 
+    @pytest.mark.parametrize("hole", [None, "x", True])
+    def test_вміщення_не_залежить_від_отвору(self, hole: object) -> None:
+        # 2c (2·margin ≤ d − (t+r)) від hole_size_mm не залежить: зіпсований отвір
+        # не ховає PERFORATION_DOES_NOT_FIT (рецензія #314, паритет із TS).
+        side = {**SIDE, "hole_size_mm": hole, "margin_mm": 48}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf", {"depth_mm": 100, "bend_radius_mm": 2.5, "side_perforation": side}, 2
+        )
+        assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm") in {
+            (e.code, e.field) for e in errs
+        }
+
     def test_перфорація_не_вміщається_margin(self) -> None:
         # d=100, t=2, r=2.5 → w=95.5; margin=48 → 2*48=96 > 95.5.
         errs = validate_enclosed_shelf(
@@ -204,3 +216,57 @@ class TestEnclosedShelfGateServer:
             },
         )
         assert res.status_code == 200, res.text
+
+    @staticmethod
+    def _export(params: dict[str, object], t: float) -> tuple[int, set[tuple[str, str]]]:
+        res = TestClient(app).post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": {**ENCLOSED_SHELF_VALID_PARAMS, **params},
+                "thickness_mm": t,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        if res.status_code != 422:
+            return res.status_code, set()
+        return 422, {(str(e.get("code")), str(e.get("field"))) for e in res.json()["detail"]}
+
+    @pytest.mark.parametrize("axis", ["pitch_x_mm", "pitch_y_mm"])
+    def test_крок_рівний_отвору_через_export_422(self, axis: str) -> None:
+        # 2a через POST /export (постановка 056: кожне правило 1, 2a–2d).
+        status, codes = self._export({"side_perforation": {**SIDE, axis: 10}}, 2)
+        assert status == 422
+        assert ("HOLES_OVERLAP", f"side_perforation.{axis}") in codes, codes
+
+    def test_відступ_половина_отвору_через_export_422(self) -> None:
+        # 2b через POST /export.
+        status, codes = self._export({"side_perforation": {**SIDE, "margin_mm": 5}}, 2)
+        assert status == 422
+        assert ("MARGIN_TOO_SMALL", "side_perforation.margin_mm") in codes, codes
+
+    def test_отвір_не_менший_за_боковину_через_export_422(self) -> None:
+        # 2d через POST /export: отвір 96 ≥ боковини 100 − (2 + 2.5) = 95.5.
+        side = {"hole_size_mm": 96, "pitch_x_mm": 100, "pitch_y_mm": 100, "margin_mm": 45}
+        status, codes = self._export(
+            {"depth_mm": 100, "bend_radius_mm": 2.5, "side_perforation": side}, 2
+        )
+        assert status == 422
+        assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.hole_size_mm") in codes, codes
+
+    def test_ребро_трохи_більше_t_r_через_export_200(self) -> None:
+        # Межа правила 1: 5.5 > t + r = 5 → експорт проходить.
+        status, codes = self._export(
+            {"bend_radius_mm": 2.5, "stiffening_rib": {"height_mm": 5.5}}, 2.5
+        )
+        assert status == 200, codes
+
+    def test_зіпсований_отвір_не_ховає_вміщення_через_export(self) -> None:
+        # Регресія рецензії #314: hole_size_mm не число → обидві помилки, а не одна.
+        side = {**SIDE, "hole_size_mm": None, "margin_mm": 48}
+        status, codes = self._export(
+            {"depth_mm": 100, "bend_radius_mm": 2.5, "side_perforation": side}, 2
+        )
+        assert status == 422
+        assert ("INVALID_PARAMETER_TYPE", "side_perforation.hole_size_mm") in codes, codes
+        assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm") in codes, codes

@@ -135,6 +135,19 @@ def validate_enclosed_shelf(
         pitch_x = _as_float(side.get("pitch_x_mm"))
         pitch_y = _as_float(side.get("pitch_y_mm"))
 
+        # 2c від отвору не залежить: зіпсований hole_size_mm не ховає її (рецензія #314,
+        # паритет із TS, де правила йдуть підряд).
+        if margin is not None and t is not None and r is not None and depth is not None:
+            w = depth - (t + r)
+            if 2 * margin > w:
+                errors.append(
+                    EnclosedShelfError(
+                        code="PERFORATION_DOES_NOT_FIT",
+                        field="side_perforation.margin_mm",
+                        detail=_fit_margin_msg(margin, depth, w),
+                    )
+                )
+
         if hole is not None:
             for axis, pitch in (("pitch_x_mm", pitch_x), ("pitch_y_mm", pitch_y)):
                 if pitch is not None and pitch <= hole:
@@ -154,17 +167,6 @@ def validate_enclosed_shelf(
                         detail=_margin_too_small_msg(margin, hole),
                     )
                 )
-
-            if margin is not None and t is not None and r is not None and depth is not None:
-                w = depth - (t + r)
-                if 2 * margin > w:
-                    errors.append(
-                        EnclosedShelfError(
-                            code="PERFORATION_DOES_NOT_FIT",
-                            field="side_perforation.margin_mm",
-                            detail=_fit_margin_msg(margin, depth, w),
-                        )
-                    )
 
             if t is not None and r is not None and depth is not None:
                 w = depth - (t + r)
