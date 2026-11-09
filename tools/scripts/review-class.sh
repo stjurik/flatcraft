@@ -120,6 +120,7 @@ RULES=(
   'роль і демон A8|tools/scripts/a8-tick*'
   'роль і демон A8|tools/scripts/a8-pr-fence*'
   'роль і демон A8|tools/scripts/a8-ro-shell*'
+  'роль і демон A8|tools/scripts/a8-ssh-doors*'
   'роль і демон A8|tools/scripts/autorun*'
   'роль і демон A8|tools/scripts/check-ansible-a8*'
   # CI: робочі процеси GitHub і локальні хуки, що стоять перед ними.
