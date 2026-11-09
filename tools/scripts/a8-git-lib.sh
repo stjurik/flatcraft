@@ -104,7 +104,19 @@ git_identity() {
 snapshot_git() { git_snapshot="$(git_identity)"; }
 
 git_unsafe_reason() { # друкує причину, якщо .git головного клону довіряти не можна
-  local g="$A8_REPO_DIR/.git" f
+  local g="$A8_REPO_DIR/.git" f sym="" symrc=0
+  # Будь-який симлінк усередині .git (#302 A, рецензія #299). git на хості ПИШЕ
+  # за симлінком: fetch перезаписує ціль FETCH_HEAD і дописує рядок у ціль
+  # reflog (logs/…), а ціль може бути будь-яким файлом agent — last-results
+  # guard'а (обхід паузи «3 падіння поспіль»), STOP, authorized_keys. Сам git
+  # симлінків у .git не створює, тож легітимного симлінка тут немає. Пропускаємо
+  # лише файли loose-об'єктів (objects/xx/…): їх тисячі, а git пише туди через
+  # тимчасовий файл і rename, тож симлінк-файл там нічого не дасть; теки objects/xx,
+  # pack/ і info/ — перевіряємо. Жорсткі посилання сюди не лягають: щоб їх зробити,
+  # контейнер мусить бачити ціль, а журнали guard'а й ключі agent йому не змонтовано.
+  if [[ -d "$g" && ! -L "$g" ]]; then
+    sym="$(find "$g" -path "$g/objects/??/*" -prune -o -type l -print -quit 2>/dev/null)" || symrc=$?
+  fi
   if [[ -L "$g" || ! -d "$g" ]]; then
     echo ".git — не тека або симлінк"
   elif [[ -e "$g/commondir" || -L "$g/commondir" ]]; then
@@ -121,6 +133,10 @@ git_unsafe_reason() { # друкує причину, якщо .git головн�
     # gc --auto після fetch) пішов би за ним і стер теку-ціль (#292, відтворено
     # на git 2.43). Законні записи (теку створює `worktree add` тіку) не чіпаємо.
     echo ".git/worktrees/ містить симлінк — git worktree prune стер би теку-ціль"
+  elif ((symrc != 0)); then
+    echo ".git не вдалося обійти (find rc=$symrc) — симлінки всередині не перевірено"
+  elif [[ -n "$sym" ]]; then
+    echo ".git містить симлінк ${sym#"$g"/} — git на хості писав би за ним у чужий файл (#302)"
   elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
     echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
   else
@@ -162,3 +178,65 @@ hgit() {
     GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}" -C "$A8_REPO_DIR" "$@"
   fi
 }
+
+# ─── Неіндексоване поза правилами ігнору бази (#302 B, рецензія #299) ────────
+# Перевірка «дерево worktree == дерево коміту» (тік #294, a8-requeue) будує
+# дерево через `add -A`, а той бере правила ігнору З САМОГО worktree: вкладений
+# `.gitignore` з `*`, `.git/info/exclude` головного клону (записуваний з
+# контейнера), core.excludesFile. Агент кладе `sub/conftest.py` поруч із
+# `sub/.gitignore` → `add -A` його не бачить, дерево == $tip, а оракул файл
+# бачить і виконує (відтворено прогоном на git 2.43, рецензія #299 B).
+#
+# Тому неіндексоване рахуємо ще раз — з правилами, яких агент змінити не може:
+# з усіх `.gitignore` коміту, який дає викликач (тік — база задачі, requeue —
+# свіжий origin/main), без --exclude-standard (тобто без info/exclude,
+# core.excludesFile і `.gitignore` з диска). Правило вкладеного `.gitignore`
+# теки D переписується від кореня: шаблон без «/» усередині — `D/**/шаблон`
+# (діє на будь-якій глибині під D), з «/» — `D/шаблон` (від D), «!» лишається.
+
+# trusted_ignore_rules <коміт> <файл правил> — пише правила ігнору коміту у файл
+# (формат --exclude-from). Ненуль — не вдалося прочитати коміт (fail closed).
+trusted_ignore_rules() {
+  local c="$1" out="$2" p d
+  : >"$out" || return 1
+  if ! hgit ls-tree -r -z --name-only "$c" >"$out.ls"; then
+    rm -f "$out.ls"
+    return 1
+  fi
+  while IFS= read -r -d '' p; do
+    [[ "$p" == .gitignore || "$p" == */.gitignore ]] || continue
+    d=""
+    [[ "$p" == */* ]] && d="${p%/.gitignore}"
+    if ! hgit cat-file blob "$c:$p" >"$out.one"; then
+      rm -f "$out.ls" "$out.one"
+      return 1
+    fi
+    awk -v d="$d" '
+      { sub(/\r$/, "") }
+      /^[[:space:]]*$/ || /^#/ { next }
+      {
+        l = $0
+        while (l ~ / $/ && l !~ /\\ $/) sub(/ $/, "", l)
+        n = ""
+        if (substr(l, 1, 1) == "!") { n = "!"; l = substr(l, 2) }
+        if (d == "") { print n l; next }
+        core = l
+        sub(/\/$/, "", core)
+        if (index(core, "/") > 0) { sub(/^\//, "", l); print n d "/" l }
+        else print n d "/**/" l
+      }' "$out.one" >>"$out" || {
+      rm -f "$out.ls" "$out.one"
+      return 1
+    }
+  done <"$out.ls"
+  rm -f "$out.ls" "$out.one"
+}
+
+# untracked_outside_rules <worktree> <індекс> <файл правил> <файл виводу> — пише
+# (через NUL) неіндексовані файли worktree, яких не ігнорують правила з файла.
+# Індекс — той самий тимчасовий, де вже є read-tree + add -A: усе, що агент не
+# ховав, уже в ньому й сюди не потрапляє. Ненуль — git не відпрацював (fail closed).
+untracked_outside_rules() {
+  GIT_INDEX_FILE="$2" hgit --work-tree="$1" ls-files -o -z --exclude-from="$3" >"$4"
+}
+

@@ -71,7 +71,11 @@ ENV
   git clone -q "$ROOT/origin.git" "$ROOT/seed" 2>/dev/null
   # CLAUDE.md у базі — щоб було що перейменувати (сценарій 19c).
   echo contract >"$ROOT/seed/CLAUDE.md"
-  git -C "$ROOT/seed" add CLAUDE.md
+  # .gitignore у базі — правила, які перевірка чистоти визнає (#302 B): у корені
+  # і вкладений (tools/.gitignore), щоб доводилось і переписування від кореня.
+  printf 'node_modules/\n*.pyc\n' >"$ROOT/seed/.gitignore"
+  mkdir -p "$ROOT/seed/tools" && printf 'cache/\n' >"$ROOT/seed/tools/.gitignore"
+  git -C "$ROOT/seed" add CLAUDE.md .gitignore tools/.gitignore
   git -C "$ROOT/seed" -c user.email=t@t -c user.name=t commit -q -m init
   git -C "$ROOT/seed" push -q origin main
   git clone -q "$ROOT/origin.git" "$ROOT/repo"
@@ -181,6 +185,29 @@ case "${AGENT_MODE:-commit}" in
     git -C "$wt" add result.txt
     git -C "$wt" checkout -q --detach
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m c2
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  dirty-nested | dirty-exclude | dirty-scoped | clean-ignored)
+    # #302 B. Стартовий коміт, далі — файл, який `add -A` не бачить, бо його
+    # ховають правила самого агента: вкладений .gitignore з «*» (dirty-nested)
+    # чи рядок у .git/info/exclude головного клону (dirty-exclude). Дерево $wt
+    # тоді == $tip, а оракул файл бачить. clean-ignored — контроль: те, що
+    # ігнорує БАЗА (node_modules/, *.pyc, вкладене tools/cache/), не робить
+    # дерево брудним.
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m start
+    case "${AGENT_MODE:-}" in
+      dirty-nested)
+        mkdir -p "$wt/sub" && printf '*\n' >"$wt/sub/.gitignore" && echo evil >"$wt/sub/conftest.py" ;;
+      dirty-exclude)
+        mkdir -p "$REPO/.git/info" && echo evil >"$wt/evil.py" && echo evil.py >>"$REPO/.git/info/exclude" ;;
+      dirty-scoped)
+        # Правило вкладеного tools/.gitignore («cache/») діє лише під tools/: файл у
+        # other/cache/ воно не ховає, хоч агент і сховав його своїм info/exclude.
+        mkdir -p "$REPO/.git/info" "$wt/other/cache" && echo evil >"$wt/other/cache/evil.py" &&
+          echo other/ >>"$REPO/.git/info/exclude" ;;
+      clean-ignored)
+        mkdir -p "$wt/node_modules/p" "$wt/x/__pycache__" "$wt/tools/a/cache"
+        echo 1 >"$wt/node_modules/p/i.js" && echo 1 >"$wt/x/__pycache__/m.pyc" && echo 1 >"$wt/tools/a/cache/c" ;;
+    esac
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
   stopafter)
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
@@ -336,6 +363,20 @@ body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest(
         mkdir -p "$REPO/.git/worktrees" "$TMPR/victim"
         echo CANARY >"$TMPR/victim/canary"
         ln -s "$TMPR/victim" "$REPO/.git/worktrees/evil" ;;
+      evil-fetchhead | evil-reflog)
+        # #302 A: симлінк у .git на файл, який agent на хості може писати
+        # (last-results guard'а). fetch тіку на хості пише за симлінком: FETCH_HEAD
+        # перезаписує ціль, reflog origin/main дописує в неї рядок (виміряно на
+        # git 2.43, рецензія #299). Так обходилась пауза «3 падіння поспіль».
+        ci --allow-empty -m work
+        if [[ "$AGENT_MODE" == evil-fetchhead ]]; then
+          rm -f "$REPO/.git/FETCH_HEAD"
+          ln -s "$TMPR/logs/last-results" "$REPO/.git/FETCH_HEAD"
+        else
+          l="$REPO/.git/logs/refs/remotes/origin/main"
+          mkdir -p "${l%/*}" && rm -f "$l"
+          ln -s "$TMPR/logs/last-results" "$l"
+        fi ;;
       evil-alternates)
         ci --allow-empty -m work
         mkdir -p "$TMPR/alt/objects"
@@ -1551,6 +1592,33 @@ EOF
     bad "23t wtentry: маркери [$(pwned)]; канарка $([[ -f "$ROOT/victim/canary" ]] && echo ціла || echo СТЕРТА); r1=$r1"
   teardown
 
+  # 23u–23v. Симлінк у .git на last-results guard'а (#302 A): FETCH_HEAD і reflog
+  # origin/main. Задача a — failed з поясненням ще до будь-якого git після
+  # контейнера; задача b на наступному тіку — теж (fetch не стартує). last-results
+  # не усічено й не дописано чужим рядком: у ньому лише справжні «failed» тіку.
+  for m in fetchhead reflog; do
+    PUSH_KIND=token_file setup
+    printf 'ok\nok\n' >"$LOGS/last-results"
+    enqueue 001-a "$(valid a)"
+    enqueue 002-b "$(valid b)"
+    AGENT_MODE="evil-$m" tick
+    r1="$(last)"
+    # origin/main іде вперед — тоді fetch наступного тіку справді пише і
+    # FETCH_HEAD, і рядок reflog (без нового коміту reflog не пишеться).
+    og="$ROOT/origin.git"
+    nc="$(git --git-dir="$og" -c user.email=o@o -c user.name=o commit-tree "$(git --git-dir="$og" rev-parse 'main^{tree}')" -p main -m advance)"
+    git --git-dir="$og" update-ref refs/heads/main "$nc"
+    AGENT_MODE=commit tick
+    lr="$(tr '\n' ' ' <"$LOGS/last-results" 2>/dev/null)"
+    if [[ "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"небезпечний .git: .git містить симлінк"* &&
+      "$(jl .result)" == failed && "$(jl .detail)" == *"симлінк"* && "$lr" == "ok ok failed failed " ]] && ! on_origin a && ! on_origin b; then
+      ok "23$([[ $m == fetchhead ]] && echo u || echo v): симлінк .git/$([[ $m == fetchhead ]] && echo FETCH_HEAD || echo logs/…/origin/main) → last-results → обидві задачі failed, last-results цілий"
+    else
+      bad "23 $m: r1=$r1; last=$(last); last-results=[$lr]"
+    fi
+    teardown
+  done
+
   # 23p. Таймаут + контейнер не зупинився (docker kill не вбив): тік НЕ кличе git,
   # а робить fail closed зі STOP (рецензія #290, п.3). Інакше живий контейнер —
   # вікно гонки над .git між перевіркою hgit і самим git.
@@ -1597,6 +1665,34 @@ EOF
     "$(jl .oracle_rc)" == "-" && -f "$ROOT/wt/a/result.txt" ]] && ! on_origin a &&
     ok "23r: незакомічена робота (M+??) → failed «незакомічені зміни», оракул не біг, нічого не запушено, \$wt цілий" ||
     bad "23r dirty: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+  teardown
+
+  # 23w–23x, 23z. #302 B: файл, захований правилами ігнору агента (вкладений
+  # .gitignore з «*», .git/info/exclude головного клону; 23z — правило вкладеного
+  # tools/.gitignore базі не дає ховати файл поза tools/). Дерево $wt == $tip,
+  # оракул файл бачить (`test -f`). Перевірка з правилами БАЗИ ловить: failed,
+  # оракул не біг, нічого не запушено. На main обидва йшли б у push.
+  for m in nested:sub/conftest.py exclude:evil.py scoped:other/cache/evil.py; do
+    PUSH_KIND=token_file setup
+    enqueue 001-a "$(with_oracle a "test -f ${m#*:}")"
+    AGENT_MODE="dirty-${m%%:*}" tick
+    if [[ "$(jl .result)" == failed && "$(jl .detail)" == *"неіндексовані файли поза правилами ігнору бази"* &&
+      "$(jl .detail)" == *"${m#*:}"* && "$(jl .oracle_rc)" == "-" ]] && ! on_origin a; then
+      ok "23$(case ${m%%:*} in nested) echo w ;; exclude) echo x ;; *) echo z ;; esac): ${m#*:} під правилом ігнору агента (${m%%:*}) → failed, оракул не біг, нічого не запушено"
+    else
+      bad "23 dirty-${m%%:*}: $(last)"
+    fi
+    teardown
+  done
+
+  # 23y. Контроль до 23w–x: ігнороване БАЗОЮ (node_modules/, *.pyc, вкладене
+  # tools/.gitignore → tools/**/cache/) не робить дерево брудним — задачу запушено.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=clean-ignored tick
+  [[ "$(jl .detail)" == pushed ]] && on_origin a &&
+    ok "23y: ігнороване правилами бази (node_modules/, *.pyc, tools/**/cache/) — не бруд, задачу запушено" ||
+    bad "23y clean-ignored: $(last)"
   teardown
 
   # 23s. #294 / контрприклад 1б: коміт на відокремленому HEAD — `status` порожній,
@@ -1801,6 +1897,11 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   # Після контейнера git не працює в "$wt".
   mutate "push з worktree" 's/      hgit push --receive-pack=git-receive-pack origin "\$tip:refs\/heads\/\$branch"/      git -C "\$wt" push origin "\$tip:refs\/heads\/\$branch"/'
   mutate "diff backstop'а з worktree" 's/changed="\$\(hgit diff -z/changed="\$(git --no-replace-objects -C "\$wt" diff -z/'
+  # #302 A — будь-який симлінк у .git; #302 B — неіндексоване з правилами бази.
+  mutate "симлінки в .git не перевіряються" 's/  elif \[\[ -n "\$sym" \]\]; then\n    echo "\.git містить симлінк[^\n]*\n//' lib
+  mutate "неіндексоване поза правилами бази не валить задачу" 's/if \[\[ -s "\$cleanextra" \]\]; then/if false; then/'
+  mutate "перелік неіндексованого з правилами агента (--exclude-standard)" 's/ls-files -o -z --exclude-from="\$3"/ls-files -o -z --exclude-standard/' lib
+  mutate "правила вкладеного .gitignore не від кореня" 's/else print n d "\/\*\*\/" l/else print n l/' lib
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"

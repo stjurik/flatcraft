@@ -652,26 +652,48 @@ fi
 # недостатній: він порівнює з HEAD/індексом самого worktree, які агент міг
 # зсунути (відокремлений HEAD, --assume-unchanged); ми ж звіряємо саме з $tip.
 #
+#
+# Але `add -A` бере правила ігнору з самого $wt і з .git/info/exclude — їх агент
+# пише сам (#302 B): `sub/conftest.py` під `sub/.gitignore` з `*` дерево не
+# міняє, а оракул файл бачить і виконує. Тому ще й неіндексоване з правилами
+# .gitignore БАЗИ задачі ($base — origin/main при створенні worktree; агент його
+# не змінить): файл, якого база не ігнорує й якого немає в $tip, — не в $tip.
+#
 # $wt НЕ чіпаємо — брудне дерево лишається доказом для людини (як release_or_keep).
 cleanidx="$A8_LOGS_DIR/tasks/$id.cleanidx"
-rm -f "$cleanidx"
+cleanrules="$A8_LOGS_DIR/tasks/$id.ignore"
+cleanextra="$A8_LOGS_DIR/tasks/$id.untracked"
+rm -f "$cleanidx" "$cleanrules" "$cleanextra"
 wttree=""
 if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$tip" >>"$log" 2>&1 &&
   GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >>"$log" 2>&1; then
   wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>>"$log")"
 fi
-rm -f "$cleanidx"
+if [[ -n "$wttree" ]] && ! { trusted_ignore_rules "$base" "$cleanrules" 2>>"$log" &&
+  untracked_outside_rules "$wt" "$cleanidx" "$cleanrules" "$cleanextra" 2>>"$log"; }; then
+  wttree=""
+fi
+rm -f "$cleanidx" "$cleanrules"
 if [[ -z "$wttree" ]]; then
-  # Побудувати дерево не вдалось (hgit відмовив на небезпечному .git, read-tree
-  # чи write-tree упали) — fail closed, не пускаємо непевне до push.
+  # Побудувати дерево чи перелік не вдалось (hgit відмовив на небезпечному .git,
+  # read-tree, write-tree чи ls-files упали) — fail closed, не пускаємо непевне до push.
+  rm -f "$cleanextra"
   fail_task "clean-tree: не вдалось побудувати дерево $wt"
   exit 0
 fi
 if [[ "$wttree" != "$(hgit rev-parse --verify --quiet "$tip^{commit}^{tree}")" ]]; then
+  rm -f "$cleanextra"
   dirty="$(hgit diff-tree -r --name-only --no-commit-id "$tip" "$wttree" 2>>"$log" | LC_ALL=C sort | tr '\n' ' ')"
   fail_task "незакомічені зміни агента: ${dirty% }"
   exit 0
 fi
+if [[ -s "$cleanextra" ]]; then
+  dirty="$(tr '\0' '\n' <"$cleanextra" | LC_ALL=C sort | head -n 10 | tr '\n' ' ')"
+  rm -f "$cleanextra"
+  fail_task "неіндексовані файли поза правилами ігнору бази (вкладений .gitignore чи .git/info/exclude агента): ${dirty% }"
+  exit 0
+fi
+rm -f "$cleanextra"
 
 # ─── 6a. Backstop заборонених шляхів — до оракула і push ──────────────────
 # CLAUDE.md §6.1 обіцяє для A8 «deny-правила + backstop-скрипт». Deny-правила
