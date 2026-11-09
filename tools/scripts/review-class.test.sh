@@ -63,6 +63,8 @@ done <<'EOF'
 роль і демон A8|infra/ansible/a8.yml
 роль і демон A8|infra/ansible/roles/a8/tasks/main.yml
 роль і демон A8|tools/scripts/a8-manual-state.sh
+роль і демон A8|tools/scripts/a8-git-lib.sh
+роль і демон A8|tools/scripts/a8-git-lib.test.sh
 роль і демон A8|tools/scripts/a8-tick-logic.sh
 роль і демон A8|tools/scripts/a8-pr-fence.sh
 роль і демон A8|tools/scripts/autorun.sh
