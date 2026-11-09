@@ -1,20 +1,10 @@
-import {
-  Button,
-  FileDown,
-  Gift,
-  Github,
-  Heart,
-  LayoutGrid,
-  Sliders,
-  type LucideIcon,
-} from "@flatcraft/ui";
+import { Button, FileDown, Gift, Heart, LayoutGrid, Sliders, type LucideIcon } from "@flatcraft/ui";
 import Link from "next/link";
 
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import { HeroLoopDemoLazy } from "./hero-loop-demo-lazy";
 
-const GITHUB_URL = "https://github.com/stjurik/flatcraft";
 const UNITED24_URL = "https://u24.gov.ua/";
 
 interface HomeContentProps {
@@ -146,11 +136,6 @@ function TrustRow({ dict }: { dict: HomeDict }) {
       icon: Heart,
       text: dict.trustDonate,
       link: { label: dict.trustDonateLink, href: UNITED24_URL },
-    },
-    {
-      icon: Github,
-      text: dict.trustOpenSource,
-      link: { label: dict.trustGithubLink, href: GITHUB_URL },
     },
   ];
 
