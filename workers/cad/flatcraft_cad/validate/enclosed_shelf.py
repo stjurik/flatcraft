@@ -26,8 +26,11 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
+
+from .types import _parsed_float
 
 _AXIS_LABEL = {
     "pitch_x_mm": "Крок X",
@@ -49,14 +52,14 @@ def _fmt(n: float) -> str:
 
 
 def _as_float(value: Any) -> float | None:
-    """`bool` — НЕ число тут (паритет з `validate/types.py::_parsed_float`:
-    `sanitize_for_gates` уже нейтралізує нечислові значення до `None`, це —
-    додатковий захист для прямих викликів повз гейт типів)."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
+    """Число для правил гейта або `None`. Той самий контракт, що й
+    `validate/types.py::_parsed_float`: `bool` — не число, рядок-число ("10") —
+    число. Рядок лишається рядком, якщо Pydantic у `_params_with_defaults`
+    (server.py) провалилась з іншої причини — як у `perforation.py` (#274);
+    без цього гейт сліпнув на всіх правилах (контрприклад Argon, PR #314).
+    Не скінченне — `None`: його ловить гейт типів."""
+    f = _parsed_float(value)
+    return f if f is not None and math.isfinite(f) else None
 
 
 def _rib_msg(h: float, tr: float, t: float, r: float) -> str:

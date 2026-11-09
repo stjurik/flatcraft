@@ -104,6 +104,25 @@ class TestEnclosedShelfGateUnit:
             (e.code, e.field) for e in errs
         }
 
+    def test_рядки_числа_не_сліплять_гейт(self) -> None:
+        # Pydantic у _params_with_defaults впала з іншої причини → рядки-числа
+        # лишаються рядками; гейт усе одно бачить усі правила (контрприклад
+        # Argon, PR #314; паритет із perforation.py, #274).
+        side = {"hole_size_mm": "10", "pitch_x_mm": "10", "pitch_y_mm": "10", "margin_mm": "48"}
+        params = {
+            "depth_mm": 100,
+            "bend_radius_mm": "2.5",
+            "side_perforation": side,
+            "stiffening_rib": {"height_mm": "5"},
+        }
+        codes = {(e.code, e.field) for e in validate_enclosed_shelf("enclosed_shelf", params, 2.5)}
+        assert {
+            ("FLANGE_TOO_SHORT", "stiffening_rib.height_mm"),
+            ("HOLES_OVERLAP", "side_perforation.pitch_x_mm"),
+            ("HOLES_OVERLAP", "side_perforation.pitch_y_mm"),
+            ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm"),
+        } <= codes, codes
+
     def test_перфорація_не_вміщається_margin(self) -> None:
         # d=100, t=2, r=2.5 → w=95.5; margin=48 → 2*48=96 > 95.5.
         errs = validate_enclosed_shelf(
@@ -269,4 +288,15 @@ class TestEnclosedShelfGateServer:
         )
         assert status == 422
         assert ("INVALID_PARAMETER_TYPE", "side_perforation.hole_size_mm") in codes, codes
+        assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm") in codes, codes
+
+    def test_рядки_числа_і_інше_зіпсоване_поле_через_export(self) -> None:
+        # width_mm 200 < 300 валить Pydantic → сирі parameters з рядками; гейт
+        # усе одно дає структуровані помилки, а не лише текст invalid_parameters.
+        side = {"hole_size_mm": "10", "pitch_x_mm": "10", "pitch_y_mm": "10", "margin_mm": "48"}
+        status, codes = self._export(
+            {"width_mm": 200, "depth_mm": 100, "side_perforation": side}, 2.5
+        )
+        assert status == 422
+        assert ("HOLES_OVERLAP", "side_perforation.pitch_x_mm") in codes, codes
         assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm") in codes, codes
