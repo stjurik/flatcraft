@@ -1348,3 +1348,51 @@
       Ключ розгортання адміністратором НЕ є, тож захист main на нього діє;
       токен, що працює іменем адміністратора, — інша річ (вимір №7).
   when: a8_v_push_kind != 'none'
+
+# ─── V25. Ручні правки A8 — такі, як описано (#306) ────────────────────────
+# Роль sshd і ufw свідомо не чіпає (main.yml, шапка), тож частина стану A8 —
+# ручна. Конфігурація, якої немає в git, не існує (CLAUDE.md §0 п.5): тут
+# машина звіряється з описом, лише читанням. ufw — docs/19 §B.3 (увімкнено,
+# deny incoming, жодного дозволу з Anywhere без прив'язки до інтерфейсу);
+# docker.service.d/ufw-reload.conf і блок DOCKER-USER в after.rules — README
+# ролі. sshd — V22 (a8-ssh-doors.sh, PR #305). 99-a8.conf опису не має: лише
+# `a8-manual-state.sh inventory` (docs/19 §B.7).
+- name: V25a — checksum of the installed manual-state check
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/a8-manual-state.sh
+    checksum_algorithm: sha256
+  register: a8_v_ms
+
+- name: V25b — checksum of the same check in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/a8-manual-state.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_ms_repo
+
+- name: V25c — run the manual-state check (read-only)
+  ansible.builtin.command:
+    argv: [/usr/local/lib/a8/a8-manual-state.sh, check]
+  register: a8_v_manual
+  changed_when: false
+  failed_when: false
+  when: a8_v_ms.stat.exists
+
+- name: V25d — manual state of A8 matches its description
+  ansible.builtin.assert:
+    that:
+      - a8_v_ms.stat.exists
+      - a8_v_ms.stat.checksum == a8_v_ms_repo.stat.checksum
+      - a8_v_ms.stat.pw_name == 'root'
+      - not a8_v_ms.stat.woth
+      - not a8_v_ms.stat.wgrp
+      - a8_v_manual.rc == 0
+    fail_msg: >-
+      /usr/local/lib/a8/a8-manual-state.sh: exists={{ a8_v_ms.stat.exists }},
+      sha256 A8={{ a8_v_ms.stat.checksum | default('—') }} repo={{ a8_v_ms_repo.stat.checksum }};
+      check rc={{ a8_v_manual.rc | default('—') }}: {{ a8_v_manual.stdout | default('') }}
+      {{ a8_v_manual.stderr | default('') }} — розбіжність: оновити опис (docs/19 §B.7) або машину,
+      повний стан — `sudo /usr/local/lib/a8/a8-manual-state.sh inventory`
+    success_msg: "{{ a8_v_manual.stdout | default('') }}"
+    quiet: true

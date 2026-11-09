@@ -733,6 +733,17 @@
     group: root
     mode: "0755"
 
+- name: Install the manual-state check for verify
+  # a8-manual-state.sh (#306) — ручні правки A8, яких роль свідомо не робить (ufw,
+  # docker.service.d/ufw-reload.conf, блок DOCKER-USER в after.rules), проти їхнього
+  # опису в docs/19 і README; лише читання. V25 кличе саме цю копію і звіряє суму.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-manual-state.sh"
+    dest: /usr/local/lib/a8/a8-manual-state.sh
+    owner: root
+    group: root
+    mode: "0755"
+
 # ─── 15. Доказова частина — окремим тегом, не при кожному застосуванні ─────
 - name: Run verification assertions
   # `apply:` обов'язковий. include_tasks — динамічний: теги на самому рядку

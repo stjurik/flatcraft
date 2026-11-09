@@ -288,6 +288,32 @@ sudo timedatectl set-timezone Europe/Kyiv
 timedatectl                      # Очікувано: Time zone: Europe/Kyiv, NTP synchronized: yes
 ```
 
+### B.7. Ручний стан A8 — реєстр (додано 2026-11-09, #306)
+
+Частину стану A8 роль свідомо не чіпає: помилка в sshd чи ufw на машині без консолі
+коштує доступу. Але конфігурація, якої немає в git, не існує (CLAUDE.md §0 п.5): 2026-11-07
+двері `a8-ctl` зачинив ручний `AllowUsers yurii`, про який не знали ні роль, ні цей
+документ. Тому кожна ручна правка — рядок тут і зонд `--tags verify`, що читає **машину**.
+
+| Що                                      | Опис (джерело)                                                                               | Зонд verify                                                                                                                                                                                          |
+| --------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sshd: `AllowUsers`, `99-hardening.conf` | §B.2                                                                                         | V22j–k, `a8-ssh-doors.sh` (PR #305): паролі й keyboard-interactive вимкнено, root не входить, адмін і `agent` проходять `AllowUsers`                                                                 |
+| ufw: правила й дефолти                  | §B.3: увімкнено, deny incoming, allow outgoing, вхідне — лише з LAN                          | V25, `a8-manual-state.sh check`: увімкнено, дефолти, жодного `ALLOW/LIMIT IN` з `Anywhere` без `on <інтерфейс>`. Дозволи з адреси чи інтерфейсу друкуються в рядку ✓ — адрес у репозиторії не пишемо |
+| `docker.service.d/ufw-reload.conf`      | README ролі (знайдено read-only 2026-09-18): `ufw reload` після кожного старту docker        | V25: файл є, `ExecStartPost=… ufw reload`                                                                                                                                                            |
+| ланцюг `DOCKER-USER`                    | README ролі: блок `# BEGIN A8 DOCKER-USER` в `/etc/ufw/after.rules` з `:DOCKER-USER - [0:0]` | V25: блок і рядок на місці                                                                                                                                                                           |
+| `99-a8.conf` (sysctl чи journald, #284) | **опису немає**                                                                              | немає — лише `inventory`; після звірки — рядок тут і зонд                                                                                                                                            |
+
+**Звірка (крок yurii, лише читання):**
+
+```bash
+sudo /usr/local/lib/a8/a8-manual-state.sh inventory > ~/a8-manual-$(date +%F).txt
+```
+
+Дамп містить `ufw status verbose`, блок A8 з `after.rules`, усі `docker.service.d/*`, усі
+`sshd_config.d/*` і `sshd -T`, кожен `99-a8.conf`, а також `sysctl.d` і `journald.conf.d`.
+Усе, чого немає в таблиці вище, — або в таблицю (з описом і зондом), або з машини.
+Розбіжність з описом verify показує рядком `✗` (V25d) — правиться опис або машина, не зонд.
+
 ### ✅ Checkpoint B
 
 ```bash

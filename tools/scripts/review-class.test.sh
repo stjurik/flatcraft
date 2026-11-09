@@ -62,6 +62,7 @@ done <<'EOF'
 дозволи й безпека|apps/api/src/routes/auth.ts
 роль і демон A8|infra/ansible/a8.yml
 роль і демон A8|infra/ansible/roles/a8/tasks/main.yml
+роль і демон A8|tools/scripts/a8-manual-state.sh
 роль і демон A8|tools/scripts/a8-tick-logic.sh
 роль і демон A8|tools/scripts/a8-pr-fence.sh
 роль і демон A8|tools/scripts/autorun.sh
