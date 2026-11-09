@@ -1111,16 +1111,42 @@ if role_installs a8-tick.sh.j2; then
     done < <(code_grep "$cc" '-C[[:space:]]+"?[$][{]?wt([^A-Za-z0-9_]|$)')
   done
 
-  # 16b (yml) — git на хості в задачах ролі: список argv, що починається з голого
-  # `git`, іде повз hgit (рецензія #299: V18d так прибирав worktree). git у
-  # контейнері запускається через a8-run-agent і сюди не потрапляє.
+  # 16b (yml) — git на хості в задачах ролі йде повз hgit (рецензія #299: V18d так
+  # прибирав worktree). Блок задачі (після strip_comments), що запускає команду на
+  # хості (command/shell/raw/script/cmd/argv) чи модуль git, не має містити слова
+  # `git` як команди в жодній формі: багаторядковий `argv:` з `- git`, `argv: [git,
+  # …]`, `shell: git …`, `sudo -u agent git …`, `/usr/bin/git` (#302 E). Слово —
+  # токен між пробілами, лапками, дужками, комами й ;&|, взятий з basename: так
+  # `.git/config`, `a8-git-lib.sh`, `hgit`, `GIT_*` не рахуються. git у контейнері
+  # (через a8-run-agent чи docker run/exec) — виняток: це робота агента, не хоста.
   for tf in "$TASKS"/*.yml; do
     [[ -f "$tf" ]] || continue
     while IFS= read -r hit; do
       [[ -z "$hit" ]] && continue
-      violations+=("задачі ролі: git на хості поза hgit (argv починається з git, #291): ${tf#"$ROOT"/}:$hit")
-    done < <(awk '/argv:[[:space:]]*$/ { a = FNR; next }
-      a && FNR == a + 1 { if ($0 ~ /^[[:space:]]*-[[:space:]]+git[[:space:]]*$/) print FNR; a = 0 }' "$tf")
+      violations+=("задачі ролі: git на хості поза hgit (#291, #302 E): ${tf#"$ROOT"/}:$hit")
+    done < <(strip_comments "$tf" | awk -F'\t' '
+      function flush(   n, i, t, toks) {
+        if (blk != "" && (runs || gitmod) && !incont) {
+          if (gitmod) print gitline ": модуль git"
+          n = split(code, toks, /[[:space:]"'"'"'\[\],;&|(){}=]+/)
+          for (i = 1; i <= n; i++) {
+            t = toks[i]; sub(/.*\//, "", t)
+            if (t == "git") { print first ": " substr(firstcode, 1, 80); break }
+          }
+        }
+        blk = ""; code = ""; runs = 0; gitmod = 0; incont = 0; first = ""; firstcode = ""
+      }
+      { ln = $1; c = $2 }
+      # Межа задачі — `- name:` на будь-якому рівні (вкладені задачі block/always
+      # — окремо) або `- ` у колонці 0; елементи argv (`- …` без name:) — ні.
+      c ~ /^[[:space:]]*- name:/ || c ~ /^- / { flush() }
+      { blk = blk c "\n" }
+      c ~ /^[[:space:]]*-?[[:space:]]*name:/ { next }
+      c ~ /(ansible\.builtin\.)?(command|shell|raw|script):|[[:space:]](cmd|argv):/ { runs = 1 }
+      c ~ /^[[:space:]]*(ansible\.builtin\.)?git:[[:space:]]*$/ { gitmod = 1; gitline = ln }
+      c ~ /a8-run-agent|docker[[:space:]]+(run|exec)/ { incont = 1 }
+      { code = code " " c; if (c ~ /(^|[^A-Za-z0-9_.\/-])(\/[^[:space:]]*\/)?git([^A-Za-z0-9_.-]|$)/ && first == "") { first = ln; firstcode = c } }
+      END { flush() }')
   done
 
   # 16c — fetch/push: програму на тому боці задає опція, не конфіг. Фетчать тік
@@ -1148,6 +1174,53 @@ if role_installs a8-tick.sh.j2; then
   done
 fi
 
+# Інваріант 18 — кожен скрипт, який роль ставить на хост з tools/scripts, —
+# у backstop'і заборонених шляхів (#302 D, рецензія #299).
+#
+# ЧОМУ. a8-git-lib.sh (обгортка git на хості) лежав у tools/scripts, поза
+# check-forbidden-paths.sh (там `^infra`), тож агент міг змінити межу, що його
+# стримує, у власному PR. Тепер backstop забороняє a8-* і сам себе; цей
+# інваріант не дає новому скрипту ролі вислизнути: кожне `src: …/tools/scripts/X`
+# у задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати
+# exit 1 у check-forbidden-paths.sh.
+FORBIDDEN_SH="$ROOT/tools/scripts/check-forbidden-paths.sh"
+role_scripts=""
+if [[ -d "$TASKS" ]]; then
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    role_scripts+="$(strip_comments "$tf" | cut -f2- | awk '
+      function flush(   i, n, it) {
+        if (src != "") {
+          if (src ~ /\{\{ *item *\}\}/) {
+            n = split(items, it, "\n")
+            for (i = 1; i <= n; i++) if (it[i] != "") { s = src; sub(/\{\{ *item *\}\}/, it[i], s); print s }
+          } else print src
+        }
+        src = ""; items = ""; inloop = 0
+      }
+      /^- / { flush() }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\/scripts\// {
+        s = $0; sub(/.*tools\/scripts\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/scripts/" s
+      }
+      /^[[:space:]]*loop:[[:space:]]*$/ { inloop = 1; next }
+      inloop && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- */, "", v); items = items v "\n"; next }
+      inloop { inloop = 0 }
+      END { flush() }')"$'\n'
+  done
+fi
+if [[ -n "${role_scripts//[[:space:]]/}" ]]; then
+  if [[ ! -f "$FORBIDDEN_SH" ]]; then
+    violations+=("роль ставить скрипти з tools/scripts, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
+  else
+    while IFS= read -r rs; do
+      [[ -z "$rs" ]] && continue
+      if bash "$FORBIDDEN_SH" <<<"$rs" >/dev/null 2>&1; then
+        violations+=("роль ставить $rs на хост, а check-forbidden-paths.sh його не забороняє — агент змінив би цю межу у своєму PR (#302 D)")
+      fi
+    done < <(sort -u <<<"$role_scripts")
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -1158,4 +1231,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home)"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home), кожен скрипт ролі з tools/scripts — у backstop'і заборонених шляхів"

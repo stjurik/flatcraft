@@ -1183,6 +1183,8 @@ cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
 cp "$REPO/tools/scripts/a8-git-lib.sh" "$mut/tools/scripts/a8-git-lib.sh"
 cp "$REPO/tools/scripts/a8-requeue.sh" "$mut/tools/scripts/a8-requeue.sh"
 cp "$REPO/tools/scripts/a8-queue.sh" "$mut/tools/scripts/a8-queue.sh"
+# Backstop заборонених шляхів (інваріант 18, #302 D): скрипти ролі мусять бути в ньому.
+cp "$REPO/tools/scripts/check-forbidden-paths.sh" "$mut/tools/scripts/check-forbidden-paths.sh"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -1713,6 +1715,32 @@ PY2
 assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
+# Мутації 39c–d — інваріант 18 (#302 D): backstop без шаблону a8-*; роль ставить
+# на хост новий скрипт з tools/scripts, якого backstop не знає.
+FPS_T="tools/scripts/check-forbidden-paths.sh"
+python3 - "$mut/$FPS_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "  '^tools/scripts/a8-[^/]*$'\n"
+assert s.count(old) == 1, "фікстура застаріла: шаблон a8-* у backstop'і виглядає інакше"
+open(p, "w").write(s.replace(old, "", 1))
+PY2
+# Порушень кілька (по одному на скрипт ролі) — тож код і назву перевіряємо окремо.
+assert_exit "мутація 39c: backstop без tools/scripts/a8-* → 1" 1 "$mut"
+grep -qF "роль ставить tools/scripts/a8-git-lib.sh на хост, а check-forbidden-paths.sh його не забороняє" "$tmproot/out" ||
+  { echo "✗ мутація 39c: порушення не називає a8-git-lib.sh"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$FPS_T" "$mut/$FPS_T"
+cat >>"$mut/$TASKS_M" <<'YML'
+
+- name: Install a new host helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/host-helper.sh"
+    dest: /usr/local/lib/a8/host-helper.sh
+    mode: "0755"
+YML
+assert_exit "мутація 39d: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
 # Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).
 # Кожна ламає один захист чинної ролі; скрипт мусить назвати саме його.
 RUN_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
@@ -1790,7 +1818,32 @@ mut16 "V18d знову голим git на хості" "infra/ansible/roles/a8/t
           - remove
           - --force
           - "{{ a8_worktrees_dir }}/verify-cad"' \
-  "git на хості поза hgit (argv починається з git"
+  "git на хості поза hgit (#291, #302 E)"
+# 16b (yml), #302 E — інші форми голого git у задачах ролі: shell-рядок, flow-список
+# argv, sudo перед git, повний шлях, модуль ansible.builtin.git.
+V18D_TAIL='      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env'
+V18D_OK="      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+$V18D_TAIL"
+mut16 "V18d: shell: git …" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        git -C {{ a8_repo_dir }} worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: argv: [git, …]" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        argv: [git, -C, "{{ a8_repo_dir }}", worktree, prune]
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: sudo -u agent git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        sudo -u agent git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: /usr/bin/git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        cmd: /usr/bin/git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: модуль ansible.builtin.git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.git:
+        repo: "{{ a8_repo_dir }}"
+        dest: /tmp/x
+'"$V18D_TAIL" "модуль git"
 mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$GIT_LIB_T" '    GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '    git "${HGIT_SAFE[@]}"' \
   "git без GIT_NO_REPLACE_OBJECTS=1"
 

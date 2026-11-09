@@ -221,6 +221,17 @@ if grep 'worktree prune' "$CALLS" | grep -qv -- '--dry-run'; then
 else
   ok "prune лише --dry-run — звіт лишається на читання"
 fi
+# #302 F: git на A8 — лише через hgit під flock -n tick.lock, жодного голого git.
+if grep -E '(^|[^h])git -C' "$CALLS" >/dev/null; then
+  bad "звіт кличе голий git на A8 (повз hgit): $(grep -E '(^|[^h])git -C' "$CALLS" | head -1)"
+else
+  ok "звіт не кличе голого git на A8"
+fi
+n_git="$(grep -c 'hgit ' "$CALLS")"
+n_locked="$(grep 'hgit ' "$CALLS" | grep -c 'flock -n /home/agent/agent-logs/tick.lock')"
+[[ "$n_git" == 3 && "$n_locked" == 3 ]] &&
+  ok "усі 3 виклики git — через hgit під flock -n tick.lock" ||
+  bad "git через hgit: $n_git, під tick.lock: $n_locked (очікував 3 і 3)"
 teardown
 
 # ─── 12. Розмір worktree рахує agent, а не той, хто зайшов по ssh ─────────
