@@ -1690,6 +1690,32 @@ grep -qF "жодна задача ролі не ставить docker-prune.serv
   { echo "✗ мутація 37: немає порушення «жодна задача ролі не ставить docker-prune.service»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
+# Мутації 37a–b — інваріант 18 (#302 D): backstop без шаблону a8-*; роль ставить
+# на хост новий скрипт з tools/scripts, якого backstop не знає.
+FPS_T="tools/scripts/check-forbidden-paths.sh"
+python3 - "$mut/$FPS_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "  '^tools/scripts/a8-[^/]*$'\n"
+assert s.count(old) == 1, "фікстура застаріла: шаблон a8-* у backstop'і виглядає інакше"
+open(p, "w").write(s.replace(old, "", 1))
+PY2
+# Порушень кілька (по одному на скрипт ролі) — тож код і назву перевіряємо окремо.
+assert_exit "мутація 37a/інв.18: backstop без tools/scripts/a8-* → 1" 1 "$mut"
+grep -qF "роль ставить tools/scripts/a8-git-lib.sh на хост, а check-forbidden-paths.sh його не забороняє" "$tmproot/out" ||
+  { echo "✗ мутація 37a/інв.18: порушення не називає a8-git-lib.sh"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$FPS_T" "$mut/$FPS_T"
+cat >>"$mut/$TASKS_M" <<'YML'
+
+- name: Install a new host helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/host-helper.sh"
+    dest: /usr/local/lib/a8/host-helper.sh
+    mode: "0755"
+YML
+assert_exit "мутація 37b/інв.18: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
 # Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
 # 38: ключ без restrict — pty і forwarding.
 python3 - "$mut/$TASKS_M" <<'PY2'
@@ -1713,32 +1739,6 @@ s = s.replace(anchor, "line: 'restrict ", 1)
 open(p, "w").write(s)
 PY2
 assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
-cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
-
-# Мутації 39c–d — інваріант 18 (#302 D): backstop без шаблону a8-*; роль ставить
-# на хост новий скрипт з tools/scripts, якого backstop не знає.
-FPS_T="tools/scripts/check-forbidden-paths.sh"
-python3 - "$mut/$FPS_T" <<'PY2'
-import sys
-p = sys.argv[1]; s = open(p).read()
-old = "  '^tools/scripts/a8-[^/]*$'\n"
-assert s.count(old) == 1, "фікстура застаріла: шаблон a8-* у backstop'і виглядає інакше"
-open(p, "w").write(s.replace(old, "", 1))
-PY2
-# Порушень кілька (по одному на скрипт ролі) — тож код і назву перевіряємо окремо.
-assert_exit "мутація 39c: backstop без tools/scripts/a8-* → 1" 1 "$mut"
-grep -qF "роль ставить tools/scripts/a8-git-lib.sh на хост, а check-forbidden-paths.sh його не забороняє" "$tmproot/out" ||
-  { echo "✗ мутація 39c: порушення не називає a8-git-lib.sh"; sed 's/^/    /' "$tmproot/out"; fail=1; }
-cp "$REPO/$FPS_T" "$mut/$FPS_T"
-cat >>"$mut/$TASKS_M" <<'YML'
-
-- name: Install a new host helper
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../tools/scripts/host-helper.sh"
-    dest: /usr/local/lib/a8/host-helper.sh
-    mode: "0755"
-YML
-assert_exit "мутація 39d: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
 # Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).
