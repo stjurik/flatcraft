@@ -46,13 +46,14 @@ test.describe("Landing (Phase 2.12.b — hero + how-it-works + trust)", () => {
     await expect(page.getByTestId("step-card-2")).toContainText("Скачайте креслення");
   });
 
-  test("3 trust-блоки з лінками на UNITED24 і GitHub", async ({ page }) => {
+  test("2 trust-блоки з лінком на UNITED24 (#266 — Open Source · MIT картку прибрано)", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.getByTestId("trust-block-0")).toContainText("10 експортів");
     const u24 = page.getByTestId("trust-block-1").getByRole("link");
     await expect(u24).toHaveAttribute("href", "https://u24.gov.ua/");
-    const gh = page.getByTestId("trust-block-2").getByRole("link");
-    await expect(gh).toHaveAttribute("href", /github\.com\/stjurik\/flatcraft/);
+    await expect(page.getByTestId("trust-block-2")).toHaveCount(0);
   });
 
   test("HeroLoopDemo рендериться канвас (RAF режим)", async ({ page }) => {
