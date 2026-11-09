@@ -748,7 +748,9 @@
   ansible.builtin.assert:
     that:
       - a8_v_doors.rc == 0
-    fail_msg: "a8-ssh-doors rc={{ a8_v_doors.rc }}: {{ a8_v_doors.stdout | default('') }} {{ a8_v_doors.stderr | default('') }} {{ a8_v_doors.msg | default('') }} (docs/19 §B.2)"
+    fail_msg: >-
+      a8-ssh-doors rc={{ a8_v_doors.rc }}: {{ a8_v_doors.stdout | default('') }}
+      {{ a8_v_doors.stderr | default('') }} {{ a8_v_doors.msg | default('') }} (docs/19 §B.2)
     success_msg: "{{ a8_v_doors.stdout }}"
     quiet: true
 

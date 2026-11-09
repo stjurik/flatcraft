@@ -33,7 +33,9 @@
 #   (--key=<рядок> теж можна; ключів може бути кілька або жодного)
 # Вихід: 0 — двері такі, як описано; 1 — порушення (кожне рядком «✗»); 2 — виклик.
 #
-# Шви для тесту: A8_SSHD (sshd), A8_SSH_ETC (/etc/ssh), A8_GETENT (getent), A8_ID (id).
+# Шви для тесту: A8_SSHD (sshd), A8_SSH_ETC (/etc/ssh), A8_GETENT (getent), A8_ID (id),
+# A8_KEYS_OWNER (хто, крім root, може володіти файлами ключів; типово — сам agent:
+# тест не від root не може віддати файл agent'у).
 set -uo pipefail
 
 SSHD="${A8_SSHD:-/usr/sbin/sshd}"
@@ -221,7 +223,7 @@ else
     fi
     for q in "$p" "$(dirname "$p")"; do
       read -r owner mode < <(stat -c '%U %a' "$q")
-      [[ "$owner" == "$agent" || "$owner" == root ]] ||
+      [[ "$owner" == "${A8_KEYS_OWNER:-$agent}" || "$owner" == root ]] ||
         bad+=("$q: власник $owner — писати ключі agent може не лише agent/root")
       (((8#$mode & 8#022) == 0)) ||
         bad+=("$q: права $mode — пишуть група чи інші (sshd StrictModes відкине, а хтось допише ключ)")

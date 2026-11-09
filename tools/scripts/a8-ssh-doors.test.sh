@@ -65,7 +65,7 @@ run() { # run <тека> [аргументи…] → $tmp/out, код у $rc
   local d="$1"
   shift
   rc=0
-  A8_SSHD="$d/bin/sshd" A8_SSH_ETC="$d/etc" A8_GETENT="$d/bin/getent" A8_ID="$d/bin/id" \
+  A8_SSHD="$d/bin/sshd" A8_SSH_ETC="$d/etc" A8_GETENT="$d/bin/getent" A8_ID="$d/bin/id" A8_KEYS_OWNER="$ME" \
     "$SCRIPT" "$@" >"$tmp/out" 2>&1 || rc=$?
 }
 
@@ -88,6 +88,9 @@ expect() {
 }
 
 A=(--agent agent --admin yurii)
+# Файли ключів у тесті належать тому, хто тест запускає (у CI — runner): тільки
+# root міг би віддати їх agent'у. Шов A8_KEYS_OWNER визнає цього власника.
+ME="$(id -un)"
 d="$tmp/d"
 
 # ─── Здорові стани ───────────────────────────────────────────────────────────
@@ -144,6 +147,14 @@ expect "повна оболонка в authorized_keys2 (sshd читає й йо
 setup "$d" "$LINE" "${T_OK/authorizedkeysfile .ssh\/authorized_keys .ssh\/authorized_keys2/authorizedkeysfile /etc/ssh/keys/%u}"
 mkdir -p "$d/etc/keys"
 expect "AuthorizedKeysFile абсолютний, з %u — файла немає, ключ задано → 1" 1 "двері зачинені" "$d" "${A[@]}" --key "$KEY"
+setup "$d" "$LINE"
+if [[ "$ME" != root ]]; then
+  ME_SAVED="$ME" ME=someone-else
+  expect "файли ключів належать не agent і не root → 1" 1 "власник $ME_SAVED" "$d" "${A[@]}" --key "$KEY"
+  ME="$ME_SAVED"
+else
+  echo "· від root файли ключів належать root (дозволено) — сценарій «чужий власник» пропущено; CI ганяє не від root"
+fi
 setup "$d" "$LINE"
 chmod 664 "$d/home/agent/.ssh/authorized_keys"
 expect "authorized_keys з правом запису групі → 1" 1 "права 664" "$d" "${A[@]}" --key "$KEY"
