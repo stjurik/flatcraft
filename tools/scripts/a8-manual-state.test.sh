@@ -75,6 +75,15 @@ setup "$d" "$HEAD
 $LAN
 80/tcp                     ALLOW IN    Anywhere                  "
 expect "80/tcp ALLOW IN з Anywhere → 1" 1 "«80/tcp ALLOW IN Anywhere» — вхідне з інтернету" "$d"
+# Рецензія #315, Argon №5А: коментар правила (`ufw allow 80/tcp comment http`) —
+# формат виміряно на ufw 0.36.2: «Anywhere                   # http».
+setup "$d" "$HEAD
+22/tcp                     ALLOW IN    192.0.2.0/24               # lan ssh
+80/tcp                     ALLOW IN    Anywhere                   # http"
+expect "80/tcp з Anywhere і коментарем «# http» — теж з інтернету → 1" 1 "«80/tcp ALLOW IN Anywhere» — вхідне з інтернету" "$d"
+setup "$d" "$HEAD
+22/tcp                     ALLOW IN    192.0.2.0/24               # lan ssh"
+expect "LAN-правило з коментарем — як без нього → 0" 0 "22/tcp ← 192.0.2.0/24" "$d"
 setup "$d" "$HEAD
 2222/tcp                   LIMIT IN    Anywhere                  "
 expect "LIMIT IN з Anywhere — теж відчинено → 1" 1 "2222/tcp LIMIT IN Anywhere" "$d"
@@ -145,6 +154,10 @@ setup "$d" "$HEAD
 mut "LIMIT IN не рахується" '(ALLOW|LIMIT)\ IN' '(ALLOW)\ IN' "$d"
 # Справжній вимкнений ufw рядка Default не друкує — тоді червоніє й він; тут він є,
 # щоб сценарій ловив саме перевірку «Status: active».
+setup "$d" "$HEAD
+80/tcp                     ALLOW IN    Anywhere                   # http"
+mut "коментар правила не зрізається" '    line="${line%%[[:space:]]#*}"
+' '' "$d"
 setup "$d" "${HEAD/Status: active/Status: inactive}"
 mut "вимкнений ufw не помічається" "grep -qx 'Status: active' <<<\"\$st\" ||" 'true ||' "$d"
 

@@ -138,16 +138,30 @@ git_unsafe_reason() { # друкує причину, якщо .git головн�
     # gc --auto після fetch) пішов би за ним і стер теку-ціль (#292, відтворено
     # на git 2.43). Законні записи (теку створює `worktree add` тіку) не чіпаємо.
     echo ".git/worktrees/ містить симлінк — git worktree prune стер би теку-ціль"
+  elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
+    # Identity — ПЕРЕД симлінками: підміна .git, у якій заразом є симлінк, мусить
+    # дати STOP черги (hgit шукає «змінили identity»), а не лише fail задачі
+    # (рецензія #315, Flash №2).
+    echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
   elif ((symrc != 0)); then
     echo ".git не вдалося обійти (find rc=$symrc) — симлінки всередині не перевірено"
   elif [[ -n "$sym" ]]; then
     echo ".git містить симлінк ${sym#"$g"/} — git на хості писав би за ним у чужий файл (#302)"
-  elif [[ -n "$git_snapshot" && "$(git_identity)" != "$git_snapshot" ]]; then
-    echo ".git, .git/config чи .git/hooks змінили identity після контейнера"
   else
     for f in objects/info/alternates info/grafts shallow; do
       if [[ -e "$g/$f" || -L "$g/$f" ]]; then
         echo ".git/$f існує — підміняє історію чи об'єкти"
+        return 0
+      fi
+    done
+    # Атрибути й sparse-checkout підміняють, ЩО git бачить у робочому дереві
+    # (рецензія #315, G — доведено прогоном на git 2.43): `* ident` у
+    # info/attributes згортає `$Id: payload $` на диску до `$Id$` у `add -A`, і
+    # перевірка чистоти визнає дерево == $tip, хоча оракул бачить payload.
+    # config.worktree — те саме для конфігу worktree. Сам git їх не створює.
+    for f in info/attributes info/sparse-checkout config.worktree; do
+      if [[ -e "$g/$f" || -L "$g/$f" ]]; then
+        echo ".git/$f існує — підміняє, що git бачить у робочому дереві (атрибути, sparse, конфіг worktree)"
         return 0
       fi
     done

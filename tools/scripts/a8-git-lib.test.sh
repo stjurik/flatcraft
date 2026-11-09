@@ -2,7 +2,8 @@
 # a8-git-lib.test.sh — правила ігнору, яким вірить перевірка чистоти дерева (#302 B).
 #
 # trusted_ignore_rules бере правила лише з .gitignore коміту (не з дерева агента,
-# не з .git/info/exclude). Тут — дві речі, яких не видно зі сценаріїв тіку:
+# не з .git/info/exclude). Тут — те, чого не видно зі сценаріїв тіку (3 — з
+# рецензії #315: info/attributes і порядок «identity перед симлінками»):
 #   1. переписування вкладеного .gitignore від кореня (D/**/шаблон, D/шаблон, «!»);
 #   2. СПРАВЖНІ правила цього репозиторію ігнорують кеші, які пишуть інструменти
 #      lefthook, CI і тести (ruff, mypy, hypothesis, pytest, uv, pnpm, turbo, tsc).
@@ -98,6 +99,30 @@ if trusted_ignore_rules HEAD "$tmp/repo-rules" 2>/dev/null; then
 else
   bad "trusted_ignore_rules HEAD у репозиторії → ненуль"
 fi
+
+# ─── 3. git_unsafe_reason: атрибути, sparse, config.worktree; порядок (рецензія #315)
+u="$tmp/u"
+git init -q -b main "$u"
+git -C "$u" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+export A8_REPO_DIR="$u"
+git_snapshot=""
+[[ -z "$(git_unsafe_reason)" ]] && ok "чистий .git → причини немає" || bad "чистий .git: $(git_unsafe_reason)"
+for f in info/attributes info/sparse-checkout config.worktree; do
+  mkdir -p "$u/.git/$(dirname "$f")" && printf '* ident\n' >"$u/.git/$f"
+  why="$(git_unsafe_reason)"
+  [[ "$why" == ".git/$f існує"* ]] && ok ".git/$f → «.git/$f існує…»" || bad ".git/$f: «$why»"
+  rm -f "$u/.git/$f"
+done
+# Підміна .git (новий inode) із симлінком усередині: identity — раніше за симлінк.
+snapshot_git
+mv "$u/.git" "$u/.git.old" && mkdir "$u/.git" && cp -a "$u/.git.old/." "$u/.git/"
+ln -s "$tmp/victim" "$u/.git/FETCH_HEAD"
+why="$(git_unsafe_reason)"
+[[ "$why" == *"змінили identity"* ]] && ok "підміна .git із симлінком → «змінили identity» (STOP), а не «містить симлінк»" ||
+  bad "порядок перевірок: «$why»"
+git_snapshot=""
+why="$(git_unsafe_reason)"
+[[ "$why" == ".git містить симлінк FETCH_HEAD"* ]] && ok "без знімка — той самий симлінк → «.git містить симлінк FETCH_HEAD»" || bad "симлінк: «$why»"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "a8-git-lib: усі перевірки пройдено"

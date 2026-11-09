@@ -659,6 +659,16 @@ fi
 # .gitignore БАЗИ задачі ($base — origin/main при створенні worktree; агент його
 # не змінить): файл, якого база не ігнорує й якого немає в $tip, — не в $tip.
 #
+# МЕЖА. Те, що ігнорують правила бази (node_modules/.bin, .venv, *.pyc,
+# packages/**/src/**/*.js тощо), перевірка не бачить за задумом — а оракул це
+# виконує. Цей крок доводить «дерево $wt == $tip поза ігнорованим базою», а не
+# «оракул бачить лише $tip» (рецензія #315, Argon №2, Sonnet №2).
+#
+# Атрибути для `add -A` — теж з бази (`--attr-source="$base"`, git ≥ 2.40): інакше
+# закомічений агентом `.gitattributes` з `* ident` згортав би `$Id: payload $` на
+# диску до `$Id$`, і дерево $wt == $tip, хоча оракул бачить payload (рецензія
+# #315, G; виміряно на git 2.43). info/attributes відкидає git_unsafe_reason.
+#
 # $wt НЕ чіпаємо — брудне дерево лишається доказом для людини (як release_or_keep).
 cleanidx="$A8_LOGS_DIR/tasks/$id.cleanidx"
 cleanrules="$A8_LOGS_DIR/tasks/$id.ignore"
@@ -666,7 +676,7 @@ cleanextra="$A8_LOGS_DIR/tasks/$id.untracked"
 rm -f "$cleanidx" "$cleanrules" "$cleanextra"
 wttree=""
 if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$tip" >>"$log" 2>&1 &&
-  GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >>"$log" 2>&1; then
+  GIT_INDEX_FILE="$cleanidx" hgit --attr-source="$base" --work-tree="$wt" add -A >>"$log" 2>&1; then
   wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>>"$log")"
 fi
 if [[ -n "$wttree" ]] && ! { trusted_ignore_rules "$base" "$cleanrules" 2>>"$log" &&

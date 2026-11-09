@@ -66,6 +66,11 @@ check_ufw() {
   # Таблиця правил — після рядка «--  ------  ----». Колонки розділяє дія:
   # «To  ALLOW IN  From» (виміряно на ufw 0.36.2, Ubuntu 24.04).
   while IFS= read -r line; do
+    # Коментар правила ufw друкує в кінці: «Anywhere   # http» (виміряно на ufw
+    # 0.36.2). Без зрізання from було б «Anywhere … # http» і правило з
+    # інтернету проходило б як безпечне (рецензія #315, Argon №5А). У колонках
+    # To/From «#» не буває.
+    line="${line%%[[:space:]]#*}"
     [[ "$line" =~ ^(.*[^[:space:]])[[:space:]]{2,}(ALLOW|LIMIT)\ IN[[:space:]]{2,}(.*[^[:space:]])[[:space:]]*$ ]] || continue
     to="${BASH_REMATCH[1]}" action="${BASH_REMATCH[2]}" from="${BASH_REMATCH[3]}"
     n=$((n + 1))

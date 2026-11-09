@@ -456,6 +456,10 @@ process_id() {
     # `add -A` бере правила ігнору з самого $wt і .git/info/exclude, які пише
     # агент, — файл під вкладеним `.gitignore` з «*» пішов би під `rm -rf` як
     # «чисте». origin/main щойно оновив fetch вище, агент його не змінить.
+    # `--attr-source`, як у тіку (рецензія #315, G), тут не потрібен: гілку з
+    # комітами понад origin/main requeue відкидає раніше, тож HEAD worktree =
+    # origin/main і закомічених агентом .gitattributes у ньому немає;
+    # .git/info/attributes відкидає git_unsafe_reason.
     cleanidx="$A8_LOGS_DIR/.requeue-clean.$id.$$"
     local cleanrules="$cleanidx.ignore" cleanextra="$cleanidx.untracked" extra
     rm -f "$cleanidx" "$cleanrules" "$cleanextra"

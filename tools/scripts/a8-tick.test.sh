@@ -310,7 +310,7 @@ case "${AGENT_MODE:-commit}" in
         else
           mv "$REPO/.git" "$TMPR/realgit" && ln -s "$e" "$REPO/.git"
         fi ;;
-      evil-mvgit)
+      evil-mvgit | evil-mvgit-sym)
         # Підміна всієї .git новою текою (новий inode) — як mv .git .git-old +
         # свій .git (рецензія #290, п.1). Структурно .git валідна, тож
         # git_unsafe_reason-перевірки симлінків/commondir проходять; ловить лише
@@ -325,7 +325,13 @@ case "${AGENT_MODE:-commit}" in
         mkdir "$d"
         cp -a "$d.old/." "$d/"
         git --git-dir="$d" config filter.x.smudge "$EVIL/smudge"
-        mkdir -p "$d/info" && echo '* filter=x' >"$d/info/attributes" ;;
+        if [[ "$AGENT_MODE" == evil-mvgit-sym ]]; then
+          # Рецензія #315, Flash №2: та сама підміна, але ще й із симлінком
+          # усередині — мусить дати STOP («змінили identity»), а не лише fail.
+          rm -f "$d/FETCH_HEAD" && ln -s "$TMPR/logs/last-results" "$d/FETCH_HEAD"
+        else
+          mkdir -p "$d/info" && echo '* filter=x' >"$d/info/attributes"
+        fi ;;
       evil-commitgraph)
         # Підроблений .git/objects/info/commit-graph (контрприклад Argon CX2):
         # коміт додає заборонений infra/x, але в CDAT графа OID кореневого дерева
@@ -363,6 +369,18 @@ body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest(
         mkdir -p "$REPO/.git/worktrees" "$TMPR/victim"
         echo CANARY >"$TMPR/victim/canary"
         ln -s "$TMPR/victim" "$REPO/.git/worktrees/evil" ;;
+      evil-attributes | evil-gitattributes)
+        # Рецензія #315, G: `* ident` згортає `$Id: payload $` на диску до `$Id$`
+        # у `add -A`, тож дерево $wt == $tip, а оракул бачить payload.
+        # evil-attributes — через .git/info/attributes головного клону;
+        # evil-gitattributes — закомічений у гілку .gitattributes.
+        printf 'print(1)\n# $Id$\n' >"$wt/f.py"
+        [[ "$AGENT_MODE" == evil-gitattributes ]] && printf '* ident\n' >"$wt/.gitattributes"
+        git -C "$wt" add -A && ci -m work
+        printf 'print(1)\n# $Id: PAYLOAD $\n' >"$wt/f.py"
+        if [[ "$AGENT_MODE" == evil-attributes ]]; then
+          mkdir -p "$REPO/.git/info" && printf '* ident\n' >"$REPO/.git/info/attributes"
+        fi ;;
       evil-fetchhead | evil-reflog)
         # #302 A: симлінк у .git на файл, який agent на хості може писати
         # (last-results guard'а). fetch тіку на хості пише за симлінком: FETCH_HEAD
@@ -1573,6 +1591,17 @@ EOF
   fi
   teardown
 
+  # 23n2. Підміна .git із симлінком усередині (рецензія #315, Flash №2): identity
+  # перевіряється ПЕРЕД симлінками — тож STOP черги, як у 23n, а не лише fail.
+  two_ticks evil-mvgit-sym
+  if [[ "$(jq -r .result <<<"$r1")" == failed && "$(jq -r .detail <<<"$r1")" == *"змінили identity"* && -s "$ROOT/STOP" &&
+    "$(jl .event)" == kill_switch && -e "$QD/002-b.json" ]] && ! on_origin a; then
+    ok "23n2: підміна .git із симлінком усередині → «змінили identity» + STOP, наступна задача не стартує"
+  else
+    bad "23n2 mvgit-sym: STOP=[$(cat "$ROOT/STOP" 2>/dev/null)]; r1=$r1; last=$(last)"
+  fi
+  teardown
+
   # 23o. .git/worktrees → симлінк на чужий gitdir (контрприклад Argon CX1):
   # git_unsafe_reason відкидає симлінк worktrees.
   two_ticks evil-wtsymlink
@@ -1665,6 +1694,25 @@ EOF
     "$(jl .oracle_rc)" == "-" && -f "$ROOT/wt/a/result.txt" ]] && ! on_origin a &&
     ok "23r: незакомічена робота (M+??) → failed «незакомічені зміни», оракул не біг, нічого не запушено, \$wt цілий" ||
     bad "23r dirty: $(last); origin ai/a: $(git -C "$ROOT/origin.git" rev-parse -q --verify refs/heads/ai/a 2>&1)"
+  teardown
+
+  # 23aa. Рецензія #315, G: .git/info/attributes з `* ident` — git_unsafe_reason
+  # відмовляє ще до перевірки чистоти. 23ab: закомічений .gitattributes з `* ident`
+  # — атрибути `add -A` беруться з бази (--attr-source), тож payload на диску —
+  # «незакомічені зміни агента: f.py». Обидва — оракул не біг, нічого не запушено.
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q PAYLOAD f.py')"
+  AGENT_MODE=evil-attributes tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"небезпечний .git: .git/info/attributes існує"* && "$(jl .oracle_rc)" == "-" ]] &&
+    ! on_origin a && ok "23aa: .git/info/attributes з * ident → failed «небезпечний .git», оракул не біг, нічого не запушено" ||
+    bad "23aa attributes: $(last)"
+  teardown
+  PUSH_KIND=token_file setup
+  enqueue 001-a "$(with_oracle a 'grep -q PAYLOAD f.py')"
+  AGENT_MODE=evil-gitattributes tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "незакомічені зміни агента: f.py" && "$(jl .oracle_rc)" == "-" ]] &&
+    ! on_origin a && ok "23ab: закомічений .gitattributes з * ident → «незакомічені зміни агента: f.py», оракул не біг" ||
+    bad "23ab gitattributes: $(last)"
   teardown
 
   # 23w–23x, 23z. #302 B: файл, захований правилами ігнору агента (вкладений
@@ -1902,6 +1950,10 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "неіндексоване поза правилами бази не валить задачу" 's/if \[\[ -s "\$cleanextra" \]\]; then/if false; then/'
   mutate "перелік неіндексованого з правилами агента (--exclude-standard)" 's/ls-files -o -z --exclude-from="\$3"/ls-files -o -z --exclude-standard/' lib
   mutate "правила вкладеного .gitignore не від кореня" 's/else print n d "\/\*\*\/" l/else print n l/' lib
+  # Рецензія #315: G (info/attributes, --attr-source) і порядок identity → симлінки.
+  mutate "info/attributes не перевіряється" 's/    for f in info\/attributes info\/sparse-checkout config\.worktree; do/    for f in; do/' lib
+  mutate "add -A з атрибутами дерева агента" 's/hgit --attr-source="\$base" --work-tree="\$wt" add -A/hgit --work-tree="\$wt" add -A/'
+  mutate "симлінки перевіряються раніше за identity" 's/(  elif \[\[ -n "\$git_snapshot" && "\$\(git_identity\)" != "\$git_snapshot" \]\]; then\n(?:    #[^\n]*\n)*    echo "[^\n]*\n)(  elif \(\(symrc != 0\)\); then\n    echo "[^\n]*\n  elif \[\[ -n "\$sym" \]\]; then\n    echo "[^\n]*\n)/$2$1/' lib
   wait
   for i in $(seq 1 "$n"); do
     name="$(cat "$MUTDIR/$i.name")"
