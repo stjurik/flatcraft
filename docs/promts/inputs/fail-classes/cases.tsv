@@ -1,0 +1,5 @@
+2026-08-10	no-caller	validateSheet, validateHoles з тестами — реальний шлях експорту їх не кликав	https://github.com/stjurik/flatcraft/issues/285
+2026-08-10	no-caller	deny-правила з docs/16 §1 — у git їх не було, діяли на одній машині	https://github.com/stjurik/flatcraft/issues/285
+2026-10-04	no-caller	weekly-digest.ts з тестами — cron, таймера чи workflow у git немає	https://github.com/stjurik/flatcraft/issues/194
+2026-10-27	no-caller	install-orchestrator-profile.sh з тестами — на T470 профіль не встановлено	https://github.com/stjurik/flatcraft/issues/285
+2026-10-27	cmd-from-text	контекст agy складено heredoc без лапок; хук guard-destructive заблокував виклик (048)	https://github.com/stjurik/flatcraft/issues/285#issuecomment-6452623506
