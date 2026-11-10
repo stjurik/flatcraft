@@ -1221,6 +1221,53 @@ if role_installs a8-tick.sh.j2; then
   done
 fi
 
+# Інваріант 17 — ключ a8-ctl у змінних має формат, який пропустить assert ролі (#301 п.3).
+#
+# ЧОМУ. Assert формату ключа діяв лише при застосуванні ролі на A8, а regexp
+# відкликання будується з base64 ключа: короткий base64 (`A==`) зачепив би чужі
+# рядки authorized_keys. Тепер вираз один — a8_ctl_pubkey_re у defaults; роль
+# звіряє ним у assert, а цей інваріант — у CI, тим самим виразом через grep -E
+# (у виразі лише конструкції, однакові в Python re і POSIX ERE). Кожна змінна
+# `a8_ctl_*pubkey` у defaults і group_vars — у подвійних лапках одним рядком:
+# інший запис цей розбір не читає, тож fail closed.
+#
+# Вмикається, коли defaults ролі має a8_ctl_pubkey (синтетичні дерева — ні).
+DEFAULTS_Y="$ROLE/defaults/main.yml"
+if [[ -f "$DEFAULTS_Y" ]] && grep -qE '^a8_ctl_pubkey:' "$DEFAULTS_Y"; then
+  # Вираз збирається з рядків a8_ctl_pubkey_formats так само, як у Jinja:
+  # підставляємо їх, з'єднані «|», на місце виклику join у a8_ctl_pubkey_re.
+  key_alts="$(awk '/^a8_ctl_pubkey_formats:[[:space:]]*$/ { on = 1; next }
+    on && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- "/, "", v); sub(/"[[:space:]]*$/, "", v); out = out (out == "" ? "" : "|") v; next }
+    on { exit } END { print out }' "$DEFAULTS_Y")"
+  key_tpl="$(sed -n -E 's/^a8_ctl_pubkey_re: "(.*)"[[:space:]]*$/\1/p' "$DEFAULTS_Y")"
+  join_call="{{ a8_ctl_pubkey_formats | join('|') }}"
+  key_re=""
+  [[ -n "$key_alts" && "$key_alts" != *'\'* && "$key_tpl" == *"$join_call"* ]] &&
+    key_re="${key_tpl/"$join_call"/$key_alts}"
+  if [[ -z "$key_re" ]]; then
+    violations+=("defaults/main.yml: немає a8_ctl_pubkey_formats (рядки «- \"…\"», без \\) чи a8_ctl_pubkey_re з $join_call — формат ключа a8-ctl нема з чим звірити (#301)")
+  else
+    grep -qF 'is match(a8_ctl_pubkey_re)' "$TASKS/main.yml" 2>/dev/null ||
+      violations+=("tasks/main.yml: assert ключа a8-ctl не через a8_ctl_pubkey_re — CI і роль перевіряли б різне (#301)")
+    for f in "$DEFAULTS_Y" "$ROOT"/infra/ansible/group_vars/*.yml; do
+      [[ -f "$f" ]] || continue
+      while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        val="${hit#*:}"
+        val="${val#*:}"
+        if [[ "$val" =~ ^[[:space:]]*\"([^\"]*)\"[[:space:]]*(#.*)?$ ]]; then
+          v="${BASH_REMATCH[1]}"
+          [[ -z "$v" ]] && continue
+          LC_ALL=C grep -qE -- "$key_re" <<<"$v" ||
+            violations+=("${f#"$ROOT"/}:${hit%%:*}: ключ a8-ctl не проходить a8_ctl_pubkey_re (тип, base64 повної довжини, коментар; без опцій) — роль його не поставить (#301)")
+        else
+          violations+=("${f#"$ROOT"/}:${hit%%:*}: ключ a8-ctl не в подвійних лапках одним рядком — формат перевірити нічим (#301)")
+        fi
+      done < <(grep -nE '^a8_ctl_[a-z_]*pubkey:' "$f")
+    done
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -1231,4 +1278,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home)"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, ключ a8-ctl у змінних — у форматі a8_ctl_pubkey_re, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home)"

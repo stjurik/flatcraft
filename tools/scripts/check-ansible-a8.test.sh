@@ -1165,6 +1165,39 @@ akey_tree "$tmproot/k6" '---
     key_options: restrict,command="/usr/local/bin/a8-ctl"'
 assert_exit "інв.15: модуль authorized_key з key_options restrict,command= → 0" 0 "$tmproot/k6"
 
+# ─── Інваріант 17: ключ a8-ctl у змінних — у форматі a8_ctl_pubkey_re (#301) ──
+# Вираз береться з чинних defaults ролі: тест перевіряє розбір, а не копію виразу.
+KEY_RE_LINES="$(sed -n '/^a8_ctl_pubkey_formats:/,/^a8_ctl_pubkey_re:/p' "$REPO/infra/ansible/roles/a8/defaults/main.yml")"
+GOOD_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzluehSS a8-ctl@t470"
+ctlkey_tree() { # ctlkey_tree <тека> <рядок a8_ctl_pubkey у group_vars> [<assert у tasks>]
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK
+- name: Check key
+  ansible.builtin.assert:
+    that:
+      - ${3:-item is match(a8_ctl_pubkey_re)}
+  loop: \"{{ a8_ctl_pubkeys }}\""
+  printf '%s\n' 'a8_ctl_pubkey: ""' "$KEY_RE_LINES" >>"$1/infra/ansible/roles/a8/defaults/main.yml"
+  mkdir -p "$1/infra/ansible/group_vars"
+  printf '%s\n' "$2" >"$1/infra/ansible/group_vars/a8.yml"
+}
+ctlkey_tree "$tmproot/c1" "a8_ctl_pubkey: \"$GOOD_KEY\""
+assert_exit "інв.17: повний ed25519 з коментарем → 0" 0 "$tmproot/c1"
+ctlkey_tree "$tmproot/c2" 'a8_ctl_pubkey: "ssh-ed25519 A== a8-ctl@t470"'
+assert_exit "інв.17: короткий base64 A== → 1" 1 "$tmproot/c2" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c3" "a8_ctl_pubkey: \"no-pty,permitopen=*:* $GOOD_KEY\""
+assert_exit "інв.17: власні опції перед ключем → 1" 1 "$tmproot/c3" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c4" "a8_ctl_pubkey: $GOOD_KEY"
+assert_exit "інв.17: без лапок — розбір не читає, fail closed → 1" 1 "$tmproot/c4" "не в подвійних лапках одним рядком"
+ctlkey_tree "$tmproot/c5" "a8_ctl_local_pubkey: \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzlueh a8-ctl@a8\""
+assert_exit "інв.17: друга змінна ключа (S3) теж звіряється, base64 на 2 коротший → 1" 1 "$tmproot/c5" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c6" "a8_ctl_pubkey: \"$GOOD_KEY\"" "item is match('^ssh-')"
+assert_exit "інв.17: assert ролі не через a8_ctl_pubkey_re → 1" 1 "$tmproot/c6" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c7" 'a8_ctl_pubkey: ""'
+assert_exit "інв.17: порожньо — ключа немає → 0" 0 "$tmproot/c7"
+ctlkey_tree "$tmproot/c8" "a8_ctl_pubkey: \"$GOOD_KEY\""
+sed -i 's/{{ a8_ctl_pubkey_formats | join(.|.) }}/ssh-ed25519 .*/' "$tmproot/c8/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "інв.17: a8_ctl_pubkey_re без списку форматів — звірити нічим → 1" 1 "$tmproot/c8" "формат ключа a8-ctl нема з чим звірити"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -1739,6 +1772,28 @@ s = s.replace(anchor, "line: 'restrict ", 1)
 open(p, "w").write(s)
 PY2
 assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 39a–b — інваріант 17 (#301 п.3): ключ у group_vars обрізано; assert ролі
+# знову зі старим виразом, що пропускав короткий base64.
+python3 - "$mut/infra/ansible/group_vars/a8.yml" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2 = re.sub(r'^(a8_ctl_pubkey: "ssh-ed25519 )\S+', r'\1AAAA', s, count=1, flags=re.M)
+assert s2 != s, "фікстура застаріла: a8_ctl_pubkey у group_vars виглядає інакше"
+open(p, "w").write(s2)
+PY2
+assert_exit "мутація 39a: ключ a8-ctl у group_vars обрізано → 1" 1 "$mut" "не проходить a8_ctl_pubkey_re"
+cp "$REPO/infra/ansible/group_vars/a8.yml" "$mut/infra/ansible/group_vars/a8.yml"
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "      - item is match(a8_ctl_pubkey_re)\n"
+assert s.count(old) == 1, "фікстура застаріла: assert ключа a8-ctl виглядає інакше"
+s = s.replace(old, "      - item is match('^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=* ?[^\\n\\r]*$')\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 39b: assert ключа зі старим виразом → 1" 1 "$mut" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
 # Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).

@@ -626,8 +626,8 @@
 
 # ─── V22. Дієслова черги (a8-queue) і ssh-обгортка (a8-ctl) ─────────────────
 # Копії на A8 = доведені в CI (a8-queue.test.sh, a8-requeue.test.sh); status
-# працює від agent; обгортка відмовляє на метасимволі, нічого не виконавши; рядок
-# authorized_keys для a8-ctl, якщо він уже є, — лише з restrict і command=.
+# працює від agent; обгортка відмовляє на метасимволі, нічого не виконавши. Двері
+# ssh (хто входить і чим) — V22h–j, a8-ssh-doors.sh.
 - name: V22a — checksums of the installed queue scripts
   ansible.builtin.stat:
     path: "{{ item.dest }}"
@@ -636,6 +636,7 @@
     - { src: a8-queue.sh, dest: /usr/local/bin/a8-queue }
     - { src: a8-ctl.sh, dest: /usr/local/bin/a8-ctl }
     - { src: a8-requeue.sh, dest: /usr/local/lib/a8/a8-requeue.sh }
+    - { src: a8-ssh-doors.sh, dest: /usr/local/lib/a8/a8-ssh-doors.sh }
   register: a8_v_qs
 
 - name: V22b — checksums of the same scripts in the repository
@@ -700,18 +701,7 @@
     path: /tmp/a8-ctl-probe
   register: a8_v_ctl_probe
 
-- name: V22h — read the agent's authorized_keys
-  ansible.builtin.slurp:
-    src: "{{ a8_agent_home }}/.ssh/authorized_keys"
-  register: a8_v_akeys
-  failed_when: false
-
-- name: V22i — status works locally and via the shim; shim refuses; a8-ctl key lines are restricted
-  vars:
-    a8_v_ctl_lines: >-
-      {{ ((a8_v_akeys.content | default('') | b64decode).splitlines())
-         | select('search', 'a8-ctl') | reject('match', '\s*#') | list }}
-    a8_v_ctl_note: "{{ 'ще не встановлено (крок yurii, #78)' if a8_v_ctl_lines | length == 0 else 'усі з restrict і command=' }}"
+- name: V22i — status works locally and via the shim; shim refuses
   ansible.builtin.assert:
     that:
       - a8_v_qstatus.rc == 0
@@ -721,16 +711,47 @@
       - not a8_v_ctl_probe.stat.exists
       - a8_v_ctl_status.rc == 0
       - "'черга:' in a8_v_ctl_status.stdout"
-      - a8_v_ctl_lines | reject('search', 'restrict') | list | length == 0
-      - a8_v_ctl_lines | reject('search', 'command="/usr/local/bin/a8-ctl"') | list | length == 0
     fail_msg: >-
       status rc={{ a8_v_qstatus.rc }} ({{ a8_v_qstatus.stderr | default('') }});
       a8-ctl «status; touch …» rc={{ a8_v_ctl_deny.rc }}, probe={{ a8_v_ctl_probe.stat.exists }};
-      a8-ctl status rc={{ a8_v_ctl_status.rc }};
-      рядків authorized_keys з a8-ctl={{ a8_v_ctl_lines | length }} (кожен мусить мати restrict і command="/usr/local/bin/a8-ctl")
-    success_msg: >-
-      a8-queue status і a8-ctl status — 0, a8-ctl відмовляє на метасимволі;
-      ключів a8-ctl в authorized_keys: {{ a8_v_ctl_lines | length }} — {{ a8_v_ctl_note }}
+      a8-ctl status rc={{ a8_v_ctl_status.rc }}
+    success_msg: a8-queue status і a8-ctl status — 0, a8-ctl відмовляє на метасимволі
+    quiet: true
+
+# V22h–j. Двері ssh: хто входить і чим (#305, #301). 2026-11-07 двері a8-ctl
+# виявились зачиненими при зеленому verify: ручний `AllowUsers yurii` відкидав
+# agent ще до перевірки ключа, а V22i бачив лише authorized_keys. Дописати agent
+# в AllowUsers — означає, що діє КОЖЕН ключ agent (група docker = root на хості),
+# тому межу доводить один скрипт з обох боків, лише читанням (роль sshd не чіпає):
+#   - sshd -T для адміністратора й agent: паролів і keyboard-interactive немає,
+#     root не входить, адмін проходить AllowUsers/DenyUsers/AllowGroups завжди, agent —
+#     коли задано ключ a8-ctl; Match за адресою — порушення (оцінити нічим);
+#   - кожен рядок кожного файла ключів agent (AuthorizedKeysFile, зокрема
+#     authorized_keys2) — рівно `restrict,command="/usr/local/bin/a8-ctl" <ключ>`
+#     з поточного a8_ctl_pubkeys; заданий ключ без рядка — теж порушення.
+# Адміністратор — той, хто зараз прийшов sudo на машину (SUDO_USER із фактів), а
+# не змінна play'ю: перевіряємо, що саме цей вхід не зачиниться. Сценарії й
+# мутації — a8-ssh-doors.test.sh; межа (адреса клієнта, живий процес sshd) — шапка скрипта.
+- name: V22h — who the admin is (the sudo user of this very login)
+  ansible.builtin.set_fact:
+    a8_v_admin: "{{ ansible_env.SUDO_USER | default(ansible_user | default(''), true) }}"
+
+- name: V22j — ssh doors — sshd lets the admin and the agent in, agent keys are exactly a8-ctl
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/lib/a8/a8-ssh-doors.sh', '--agent', a8_agent_user, '--admin', a8_v_admin]
+      + (a8_ctl_pubkeys | map('regex_replace', '^', '--key=') | list) }}"
+  register: a8_v_doors
+  changed_when: false
+  failed_when: false
+
+- name: V22k — ssh doors are as described
+  ansible.builtin.assert:
+    that:
+      - a8_v_doors.rc == 0
+    fail_msg: >-
+      a8-ssh-doors rc={{ a8_v_doors.rc }}: {{ a8_v_doors.stdout | default('') }}
+      {{ a8_v_doors.stderr | default('') }} {{ a8_v_doors.msg | default('') }} (docs/19 §B.2)
+    success_msg: "{{ a8_v_doors.stdout }}"
     quiet: true
 
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
