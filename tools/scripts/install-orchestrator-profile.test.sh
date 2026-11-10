@@ -569,19 +569,28 @@ allow|git push -u origin HEAD:feat/x
 allow|gh issue list --label ai-approved
 allow|gh pr list --label ai-approved
 allow|gh issue view 5
-allow|pnpm test
-allow|pnpm vitest run packages/cad-engine
-allow|pnpm lint
+deny|pnpm test
+deny|pnpm vitest run packages/cad-engine
+deny|pnpm lint
 allow|git add README.md
 allow|git commit -m probe
-allow|bash tools/scripts/install-orchestrator-profile.test.sh
-allow|bash tools/scripts/install-agy-permissions.test.sh
+deny|bash tools/scripts/install-orchestrator-profile.test.sh
+deny|bash tools/scripts/install-agy-permissions.test.sh
 ask|bash tools/scripts/install-orchestrator-profile.sh --replace
 ask|bash tools/scripts/install-agy-permissions.sh
 ask|tools/scripts/install-orchestrator-profile.sh
-allow|bash tools/scripts/measure-deny.test.sh
+deny|bash tools/scripts/measure-deny.test.sh
 ask|bash tools/scripts/measure-trust.sh
-питає|pnpm --filter @flatcraft/discord-tools snapshot
+deny|pnpm --filter @flatcraft/discord-tools snapshot
+deny|pnpm install --frozen-lockfile
+deny|pnpm typecheck
+deny|npx prettier --check .
+deny|npm test
+deny|uv run --directory workers/cad pytest
+deny|uv run --directory workers/cad ruff check .
+deny|node tools/scripts/x.js
+deny|tools/scripts/a8-queue.test.sh
+allow|bash tools/scripts/a8-report.sh
 EOF
 
 # ─── 34. Хук не своєї події — відмова ──────────────────────────────────────

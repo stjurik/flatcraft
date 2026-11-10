@@ -121,6 +121,14 @@ RULES=(
   'роль і демон A8|tools/scripts/a8-pr-fence*'
   'роль і демон A8|tools/scripts/a8-ro-shell*'
   'роль і демон A8|tools/scripts/a8-ssh-doors*'
+  # Скрипти, які роль копіює на A8 і які там тримають межу агента: черга й двері a8-ctl,
+  # git на хості, повторна постановка (незалежне ревю 2026-11, №3 — були «звичайні»).
+  # Поіменно, не `a8-*`: звіти й метрики (a8-report, a8-metrics) свідомо звичайні.
+  # Новий скрипт ролі без рядка тут валить review-class.test.sh, розділ 1b.
+  'роль і демон A8|tools/scripts/a8-git-lib*'
+  'роль і демон A8|tools/scripts/a8-queue*'
+  'роль і демон A8|tools/scripts/a8-ctl*'
+  'роль і демон A8|tools/scripts/a8-requeue*'
   'роль і демон A8|tools/scripts/autorun*'
   'роль і демон A8|tools/scripts/check-ansible-a8*'
   # CI: робочі процеси GitHub і локальні хуки, що стоять перед ними.
@@ -128,6 +136,15 @@ RULES=(
   'CI|lefthook.yml'
   'CI|tools/scripts/prove-red-before-green*'
   'CI|tools/scripts/check-journals*'
+  # Залежності й скрипти пакетів: що CI і контейнер A8 ставлять і запускають (`pnpm test`
+  # бере команду з package.json). Нова залежність — питання класу A (CLAUDE.md §6), а
+  # клас за шляхом давав «звичайний» (незалежне ревю 2026-11, №3).
+  'CI|package.json'
+  'CI|*/package.json'
+  'CI|pnpm-lock.yaml'
+  'CI|pnpm-workspace.yaml'
+  'CI|workers/cad/pyproject.toml'
+  'CI|workers/cad/uv.lock'
   # Експорт і валідатори §7: усе, що визначає файли, які отримає виробництво.
   'експорт і валідатори §7|workers/cad/flatcraft_cad/*'
   'експорт і валідатори §7|workers/cad/tests/snapshots/*'
