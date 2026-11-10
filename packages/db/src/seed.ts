@@ -147,7 +147,7 @@ export const SEED_TEMPLATES: ReadonlyArray<TemplateSeed> = [
     slug: "corner_angle",
     nameUk: "Кутник",
     nameEn: "Corner angle",
-    descriptionUk: "Підсилювальний кутник з grid отворів для меблів та конструкцій.",
+    descriptionUk: "Підсилювальний кутник з отворами для меблів та конструкцій.",
     descriptionEn: "Reinforcement angle with hole grid for furniture and structures.",
     // Phase 2.10.b — CadQuery-builder і auto-grid hole pattern готові.
     isPublished: true,
