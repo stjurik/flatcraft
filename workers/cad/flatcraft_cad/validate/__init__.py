@@ -6,6 +6,11 @@ from flatcraft_cad.validate.bend import (
     validate_bend,
     validate_export,
 )
+from flatcraft_cad.validate.enclosed_shelf import (
+    EnclosedShelfError,
+    validate_enclosed_shelf,
+    validate_export_enclosed_shelf,
+)
 from flatcraft_cad.validate.holes import (
     HoleError,
     validate_export_holes,
@@ -35,6 +40,7 @@ from flatcraft_cad.validate.types import (
 
 __all__ = [
     "BendError",
+    "EnclosedShelfError",
     "HoleError",
     "ParameterTypeError",
     "PerforationError",
@@ -43,7 +49,9 @@ __all__ = [
     "load_spec",
     "sanitize_for_gates",
     "validate_bend",
+    "validate_enclosed_shelf",
     "validate_export",
+    "validate_export_enclosed_shelf",
     "validate_export_holes",
     "validate_export_perforation",
     "validate_export_profile",
