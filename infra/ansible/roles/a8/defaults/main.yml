@@ -141,3 +141,26 @@ a8_push_ssh_url: "git@github.com:stjurik/flatcraft.git"
 # публічний — йому можна бути в git. Порожньо — роль ключа не ставить (дефолт:
 # новий ключ — рішення yurii, клас A).
 a8_ctl_pubkey: ""
+
+# Усі поточні ключі a8-ctl одним списком (#301). Роль ставить кожен з них і
+# ВІДКЛИКАЄ з authorized_keys агента кожен рядок a8-ctl, ключа якого тут немає;
+# V22 (a8-ssh-doors.sh) вимагає рівно ці рядки. S3 (ADR-044 п.3) допише сюди
+# a8_ctl_local_pubkey — тут, а не окремою задачею, щоб відкликання бачило обидва.
+a8_ctl_pubkeys: "{{ [a8_ctl_pubkey] | map('trim') | select | list }}"
+
+# Формат ключа a8-ctl — одне джерело для assert ролі і для CI (інваріант 17
+# check-ansible-a8.sh читає обидві змінні звідси й звіряє group_vars тим самим
+# виразом через grep -E). Рядок формату на тип: тип і base64 рівно тієї довжини,
+# яку дає ssh-keygen (виміряно 2026-11-09: ed25519 — 68, ecdsa 256/384/521 —
+# 140/184/232, rsa ≥2048 біт — ≥372); далі необов'язковий коментар друкованими
+# ASCII. Короткий base64 (`A==`) не проходить: інакше regexp задач ролі зачепив
+# би чужі рядки authorized_keys (#301 п.3). Власні опції (`command=…`, `from=…`)
+# і другий рядок не проходять: вираз починається з типу і не пускає переносу.
+# Лише конструкції, однакові в Python re і POSIX ERE; без зворотної риски.
+a8_ctl_pubkey_formats:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}"
+  - "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY[A-Za-z0-9+/=]{109}"
+  - "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQ[A-Za-z0-9+/=]{153}"
+  - "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjE[A-Za-z0-9+/=]{201}"
+  - "ssh-rsa AAAAB3NzaC1yc2E[A-Za-z0-9+/=]{357,}"
+a8_ctl_pubkey_re: "^({{ a8_ctl_pubkey_formats | join('|') }})( [ -~]*)?$"

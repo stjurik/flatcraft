@@ -626,14 +626,16 @@
     - a8-ctl
 
 - name: Check the a8-ctl public key format
-  # Лише голий публічний ключ: тип, base64, необов'язковий коментар. Власні опції
-  # (`command=…`, `from=…`) чи другий рядок у змінній обійшли б restrict нижче.
+  # Лише голий публічний ключ: тип, base64 точної для типу довжини, необов'язковий
+  # коментар (a8_ctl_pubkey_re у defaults — той самий вираз CI звіряє з group_vars,
+  # інваріант 17). Власні опції (`command=…`, `from=…`) чи другий рядок у змінній
+  # обійшли б restrict нижче; короткий base64 зробив би regexp відкликання ширшим.
   ansible.builtin.assert:
     that:
-      - a8_ctl_pubkey is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+=* ?[^\n\r]*$')
-    fail_msg: "a8_ctl_pubkey не схожий на рядок .pub (тип, base64, коментар) — ключ не ставлю"
+      - item is match(a8_ctl_pubkey_re)
+    fail_msg: "ключ a8-ctl не схожий на рядок .pub (тип, base64 повної довжини, коментар) — ключ не ставлю: {{ item[:40] }}…"
     quiet: true
-  when: a8_ctl_pubkey | length > 0
+  loop: "{{ a8_ctl_pubkeys }}"
 
 - name: Ensure agent ssh directory exists for the a8-ctl key
   ansible.builtin.file:
@@ -642,20 +644,49 @@
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0700"
-  when: a8_ctl_pubkey | length > 0
+  when: a8_ctl_pubkeys | length > 0
 
-- name: Authorize the orchestrator key for a8-ctl only
-  # Рядок шукається за base64-частиною ключа: той самий ключ без restrict чи з
-  # іншою командою замінюється, а не дублюється. Інші ключі файла не чіпаються.
+- name: Revoke a8-ctl key lines that are not current
+  # Відкликання (#301 п.1). Без цієї задачі очищений чи змінений a8_ctl_pubkey
+  # лишав старий рядок у файлі: lineinfile нижче лише додає. Прибирається кожен
+  # рядок, що згадує a8-ctl АБО base64 поточного ключа, якщо він не рівно рядок,
+  # який ставить задача нижче: старий ключ, той самий ключ без restrict, з pty
+  # чи з іншою командою. Інші ключі файла роль не чіпає — але V22j (a8-ssh-doors)
+  # на кожному з них падає: після `AllowUsers … agent` кожен ключ agent діє.
+  # Порожній список ключів — прибираються всі рядки a8-ctl. Файла немає — нічого.
+  vars:
+    a8_ctl_keep_re: >-
+      {{ a8_ctl_pubkeys | map('regex_replace', '^', 'restrict,command="/usr/local/bin/a8-ctl" ')
+         | map('regex_escape') | join('|') }}
+    a8_ctl_b64_re: >-
+      {{ a8_ctl_pubkeys | map('regex_replace', '^\S+ (\S+).*$', '\1') | map('regex_escape') | join('|') }}
   ansible.builtin.lineinfile:
     path: "{{ a8_agent_home }}/.ssh/authorized_keys"
-    regexp: "{{ (a8_ctl_pubkey.split())[1] | regex_escape }}"
-    line: 'restrict,command="/usr/local/bin/a8-ctl" {{ a8_ctl_pubkey | trim }}'
+    regexp: >-
+      {{ ('^(?!(?:' ~ a8_ctl_keep_re ~ ')$)' if a8_ctl_pubkeys | length > 0 else '')
+         ~ '.*(?:/usr/local/bin/a8-ctl' ~ (('|' ~ a8_ctl_b64_re) if a8_ctl_pubkeys | length > 0 else '') ~ ')' }}
+    state: absent
+
+- name: Authorize the orchestrator key for a8-ctl only
+  # Рядок — точно такий, і жодного іншого з цим ключем (задача вище прибрала).
+  ansible.builtin.lineinfile:
+    path: "{{ a8_agent_home }}/.ssh/authorized_keys"
+    line: 'restrict,command="/usr/local/bin/a8-ctl" {{ item }}'
     create: true
     owner: "{{ a8_agent_user }}"
     group: "{{ a8_agent_user }}"
     mode: "0600"
-  when: a8_ctl_pubkey | length > 0
+  loop: "{{ a8_ctl_pubkeys }}"
+
+- name: Install ssh doors check for verify
+  # a8-ssh-doors.sh (#305, #301) — V22j кличе саме цю копію під root; та сама, що
+  # доведена в CI (a8-ssh-doors.test.sh). V22 звіряє суму з репозиторієм.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-ssh-doors.sh"
+    dest: /usr/local/lib/a8/a8-ssh-doors.sh
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Install queue tick
   ansible.builtin.template:
