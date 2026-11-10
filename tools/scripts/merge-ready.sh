@@ -82,17 +82,18 @@ epoch() { # epoch <ISO8601Z> — unix-час або порожньо
 }
 # gh_api_json/gh_api_list НЕ викликають die: die всередині функції, покликаної через
 # підстановку команди `x="$(fn)"`, завершує лише підшкаралупу підстановки, а не весь
-# скрипт — тож помилку повертаємо кодом і текстом у GH_ERR, die кличе викликач.
-gh_api_json() { # gh_api_json <шлях> — одне валідне значення JSON; $? != 0 → GH_ERR
+# скрипт. Причину функція друкує в stderr сама (змінна, присвоєна в підшкаралупі,
+# до викликача не доходить — рецензія #317), а die з кодом кличе викликач.
+gh_api_json() { # gh_api_json <шлях> — одне валідне значення JSON; $? != 0 → причина в stderr
   local out rc
   out="$("$GH" api "$1" 2>&1)"
   rc=$?
   if ((rc != 0)); then
-    GH_ERR="gh api $1: $out"
+    echo "merge-ready: gh api $1: $out" >&2
     return 1
   fi
   if ! jq -e . >/dev/null 2>&1 <<<"$out"; then
-    GH_ERR="gh api $1: відповідь не JSON: $out"
+    echo "merge-ready: gh api $1: відповідь не JSON: $out" >&2
     return 1
   fi
   printf '%s' "$out"
@@ -102,19 +103,19 @@ gh_api_list() { # gh_api_list <шлях> — сторінки --paginate, зве
   raw="$("$GH" api "$1" --paginate 2>&1)"
   rc=$?
   if ((rc != 0)); then
-    GH_ERR="gh api $1 --paginate: $raw"
+    echo "merge-ready: gh api $1 --paginate: $raw" >&2
     return 1
   fi
   merged="$(jq -cs 'add // []' <<<"$raw" 2>&1)"
   if (($? != 0)); then
-    GH_ERR="gh api $1 --paginate: відповідь не JSON: $merged"
+    echo "merge-ready: gh api $1 --paginate: відповідь не JSON: $merged" >&2
     return 1
   fi
   printf '%s' "$merged"
 }
 
 # ─── 1. коментар згоди ────────────────────────────────────────────────────
-consent_json="$(gh_api_json "repos/$HART_INBOX/issues/comments/$CONSENT_ID")" || die "$GH_ERR" 1
+consent_json="$(gh_api_json "repos/$HART_INBOX/issues/comments/$CONSENT_ID")" || die "не вдалося прочитати hart-inbox (причина вище) — merge не зроблено" 1
 c_login="$(jq -r '.user.login' <<<"$consent_json")"
 c_issue_url="$(jq -r '.issue_url' <<<"$consent_json")"
 c_created="$(jq -r '.created_at' <<<"$consent_json")"
@@ -131,7 +132,7 @@ if grep -qF -- "$MARK" <<<"$c_unquoted" || grep -qE 'Архітектор (→|-
 fi
 
 # ─── 2. коментар зведення ─────────────────────────────────────────────────
-digest_json="$(gh_api_json "repos/$HART_INBOX/issues/comments/$DIGEST_ID")" || die "$GH_ERR" 1
+digest_json="$(gh_api_json "repos/$HART_INBOX/issues/comments/$DIGEST_ID")" || die "не вдалося прочитати hart-inbox (причина вище) — merge не зроблено" 1
 d_login="$(jq -r '.user.login' <<<"$digest_json")"
 d_issue_url="$(jq -r '.issue_url' <<<"$digest_json")"
 d_created="$(jq -r '.created_at' <<<"$digest_json")"
@@ -147,7 +148,7 @@ d_epoch="$(epoch "$d_created")"
 [[ -n "$c_epoch" && -n "$d_epoch" ]] || die "дата згоди чи зведення не ISO8601" 1
 ((d_epoch < c_epoch)) || die "зведення #$DIGEST_ID не раніше згоди #$CONSENT_ID" 3
 
-comments_json="$(gh_api_list "repos/$HART_INBOX/issues/$ISSUE/comments")" || die "$GH_ERR" 1
+comments_json="$(gh_api_list "repos/$HART_INBOX/issues/$ISSUE/comments")" || die "не вдалося прочитати hart-inbox (причина вище) — merge не зроблено" 1
 newer="$(jq -r --arg owner "$OWNER" --arg mark "$MARK" --argjson did "$DIGEST_ID" --argjson depoch "$d_epoch" '
   [ .[]
     | select(.id != $did)

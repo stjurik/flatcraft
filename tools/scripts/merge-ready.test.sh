@@ -62,6 +62,7 @@ export FIXTURE_DIR="$D" CALLS_DIR
 cat >"$SB/bin/gh" <<'EOS'
 #!/usr/bin/env bash
 n=$(ls "$CALLS_DIR" | wc -l)
+[[ "${1:-}" == api && -n "${MR_API_FAIL:-}" ]] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 printf '%s\n' "$@" >"$CALLS_DIR/$(printf %04d "$n").args"
 D="$FIXTURE_DIR"
 a=("$@")
@@ -291,6 +292,28 @@ out="$(cd "$SB" && PATH="$SB/bin:$PATH" PARSE_DECISIONS_SH="$SB/pd.sh" "$MR" "$P
 rc=$?
 set -e
 expect 2 "поза клоном flatcraft"
+
+# ── Регресія рецензії #317: збій gh api — код 1 і справжня причина в stderr,
+#    а не «GH_ERR: unbound variable». ─────────────────────────────────────
+baseline
+export MR_API_FAIL=1
+std
+unset MR_API_FAIL
+expect 1 "збій gh api"
+if grep -q 'HTTP 502' "$ERRFILE" && ! grep -q 'unbound variable' "$ERRFILE"; then
+  ok "причина збою gh api — у stderr"
+else
+  bad "причина збою gh api загубилась: $(head -c 300 "$ERRFILE")"
+fi
+if merged; then bad "збій gh api — а merge викликано"; else ok "збій gh api — без merge"; fi
+
+# ── Draft PR: спершу pr ready, потім pr merge. ─────────────────────────
+baseline
+write_pr "$SHA" true
+std
+expect 0 "draft PR — merge"
+c="$(calls)"
+if [[ "$c" == *"pr ready"*"pr merge"* ]]; then ok "draft: pr ready перед pr merge"; else bad "draft: немає pr ready перед pr merge: $c"; fi
 
 if [[ "$fail" -eq 0 ]]; then
   echo "Усі тести пройдено."
