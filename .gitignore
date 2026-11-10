@@ -103,6 +103,13 @@ logs/
 
 # Cache
 .cache/
+# Кеші інструментів, що ховаються самі — кладуть у свою теку .gitignore з «*»:
+# ruff і mypy (lefthook), hypothesis (pytest воркера). Перевірка чистоти дерева
+# на A8 правил ігнору з дерева агента не визнає, лише цей файл (#302 B). Без цих
+# рядків кожна задача з Python падала б як «брудна». Тримає a8-git-lib.test.sh.
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
 
 # Claude Code локальні налаштування (permission allowlist з машинно-специфічними
 # командами + session lock) — не для публічного репо.

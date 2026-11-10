@@ -267,6 +267,36 @@ run_scenarios() {
   [[ "$(fingerprint)" == "$fp" && -f "$WT/u/new.txt" ]] && ok "робота у worktree збережена" || bad "брудний worktree зачеплено"
   teardown
 
+  # 3a. #302 B: робота, захована правилами ігнору агента — вкладений .gitignore
+  # з «*» (v) і рядок у .git/info/exclude головного клону (w). `add -A` дає
+  # дерево == HEAD, тож до правки requeue визнавав worktree чистим і `rm -rf`
+  # стирав файли. Правила origin/main (лише node_modules/) їх не ховають → SKIP.
+  # Контроль x: ігнороване базою (node_modules/) — не бруд, requeue проходить.
+  setup
+  mkfailed v
+  mkbranch v
+  mkdir -p "$WT/v/sub" && printf '*\n' >"$WT/v/sub/.gitignore" && echo work >"$WT/v/sub/conftest.py"
+  mkfailed w
+  mkbranch w
+  mkdir -p "$REPO/.git/info" && echo work >"$WT/w/evil.py" && echo evil.py >>"$REPO/.git/info/exclude"
+  fp="$(fingerprint)"
+  run_rq v w
+  [[ $RC -eq 1 && "$OUT" == *"SKIP v:"*"поза правилами ігнору origin/main"*"sub/conftest.py"* &&
+    "$OUT" == *"SKIP w:"*"поза правилами ігнору origin/main"*"evil.py"* ]] &&
+    ok "3a: файли під правилами ігнору агента (вкладений .gitignore, info/exclude) → SKIP «поза правилами ігнору origin/main»" ||
+    bad "3a: rc=$RC $OUT"
+  [[ "$(fingerprint)" == "$fp" && -f "$WT/v/sub/conftest.py" && -f "$WT/w/evil.py" ]] &&
+    ok "3a: захована робота у worktree збережена" || bad "3a: worktree зачеплено"
+  teardown
+  setup
+  mkfailed x
+  mkbranch x
+  mkdir -p "$WT/x/node_modules/p" && echo 1 >"$WT/x/node_modules/p/i.js"
+  run_rq x
+  [[ $RC -eq 0 && ! -d "$WT/x" ]] && ok "3a: ігнороване правилами origin/main (node_modules/) — не бруд, requeue прибрав worktree" ||
+    bad "3a контроль: rc=$RC $OUT"
+  teardown
+
   # 3b. Контейнер-шкідник: симлінк УСЕРЕДИНІ .git/worktrees/ головного клону
   # (#291/#292). requeue ходить у git ТІЛЬКИ через спільний hgit, тож небезпечну
   # .git ловить git_unsafe_reason одразу на старті — задачу й гілку не чіпає.
@@ -797,6 +827,7 @@ elif [[ -z "${A8_REQUEUE_UNDER_TEST:-}" ]]; then
   }
   mutate "перевірку комітів гілки прибрано" 's/if \(\(n != 0\)\); then\n      skip "на гілці/if false; then\n      skip "на гілці/'
   mutate "перевірку брудного worktree прибрано" 's/    if \[\[ "\$wttree" != "\$\(hgit rev-parse --verify --quiet "\$WT_HEAD\^\{commit\}\^\{tree\}"\)" \]\]; then/    if false; then/'
+  mutate "неіндексоване поза правилами origin/main не зупиняє requeue" 's/    if \[\[ -n "\$extra" \]\]; then/    if false; then/'
   mutate "reset прибирає всі кінцеві failed" 's/ && r < k\)/)/'
   mutate "reset: старий алгоритм (K = скільки повернуто)" 's/  ATTR="\$\(jq -r \.c <<<"\$res"\)"/  ATTR=\$#/'
   mutate "reset: лік не зупиняє ok чи чужа задача" 's/            else \.done = true\n            end/            else .\n            end/'

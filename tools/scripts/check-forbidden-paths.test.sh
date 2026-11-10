@@ -83,6 +83,16 @@ else
   done
 fi
 
+# #302 D: скрипти, які роль A8 ставить на хост, і сам backstop — заборонені;
+# сусідні скрипти tools/scripts (не a8-*) — ні.
+assert_exit "a8-git-lib.sh (обгортка git на хості) → 1" 1 "tools/scripts/a8-git-lib.sh"
+assert_exit "a8-queue.sh / a8-requeue.sh → 1" 1 "$(printf 'tools/scripts/a8-queue.sh\ntools/scripts/a8-requeue.sh\n')"
+assert_exit "a8-*.test.sh (тест межі) → 1" 1 "tools/scripts/a8-tick.test.sh"
+assert_exit "сам check-forbidden-paths.sh → 1" 1 "tools/scripts/check-forbidden-paths.sh"
+assert_exit "check-forbidden-paths.test.sh → 1" 1 "tools/scripts/check-forbidden-paths.test.sh"
+assert_exit "сусідні скрипти (agy-call.sh, daily-digest.sh) → 0" 0 "$(printf 'tools/scripts/agy-call.sh\ntools/scripts/daily-digest.sh\n')"
+assert_exit "a8- лише як частина назви (tools/scripts/x-a8-y.sh) → 0" 0 "tools/scripts/x-a8-y.sh"
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1
