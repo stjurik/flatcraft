@@ -133,6 +133,13 @@ describe("SEED_TEMPLATES", () => {
     });
   });
 
+  it("corner_angle descriptionUk — без «grid», дослівно за yurii (issue #265)", () => {
+    const corner = SEED_TEMPLATES.find((t) => t.slug === "corner_angle");
+    expect(corner?.descriptionUk).toBe(
+      "Підсилювальний кутник з отворами для меблів та конструкцій.",
+    );
+  });
+
   it("wall_shelf defaultParameters містить U-channel і mount-hole поля", () => {
     const shelf = SEED_TEMPLATES.find((t) => t.slug === "wall_shelf");
     expect(shelf?.defaultParameters).toMatchObject({
