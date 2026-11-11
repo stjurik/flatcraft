@@ -52,6 +52,16 @@ jobs:
             echo "── $t"
             bash "$t"
           done
+      # Двійник хука lefthook `vault-encrypted`. Хуки на машині оркестратора вимкнено
+      # (вони виконували код гілки PR — рецензія #318), тож гейт має жити тут: інакше
+      # розшифрований vault дійшов би до публічного репо без жодної перевірки.
+      - name: Vault-файли зашифровано ansible-vault
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            head -1 "$f" | grep -q '^\$ANSIBLE_VAULT' || { echo "::error file=$f::не зашифровано ansible-vault"; bad=1; }
+          done < <(git ls-files 'infra/ansible/**/*.vault.yml')
+          exit "$bad"
 
   # Журнали лише доповнюються (issue #169, правило трьох): заголовки docs/13 з бази
   # лишаються в PR, agy-stats.md — тільки дописування. Окремий job, бо «Guard-скрипти»
