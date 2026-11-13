@@ -191,7 +191,13 @@ class TestНескінченнеУВкладеномуОтворі:
 
     @pytest.mark.parametrize("bad", NONFINITE)
     def test_z_bracket(self, client: TestClient, bad: str) -> None:
-        hole = {**GOOD_HOLE, "distance_from_bend_mm": bad}
+        # z_bracket — `segment`, не `leg` (інакше новий гейт 057 дав би ще й
+        # HOLE_FIELD_MISSING на holes.0.segment поряд з TYPE_CODE).
+        hole = {
+            **{k: v for k, v in GOOD_HOLE.items() if k != "leg"},
+            "segment": "T",
+            "distance_from_bend_mm": bad,
+        }
         res = _export(client, "z_bracket", {**Z_VALID_PARAMS, "holes": [hole]})
         assert res.status_code == 422, res.text
         detail = res.json()["detail"]
