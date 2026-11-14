@@ -170,6 +170,58 @@ class TestEnclosedShelfGateUnit:
         assert codes.count("HOLES_OVERLAP") == 2
         assert "MARGIN_TOO_SMALL" in codes
 
+    def test_issue_303_занадто_близько_до_гиба_і_в_кутовому_виступі(self) -> None:
+        # depth=100, t=r=2.5, rib=15, h=20, px=37, py=39.5, m=10.5:
+        # e_x-h/2=0.5 < a·t+r=7.5; e_y-h/2=0.5 < q=tr=5.
+        side = {"hole_size_mm": 20, "pitch_x_mm": 37, "pitch_y_mm": 39.5, "margin_mm": 10.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "cold_rolled_steel",
+        )
+        codes_fields = {(e.code, e.field) for e in errs}
+        assert ("HOLE_TOO_CLOSE_TO_BEND", "side_perforation.margin_mm") in codes_fields
+        assert ("HOLE_IN_CORNER_TAB", "side_perforation.margin_mm") in codes_fields
+
+    def test_межа_гиба_валідна(self) -> None:
+        # e_x-h/2 = 12.5-5 = 7.5 = a·t+r — межа включна.
+        side = {"hole_size_mm": 10, "pitch_x_mm": 35, "pitch_y_mm": 35, "margin_mm": 12.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "cold_rolled_steel",
+        )
+        assert not any(e.code == "HOLE_TOO_CLOSE_TO_BEND" for e in errs)
+
+    def test_невідомий_материал_пропускає_лише_too_close_to_bend(self) -> None:
+        side = {"hole_size_mm": 20, "pitch_x_mm": 37, "pitch_y_mm": 39.5, "margin_mm": 10.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "unobtanium",
+        )
+        codes = [e.code for e in errs]
+        assert "HOLE_TOO_CLOSE_TO_BEND" not in codes
+        assert "HOLE_IN_CORNER_TAB" in codes
+
 
 @pytest.fixture(autouse=True)
 def _s3(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:

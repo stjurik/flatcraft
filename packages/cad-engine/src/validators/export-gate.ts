@@ -309,6 +309,8 @@ export function validateExportPerforation(body: ExportRequest): ProblemError[] {
           side_perforation: p.side_perforation,
           depth_mm: p.depth_mm,
           bend_radius_mm: p.bend_radius_mm,
+          stiffening_rib: p.stiffening_rib,
+          material_code: body.material_code,
         },
         body.thickness_mm,
       );

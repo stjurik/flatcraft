@@ -1,22 +1,36 @@
 /**
  * enclosed_shelf-специфічні серверні перевірки (issue #283, ADR-019): ребро
  * жорсткості (flange-after-bend) і перфорація боковин (вміщення у площину,
- * злиття отворів, вихід на край). Окремий файл, не `profile.ts`/
- * `perforation.ts` — ці два валідатори не мають case'у "enclosed_shelf" у
- * своїх дискримінованих union-входах, а розширювати їх під один шаблон зі
- * своєю геометрією (cross-розгортка, дві незалежні боковини) недоцільно.
+ * злиття отворів, вихід на край, відстань від гиба, кутові виступи). Окремий
+ * файл, не `profile.ts`/`perforation.ts` — ці два валідатори не мають case'у
+ * "enclosed_shelf" у своїх дискримінованих union-входах, а розширювати їх під
+ * один шаблон зі своєю геометрією (cross-розгортка, дві незалежні боковини)
+ * недоцільно.
  *
  * Дзеркало Python `workers/cad/flatcraft_cad/validate/enclosed_shelf.py` —
  * захист в глибину (клієнт-банер + Fastify-gate тут + cad-worker, ADR-019/026).
  *
- * Browser-safe: жодного `node:*`, чисті функції.
+ * Browser-safe: жодного `node:*`, чисті функції. Коефіцієнт `hole_to_bend_distance`
+ * береться з `bakedSpec` (та сама константа, що й `holes.ts`, але
+ * `validateExportPerforation` викликається з ОДНИМ аргументом — spec у неї
+ * передати нема звідки, тож тут власний імпорт, issue #303).
  */
+import { bakedSpec } from "../generated/baked-spec.js";
 
 export type EnclosedShelfGateCode =
   | "FLANGE_TOO_SHORT"
   | "HOLES_OVERLAP"
   | "MARGIN_TOO_SMALL"
-  | "PERFORATION_DOES_NOT_FIT";
+  | "PERFORATION_DOES_NOT_FIT"
+  | "HOLE_TOO_CLOSE_TO_BEND"
+  | "HOLE_IN_CORNER_TAB";
+
+/**
+ * Допуск на представлення чисел із рухомою крапкою (CLAUDE.md §7 — межа «від
+ * краю»), той самий 1e-9, що `holes.ts::EDGE_DISTANCE_EPSILON_MM` і Python
+ * `validate/holes.py::EDGE_DISTANCE_EPSILON_MM`.
+ */
+const EDGE_DISTANCE_EPSILON_MM = 1e-9;
 
 export interface EnclosedShelfGateError {
   readonly field: string;
@@ -70,6 +84,32 @@ export interface EnclosedShelfSidePerforationParams {
   } | null;
   readonly depth_mm: number;
   readonly bend_radius_mm: number;
+  readonly stiffening_rib: { readonly height_mm: number } | null;
+  readonly material_code: string;
+}
+
+/**
+ * Ефективні відступи центрованої сітки отворів (issue #303) — та сама
+ * формула, що Python `unfold.py::_enclosed_shelf_side_holes`: `null`, якщо
+ * отворів взагалі немає (`avail < 0` по будь-якій осі, уже ловить
+ * PERFORATION_DOES_NOT_FIT/056).
+ */
+function sidePerforationEffectiveMargins(
+  wMm: number,
+  hMm: number,
+  pitchXMm: number,
+  pitchYMm: number,
+  marginMm: number,
+): { readonly effMarginXMm: number; readonly effMarginYMm: number } | null {
+  const availX = wMm - 2 * marginMm;
+  const availY = hMm - 2 * marginMm;
+  if (availX < 0 || availY < 0) return null;
+  const nCols = Math.floor(availX / pitchXMm) + 1;
+  const nRows = Math.floor(availY / pitchYMm) + 1;
+  return {
+    effMarginXMm: (wMm - (nCols - 1) * pitchXMm) / 2,
+    effMarginYMm: (hMm - (nRows - 1) * pitchYMm) / 2,
+  };
 }
 
 const AXIS_LABEL: Record<"pitch_x_mm" | "pitch_y_mm", string> = {
@@ -96,6 +136,21 @@ const AXIS_LABEL: Record<"pitch_x_mm" | "pitch_y_mm", string> = {
  *      (PERFORATION_DOES_NOT_FIT на hole_size_mm) — окрема підказка
  *      («зменшіть отвір»), щоб не ходити по колу з (c) («зменшіть відступ»).
  * `null` — перфорації немає, нічого перевіряти.
+ *
+ * Ще два незалежні правила (issue #303, CLAUDE.md §7 — отвір не ближче
+ * `a·t+R` до гиба): рахуються лише коли отвори реально є (інакше про них
+ * нічого сказати — це вже ловить (c)). Позначення: tr = t+r, M_hb = a·t+r
+ * (a — коефіцієнт `hole_to_bend_distance.coefficient_by_material[material_code]`
+ * з `bakedSpec`), q = tr, якщо задано ребро жорсткості, інакше tr/2 (висота
+ * смуги кутового виступу боковини — похідна від `flat_bottom_y` у
+ * `unfold.py::unfold_enclosed_shelf`, не залежить від depth_mm).
+ *   e. ефективний відступ сітки по осі X (лінія гиба боковина↔дно) мінус
+ *      половина отвору ≥ M_hb — інакше край отвору заходить у зону гиба
+ *      (HOLE_TOO_CLOSE_TO_BEND на margin_mm). Невідомий material_code —
+ *      правило пропускається (матеріал ловить власний гейт, `validateExportBends`).
+ *   f. ефективний відступ сітки по осі Y мінус половина отвору ≥ q — інакше
+ *      ряд отворів заходить у кутовий виступ (HOLE_IN_CORNER_TAB на margin_mm).
+ *      Не залежить від матеріалу.
  */
 export function validateEnclosedShelfSidePerforation(
   params: EnclosedShelfSidePerforationParams,
@@ -145,6 +200,35 @@ export function validateEnclosedShelfSidePerforation(
       value: h,
       message: `Зменшіть «Сторона □»: отвір ${fmt(h)} мм не вміщається у боковину шириною ${fmt(w)} мм.`,
     });
+  }
+
+  const grid = sidePerforationEffectiveMargins(w, params.depth_mm, px, py, m);
+  if (grid !== null) {
+    const tr = thicknessMm + params.bend_radius_mm;
+    const coeff = bakedSpec.hole_to_bend_distance.coefficient_by_material[params.material_code];
+    if (coeff !== undefined) {
+      const minHb = coeff * thicknessMm + params.bend_radius_mm;
+      const edgeX = grid.effMarginXMm - h / 2;
+      if (edgeX < minHb - EDGE_DISTANCE_EPSILON_MM) {
+        errors.push({
+          field: "side_perforation.margin_mm",
+          code: "HOLE_TOO_CLOSE_TO_BEND",
+          value: m,
+          message: `Збільшіть «Відступ від країв» чи «Крок X», або зменшіть отвір: відстань від краю найближчого отвору до лінії гиба боковина↔дно ${fmt(edgeX)} мм менша за мінімум ${fmt(minHb)} мм (a·t+R = ${fmt(coeff)}×${fmt(thicknessMm)}+${fmt(params.bend_radius_mm)}).`,
+        });
+      }
+    }
+
+    const q = params.stiffening_rib !== null ? tr : tr / 2;
+    const edgeY = grid.effMarginYMm - h / 2;
+    if (edgeY < q - EDGE_DISTANCE_EPSILON_MM) {
+      errors.push({
+        field: "side_perforation.margin_mm",
+        code: "HOLE_IN_CORNER_TAB",
+        value: m,
+        message: `Перемістіть ряд отворів усередину чи зменшіть отвір: ряд заходить у кутовий виступ боковини на ${fmt(q - edgeY)} мм (відступ від виступу ${fmt(edgeY)} мм, потрібно не менше ${fmt(q)} мм).`,
+      });
+    }
   }
 
   return errors;

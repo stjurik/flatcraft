@@ -450,7 +450,9 @@ def _build_app() -> FastAPI:
             *validate_export_profile(req.template_slug, gate_params, req.thickness_mm),
             *validate_export(req.template_slug, gate_params, req.thickness_mm, req.material_code),
             *validate_export_perforation(req.template_slug, gate_params),
-            *validate_export_enclosed_shelf(req.template_slug, gate_params, req.thickness_mm),
+            *validate_export_enclosed_shelf(
+                req.template_slug, gate_params, req.thickness_mm, req.material_code
+            ),
             *validate_export_sheet(
                 req.template_slug, gate_params, req.thickness_mm, req.material_code
             ),
