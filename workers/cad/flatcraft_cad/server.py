@@ -64,6 +64,7 @@ from flatcraft_cad.validate import (
     sanitize_for_gates,
     validate_export,
     validate_export_enclosed_shelf,
+    validate_export_hole_shape,
     validate_export_holes,
     validate_export_perforation,
     validate_export_profile,
@@ -445,6 +446,7 @@ def _build_app() -> FastAPI:
         gate_params = sanitize_for_gates(gate_params, type_errors)
         errors = [
             *type_errors,
+            *validate_export_hole_shape(req.template_slug, req.parameters, type_errors),
             *validate_export_profile(req.template_slug, gate_params, req.thickness_mm),
             *validate_export(req.template_slug, gate_params, req.thickness_mm, req.material_code),
             *validate_export_perforation(req.template_slug, gate_params),
