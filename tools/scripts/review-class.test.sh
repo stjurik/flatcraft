@@ -69,12 +69,29 @@ done <<'EOF'
 роль і демон A8|tools/scripts/a8-pr-fence.sh
 роль і демон A8|tools/scripts/a8-ssh-doors.sh
 роль і демон A8|tools/scripts/a8-ssh-doors.test.sh
+роль і демон A8|tools/scripts/a8-git-lib.sh
+роль і демон A8|tools/scripts/a8-queue.sh
+роль і демон A8|tools/scripts/a8-ctl.sh
+роль і демон A8|tools/scripts/a8-requeue.sh
 роль і демон A8|tools/scripts/autorun.sh
 CI|.github/workflows/ci.yml
 CI|lefthook.yml
 CI|tools/scripts/prove-red-before-green.sh
 CI|tools/scripts/check-journals.sh
 CI|tools/scripts/check-journals.test.sh
+CI|package.json
+CI|apps/web/package.json
+CI|pnpm-lock.yaml
+CI|pnpm-workspace.yaml
+CI|workers/cad/pyproject.toml
+CI|workers/cad/uv.lock
+CI|turbo.json
+CI|eslint.config.mjs
+CI|apps/web/vitest.config.ts
+CI|apps/web/playwright.config.ts
+CI|.prettierrc
+CI|workers/cad/tests/conftest.py
+CI|tools/scripts/workflow-permissions.test.sh
 експорт і валідатори §7|workers/cad/flatcraft_cad/export/dxf.py
 експорт і валідатори §7|workers/cad/flatcraft_cad/validate/profile.py
 експорт і валідатори §7|workers/cad/tests/snapshots/l_bracket.dxf
@@ -97,6 +114,29 @@ CI|tools/scripts/check-journals.test.sh
 інфраструктура|infra/docker/api.Dockerfile
 інфраструктура|infra/discord/README.md
 EOF
+
+# ─── 1b. Усе, що роль a8 копіює з tools/scripts/ на машину, — ризикове ───────
+# Незалежне ревю 2026-11 (№3): a8-git-lib, a8-queue, a8-ctl, a8-requeue роль ставить на A8
+# від root, і вони тримають межу агента, а клас за шляхом давав «звичайний». Перелік
+# береться з самої ролі: новий скрипт ролі без рядка в RULES валить цей розділ.
+ROLE="$HERE/../../infra/ansible/roles/a8/tasks/main.yml"
+deployed="$(awk '
+  /src: .*tools\/scripts\/\{\{ item \}\}\.sh/ { inloop = 1; next }
+  inloop && /^ +- [A-Za-z0-9_.-]+ *$/ { print "tools/scripts/" $2 ".sh"; next }
+  inloop && /^ +(dest|owner|group|mode|loop):/ { next }
+  inloop { inloop = 0 }
+  /src:/ && match($0, /tools\/scripts\/[A-Za-z0-9_.-]+\.sh/) { print substr($0, RSTART, RLENGTH) }
+' "$ROLE" 2>/dev/null | sort -u)"
+# Нижня межа — щоб тест не позеленів, якщо розбір ролі мовчки перестав щось знаходити.
+# 8 на 2026-11-10: a8-tick-logic, a8-git-lib, check-forbidden-paths, a8-requeue,
+# a8-queue, a8-ctl, a8-ro-shell, a8-ssh-doors.
+if (($(grep -c . <<<"$deployed") < 8)); then
+  bad "1b: з ролі прочитано менше 8 скриптів — розбір ролі застарів: ${deployed:-нічого}"
+else
+  while IFS= read -r p; do
+    expect "роль ставить на A8 — ризиковий: $p" 0 "$p"$'\napps/web/src/x.tsx\n' "клас: ризиковий" ": $p"
+  done <<<"$deployed"
+fi
 
 # ─── 2. Звичайні зміни — одна рецензія ─────────────────────────────────────
 expect "документи, промпти, UI, звіти A8 — звичайний" 0 \
@@ -391,6 +431,11 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "без міграцій" "  'міграції|packages/db/src/migrations/*'" ''
   mutate "без снапшотів експорту" "  'експорт і валідатори §7|workers/cad/tests/snapshots/*'" ''
   mutate "роль A8 не ризикова" "  'роль і демон A8|infra/ansible/roles/a8/*'" ''
+  mutate "git на хості не ризиковий" "  'роль і демон A8|tools/scripts/a8-git-lib*'" ''
+  mutate "двері a8-ctl не ризикові" "  'роль і демон A8|tools/scripts/a8-ctl*'" ''
+  mutate "lockfile не ризиковий" "  'CI|pnpm-lock.yaml'" ''
+  mutate "package.json пакета не ризиковий" "  'CI|*/package.json'" ''
+  mutate "конфіг тест-раннера не ризиковий" "  'CI|*vitest.config.*'" ''
   mutate "механізм рецензії не ризиковий" "  'дозволи й безпека|tools/scripts/review-class*'" ''
   mutate "порожній вхід — звичайний" 'нічого класифікувати" >&2
   exit 2' 'нічого класифікувати" >&2

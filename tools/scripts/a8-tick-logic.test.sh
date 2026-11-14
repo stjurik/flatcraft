@@ -105,13 +105,16 @@ run_scenarios() {
   printf 'Error: rate limit reached, usage quota exceeded, try later\n' >"$TMP/quota-ish.log"
   printf '{"type":"result","is_error":false,"result":"done"}\n' >"$TMP/ok.log"
   printf '{"type":"result","is_error":true,"result":"something broke"}\n' >"$TMP/iserr.log"
+  # Причина падіння (#10, 14.11): службові поля — у деталь, вільний текст result — ні.
+  printf 'warning: stderr\n{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":7,"terminal_reason":"api_error","api_error_status":529,"error":"overloaded; rm -rf /","result":"ghp_SECRETTOKEN у відповіді агента"}\n' >"$TMP/why.log"
+  printf '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":200,"error":"%s","result":"x"}\n' "$(printf 'a%.0s' {1..60})" >"$TMP/why-long.log"
 
   check "401 + is_error, rc=1 → auth_stop (STOP, не retry)" 0 "auth_stop 401" -- L classify 1 "$TMP/401.log"
   check "401 + is_error, rc=0 → теж auth_stop" 0 "auth_stop 401" -- L classify 0 "$TMP/401.log"
   # Розводимо «рядок 401 є» і «прогін упав через 401»: агент згадав сигнатуру
   # в успішному прогоні — це НЕ зупинка черги.
   check "згадка 401 в УСПІШНОМУ прогоні → ok, не auth_stop" 0 "ok -" -- L classify 0 "$TMP/mention.log"
-  check "згадка 401 у прогоні, що впав ІНАКШЕ після 200 кроків → failed, не auth_stop" 0 "failed rc=1" -- \
+  check "згадка 401 у прогоні, що впав ІНАКШЕ після 200 кроків → failed, не auth_stop" 0 "failed rc=1 subtype=error_max_turns" -- \
     L classify 1 "$TMP/mention-fail.log"
   check "401 із рядком stderr перед JSON → усе одно auth_stop" 0 "auth_stop 401" -- L classify 1 "$TMP/401-noisy.log"
   check "успіх за 1 крок із цитатою 401 → ok (is_error=false)" 0 "ok -" -- L classify 0 "$TMP/mention-1turn.log"
@@ -120,6 +123,15 @@ run_scenarios() {
   check "невідома сигнатура «quota» → failed, НЕ quota" 0 "failed rc=1" -- L classify 1 "$TMP/quota-ish.log"
   check "rc=0 без помилки → ok" 0 "ok -" -- L classify 0 "$TMP/ok.log"
   check "rc=0, але is_error → failed" 0 "failed is_error" -- L classify 0 "$TMP/iserr.log"
+  check "причина падіння: службові поля в деталі, result і зайві символи — ні" 0 \
+    "failed rc=1 subtype=error_during_execution terminal_reason=api_error api_error_status=529 error=overloadedrm-rf" -- \
+    L classify 1 "$TMP/why.log"
+  check "причина падіння: значення обрізано до 40 символів" 0 \
+    "failed rc=1 subtype=error_max_turns error=$(printf 'a%.0s' {1..40})" -- L classify 1 "$TMP/why-long.log"
+  check "причина падіння: при rc=0 і is_error теж" 0 \
+    "failed is_error subtype=error_during_execution terminal_reason=api_error api_error_status=529 error=overloadedrm-rf" -- \
+    L classify 0 "$TMP/why.log"
+  check "причина падіння: успіх не отримує полів" 0 "ok -" -- L classify 0 "$TMP/ok.log"
   check "таймаут 124 → failed timeout" 0 "failed timeout" -- L classify 124 "$TMP/ok.log"
   check "обгортка повернула 11 → stopped daily_limit, не failed" 0 "stopped daily_limit" -- L classify 11 "$TMP/ok.log"
 
@@ -173,6 +185,10 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "401 без умови is_error" 's/    if ((is_error)) \&\&$/    if true \&\&/'
   mutate "401 у сирому виводі навіть при rc=0" 's/  elif \[\[ "\$rc" != 0 \]\] \&\& grep -Fq/  elif grep -Fq/'
   mutate "клас quota з повітря" 's/echo "failed rc=\$rc"/echo "quota -"/'
+  mutate "причина падіння не дописується" 's/then line+="\$(a8_result_why "\$2")"; fi/then :; fi/'
+  mutate "у деталь іде вільний текст result" 's/("subtype", "terminal_reason"/("result", "subtype", "terminal_reason"/'
+  mutate "значення причини без фільтра символів" 's/gsub("\[^A-Za-z0-9_.-\]"; "")/./'
+  mutate "значення причини без обрізання" 's/ | \.\[0:40\]//'
   mutate "external дозволено за замовчуванням" 's/A8_SOURCES_ALLOWED:-human}/A8_SOURCES_ALLOWED:-human external}/'
   mutate "перевірку origin прибрано" 's/    reasons+=("origin:invalid")/    :/'
   mutate "перевірку prompt прибрано" 's/    reasons+=("prompt:missing")/    :/'

@@ -11,6 +11,13 @@ on:
   pull_request:
     branches: [main]
 
+# Лише читання. CI проганяє код гілки PR (тести, скрипти з package.json), тож токен
+# цього прогону не має права писати в репо, issues чи PR. Без блоку діяли б права
+# репозиторію за замовчуванням (незалежне ревю 2026-11, №8). Потрібні дії —
+# checkout, кеш, upload-artifact — працюють з `contents: read`.
+permissions:
+  contents: read
+
 # Скасовуємо застарілі запуски на тому ж референсі — економить minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -45,6 +52,17 @@ jobs:
             echo "── $t"
             bash "$t"
           done
+      # Двійник хука lefthook `vault-encrypted`. Хуки lefthook виконують код гілки PR на
+      # машині оркестратора (рецензія #318), тому коміти в гілки PR він робить з клону
+      # без хуків — і гейт має жити тут: інакше розшифрований vault дійшов би до
+      # публічного репо без жодної перевірки.
+      - name: Vault-файли зашифровано ansible-vault
+        run: |
+          bad=0
+          while IFS= read -r f; do
+            head -1 "$f" | grep -q '^\$ANSIBLE_VAULT' || { echo "::error file=$f::не зашифровано ansible-vault"; bad=1; }
+          done < <(git ls-files 'infra/ansible/**/*.vault.yml')
+          exit "$bad"
 
   # Журнали лише доповнюються (issue #169, правило трьох): заголовки docs/13 з бази
   # лишаються в PR, agy-stats.md — тільки дописування. Окремий job, бо «Guard-скрипти»
