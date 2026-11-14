@@ -424,3 +424,23 @@ class TestSideHolesNearBendExport:
         status, codes = self._post(self._side(10, 35, 35, 12.5), material="stainless_304")
         assert status == 422, codes
         assert self.BEND in codes, codes
+
+    def test_крок_нуль_повз_pydantic_422_а_не_500(self) -> None:
+        # width_mm 200 < 300 валить Pydantic → гейт бачить сирі параметри з кроком 0.
+        res = TestClient(app, raise_server_exceptions=False).post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": {
+                    **ENCLOSED_SHELF_VALID_PARAMS,
+                    "width_mm": 200,
+                    "depth_mm": 100,
+                    "bend_radius_mm": 2.5,
+                    "side_perforation": self._side(20, 0, 39.5, 10.5),
+                    "stiffening_rib": {"height_mm": 15},
+                },
+                "thickness_mm": 2.5,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text

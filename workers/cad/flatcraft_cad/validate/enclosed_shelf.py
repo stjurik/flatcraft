@@ -144,6 +144,11 @@ def _side_perforation_effective_margins(
     avail_y = h - 2 * margin
     if avail_x < 0 or avail_y < 0:
         return None
+    # Крок ≤ 0 (зіпсований запит повз Pydantic) — розкладки немає; без цього
+    # `avail // 0` дав би ZeroDivisionError → 500 (контрприклад Argon, рецензія #321).
+    # HOLES_OVERLAP на такий крок уже видає правило (a).
+    if pitch_x <= 0 or pitch_y <= 0:
+        return None
     n_cols = int(avail_x // pitch_x) + 1
     n_rows = int(avail_y // pitch_y) + 1
     eff_margin_x = (w - (n_cols - 1) * pitch_x) / 2.0
