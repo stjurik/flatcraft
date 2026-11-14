@@ -145,6 +145,17 @@ RULES=(
   'CI|pnpm-workspace.yaml'
   'CI|workers/cad/pyproject.toml'
   'CI|workers/cad/uv.lock'
+  # Конфіги, які CI і хуки ВИКОНУЮТЬ як код: оркестрація задач, лінтер, тест-раннери
+  # (рецензія #318, Sonnet №6). conftest.py — так само для pytest.
+  'CI|turbo.json'
+  'CI|eslint.config.*'
+  'CI|*/eslint.config.*'
+  'CI|*vitest.config.*'
+  'CI|*vitest.workspace.*'
+  'CI|*playwright.config.*'
+  'CI|.prettierrc*'
+  'CI|*conftest.py'
+  'CI|tools/scripts/workflow-permissions*'
   # Експорт і валідатори §7: усе, що визначає файли, які отримає виробництво.
   'експорт і валідатори §7|workers/cad/flatcraft_cad/*'
   'експорт і валідатори §7|workers/cad/tests/snapshots/*'

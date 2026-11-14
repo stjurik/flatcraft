@@ -451,8 +451,11 @@ out="$(run --check)"
   bad "--check без локального файла: $out"
 teardown
 
-# ─── 30. Заборони на push у main і живий Discord — обов'язкові ─────────────
-for d in 'Bash(git push * main)' 'Bash(git push * main *)' 'Bash(pnpm *discord:apply*)' 'Bash(pnpm * apply*)'; do
+# ─── 30. Заборони на push у main, живий Discord і код гілки — обов'язкові ────
+# Код гілки на T470 (блок А1, рецензія #318 Flash №1): без цих чотирьох профіль
+# знову дозволяв би тести й залежності гілки PR.
+for d in 'Bash(git push * main)' 'Bash(git push * main *)' 'Bash(pnpm *discord:apply*)' 'Bash(pnpm * apply*)' \
+  'Bash(pnpm *)' 'Bash(npx *)' 'Bash(uv run *)' 'Bash(bash tools/scripts/*.test.sh)'; do
   p="$(mktemp)"
   jq --arg d "$d" '.permissions.deny -= [$d]' "$REAL_PROFILE" >"$p"
   setup "$p"

@@ -82,6 +82,13 @@ CI|pnpm-lock.yaml
 CI|pnpm-workspace.yaml
 CI|workers/cad/pyproject.toml
 CI|workers/cad/uv.lock
+CI|turbo.json
+CI|eslint.config.mjs
+CI|apps/web/vitest.config.ts
+CI|apps/web/playwright.config.ts
+CI|.prettierrc
+CI|workers/cad/tests/conftest.py
+CI|tools/scripts/workflow-permissions.test.sh
 експорт і валідатори §7|workers/cad/flatcraft_cad/export/dxf.py
 експорт і валідатори §7|workers/cad/flatcraft_cad/validate/profile.py
 експорт і валідатори §7|workers/cad/tests/snapshots/l_bracket.dxf
@@ -425,6 +432,7 @@ if [[ -z "${REVIEW_CLASS_UNDER_TEST:-}" && $fail == 0 ]]; then
   mutate "двері a8-ctl не ризикові" "  'роль і демон A8|tools/scripts/a8-ctl*'" ''
   mutate "lockfile не ризиковий" "  'CI|pnpm-lock.yaml'" ''
   mutate "package.json пакета не ризиковий" "  'CI|*/package.json'" ''
+  mutate "конфіг тест-раннера не ризиковий" "  'CI|*vitest.config.*'" ''
   mutate "механізм рецензії не ризиковий" "  'дозволи й безпека|tools/scripts/review-class*'" ''
   mutate "порожній вхід — звичайний" 'нічого класифікувати" >&2
   exit 2' 'нічого класифікувати" >&2

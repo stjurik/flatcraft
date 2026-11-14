@@ -144,7 +144,30 @@ a8_guard_state() {
 # обгортці (між перевіркою демона і запуском контейнера) — це стоп, не падіння.
 A8_SIG_401='Failed to authenticate. API Error: 401 Invalid bearer token'
 
+# ПРИЧИНА ПАДІННЯ — у деталь (#10, 14.11: 058, 059, 060 упали як «rc=1», і причину
+# бачив лише журнал на A8, куди оркестратор не має доступу). До деталі `failed …`
+# дописуються ЛИШЕ короткі службові поля JSON-результату CLI: subtype,
+# terminal_reason, api_error_status, error — значення-переліки на кшталт
+# `error_max_turns`, `api_error`, `529`, `rate_limit_error`. Вільний текст `result`
+# не береться: це остання відповідь агента, і в ній може бути що завгодно. Кожне
+# значення — лише [A-Za-z0-9_.-], до 40 символів; поле без значення пропускається.
+# Деталь іде в runs.log, а його хвіст показує `a8-ctl status`.
+a8_result_why() { # a8_result_why <файл виводу> → « k=v …» або нічого
+  jq -rR 'fromjson? | select(type == "object" and has("is_error"))
+    | [ ("subtype", "terminal_reason", "api_error_status", "error") as $k
+        | (.[$k] // empty | tostring | gsub("[^A-Za-z0-9_.-]"; "") | .[0:40]) as $v
+        | select($v != "") | "\($k)=\($v)" ]
+    | join(" ")' "$1" 2>/dev/null | tail -n 1 | sed 's/^./ &/'
+}
+
 a8_classify() {
+  local line
+  line="$(a8_classify_core "$@")"
+  if [[ "$line" == "failed "* ]]; then line+="$(a8_result_why "$2")"; fi
+  echo "$line"
+}
+
+a8_classify_core() {
   local rc="$1" out="$2" res is_error=0 auth=0
   # Останній JSON-об'єкт із полем is_error — результат прогону.
   # Порядково і толерантно: поруч із JSON-результатом бувають рядки stderr, а
