@@ -202,6 +202,36 @@ run_suite() { # run_suite <local|ssh>
   call enqueue < <(task c1)
   [[ "$RC" == 1 && -z "$(qfiles)" && "$ERR" == *"гілка ai/c1"* ]] &&
     ok "$T гілка ai/<id> уже є → 1" || bad "$T гілка: rc=$RC $ERR"
+  # 5b. #302 C: тік працює (tick.lock зайнятий) — git на хості не запускається
+  # зовсім, гілку видно з ref-файлів: і loose (ai/c1), і з packed-refs (ai/c5).
+  # Вільний id при зайнятому тіку приймається. Заглушка git у PATH пише кожен
+  # виклик — під зайнятим tick.lock їх мусить бути 0.
+  mkdir -p "$ROOT/gitspy"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/calls"\nexec %s "$@"\n' "$ROOT/gitspy" "$(command -v git)" >"$ROOT/gitspy/git"
+  chmod +x "$ROOT/gitspy/git"
+  git -C "$REPO" branch ai/c5 origin/main && git -C "$REPO" pack-refs --all && git -C "$REPO" branch ai/c1x origin/main
+  : >"$LOGS/tick.lock"
+  flock "$LOGS/tick.lock" sleep 5 &
+  lockpid=$!
+  for _ in $(seq 50); do flock -n "$LOGS/tick.lock" true 2>/dev/null || break; sleep 0.1; done
+  PATH="$ROOT/gitspy:$PATH" call enqueue < <(task c1x)
+  r1="$RC/$ERR"
+  PATH="$ROOT/gitspy:$PATH" call enqueue < <(task c5)
+  r2="$RC/$ERR"
+  PATH="$ROOT/gitspy:$PATH" call enqueue < <(task c6)
+  r3="$RC/$(qfiles | tr '\n' ' ')"
+  # flock передає lock дочірньому sleep: вбити треба обох, інакше lock живе далі.
+  pkill -P "$lockpid" 2>/dev/null
+  kill "$lockpid" 2>/dev/null
+  wait "$lockpid" 2>/dev/null
+  [[ "$r1" == 1/*"гілка ai/c1x"* && "$r2" == 1/*"гілка ai/c5"* && "$r3" == "0/"*c6* && ! -s "$ROOT/gitspy/calls" ]] &&
+    ok "$T тік працює → git не запущено, гілки з loose-ref і packed-refs видно, вільний id прийнято" ||
+    bad "$T tick.lock зайнятий: c1x=[$r1] c5=[$r2] c6=[$r3] git-виклики=[$(tr '\n' ';' <"$ROOT/gitspy/calls" 2>/dev/null)]"
+  rm -f "$QD"/*c6*.json
+  # Вільний tick.lock — show-ref через hgit, як і раніше (виклик git є).
+  PATH="$ROOT/gitspy:$PATH" call enqueue < <(task c5)
+  [[ "$RC" == 1 && "$ERR" == *"гілка ai/c5"* && -s "$ROOT/gitspy/calls" ]] &&
+    ok "$T тік вільний → гілка з packed-refs через hgit show-ref → 1" || bad "$T tick.lock вільний: rc=$RC $ERR"
   # id у failed/ чи done/ — теж зайнятий.
   task c2 >"$QD/done/c2.json"
   call enqueue < <(task c2)
@@ -530,6 +560,9 @@ elif [[ -z "${A8_QUEUE_UNDER_TEST:-}${A8_CTL_UNDER_TEST:-}${A8_REQUEUE_UNDER_TES
   mutate queue "гілка ai\/<id> не перевіряється" 's/  hgit show-ref --verify --quiet "refs\/heads\/ai\/\$id" 2>\/dev\/null \|\| grc=\$\?/  grc=1/'
   # #291: show-ref гілки повз спільний hgit (голий git на небезпечній .git).
   mutate queue "show-ref гілки повз hgit" 's/  hgit show-ref --verify --quiet "refs\/heads\/ai\/\$id"/  git -C "\$A8_REPO_DIR" show-ref --verify --quiet "refs\/heads\/ai\/\$id"/'
+  # #302 C: git на хості при живому тіку; packed-refs не читаються.
+  mutate queue "show-ref гілки й при зайнятому tick.lock" 's/  if \{ exec 6>>"\$A8_LOGS_DIR\/tick.lock"; \} 2>\/dev\/null && flock -n 6; then/  if true; then/'
+  mutate queue "packed-refs при зайнятому тіку не читаються" 's/ \|\|\n      \{ \[\[ -f "\$g\/packed-refs" \]\][^\n]*\n/; then\n/'
   mutate queue "невідкладних кілька" 's/    if \[\[ "\$\(count_json "\$URGENT"\)" != 0 \]\]; then/    if false; then/'
   mutate queue "--urgent у плановий потік" 's/    tmpdir="\$URGENT"/    tmpdir="\$Q"/'
   mutate queue "pause пише подію щоразу" 's/  if \[\[ -e "\$PAUSE_FLAG" \]\]; then\n    log_detail="already"/  if false; then\n    log_detail="already"/'
