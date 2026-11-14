@@ -125,7 +125,6 @@ RULES=(
   # git на хості, повторна постановка (незалежне ревю 2026-11, №3 — були «звичайні»).
   # Поіменно, не `a8-*`: звіти й метрики (a8-report, a8-metrics) свідомо звичайні.
   # Новий скрипт ролі без рядка тут валить review-class.test.sh, розділ 1b.
-  'роль і демон A8|tools/scripts/a8-git-lib*'
   'роль і демон A8|tools/scripts/a8-queue*'
   'роль і демон A8|tools/scripts/a8-ctl*'
   'роль і демон A8|tools/scripts/a8-requeue*'

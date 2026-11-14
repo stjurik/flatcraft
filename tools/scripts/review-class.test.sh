@@ -69,7 +69,6 @@ done <<'EOF'
 роль і демон A8|tools/scripts/a8-pr-fence.sh
 роль і демон A8|tools/scripts/a8-ssh-doors.sh
 роль і демон A8|tools/scripts/a8-ssh-doors.test.sh
-роль і демон A8|tools/scripts/a8-git-lib.sh
 роль і демон A8|tools/scripts/a8-queue.sh
 роль і демон A8|tools/scripts/a8-ctl.sh
 роль і демон A8|tools/scripts/a8-requeue.sh
