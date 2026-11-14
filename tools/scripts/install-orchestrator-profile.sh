@@ -99,7 +99,7 @@ hook_cmd() { # hook_cmd <файл> — єдина дозволена коман�
 #   інтерпретатори   — python, node, perl, bash -c тощо.
 # У режимі Auto allow-правило ще й ВИМИКАЄ перевірку класифікатором для
 # збіжних команд, тож широкий allow знімає захист, а не кліки.
-DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh |^Bash\(git (\*|-c|-C)|^Bash\((bash |sh )?(\./)?tools/scripts/\*\)|^Bash\((bash|sh) (-c|\*)|^Bash\(uv run (?!--directory workers/cad (pytest|ruff|mypy) \*\)$)|^Bash\(pnpm (--filter \S+ )?(run|exec|dlx) |^Bash\(pnpm --filter \*|^Bash\(npx (?!prettier --check \*\)$)|^Bash\((pnpx|uvx|bunx|deno|bun) |^Bash\((npm|yarn) (exec|run|x|dlx) |^Bash\(pnpm (\S+ )*(run|exec|dlx|x) |^Bash\((sort|jq|cut|uniq|tr|date|printf|comm|column|awk|sed|tee|xargs|find|env|python3?|node|perl|ruby) |^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
+DANGER_RE='^Bash\(\*|^Bash\(\)|^Bash\(ssh |^Bash\(git (\*|-c|-C)|^Bash\((bash |sh )?(\./)?tools/scripts/\*\)|^Bash\((bash|sh) (-c|\*)|^Bash\(uv (run|sync)|^Bash\(pnpm( |\))|\.test\.sh|^Bash\(pnpm (--filter \S+ )?(run|exec|dlx) |^Bash\(pnpm --filter \*|^Bash\(npx |^Bash\(npm |^Bash\((pnpx|uvx|bunx|deno|bun) |^Bash\((npm|yarn) (exec|run|x|dlx) |^Bash\(pnpm (\S+ )*(run|exec|dlx|x) |^Bash\((sort|jq|cut|uniq|tr|date|printf|comm|column|awk|sed|tee|xargs|find|env|python3?|node|perl|ruby) |^Bash\(gh api|--force|^Bash\(git push -f|gh pr merge|^Bash\(gh auth|^Bash\(gh secret|^Bash\(gh repo (edit|delete)|^Bash\(sudo|^Bash\(docker|discord|^Bash\(rm |^Bash\(ansible-playbook (?!a8\.yml -i inventory\.a8\.ini --tags verify\)$)|^Read\(//|^Read\(~'
 
 REQUIRED_DENY=(
   'Bash(git push --force:*)'
@@ -122,6 +122,15 @@ REQUIRED_DENY=(
   # Живий Discord (ADR-023): і через кореневий скрипт, і через пакет напряму.
   'Bash(pnpm *discord:apply*)'
   'Bash(pnpm * apply*)'
+  # Код гілки PR на T470 не запускається (незалежне ревю 2026-11, №1; рішення yurii
+  # 2026-11-10, блок А1): тести, встановлення залежностей і лінтери виконують код і
+  # конфігурацію гілки під користувачем, поруч з яким лежать креденшали. Прогін — у CI
+  # або в контейнері A8. Заборона, а не «питати»: оркестратор працює без людини поруч,
+  # і питання зупинило б цикл, а вартовий режиму Auto пропустив би «звичайний» тест.
+  'Bash(pnpm *)'
+  'Bash(npx *)'
+  'Bash(uv run *)'
+  'Bash(bash tools/scripts/*.test.sh)'
 )
 
 # Правила з `*` — лише ПЕРЕВІРЕНІ форми. Шаблон ловить відомі небезпечні форми,
@@ -154,15 +163,6 @@ WILDCARD_OK=(
   'Bash(gh run view *)'
   'Bash(gh issue view *)'
   'Bash(gh issue list *)'
-  'Bash(pnpm test *)'
-  'Bash(pnpm vitest *)'
-  'Bash(pnpm lint *)'
-  'Bash(pnpm typecheck *)'
-  'Bash(npx prettier --check *)'
-  'Bash(uv run --directory workers/cad pytest *)'
-  'Bash(uv run --directory workers/cad ruff *)'
-  'Bash(uv run --directory workers/cad mypy *)'
-  'Bash(bash tools/scripts/*.test.sh)'
   'Bash(bash tools/scripts/a8-report.sh -o *)'
   'Bash(agy -p *)'
   'Bash(bash tools/scripts/check-agy-scope.sh *)'
