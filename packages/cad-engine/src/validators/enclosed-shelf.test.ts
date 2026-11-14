@@ -193,3 +193,46 @@ describe("validateEnclosedShelfSidePerforation", () => {
     expect(got).toContain("HOLE_IN_CORNER_TAB");
   });
 });
+
+describe("validateEnclosedShelfSidePerforation — #303, сценарії постановки 060 (рецензія #321)", () => {
+  const side = (h: number, px: number, py: number, m: number) => ({
+    hole_size_mm: h,
+    pitch_x_mm: px,
+    pitch_y_mm: py,
+    margin_mm: m,
+  });
+  const codes = (
+    s: ReturnType<typeof side>,
+    rib: number | null = 15,
+    material = "cold_rolled_steel",
+  ): string[] =>
+    validateEnclosedShelfSidePerforation(
+      {
+        side_perforation: s,
+        depth_mm: 100,
+        bend_radius_mm: 2.5,
+        stiffening_rib: rib === null ? null : { height_mm: rib },
+        material_code: material,
+      },
+      2.5,
+    ).map((e) => `${e.code}@${e.field}`);
+  const BEND = "HOLE_TOO_CLOSE_TO_BEND@side_perforation.margin_mm";
+  const TAB = "HOLE_IN_CORNER_TAB@side_perforation.margin_mm";
+
+  it("px=36, m=11.5 → HOLE_TOO_CLOSE_TO_BEND (6.5 < 7.5), без HOLE_IN_CORNER_TAB", () => {
+    const c = codes(side(10, 36, 35, 11.5));
+    expect(c).toContain(BEND);
+    expect(c).not.toContain(TAB);
+  });
+  it("py=42, m=8: з ребром → HOLE_IN_CORNER_TAB; без ребра → немає", () => {
+    expect(codes(side(10, 35, 42, 8), 15)).toContain(TAB);
+    expect(codes(side(10, 35, 42, 8), null)).not.toContain(TAB);
+  });
+  it("py=45, m=8 → без HOLE_IN_CORNER_TAB (рахується від e_y = 27.5, а не m)", () => {
+    expect(codes(side(10, 35, 45, 8))).not.toContain(TAB);
+  });
+  it("коефіцієнт з таблиці: aluminum_5754 → без BEND; stainless_304 на межі сталі → BEND", () => {
+    expect(codes(side(10, 36, 35, 11.5), 15, "aluminum_5754")).not.toContain(BEND);
+    expect(codes(side(10, 35, 35, 12.5), 15, "stainless_304")).toContain(BEND);
+  });
+});
