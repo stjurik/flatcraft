@@ -1165,6 +1165,39 @@ akey_tree "$tmproot/k6" '---
     key_options: restrict,command="/usr/local/bin/a8-ctl"'
 assert_exit "інв.15: модуль authorized_key з key_options restrict,command= → 0" 0 "$tmproot/k6"
 
+# ─── Інваріант 17: ключ a8-ctl у змінних — у форматі a8_ctl_pubkey_re (#301) ──
+# Вираз береться з чинних defaults ролі: тест перевіряє розбір, а не копію виразу.
+KEY_RE_LINES="$(sed -n '/^a8_ctl_pubkey_formats:/,/^a8_ctl_pubkey_re:/p' "$REPO/infra/ansible/roles/a8/defaults/main.yml")"
+GOOD_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzluehSS a8-ctl@t470"
+ctlkey_tree() { # ctlkey_tree <тека> <рядок a8_ctl_pubkey у group_vars> [<assert у tasks>]
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK
+- name: Check key
+  ansible.builtin.assert:
+    that:
+      - ${3:-item is match(a8_ctl_pubkey_re)}
+  loop: \"{{ a8_ctl_pubkeys }}\""
+  printf '%s\n' 'a8_ctl_pubkey: ""' "$KEY_RE_LINES" >>"$1/infra/ansible/roles/a8/defaults/main.yml"
+  mkdir -p "$1/infra/ansible/group_vars"
+  printf '%s\n' "$2" >"$1/infra/ansible/group_vars/a8.yml"
+}
+ctlkey_tree "$tmproot/c1" "a8_ctl_pubkey: \"$GOOD_KEY\""
+assert_exit "інв.17: повний ed25519 з коментарем → 0" 0 "$tmproot/c1"
+ctlkey_tree "$tmproot/c2" 'a8_ctl_pubkey: "ssh-ed25519 A== a8-ctl@t470"'
+assert_exit "інв.17: короткий base64 A== → 1" 1 "$tmproot/c2" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c3" "a8_ctl_pubkey: \"no-pty,permitopen=*:* $GOOD_KEY\""
+assert_exit "інв.17: власні опції перед ключем → 1" 1 "$tmproot/c3" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c4" "a8_ctl_pubkey: $GOOD_KEY"
+assert_exit "інв.17: без лапок — розбір не читає, fail closed → 1" 1 "$tmproot/c4" "не в подвійних лапках одним рядком"
+ctlkey_tree "$tmproot/c5" "a8_ctl_local_pubkey: \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzlueh a8-ctl@a8\""
+assert_exit "інв.17: друга змінна ключа (S3) теж звіряється, base64 на 2 коротший → 1" 1 "$tmproot/c5" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c6" "a8_ctl_pubkey: \"$GOOD_KEY\"" "item is match('^ssh-')"
+assert_exit "інв.17: assert ролі не через a8_ctl_pubkey_re → 1" 1 "$tmproot/c6" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c7" 'a8_ctl_pubkey: ""'
+assert_exit "інв.17: порожньо — ключа немає → 0" 0 "$tmproot/c7"
+ctlkey_tree "$tmproot/c8" "a8_ctl_pubkey: \"$GOOD_KEY\""
+sed -i 's/{{ a8_ctl_pubkey_formats | join(.|.) }}/ssh-ed25519 .*/' "$tmproot/c8/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "інв.17: a8_ctl_pubkey_re без списку форматів — звірити нічим → 1" 1 "$tmproot/c8" "формат ключа a8-ctl нема з чим звірити"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -1183,6 +1216,8 @@ cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
 cp "$REPO/tools/scripts/a8-git-lib.sh" "$mut/tools/scripts/a8-git-lib.sh"
 cp "$REPO/tools/scripts/a8-requeue.sh" "$mut/tools/scripts/a8-requeue.sh"
 cp "$REPO/tools/scripts/a8-queue.sh" "$mut/tools/scripts/a8-queue.sh"
+# Backstop заборонених шляхів (інваріант 18, #302 D): скрипти ролі мусять бути в ньому.
+cp "$REPO/tools/scripts/check-forbidden-paths.sh" "$mut/tools/scripts/check-forbidden-paths.sh"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -1688,6 +1723,32 @@ grep -qF "жодна задача ролі не ставить docker-prune.serv
   { echo "✗ мутація 37: немає порушення «жодна задача ролі не ставить docker-prune.service»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
+# Мутації 37a–b — інваріант 18 (#302 D): backstop без шаблону a8-*; роль ставить
+# на хост новий скрипт з tools/scripts, якого backstop не знає.
+FPS_T="tools/scripts/check-forbidden-paths.sh"
+python3 - "$mut/$FPS_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "  '^tools/scripts/a8-[^/]*$'\n"
+assert s.count(old) == 1, "фікстура застаріла: шаблон a8-* у backstop'і виглядає інакше"
+open(p, "w").write(s.replace(old, "", 1))
+PY2
+# Порушень кілька (по одному на скрипт ролі) — тож код і назву перевіряємо окремо.
+assert_exit "мутація 37a/інв.18: backstop без tools/scripts/a8-* → 1" 1 "$mut"
+grep -qF "роль ставить tools/scripts/a8-git-lib.sh на хост, а check-forbidden-paths.sh його не забороняє" "$tmproot/out" ||
+  { echo "✗ мутація 37a/інв.18: порушення не називає a8-git-lib.sh"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$FPS_T" "$mut/$FPS_T"
+cat >>"$mut/$TASKS_M" <<'YML'
+
+- name: Install a new host helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/host-helper.sh"
+    dest: /usr/local/lib/a8/host-helper.sh
+    mode: "0755"
+YML
+assert_exit "мутація 37b/інв.18: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
 # Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
 # 38: ключ без restrict — pty і forwarding.
 python3 - "$mut/$TASKS_M" <<'PY2'
@@ -1711,6 +1772,28 @@ s = s.replace(anchor, "line: 'restrict ", 1)
 open(p, "w").write(s)
 PY2
 assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 39a–b — інваріант 17 (#301 п.3): ключ у group_vars обрізано; assert ролі
+# знову зі старим виразом, що пропускав короткий base64.
+python3 - "$mut/infra/ansible/group_vars/a8.yml" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2 = re.sub(r'^(a8_ctl_pubkey: "ssh-ed25519 )\S+', r'\1AAAA', s, count=1, flags=re.M)
+assert s2 != s, "фікстура застаріла: a8_ctl_pubkey у group_vars виглядає інакше"
+open(p, "w").write(s2)
+PY2
+assert_exit "мутація 39a: ключ a8-ctl у group_vars обрізано → 1" 1 "$mut" "не проходить a8_ctl_pubkey_re"
+cp "$REPO/infra/ansible/group_vars/a8.yml" "$mut/infra/ansible/group_vars/a8.yml"
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "      - item is match(a8_ctl_pubkey_re)\n"
+assert s.count(old) == 1, "фікстура застаріла: assert ключа a8-ctl виглядає інакше"
+s = s.replace(old, "      - item is match('^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=* ?[^\\n\\r]*$')\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 39b: assert ключа зі старим виразом → 1" 1 "$mut" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
 
 # Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).
@@ -1790,7 +1873,32 @@ mut16 "V18d знову голим git на хості" "infra/ansible/roles/a8/t
           - remove
           - --force
           - "{{ a8_worktrees_dir }}/verify-cad"' \
-  "git на хості поза hgit (argv починається з git"
+  "git на хості поза hgit (#291, #302 E)"
+# 16b (yml), #302 E — інші форми голого git у задачах ролі: shell-рядок, flow-список
+# argv, sudo перед git, повний шлях, модуль ansible.builtin.git.
+V18D_TAIL='      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env'
+V18D_OK="      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+$V18D_TAIL"
+mut16 "V18d: shell: git …" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        git -C {{ a8_repo_dir }} worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: argv: [git, …]" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        argv: [git, -C, "{{ a8_repo_dir }}", worktree, prune]
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: sudo -u agent git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        sudo -u agent git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: /usr/bin/git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        cmd: /usr/bin/git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: модуль ansible.builtin.git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.git:
+        repo: "{{ a8_repo_dir }}"
+        dest: /tmp/x
+'"$V18D_TAIL" "модуль git"
 mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$GIT_LIB_T" '    GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '    git "${HGIT_SAFE[@]}"' \
   "git без GIT_NO_REPLACE_OBJECTS=1"
 

@@ -288,8 +288,28 @@ do_enqueue() {
   # Гілка лишається після done і після падіння з комітами: тік на ній упав би
   # «гілка вже існує» (a8-tick, крок 3) і записав би `failed`.
   # Помилка git (не «гілки немає», а, скажімо, «dubious ownership») — не «вільно».
+  #
+  # git на хості — лише без контейнера (шапка a8-git-lib.sh, #302 C). tick.lock
+  # тік тримає всю задачу, тож вільний tick.lock = контейнера тіку немає; тримаємо
+  # його тільки на час show-ref (тік, що стартує саме тоді, запише busy і візьме
+  # задачу наступним разом). Тік зайнятий — гілку перевіряємо як ДАНІ, без
+  # запуску git: файл refs/heads/ai/<id> чи рядок у packed-refs. Ці файли
+  # контейнер може підробити, але наслідок — лише хибна відмова тут чи «гілка вже
+  # існує» на тіку (failed з поясненням); виконати через них нічого не можна.
   grc=0
-  hgit show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null || grc=$?
+  if { exec 6>>"$A8_LOGS_DIR/tick.lock"; } 2>/dev/null && flock -n 6; then
+    hgit show-ref --verify --quiet "refs/heads/ai/$id" 2>/dev/null || grc=$?
+    exec 6>&-
+  else
+    exec 6>&-
+    g="$A8_REPO_DIR/.git"
+    [[ -d "$g" && -r "$g" ]] || die 2 "тік працює, а $g не прочитати — не можу перевірити гілку ai/$id; у черзі нічого"
+    grc=1
+    if [[ -e "$g/refs/heads/ai/$id" || -L "$g/refs/heads/ai/$id" ]] ||
+      { [[ -f "$g/packed-refs" ]] && awk -v r="refs/heads/ai/$id" '$2 == r { f = 1 } END { exit !f }' "$g/packed-refs"; }; then
+      grc=0
+    fi
+  fi
   case "$grc" in
     0) die 1 "гілка ai/$id уже є в $A8_REPO_DIR — тік на ній упав би; новий id або a8-queue requeue" ;;
     1) ;;

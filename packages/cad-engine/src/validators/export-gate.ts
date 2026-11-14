@@ -20,6 +20,10 @@ import { z } from "zod";
 import { computeBendAllowanceMm, computeKFactor } from "../k-factor.js";
 import type { BendMachineSpec } from "../spec.js";
 import { validateBend, type BendInput } from "./bend.js";
+import {
+  validateEnclosedShelfRib,
+  validateEnclosedShelfSidePerforation,
+} from "./enclosed-shelf.js";
 import { validateHoles, type HoleInput } from "./holes.js";
 import { validatePerforation, type PerforationIssue } from "./perforation.js";
 import { validateProfile, type ProfileIssue } from "./profile.js";
@@ -258,12 +262,18 @@ export function validateExportProfile(body: ExportRequest): ProblemError[] {
         parameters: body.parameters,
         thicknessMm,
       }).map(profileIssueToProblem);
-    case "enclosed_shelf":
-      // Phase 3.0 PR 7c: profile-валідатор для cross-розгортки поки не
-      // моделюється (no flange-after-bend перевірка — depth_mm уже >=100 і
-      // bend reduces by t+r≤~6мм, гарантовано >0). Zod-min ranges відсіюють
-      // невалідне ще на API. Якщо знадобиться — додаємо у наступному hotfix.
-      return [];
+    case "enclosed_shelf": {
+      // issue #283 п.1: ребро жорсткості (5-й опційний сегмент) — flange-
+      // after-bend перевірка, той самий код FLANGE_TOO_SHORT, що в інших
+      // шаблонах. bottom/back/left/right тут не моделюються (depth_mm уже
+      // >=100 і bend reduces by t+r≤~6мм, гарантовано >0; Zod-min ranges
+      // відсіюють решту ще на API).
+      const p = body.parameters;
+      return validateEnclosedShelfRib(
+        { stiffening_rib: p.stiffening_rib, bend_radius_mm: p.bend_radius_mm },
+        thicknessMm,
+      );
+    }
   }
 }
 
@@ -289,6 +299,20 @@ export function validateExportPerforation(body: ExportRequest): ProblemError[] {
         templateSlug: "perforated_panel",
         parameters: body.parameters as unknown as Readonly<Record<string, number | string>>,
       }).map(perforationIssueToProblem);
+    case "enclosed_shelf": {
+      // issue #283 п.2: перфорація боковин (вміщення, злиття отворів, вихід
+      // на край) — окремий concern від grid-перфорації `perforated_panel`
+      // (дві незалежні боковини depth×depth, не одна плоска панель).
+      const p = body.parameters;
+      return validateEnclosedShelfSidePerforation(
+        {
+          side_perforation: p.side_perforation,
+          depth_mm: p.depth_mm,
+          bend_radius_mm: p.bend_radius_mm,
+        },
+        body.thickness_mm,
+      );
+    }
     default:
       return [];
   }

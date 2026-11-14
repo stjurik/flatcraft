@@ -452,20 +452,39 @@ process_id() {
     # Брудне дерево: будуємо дерево $wt у тимчасовому індексі головного клону
     # (--work-tree + read-tree HEAD + add -A + write-tree, як #294) і звіряємо з
     # деревом HEAD. Жодного git у теці worktree — лише в головному клоні за SHA.
+    # Плюс неіндексоване з правилами .gitignore свіжого origin/main (#302 B):
+    # `add -A` бере правила ігнору з самого $wt і .git/info/exclude, які пише
+    # агент, — файл під вкладеним `.gitignore` з «*» пішов би під `rm -rf` як
+    # «чисте». origin/main щойно оновив fetch вище, агент його не змінить.
+    # `--attr-source`, як у тіку (рецензія #315, G), тут не потрібен: гілку з
+    # комітами понад origin/main requeue відкидає раніше, тож HEAD worktree =
+    # origin/main і закомічених агентом .gitattributes у ньому немає;
+    # .git/info/attributes відкидає git_unsafe_reason.
     cleanidx="$A8_LOGS_DIR/.requeue-clean.$id.$$"
-    rm -f "$cleanidx"
+    local cleanrules="$cleanidx.ignore" cleanextra="$cleanidx.untracked" extra
+    rm -f "$cleanidx" "$cleanrules" "$cleanextra"
     wttree=""
     if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$WT_HEAD" >/dev/null 2>&1 &&
       GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >/dev/null 2>&1; then
       wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>/dev/null)"
     fi
-    rm -f "$cleanidx"
+    if [[ -n "$wttree" ]] && ! { trusted_ignore_rules refs/remotes/origin/main "$cleanrules" 2>/dev/null &&
+      untracked_outside_rules "$wt" "$cleanidx" "$cleanrules" "$cleanextra" 2>/dev/null; }; then
+      wttree=""
+    fi
+    extra=""
+    [[ -s "$cleanextra" ]] && extra="$(tr '\0' '\n' <"$cleanextra" | LC_ALL=C sort | head -n 5 | tr '\n' ' ')"
+    rm -f "$cleanidx" "$cleanrules" "$cleanextra"
     if [[ -z "$wttree" ]]; then
       skip "не вдалося побудувати дерево $wt (небезпечна .git чи пошкоджено) — не чіпаю"
       return 1
     fi
     if [[ "$wttree" != "$(hgit rev-parse --verify --quiet "$WT_HEAD^{commit}^{tree}")" ]]; then
       skip "брудний worktree: робоче дерево $wt не збігається з його HEAD"
+      return 1
+    fi
+    if [[ -n "$extra" ]]; then
+      skip "брудний worktree: неіндексовані файли поза правилами ігнору origin/main (${extra% }) — не чіпаю"
       return 1
     fi
     # Коміт на відокремленому HEAD не видно ні в статусі, ні на гілці.

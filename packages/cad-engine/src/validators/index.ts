@@ -30,3 +30,11 @@ export {
   type PerforationIssueCode,
   type PerforationValidationInput,
 } from "./perforation.js";
+export {
+  validateEnclosedShelfRib,
+  validateEnclosedShelfSidePerforation,
+  type EnclosedShelfGateCode,
+  type EnclosedShelfGateError,
+  type EnclosedShelfRibParams,
+  type EnclosedShelfSidePerforationParams,
+} from "./enclosed-shelf.js";
