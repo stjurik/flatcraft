@@ -170,6 +170,58 @@ class TestEnclosedShelfGateUnit:
         assert codes.count("HOLES_OVERLAP") == 2
         assert "MARGIN_TOO_SMALL" in codes
 
+    def test_issue_303_занадто_близько_до_гиба_і_в_кутовому_виступі(self) -> None:
+        # depth=100, t=r=2.5, rib=15, h=20, px=37, py=39.5, m=10.5:
+        # e_x-h/2=0.5 < a·t+r=7.5; e_y-h/2=0.5 < q=tr=5.
+        side = {"hole_size_mm": 20, "pitch_x_mm": 37, "pitch_y_mm": 39.5, "margin_mm": 10.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "cold_rolled_steel",
+        )
+        codes_fields = {(e.code, e.field) for e in errs}
+        assert ("HOLE_TOO_CLOSE_TO_BEND", "side_perforation.margin_mm") in codes_fields
+        assert ("HOLE_IN_CORNER_TAB", "side_perforation.margin_mm") in codes_fields
+
+    def test_межа_гиба_валідна(self) -> None:
+        # e_x-h/2 = 12.5-5 = 7.5 = a·t+r — межа включна.
+        side = {"hole_size_mm": 10, "pitch_x_mm": 35, "pitch_y_mm": 35, "margin_mm": 12.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "cold_rolled_steel",
+        )
+        assert not any(e.code == "HOLE_TOO_CLOSE_TO_BEND" for e in errs)
+
+    def test_невідомий_материал_пропускає_лише_too_close_to_bend(self) -> None:
+        side = {"hole_size_mm": 20, "pitch_x_mm": 37, "pitch_y_mm": 39.5, "margin_mm": 10.5}
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {
+                "depth_mm": 100,
+                "bend_radius_mm": 2.5,
+                "side_perforation": side,
+                "stiffening_rib": {"height_mm": 15},
+            },
+            2.5,
+            "unobtanium",
+        )
+        codes = [e.code for e in errs]
+        assert "HOLE_TOO_CLOSE_TO_BEND" not in codes
+        assert "HOLE_IN_CORNER_TAB" in codes
+
 
 @pytest.fixture(autouse=True)
 def _s3(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
@@ -300,3 +352,95 @@ class TestEnclosedShelfGateServer:
         assert status == 422
         assert ("HOLES_OVERLAP", "side_perforation.pitch_x_mm") in codes, codes
         assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.margin_mm") in codes, codes
+
+
+class TestSideHolesNearBendExport:
+    """#303 через POST /export — сценарії постановки 060, яких бракувало (рецензія #321)."""
+
+    BEND = ("HOLE_TOO_CLOSE_TO_BEND", "side_perforation.margin_mm")
+    TAB = ("HOLE_IN_CORNER_TAB", "side_perforation.margin_mm")
+
+    @staticmethod
+    def _post(
+        side: dict[str, float], rib: float | None = 15, material: str = "cold_rolled_steel"
+    ) -> tuple[int, set[tuple[str, str]]]:
+        params: dict[str, object] = {
+            **ENCLOSED_SHELF_VALID_PARAMS,
+            "depth_mm": 100,
+            "bend_radius_mm": 2.5,
+            "side_perforation": side,
+            "stiffening_rib": None if rib is None else {"height_mm": rib},
+        }
+        res = TestClient(app).post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": params,
+                "thickness_mm": 2.5,
+                "material_code": material,
+            },
+        )
+        if res.status_code != 422:
+            return res.status_code, set()
+        return 422, {(str(e.get("code")), str(e.get("field"))) for e in res.json()["detail"]}
+
+    @staticmethod
+    def _side(h: float, px: float, py: float, m: float) -> dict[str, float]:
+        return {"hole_size_mm": h, "pitch_x_mm": px, "pitch_y_mm": py, "margin_mm": m}
+
+    def test_випадок_303_обидві_помилки(self) -> None:
+        status, codes = self._post(self._side(20, 37, 39.5, 10.5))
+        assert status == 422, codes
+        assert {self.BEND, self.TAB} <= codes, codes
+
+    def test_межа_гиба_200(self) -> None:
+        # e_x − h/2 = 12.5 − 5 = 7.5 = a·t + r — межа включна.
+        status, codes = self._post(self._side(10, 35, 35, 12.5))
+        assert status == 200, codes
+
+    def test_ближче_до_гиба_без_виступу(self) -> None:
+        # n_x = 3, e_x = 11.5 → 6.5 < 7.5.
+        status, codes = self._post(self._side(10, 36, 35, 11.5))
+        assert status == 422, codes
+        assert self.BEND in codes, codes
+        assert self.TAB not in codes, codes
+
+    def test_виступ_лише_з_ребром(self) -> None:
+        status, codes = self._post(self._side(10, 35, 42, 8), rib=15)
+        assert status == 422, codes
+        assert self.TAB in codes, codes
+        assert self.BEND not in codes, codes
+        status, codes = self._post(self._side(10, 35, 42, 8), rib=None)
+        assert status == 200, codes
+
+    def test_від_ефективного_відступу_y(self) -> None:
+        # n_y = 2, e_y = 27.5 (а не margin 8) → без виступу.
+        status, codes = self._post(self._side(10, 35, 45, 8))
+        assert status == 200, codes
+
+    def test_коефіцієнт_матеріалу_з_таблиці(self) -> None:
+        status, codes = self._post(self._side(10, 36, 35, 11.5), material="aluminum_5754")
+        assert self.BEND not in codes, codes
+        status, codes = self._post(self._side(10, 35, 35, 12.5), material="stainless_304")
+        assert status == 422, codes
+        assert self.BEND in codes, codes
+
+    def test_крок_нуль_повз_pydantic_422_а_не_500(self) -> None:
+        # width_mm 200 < 300 валить Pydantic → гейт бачить сирі параметри з кроком 0.
+        res = TestClient(app, raise_server_exceptions=False).post(
+            "/export",
+            json={
+                "template_slug": "enclosed_shelf",
+                "parameters": {
+                    **ENCLOSED_SHELF_VALID_PARAMS,
+                    "width_mm": 200,
+                    "depth_mm": 100,
+                    "bend_radius_mm": 2.5,
+                    "side_perforation": self._side(20, 0, 39.5, 10.5),
+                    "stiffening_rib": {"height_mm": 15},
+                },
+                "thickness_mm": 2.5,
+                "material_code": "cold_rolled_steel",
+            },
+        )
+        assert res.status_code == 422, res.text
