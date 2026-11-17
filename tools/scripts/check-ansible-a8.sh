@@ -821,7 +821,7 @@ else
   done
 fi
 
-# Інваріант 16 — креденшали двох виконавців не перетинаються (PR-B #262).
+# Інваріант 19 — креденшали двох виконавців не перетинаються (PR-B #262).
 #
 # ЧОМУ. Смуга виконавця (orchestrator-autonomy.md §8) запускає в тому самому
 # образі два різні агенти: Claude (токен Claude) і agy (логін Google). Рішення
@@ -1001,6 +1001,355 @@ if [[ -f "$AGENT_DOCKERFILE" ]]; then
     violations+=("у фінальній стадії $AGENT_DOCKERFILE немає LABEL hart.keep=true — prune таймера видалить образ агента (issue #117)")
 fi
 
+# Інваріант 15 — ключ у authorized_keys агента роль ставить лише з restrict і command=.
+#
+# ЧОМУ. Ключ оркестратора (a8_ctl_pubkey, #231) дає вхід на A8 від імені agent —
+# того, хто володіє чергою і запускає контейнери. Без `command="…"` він давав би
+# повну оболонку, без `restrict` — pty і forwarding (тунель у мережу A8 повз
+# egress-фільтр). Межа «лише дієслова a8-ctl» тримається на цих двох словах у
+# рядку authorized_keys, тож кожна задача ролі, що пише цей файл, мусить їх мати.
+#
+# Як: блоки задач (після strip_comments), що згадують authorized_keys і пишуть
+# (lineinfile, blockinfile, copy, template, authorized_key). Читання (slurp у
+# verify.yml) не рахується. Живий стан — V22i.
+akey_blocks=""
+if [[ -d "$TASKS" ]]; then
+  mapfile -t akey_files < <(find "$TASKS" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+  for f in "${akey_files[@]}"; do
+    akey_blocks+="$(strip_comments "$f" | cut -f2- | awk -v f="${f#"$ROOT"/}" '
+      function flush() {
+        if (blk ~ /authorized_keys?/ && blk ~ /(lineinfile|blockinfile|copy|template|authorized_key):/) printf "%s\036", f ": " blk
+        blk = ""
+      }
+      /^- / { flush() }
+      { blk = blk $0 "\n" }
+      END { flush() }')"
+  done
+fi
+while IFS= read -r -d $'\036' blk; do
+  [[ -z "${blk//[[:space:]]/}" ]] && continue
+  name="$(grep -m1 -E 'name:' <<<"$blk" | sed -E 's/^[^:]*:[[:space:]]*- name:[[:space:]]*//; s/^[[:space:]]*- name:[[:space:]]*//')"
+  [[ "$blk" == *restrict* ]] ||
+    violations+=("задача ролі пише authorized_keys без restrict (ключ дасть pty і forwarding): ${blk%%:*} «$name»")
+  [[ "$blk" =~ command=\\?\"/usr/local/bin/ ]] ||
+    violations+=("задача ролі пише authorized_keys без command=\"/usr/local/bin/…\" (ключ дасть повну оболонку agent): ${blk%%:*} «$name»")
+done < <(printf '%s' "$akey_blocks")
+
+# Інваріант 18 — кожен скрипт, який роль ставить на хост з tools/scripts, —
+# у backstop'і заборонених шляхів (#302 D, рецензія #299).
+#
+# ЧОМУ. a8-git-lib.sh (обгортка git на хості) лежав у tools/scripts, поза
+# check-forbidden-paths.sh (там `^infra`), тож агент міг змінити межу, що його
+# стримує, у власному PR. Тепер backstop забороняє a8-* і сам себе; цей
+# інваріант не дає новому скрипту ролі вислизнути: кожне `src: …/tools/scripts/X`
+# у задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати
+# exit 1 у check-forbidden-paths.sh.
+FORBIDDEN_SH="$ROOT/tools/scripts/check-forbidden-paths.sh"
+role_scripts=""
+if [[ -d "$TASKS" ]]; then
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    role_scripts+="$(strip_comments "$tf" | cut -f2- | awk '
+      function flush(   i, n, it) {
+        if (src != "") {
+          if (src ~ /\{\{ *item *\}\}/) {
+            n = split(items, it, "\n")
+            for (i = 1; i <= n; i++) if (it[i] != "") { s = src; sub(/\{\{ *item *\}\}/, it[i], s); print s }
+          } else print src
+        }
+        src = ""; items = ""; inloop = 0
+      }
+      /^- / { flush() }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\/scripts\// {
+        s = $0; sub(/.*tools\/scripts\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/scripts/" s
+      }
+      /^[[:space:]]*loop:[[:space:]]*$/ { inloop = 1; next }
+      inloop && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- */, "", v); items = items v "\n"; next }
+      inloop { inloop = 0 }
+      END { flush() }')"$'\n'
+  done
+fi
+if [[ -n "${role_scripts//[[:space:]]/}" ]]; then
+  if [[ ! -f "$FORBIDDEN_SH" ]]; then
+    violations+=("роль ставить скрипти з tools/scripts, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
+  else
+    while IFS= read -r rs; do
+      [[ -z "$rs" ]] && continue
+      if bash "$FORBIDDEN_SH" <<<"$rs" >/dev/null 2>&1; then
+        violations+=("роль ставить $rs на хост, а check-forbidden-paths.sh його не забороняє — агент змінив би цю межу у своєму PR (#302 D)")
+      fi
+    done < <(sort -u <<<"$role_scripts")
+  fi
+fi
+
+# Інваріант 16 — git на хості не виконує те, що підклав контейнер (#276).
+#
+# ЧОМУ. Контейнер агента бачить головний клон на запис разом із .git, а тік на
+# хості кличе git у тому самому клоні від agent (через групу docker це root).
+# Хук post-checkout, `core.fsmonitor` чи `remote.origin.uploadpack`, записані
+# контейнером, тік виконав би сам, поза allowlist мережі. Захист — три шари, і
+# кожен тут має статичне твердження; поведінку доводить a8-tick.test.sh
+# (сценарії 23), а на A8 — V23.
+#
+#   16a. Обгортка, що монтує головний клон, монтує .git/config і .git/hooks з
+#        :ro і відмовляє, якщо їх немає або це симлінк (docker на відсутній шлях
+#        створив би теку від root).
+#   16b. У тіку кожен git — лише через hgit: рівно один рядок запускає git, і
+#        він несе "${HGIT_SAFE[@]}", GIT_NO_REPLACE_OBJECTS=1 і -C "$A8_REPO_DIR".
+#        `-C "$wt"` немає ніде: після контейнера gitdir worktree підмінений.
+#   16c. HGIT_SAFE несе кожен ключ, що виконує команду або підміняє, куди йде
+#        git. Ключі, яких динамічний тест спрацювати не змусить (pager без tty,
+#        diff --name-only, локальний origin, GIT_SSH_COMMAND сильніший), тримає
+#        лише цей список — тому кожен перелічено явно. uploadpack і receivepack
+#        `-c` не перекриває (git бере перше значення — з конфігу репо), тож кожен
+#        fetch несе --upload-pack=git-upload-pack, кожен push — --receive-pack.
+#   16d. Обгортка задає контейнеру core.hooksPath (GIT_CONFIG_*) на теку в
+#        container-home: .git/hooks лише для читання, і `prepare: lefthook
+#        install` при КОЖНОМУ pnpm install — тіку чи самого агента — падав би з
+#        EROFS. Не /tmp: /tmp кожного контейнера порожній, і git commit агента та
+#        check-hook-loud.sh лишились би без хуків.
+#   16e. Зонд V23a пише в сам файл .git/config (`: >>`), а не `touch <файл>/…`:
+#        той дає ENOTDIR при будь-яких правах — хибне «RO» (контрприклад 5).
+#        Зонд V23b звіряє .git/hooks до і після pnpm install агента.
+#
+# Перевірки вмикає сама роль, а не наявність файла: обгортка, що монтує
+# головний клон; задача, що ставить тік. Так синтетичні дерева інших
+# інваріантів їх не чіпають, а роль без потрібного файла — червона.
+TICK_TPL="$ROLE/templates/a8-tick.sh.j2"
+GIT_LIB="$ROOT/tools/scripts/a8-git-lib.sh"
+REQUEUE_SH="$ROOT/tools/scripts/a8-requeue.sh"
+QUEUE_SH="$ROOT/tools/scripts/a8-queue.sh"
+VERIFY_Y="$TASKS/verify.yml"
+HGIT_REQUIRED=(
+  core.hooksPath=/dev/null
+  core.fsmonitor=false
+  core.sshCommand=ssh
+  core.askPass=
+  credential.helper=
+  diff.external=
+  core.pager=cat
+  core.editor=false
+  core.gitProxy=
+  protocol.ext.allow=never
+  core.alternateRefsCommand=
+  core.commitGraph=false
+  gc.auto=0
+  maintenance.auto=false
+)
+role_installs() { # role_installs <шаблон> — чи ставить його якась задача ролі
+  [[ -d "$TASKS" ]] && grep -rqE "^[[:space:]]*src:[[:space:]]*\"?$1\"?[[:space:]]*$" "$TASKS"
+}
+
+# 16a
+if [[ -f "$RUNNER_TPL" ]] &&
+  strip_comments "$RUNNER_TPL" | cut -f2- | grep -qE -- '-v[[:space:]]+"?\{\{ a8_repo_dir \}\}:\{\{ a8_repo_dir \}\}'; then
+  runner_code="$(strip_comments "$RUNNER_TPL" | cut -f2-)"
+  grep -qF 'GITDIR="{{ a8_repo_dir }}/.git"' <<<"$runner_code" ||
+    violations+=("a8-run-agent монтує головний клон, але не задає GITDIR=\"{{ a8_repo_dir }}/.git\" — .git/config і .git/hooks не захищено (#276)")
+  for what in config hooks; do
+    grep -qE -- "-v[[:space:]]+\"\\\$GITDIR/$what:\\\$GITDIR/$what:ro\"" <<<"$runner_code" ||
+      violations+=("a8-run-agent не монтує .git/$what головного клону з :ro — контейнер підкладе те, що тік виконає на хості (#276)")
+  done
+  # Сам .git — bind onto self (без :ro, агент туди пише), інакше `mv .git` з
+  # контейнера проходить і config/hooks :ro ні до чого (рецензія #290, п.1).
+  grep -qE -- '-v[[:space:]]+"\$GITDIR:\$GITDIR"' <<<"$runner_code" ||
+    violations+=("a8-run-agent не монтує саму .git (bind onto self) — rename .git з контейнера не дасть EBUSY, config/hooks :ro обходяться (#276)")
+  grep -qE -- '-v[[:space:]]+"\$GITDIR/worktrees:\$GITDIR/worktrees"' <<<"$runner_code" ||
+    violations+=("a8-run-agent не монтує .git/worktrees (bind onto self) — її підміняють симлінком на чужий gitdir (#276, контрприклад CX1)")
+  # Відмова: if ! [[ … ]]; then … exit N; fi з усіма чотирма перевірками.
+  refusal="$(awk '/^[[:space:]]*if ! \[\[.*\$GITDIR/ { on = 1 } on { print } on && /^[[:space:]]*fi[[:space:]]*$/ { exit }' <<<"$runner_code")"
+  for frag in '-d "$GITDIR"' '! -L "$GITDIR"' '-f "$GITDIR/config"' '! -L "$GITDIR/config"' '-d "$GITDIR/hooks"' '! -L "$GITDIR/hooks"'; do
+    grep -qF -- "$frag" <<<"$refusal" ||
+      violations+=("a8-run-agent: у відмові перед запуском немає перевірки '$frag' — docker на відсутній шлях створить теку від root, симлінк змонтує не те (#276)")
+  done
+  grep -qE '^[[:space:]]*exit[[:space:]]+[1-9]' <<<"$refusal" ||
+    violations+=("a8-run-agent: перевірка .git головного клону не відмовляє (немає exit ≠ 0) — контейнер стартує без :ro (#276)")
+
+  # 16d
+  for kv in GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath 'GIT_CONFIG_VALUE_0="{{ a8_container_home }}/'; do
+    grep -qF -- "-e $kv" <<<"$runner_code" ||
+      violations+=("a8-run-agent без -e $kv… — core.hooksPath контейнера не на теці в container-home: pnpm install упреться в .git/hooks :ro (EROFS) або коміти підуть без хуків (#276)")
+  done
+
+  # 16e
+  if [[ -f "$VERIFY_Y" ]]; then
+    grep -qF ': >> "{{ a8_repo_dir }}/.git/config"' "$VERIFY_Y" ||
+      violations+=("verify.yml: немає зонда, що дописує в сам файл .git/config з контейнера (V23a, #276)")
+    grep -qF '"{{ a8_repo_dir }}/.git/hooks/.a8probe"' "$VERIFY_Y" ||
+      violations+=("verify.yml: немає зонда запису в .git/hooks з контейнера (V23a, #276)")
+    grep -qF 'echo HOOKS_UNCHANGED' "$VERIFY_Y" ||
+      violations+=("verify.yml: немає зонда, що pnpm install агента в контейнері не змінює .git/hooks (V23b, #276)")
+    ! grep -qE '\.git/config/' "$VERIFY_Y" ||
+      violations+=("verify.yml: запис у <файл>/… для .git/config дає ENOTDIR при будь-яких правах — хибне «RO» (#276, контрприклад 5)")
+  else
+    violations+=("немає $VERIFY_Y — зонда .git/config і .git/hooks лише для читання (V23a) немає (#276)")
+  fi
+fi
+
+# 16b–16c (#276, #291). Обгортка hgit + HGIT_SAFE живуть у спільному
+# a8-git-lib.sh; тік, a8-requeue.sh і a8-queue.sh її сорсять і git на хості
+# викликають ТІЛЬКИ через hgit — жодного голого git, жодного git -C "$wt".
+if role_installs a8-tick.sh.j2; then
+  # git у позиції команди: на початку, після ; & | ( { $( ! і if/elif/while/until/then/do/else,
+  # з необов'язковими VAR=… і command/exec/env попереду.
+  git_cmd_re='(^|[;&|({!]|\$\(|(if|elif|while|until|then|do|else)[[:space:]])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:]]*)[[:space:]]+)*(timeout[[:space:]]+("[^"]*"|[^[:space:]]+)[[:space:]]+)?((command|exec|env)[[:space:]]+)?\\?["'"'"']?git["'"'"']?([[:space:]]|$)'
+  # code_grep <код> <RE> → «рядок: код» для рядків strip_comments, де код матчить RE.
+  code_grep() { RE="$2" awk -F'\t' '$2 ~ ENVIRON["RE"] { print $1 ": " $2 }' <<<"$1"; }
+  if [[ ! -f "$GIT_LIB" ]]; then
+    violations+=("немає tools/scripts/a8-git-lib.sh — спільної обгортки hgit немає (#291)")
+  else
+    # 16c — exec git у спільному lib. Їх рівно стільки, скільки гілок hgit (з
+    # timeout і без), і КОЖЕН мусить нести GIT_NO_REPLACE_OBJECTS, HGIT_SAFE і
+    # -C "$A8_REPO_DIR" — жодного необгорнутого git у самому lib (#276, #291).
+    lib_code="$(strip_comments "$GIT_LIB")"
+    lib_git="$(code_grep "$lib_code" "$git_cmd_re")"
+    if ! grep -qF '"${HGIT_SAFE[@]}"' <<<"$lib_git"; then
+      violations+=("a8-git-lib: немає рядка, що запускає git з \"\${HGIT_SAFE[@]}\" — обгортки hgit немає (#291)")
+    fi
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      [[ "$hit" == *'"${HGIT_SAFE[@]}"'* ]] ||
+        violations+=("a8-git-lib: git без \"\${HGIT_SAFE[@]}\" — без безпечних -c (#276): $hit")
+      [[ "$hit" == *GIT_NO_REPLACE_OBJECTS=1* ]] ||
+        violations+=("a8-git-lib: git без GIT_NO_REPLACE_OBJECTS=1 — git replace підмінить вміст для diff backstop'а (#276): $hit")
+      [[ "$hit" == *'-C "$A8_REPO_DIR"'* ]] ||
+        violations+=("a8-git-lib: git без -C \"\$A8_REPO_DIR\" — git після контейнера пішов би в підмінений gitdir (#276): $hit")
+    done <<<"$lib_git"
+    # 16c — ключі HGIT_SAFE, рядок за рядком, з точним значенням (у lib).
+    hgit_safe="$(awk '/^HGIT_SAFE=\(/ { on = 1; next } on && /^\)/ { exit } on' "$GIT_LIB" | sed -E 's/[[:space:]]+#.*$//')"
+    for kv in "${HGIT_REQUIRED[@]}"; do
+      grep -qE "^[[:space:]]*-c[[:space:]]+${kv//./\\.}[[:space:]]*$" <<<"$hgit_safe" ||
+        violations+=("a8-git-lib: HGIT_SAFE без -c $kv — цей ключ виконує команду або підміняє, куди йде git (#276)")
+    done
+  fi
+
+  # 16b — у кожному скрипті на хості git ТІЛЬКИ через hgit: жодного голого git у
+  # позиції команди (окрім самого lib), жодного git -C "$wt" (#276, #291).
+  for pair in "a8-tick:$TICK_TPL" "a8-requeue:$REQUEUE_SH" "a8-queue:$QUEUE_SH"; do
+    cl="${pair%%:*}"
+    cf="${pair#*:}"
+    [[ -f "$cf" ]] || continue
+    cc="$(strip_comments "$cf")"
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("$cl: git поза обгорткою hgit (без -c безпечних ключів і перевірок .git, #276/#291): ${cf#"$ROOT"/}:$hit")
+    done < <(code_grep "$cc" "$git_cmd_re")
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("$cl: git із -C \"\$wt\" — gitdir worktree контейнер міг підмінити (#276): ${cf#"$ROOT"/}:$hit")
+    done < <(code_grep "$cc" '-C[[:space:]]+"?[$][{]?wt([^A-Za-z0-9_]|$)')
+  done
+
+  # 16b (yml) — git на хості в задачах ролі йде повз hgit (рецензія #299: V18d так
+  # прибирав worktree). Блок задачі (після strip_comments), що запускає команду на
+  # хості (command/shell/raw/script/cmd/argv) чи модуль git, не має містити слова
+  # `git` як команди в жодній формі: багаторядковий `argv:` з `- git`, `argv: [git,
+  # …]`, `shell: git …`, `sudo -u agent git …`, `/usr/bin/git` (#302 E). Слово —
+  # токен між пробілами, лапками, дужками, комами й ;&|, взятий з basename: так
+  # `.git/config`, `a8-git-lib.sh`, `hgit`, `GIT_*` не рахуються. git у контейнері
+  # (через a8-run-agent чи docker run/exec) — виняток: це робота агента, не хоста.
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("задачі ролі: git на хості поза hgit (#291, #302 E): ${tf#"$ROOT"/}:$hit")
+    done < <(strip_comments "$tf" | awk -F'\t' '
+      function flush(   n, i, t, toks) {
+        if (blk != "" && (runs || gitmod) && !incont) {
+          if (gitmod) print gitline ": модуль git"
+          n = split(code, toks, /[[:space:]"'"'"'\[\],;&|(){}=]+/)
+          for (i = 1; i <= n; i++) {
+            t = toks[i]; sub(/.*\//, "", t)
+            if (t == "git") { print first ": " substr(firstcode, 1, 80); break }
+          }
+        }
+        blk = ""; code = ""; runs = 0; gitmod = 0; incont = 0; first = ""; firstcode = ""
+      }
+      { ln = $1; c = $2 }
+      # Межа задачі — `- name:` на будь-якому рівні (вкладені задачі block/always
+      # — окремо) або `- ` у колонці 0; елементи argv (`- …` без name:) — ні.
+      c ~ /^[[:space:]]*- name:/ || c ~ /^- / { flush() }
+      { blk = blk c "\n" }
+      c ~ /^[[:space:]]*-?[[:space:]]*name:/ { next }
+      c ~ /(ansible\.builtin\.)?(command|shell|raw|script):|[[:space:]](cmd|argv):/ { runs = 1 }
+      c ~ /^[[:space:]]*(ansible\.builtin\.)?git:[[:space:]]*$/ { gitmod = 1; gitline = ln }
+      c ~ /a8-run-agent|docker[[:space:]]+(run|exec)/ { incont = 1 }
+      { code = code " " c; if (c ~ /(^|[^A-Za-z0-9_.\/-])(\/[^[:space:]]*\/)?git([^A-Za-z0-9_.-]|$)/ && first == "") { first = ln; firstcode = c } }
+      END { flush() }')
+  done
+
+  # 16c — fetch/push: програму на тому боці задає опція, не конфіг. Фетчать тік
+  # і requeue; push — лише тік.
+  if [[ -f "$TICK_TPL" ]]; then
+    tick_code="$(strip_comments "$TICK_TPL")"
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      [[ "$hit" == *"--receive-pack=git-receive-pack"* ]] ||
+        violations+=("a8-tick: hgit push без --receive-pack=git-receive-pack — remote.origin.receivepack із конфігу репо виконається на хості (#276): $hit")
+    done < <(code_grep "$tick_code" 'hgit[[:space:]]+push([[:space:]]|$)')
+    [[ -n "$(code_grep "$tick_code" 'hgit[[:space:]]+fetch([[:space:]]|$)')" && -n "$(code_grep "$tick_code" 'hgit[[:space:]]+push([[:space:]]|$)')" ]] ||
+      violations+=("a8-tick: не знайдено hgit fetch чи hgit push — перевірити --upload-pack/--receive-pack нічим (#276)")
+  fi
+  for pair in "a8-tick:$TICK_TPL" "a8-requeue:$REQUEUE_SH"; do
+    cl="${pair%%:*}"
+    cf="${pair#*:}"
+    [[ -f "$cf" ]] || continue
+    cc="$(strip_comments "$cf")"
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      [[ "$hit" == *"--upload-pack=git-upload-pack"* ]] ||
+        violations+=("$cl: hgit fetch без --upload-pack=git-upload-pack — remote.origin.uploadpack із конфігу репо виконається на хості (#276): $hit")
+    done < <(code_grep "$cc" 'hgit[[:space:]]+fetch([[:space:]]|$)')
+  done
+fi
+
+# Інваріант 17 — ключ a8-ctl у змінних має формат, який пропустить assert ролі (#301 п.3).
+#
+# ЧОМУ. Assert формату ключа діяв лише при застосуванні ролі на A8, а regexp
+# відкликання будується з base64 ключа: короткий base64 (`A==`) зачепив би чужі
+# рядки authorized_keys. Тепер вираз один — a8_ctl_pubkey_re у defaults; роль
+# звіряє ним у assert, а цей інваріант — у CI, тим самим виразом через grep -E
+# (у виразі лише конструкції, однакові в Python re і POSIX ERE). Кожна змінна
+# `a8_ctl_*pubkey` у defaults і group_vars — у подвійних лапках одним рядком:
+# інший запис цей розбір не читає, тож fail closed.
+#
+# Вмикається, коли defaults ролі має a8_ctl_pubkey (синтетичні дерева — ні).
+DEFAULTS_Y="$ROLE/defaults/main.yml"
+if [[ -f "$DEFAULTS_Y" ]] && grep -qE '^a8_ctl_pubkey:' "$DEFAULTS_Y"; then
+  # Вираз збирається з рядків a8_ctl_pubkey_formats так само, як у Jinja:
+  # підставляємо їх, з'єднані «|», на місце виклику join у a8_ctl_pubkey_re.
+  key_alts="$(awk '/^a8_ctl_pubkey_formats:[[:space:]]*$/ { on = 1; next }
+    on && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- "/, "", v); sub(/"[[:space:]]*$/, "", v); out = out (out == "" ? "" : "|") v; next }
+    on { exit } END { print out }' "$DEFAULTS_Y")"
+  key_tpl="$(sed -n -E 's/^a8_ctl_pubkey_re: "(.*)"[[:space:]]*$/\1/p' "$DEFAULTS_Y")"
+  join_call="{{ a8_ctl_pubkey_formats | join('|') }}"
+  key_re=""
+  [[ -n "$key_alts" && "$key_alts" != *'\'* && "$key_tpl" == *"$join_call"* ]] &&
+    key_re="${key_tpl/"$join_call"/$key_alts}"
+  if [[ -z "$key_re" ]]; then
+    violations+=("defaults/main.yml: немає a8_ctl_pubkey_formats (рядки «- \"…\"», без \\) чи a8_ctl_pubkey_re з $join_call — формат ключа a8-ctl нема з чим звірити (#301)")
+  else
+    grep -qF 'is match(a8_ctl_pubkey_re)' "$TASKS/main.yml" 2>/dev/null ||
+      violations+=("tasks/main.yml: assert ключа a8-ctl не через a8_ctl_pubkey_re — CI і роль перевіряли б різне (#301)")
+    for f in "$DEFAULTS_Y" "$ROOT"/infra/ansible/group_vars/*.yml; do
+      [[ -f "$f" ]] || continue
+      while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        val="${hit#*:}"
+        val="${val#*:}"
+        if [[ "$val" =~ ^[[:space:]]*\"([^\"]*)\"[[:space:]]*(#.*)?$ ]]; then
+          v="${BASH_REMATCH[1]}"
+          [[ -z "$v" ]] && continue
+          LC_ALL=C grep -qE -- "$key_re" <<<"$v" ||
+            violations+=("${f#"$ROOT"/}:${hit%%:*}: ключ a8-ctl не проходить a8_ctl_pubkey_re (тип, base64 повної довжини, коментар; без опцій) — роль його не поставить (#301)")
+        else
+          violations+=("${f#"$ROOT"/}:${hit%%:*}: ключ a8-ctl не в подвійних лапках одним рядком — формат перевірити нічим (#301)")
+        fi
+      done < <(grep -nE '^a8_ctl_[a-z_]*pubkey:' "$f")
+    done
+  fi
+fi
+
 if [[ ${#violations[@]} -gt 0 ]]; then
   echo "::error::Інваріанти ролі A8 порушено (${#violations[@]}):" >&2
   for v in "${violations[@]}"; do
@@ -1011,4 +1360,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile)"
+echo "✓ Інваріанти ролі A8: include_tasks з apply, pipefail під bash, контейнер через argv, зонд без shell-змінних і без login-shell, обгортка через a8-guard check-run, verify не судить про машину за змінною play'ю, булеві змінні в умовах через | bool, образ агента несе всі бібліотеки воркера, образ збирається з --network host, а агент запускається без --network, uv sync агента ставить те саме, що CI, docker без IPv6, живий вимір фільтра V20 з IPv4-пробою поза allowlist і контролем, prune з ролі не чіпає образ агента (label!=hart.keep=true + LABEL у Dockerfile), ключ у authorized_keys — лише з restrict і command=, ключ a8-ctl у змінних — у форматі a8_ctl_pubkey_re, git на хості не виконує підкладене контейнером (.git/config і hooks :ro, hgit, хуки контейнера в container-home)"

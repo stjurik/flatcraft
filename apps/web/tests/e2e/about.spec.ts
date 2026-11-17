@@ -63,12 +63,12 @@ test.describe("/about (Phase X.1 D)", () => {
   // сусіди видаленого пункту: видалення елемента з масиву `columns` не мало
   // зачепити ні решту колонки «Спільнота», ні інші колонки, ні маршрут /soon,
   // який після видалення Telegram тримає лише пункт «Розблокувати».
-  test("Footer «Спільнота» — GitHub і Discord цілі після видалення Telegram", async ({ page }) => {
+  test("Footer «Спільнота» — лише Discord після видалення Telegram (#266)", async ({ page }) => {
     await page.goto("/");
     const links = page.getByTestId("site-links");
-    const github = links.getByRole("link", { name: /GitHub/ });
-    await expect(github).toHaveAttribute("href", "https://github.com/stjurik/flatcraft");
-    await expect(github).toHaveAttribute("target", "_blank");
+    const discord = links.getByRole("link", { name: /Discord/ });
+    await expect(discord).toHaveAttribute("href", /^https:\/\/discord\.gg\//);
+    await expect(discord).toHaveAttribute("target", "_blank");
 
     await page.goto("/en");
     const discordEn = links.getByRole("link", { name: /Discord/ });
@@ -121,7 +121,7 @@ test.describe("/about (Phase X.1 D)", () => {
         "about-donate-monobank",
         "about-donate-united24",
         "about-feedback-email",
-        "about-feedback-github",
+        "about-feedback-discord",
       ]) {
         const box = await page.getByTestId(id).boundingBox();
         expect(box, `${id} має bounding box`).not.toBeNull();

@@ -272,45 +272,45 @@ TASKS_OK='---
 make_tree "$tmproot/ok" "$PLAY_OK" "$TASKS_OK"
 assert_exit "здорова роль → 0" 0 "$tmproot/ok"
 
-# ─── Інваріант 16 — креденшали двох виконавців не перетинаються ────────────
+# ─── Інваріант 19 — креденшали двох виконавців не перетинаються ────────────
 # Здорова роль ($RUNNER_OK) — 0; кожна зламана половина — рівно одне порушення.
 runner_tree() { # runner_tree <тека> <обгортка>
   make_tree "$1" "$PLAY_OK" "$TASKS_OK"
   printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
 }
 runner_tree "$tmproot/x16a" "$RUNNER_OK"
-assert_exit "16: обгортка з гілками claude/gemini → 0" 0 "$tmproot/x16a"
+assert_exit "19: обгортка з гілками claude/gemini → 0" 0 "$tmproot/x16a"
 runner_tree "$tmproot/x16b" "${RUNNER_OK/case \"\$\{A8_EXECUTOR:-claude\}\" in/OPT_ARGS+=(-v \"\$A8_AGY_HOME:/h/.gemini\")
 case \"\$\{A8_EXECUTOR:-claude\}\" in}"
-assert_exit "16: тека agy монтується поза гілкою gemini → 1" 1 "$tmproot/x16b" "монтує теку agy поза гілкою gemini"
+assert_exit "19: тека agy монтується поза гілкою gemini → 1" 1 "$tmproot/x16b" "монтує теку agy поза гілкою gemini"
 runner_tree "$tmproot/x16c" "${RUNNER_OK/    OPT_ARGS+=(-v \"\$A8_AGY_HOME/    OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
     OPT_ARGS+=(-v \"\$A8_AGY_HOME}"
-assert_exit "16: токен Claude у гілці gemini → 1" 1 "$tmproot/x16c" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
+assert_exit "19: токен Claude у гілці gemini → 1" 1 "$tmproot/x16c" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
 runner_tree "$tmproot/x16d" "${RUNNER_OK/      exit 2
 /      :
 }"
-assert_exit "16: gemini не відмовляє на токені Claude → 1" 1 "$tmproot/x16d" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
+assert_exit "19: gemini не відмовляє на токені Claude → 1" 1 "$tmproot/x16d" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
 runner_tree "$tmproot/x16e" "${RUNNER_OK/  gemini)/  gemini-off)}"
 # Тут порушень два: гілки немає, і монтування теки agy тепер поза нею.
-assert_exit "16: немає гілки gemini → 1" 1 "$tmproot/x16e"
+assert_exit "19: немає гілки gemini → 1" 1 "$tmproot/x16e"
 grep -qF "немає гілки gemini)" "$tmproot/out" ||
-  { echo "✗ 16: немає порушення «немає гілки gemini)»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+  { echo "✗ 19: немає порушення «немає гілки gemini)»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 runner_tree "$tmproot/x16f" "$RUNNER_OK"
 printf '%s\n' '- name: probe' '  ansible.builtin.command:' '    argv:' '      - docker' '      - run' '      - -v' \
   '      - "{{ a8_agy_config_dir }}:/root/.gemini"' >"$tmproot/x16f/infra/ansible/roles/a8/tasks/probe.yml"
-assert_exit "16: задача ролі монтує теку agy повз обгортку (argv) → 1" 1 "$tmproot/x16f" "монтує в контейнер не обгортка"
+assert_exit "19: задача ролі монтує теку agy повз обгортку (argv) → 1" 1 "$tmproot/x16f" "монтує в контейнер не обгортка"
 runner_tree "$tmproot/x16g" "$RUNNER_OK"
 printf '%s\n' '- name: probe' '  ansible.builtin.shell: docker run -v {{ a8_agy_config_dir }}:/x img true' \
   >"$tmproot/x16g/infra/ansible/roles/a8/tasks/probe.yml"
-assert_exit "16: задача ролі монтує теку agy повз обгортку (рядок) → 1" 1 "$tmproot/x16g" "монтує в контейнер не обгортка"
+assert_exit "19: задача ролі монтує теку agy повз обгортку (рядок) → 1" 1 "$tmproot/x16g" "монтує в контейнер не обгортка"
 runner_tree "$tmproot/x16h" "$RUNNER_OK"
 printf '%s\n' 'a8_container_home: /home/agent/container-home' 'a8_agy_config_dir: /home/agent/container-home/gemini' \
   >>"$tmproot/x16h/infra/ansible/roles/a8/defaults/main.yml"
-assert_exit "16: тека agy всередині container-home → 1" 1 "$tmproot/x16h" "a8_agy_config_dir (/home/agent/container-home/gemini) лежить у a8_container_home"
+assert_exit "19: тека agy всередині container-home → 1" 1 "$tmproot/x16h" "a8_agy_config_dir (/home/agent/container-home/gemini) лежить у a8_container_home"
 runner_tree "$tmproot/x16i" "$RUNNER_OK"
 printf '%s\n' 'a8_container_home: /home/agent/container-home' 'a8_agy_config_dir: /home/agent/container-home2' \
   >>"$tmproot/x16i/infra/ansible/roles/a8/defaults/main.yml"
-assert_exit "16: схожий префікс (container-home2) — не всередині → 0" 0 "$tmproot/x16i"
+assert_exit "19: схожий префікс (container-home2) — не всередині → 0" 0 "$tmproot/x16i"
 
 # Тест 2 — include_tasks у рядковій формі (вада 1, реальна: ok=2 у verify).
 make_tree "$tmproot/inc" "$PLAY_OK" '---
@@ -1167,6 +1167,89 @@ make_prune_tree "$tmproot/p15" "" "$DF_HEAD
 LABEL hart.keep=truer"
 assert_exit "інв.14: hart.keep=truer — не та мітка → 1" 1 "$tmproot/p15" "немає LABEL hart.keep=true"
 
+# ─── Інваріант 15: ключ у authorized_keys — лише з restrict і command= ───────
+akey_tree() { # akey_tree <тека> <вміст tasks/akey.yml>
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK"
+  printf '%s\n' "$2" >"$1/infra/ansible/roles/a8/tasks/akey.yml"
+}
+akey_tree "$tmproot/k1" '---
+- name: Authorize key
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: restrict,command="/usr/local/bin/a8-ctl" {{ k }}'
+assert_exit "інв.15: lineinfile з restrict і command= → 0" 0 "$tmproot/k1"
+
+akey_tree "$tmproot/k2" '---
+- name: Authorize key
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: command="/usr/local/bin/a8-ctl" {{ k }}'
+assert_exit "інв.15: без restrict → 1" 1 "$tmproot/k2" "без restrict"
+
+akey_tree "$tmproot/k3" '---
+- name: Authorize key
+  ansible.builtin.copy:
+    content: "restrict {{ k }}"
+    dest: /home/agent/.ssh/authorized_keys'
+assert_exit "інв.15: copy без command= → 1" 1 "$tmproot/k3" "без command="
+
+akey_tree "$tmproot/k4" '---
+- name: Authorize key
+  # restrict,command="/usr/local/bin/a8-ctl" — лише в коментарі
+  ansible.builtin.lineinfile:
+    path: /home/agent/.ssh/authorized_keys
+    line: "{{ k }}"'
+assert_exit "інв.15: restrict і command= лише в коментарі → 1" 1 "$tmproot/k4"
+grep -qF "без restrict" "$tmproot/out" && grep -qF "без command=" "$tmproot/out" ||
+  { echo "✗ інв.15: очікував обидва порушення для k4"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+
+akey_tree "$tmproot/k5" '---
+- name: Read keys
+  ansible.builtin.slurp:
+    src: /home/agent/.ssh/authorized_keys'
+assert_exit "інв.15: лише читання (slurp) → 0" 0 "$tmproot/k5"
+
+akey_tree "$tmproot/k6" '---
+- name: Authorize key
+  ansible.posix.authorized_key:
+    user: agent
+    key: "{{ k }}"
+    key_options: restrict,command="/usr/local/bin/a8-ctl"'
+assert_exit "інв.15: модуль authorized_key з key_options restrict,command= → 0" 0 "$tmproot/k6"
+
+# ─── Інваріант 17: ключ a8-ctl у змінних — у форматі a8_ctl_pubkey_re (#301) ──
+# Вираз береться з чинних defaults ролі: тест перевіряє розбір, а не копію виразу.
+KEY_RE_LINES="$(sed -n '/^a8_ctl_pubkey_formats:/,/^a8_ctl_pubkey_re:/p' "$REPO/infra/ansible/roles/a8/defaults/main.yml")"
+GOOD_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzluehSS a8-ctl@t470"
+ctlkey_tree() { # ctlkey_tree <тека> <рядок a8_ctl_pubkey у group_vars> [<assert у tasks>]
+  make_tree "$1" "$PLAY_OK" "$TASKS_OK
+- name: Check key
+  ansible.builtin.assert:
+    that:
+      - ${3:-item is match(a8_ctl_pubkey_re)}
+  loop: \"{{ a8_ctl_pubkeys }}\""
+  printf '%s\n' 'a8_ctl_pubkey: ""' "$KEY_RE_LINES" >>"$1/infra/ansible/roles/a8/defaults/main.yml"
+  mkdir -p "$1/infra/ansible/group_vars"
+  printf '%s\n' "$2" >"$1/infra/ansible/group_vars/a8.yml"
+}
+ctlkey_tree "$tmproot/c1" "a8_ctl_pubkey: \"$GOOD_KEY\""
+assert_exit "інв.17: повний ed25519 з коментарем → 0" 0 "$tmproot/c1"
+ctlkey_tree "$tmproot/c2" 'a8_ctl_pubkey: "ssh-ed25519 A== a8-ctl@t470"'
+assert_exit "інв.17: короткий base64 A== → 1" 1 "$tmproot/c2" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c3" "a8_ctl_pubkey: \"no-pty,permitopen=*:* $GOOD_KEY\""
+assert_exit "інв.17: власні опції перед ключем → 1" 1 "$tmproot/c3" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c4" "a8_ctl_pubkey: $GOOD_KEY"
+assert_exit "інв.17: без лапок — розбір не читає, fail closed → 1" 1 "$tmproot/c4" "не в подвійних лапках одним рядком"
+ctlkey_tree "$tmproot/c5" "a8_ctl_local_pubkey: \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzlueh a8-ctl@a8\""
+assert_exit "інв.17: друга змінна ключа (S3) теж звіряється, base64 на 2 коротший → 1" 1 "$tmproot/c5" "не проходить a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c6" "a8_ctl_pubkey: \"$GOOD_KEY\"" "item is match('^ssh-')"
+assert_exit "інв.17: assert ролі не через a8_ctl_pubkey_re → 1" 1 "$tmproot/c6" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
+ctlkey_tree "$tmproot/c7" 'a8_ctl_pubkey: ""'
+assert_exit "інв.17: порожньо — ключа немає → 0" 0 "$tmproot/c7"
+ctlkey_tree "$tmproot/c8" "a8_ctl_pubkey: \"$GOOD_KEY\""
+sed -i 's/{{ a8_ctl_pubkey_formats | join(.|.) }}/ssh-ed25519 .*/' "$tmproot/c8/infra/ansible/roles/a8/defaults/main.yml"
+assert_exit "інв.17: a8_ctl_pubkey_re без списку форматів — звірити нічим → 1" 1 "$tmproot/c8" "формат ключа a8-ctl нема з чим звірити"
+
 # ─── Мутації чинної ролі ───────────────────────────────────────────────────
 # Копія справжньої ролі, у яку по черзі вносимо кожну з трьох реальних вад.
 # Спершу доводимо, що НЕзламана копія зелена — інакше наступні три тести
@@ -1180,6 +1263,13 @@ cp -r "$REPO/infra/docker" "$mut/infra/docker"
 mkdir -p "$mut/.github/workflows" "$mut/tools/scripts"
 cp "$REPO/.github/workflows/ci.yml" "$mut/.github/workflows/ci.yml"
 cp "$REPO/tools/scripts/autorun.sh" "$mut/tools/scripts/autorun.sh"
+# Спільна обгортка git і скрипти на хості (інваріант 16, #291): check-ansible
+# звіряє HGIT_SAFE і «git тільки через hgit» саме в цих копіях.
+cp "$REPO/tools/scripts/a8-git-lib.sh" "$mut/tools/scripts/a8-git-lib.sh"
+cp "$REPO/tools/scripts/a8-requeue.sh" "$mut/tools/scripts/a8-requeue.sh"
+cp "$REPO/tools/scripts/a8-queue.sh" "$mut/tools/scripts/a8-queue.sh"
+# Backstop заборонених шляхів (інваріант 18, #302 D): скрипти ролі мусять бути в ньому.
+cp "$REPO/tools/scripts/check-forbidden-paths.sh" "$mut/tools/scripts/check-forbidden-paths.sh"
 assert_exit "мутація 0: чинна роль як є → 0" 0 "$mut"
 
 sed -i 's|^\(\s*\)ansible_shell_executable: /bin/bash|\1# знято мутацією|' "$mut/infra/ansible/a8.yml"
@@ -1641,9 +1731,9 @@ PY2
 assert_exit "мутація 34: V20b резолвить ціль сам → 1" 1 "$mut" "іде не на адресу, яку пробував агент"
 cp "$REPO/$VERIFY_Y" "$mut/$VERIFY_Y"
 
-# Мутації 40–43 — інваріант 16, креденшали двох виконавців (PR-B #262).
+# Мутації 19a–d — інваріант 19, креденшали двох виконавців (PR-B #262).
 RUNNER_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
-# 40: токен Claude і в контейнер agy.
+# 19a: токен Claude і в контейнер agy.
 python3 - "$mut/$RUNNER_T" <<'PY2'
 import sys
 p = sys.argv[1]; s = open(p).read()
@@ -1652,9 +1742,9 @@ assert s.count(anchor) == 1, "фікстура застаріла: монтув�
 s = s.replace(anchor, '    OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)\n' + anchor, 1)
 open(p, "w").write(s)
 PY2
-assert_exit "мутація 40: токен Claude у гілці gemini → 1" 1 "$mut" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
+assert_exit "мутація 19a: токен Claude у гілці gemini → 1" 1 "$mut" "передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude"
 cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
-# 41: тека agy — і для claude.
+# 19b: тека agy — і для claude.
 python3 - "$mut/$RUNNER_T" <<'PY2'
 import sys
 p = sys.argv[1]; s = open(p).read()
@@ -1663,9 +1753,9 @@ assert s.count(anchor) == 1, "фікстура застаріла: вибір в
 s = s.replace(anchor, '[[ -n "${A8_AGY_HOME:-}" ]] && OPT_ARGS+=(-v "$A8_AGY_HOME:{{ a8_container_home }}/.gemini")\n' + anchor, 1)
 open(p, "w").write(s)
 PY2
-assert_exit "мутація 41: тека agy поза гілкою gemini → 1" 1 "$mut" "монтує теку agy поза гілкою gemini"
+assert_exit "мутація 19b: тека agy поза гілкою gemini → 1" 1 "$mut" "монтує теку agy поза гілкою gemini"
 cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
-# 42: gemini більше не відмовляє на токені Claude.
+# 19c: gemini більше не відмовляє на токені Claude.
 python3 - "$mut/$RUNNER_T" <<'PY2'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
@@ -1673,9 +1763,9 @@ s2 = re.sub(r'(    if \[\[ -n "\$\{CLAUDE_CODE_OAUTH_TOKEN:-\}" \]\]; then\n(?: 
 assert s2 != s, "фікстура застаріла: відмова на токені виглядає інакше"
 open(p, "w").write(s2)
 PY2
-assert_exit "мутація 42: gemini не відмовляє на токені Claude → 1" 1 "$mut" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
+assert_exit "мутація 19c: gemini не відмовляє на токені Claude → 1" 1 "$mut" "не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN"
 cp "$REPO/$RUNNER_T" "$mut/$RUNNER_T"
-# 43: тека agy переїхала в container-home — її бачить і контейнер Claude.
+# 19d: тека agy переїхала в container-home — її бачить і контейнер Claude.
 DEF_M="infra/ansible/roles/a8/defaults/main.yml"
 python3 - "$mut/$DEF_M" <<'PY2'
 import re, sys
@@ -1684,7 +1774,7 @@ s2 = re.sub(r'^a8_agy_config_dir: .*$', 'a8_agy_config_dir: /home/agent/containe
 assert s2 != s, "фікстура застаріла: a8_agy_config_dir виглядає інакше"
 open(p, "w").write(s2)
 PY2
-assert_exit "мутація 43: тека agy у container-home → 1" 1 "$mut" "лежить у a8_container_home"
+assert_exit "мутація 19d: тека agy у container-home → 1" 1 "$mut" "лежить у a8_container_home"
 cp "$REPO/$DEF_M" "$mut/$DEF_M"
 
 # Мутації 35–37 — інваріант 14, prune docker не чіпає образ агента (issue #117).
@@ -1730,6 +1820,199 @@ assert_exit "мутація 37: роль не ставить юніти prune �
 grep -qF "жодна задача ролі не ставить docker-prune.service" "$tmproot/out" ||
   { echo "✗ мутація 37: немає порушення «жодна задача ролі не ставить docker-prune.service»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 37a–b — інваріант 18 (#302 D): backstop без шаблону a8-*; роль ставить
+# на хост новий скрипт з tools/scripts, якого backstop не знає.
+FPS_T="tools/scripts/check-forbidden-paths.sh"
+python3 - "$mut/$FPS_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "  '^tools/scripts/a8-[^/]*$'\n"
+assert s.count(old) == 1, "фікстура застаріла: шаблон a8-* у backstop'і виглядає інакше"
+open(p, "w").write(s.replace(old, "", 1))
+PY2
+# Порушень кілька (по одному на скрипт ролі) — тож код і назву перевіряємо окремо.
+assert_exit "мутація 37a/інв.18: backstop без tools/scripts/a8-* → 1" 1 "$mut"
+grep -qF "роль ставить tools/scripts/a8-git-lib.sh на хост, а check-forbidden-paths.sh його не забороняє" "$tmproot/out" ||
+  { echo "✗ мутація 37a/інв.18: порушення не називає a8-git-lib.sh"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+cp "$REPO/$FPS_T" "$mut/$FPS_T"
+cat >>"$mut/$TASKS_M" <<'YML'
+
+- name: Install a new host helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/host-helper.sh"
+    dest: /usr/local/lib/a8/host-helper.sh
+    mode: "0755"
+YML
+assert_exit "мутація 37b/інв.18: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
+# 38: ключ без restrict — pty і forwarding.
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "line: 'restrict,command=\"/usr/local/bin/a8-ctl\" "
+assert s.count(anchor) == 1, "фікстура застаріла: рядок ключа a8-ctl виглядає інакше"
+s = s.replace(anchor, "line: 'command=\"/usr/local/bin/a8-ctl\" ", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 38: ключ a8-ctl без restrict → 1" 1 "$mut" "без restrict"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# 39: ключ без command= — повна оболонка agent.
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+anchor = "line: 'restrict,command=\"/usr/local/bin/a8-ctl\" "
+assert s.count(anchor) == 1, "фікстура застаріла: рядок ключа a8-ctl виглядає інакше"
+s = s.replace(anchor, "line: 'restrict ", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 39: ключ a8-ctl без command= → 1" 1 "$mut" "без command="
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 39a–b — інваріант 17 (#301 п.3): ключ у group_vars обрізано; assert ролі
+# знову зі старим виразом, що пропускав короткий base64.
+python3 - "$mut/infra/ansible/group_vars/a8.yml" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2 = re.sub(r'^(a8_ctl_pubkey: "ssh-ed25519 )\S+', r'\1AAAA', s, count=1, flags=re.M)
+assert s2 != s, "фікстура застаріла: a8_ctl_pubkey у group_vars виглядає інакше"
+open(p, "w").write(s2)
+PY2
+assert_exit "мутація 39a: ключ a8-ctl у group_vars обрізано → 1" 1 "$mut" "не проходить a8_ctl_pubkey_re"
+cp "$REPO/infra/ansible/group_vars/a8.yml" "$mut/infra/ansible/group_vars/a8.yml"
+python3 - "$mut/$TASKS_M" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "      - item is match(a8_ctl_pubkey_re)\n"
+assert s.count(old) == 1, "фікстура застаріла: assert ключа a8-ctl виглядає інакше"
+s = s.replace(old, "      - item is match('^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/]+=* ?[^\\n\\r]*$')\n", 1)
+open(p, "w").write(s)
+PY2
+assert_exit "мутація 39b: assert ключа зі старим виразом → 1" 1 "$mut" "assert ключа a8-ctl не через a8_ctl_pubkey_re"
+cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+
+# Мутації 40–… — інваріант 16, git на хості не виконує підкладене контейнером (#276).
+# Кожна ламає один захист чинної ролі; скрипт мусить назвати саме його.
+RUN_T="infra/ansible/roles/a8/templates/a8-run-agent.sh.j2"
+TICK_T="infra/ansible/roles/a8/templates/a8-tick.sh.j2"
+GIT_LIB_T="tools/scripts/a8-git-lib.sh"
+REQUEUE_T="tools/scripts/a8-requeue.sh"
+mut16() { # mut16 <назва> <файл відносно кореня> <було> <стало> <очікуване порушення>
+  python3 - "$mut/$2" "$3" "$4" <<'PY2'
+import sys
+p, old, new = sys.argv[1:4]
+s = open(p).read()
+assert s.count(old) == 1, "фікстура застаріла: " + old[:60]
+open(p, "w").write(s.replace(old, new, 1))
+PY2
+  assert_exit "мутація 16/#276: $1 → 1" 1 "$mut"
+  grep -qF -- "$5" "$tmproot/out" ||
+    { echo "✗ мутація 16/#276: $1 — немає порушення «$5»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+  cp "$REPO/$2" "$mut/$2"
+}
+
+# 16a — обгортка.
+mut16 ".git/config без :ro" "$RUN_T" '-v "$GITDIR/config:$GITDIR/config:ro"' '-v "$GITDIR/config:$GITDIR/config"' \
+  "не монтує .git/config головного клону з :ro"
+mut16 ".git/hooks без :ro" "$RUN_T" '-v "$GITDIR/hooks:$GITDIR/hooks:ro"' '-v "$GITDIR/hooks:$GITDIR/hooks"' \
+  "не монтує .git/hooks головного клону з :ro"
+mut16 "немає відмови, коли шляху немає" "$RUN_T" '  exit 1
+fi
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' 'fi
+RO_ARGS+=(-v "$GITDIR:$GITDIR"' "не відмовляє (немає exit ≠ 0)"
+mut16 "відмова без перевірки симлінка config" "$RUN_T" '-f "$GITDIR/config" && ! -L "$GITDIR/config" &&' '-f "$GITDIR/config" &&' \
+  "немає перевірки '! -L \"\$GITDIR/config\"'"
+mut16 ".git не bind onto self" "$RUN_T" 'RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config' 'RO_ARGS+=(-v "$GITDIR/config' \
+  "не монтує саму .git (bind onto self)"
+mut16 ".git/worktrees не bind onto self" "$RUN_T" '-v "$GITDIR/worktrees:$GITDIR/worktrees"' '-v "$GITDIR/wt-skip:x"' \
+  "не монтує .git/worktrees (bind onto self)"
+
+# 16c — кожен ключ hgit окремо (у спільному a8-git-lib.sh, #291): частину з них
+# жоден динамічний сценарій спрацювати не змусить, і тоді цей рядок — єдине, що їх тримає.
+for kv in core.hooksPath=/dev/null core.fsmonitor=false core.sshCommand=ssh core.askPass= credential.helper= \
+  diff.external= core.pager=cat core.editor=false core.gitProxy= protocol.ext.allow=never core.alternateRefsCommand= \
+  core.commitGraph=false gc.auto=0 maintenance.auto=false; do
+  mut16 "hgit без -c $kv" "$GIT_LIB_T" "  -c $kv
+" "" "HGIT_SAFE без -c $kv"
+done
+mut16 "fetch без --upload-pack" "$TICK_T" 'hgit fetch --quiet --upload-pack=git-upload-pack' 'hgit fetch --quiet' \
+  "hgit fetch без --upload-pack=git-upload-pack"
+mut16 "push без --receive-pack" "$TICK_T" 'hgit push --receive-pack=git-receive-pack origin' 'hgit push origin' \
+  "hgit push без --receive-pack=git-receive-pack"
+# #291: requeue і queue теж ходять у git тільки через hgit; fetch requeue — з --upload-pack.
+mut16 "requeue git повз hgit" "$REQUEUE_T" 'hgit rev-parse --git-dir' 'git -C "$A8_REPO_DIR" rev-parse --git-dir' \
+  "a8-requeue: git поза обгорткою hgit"
+mut16 "requeue fetch без --upload-pack" "$REQUEUE_T" 'hgit fetch --quiet --upload-pack=git-upload-pack origin main' \
+  'hgit fetch --quiet origin main' "a8-requeue: hgit fetch без --upload-pack=git-upload-pack"
+mut16 "queue git повз hgit" "tools/scripts/a8-queue.sh" 'hgit show-ref --verify --quiet "refs/heads/ai/$id"' \
+  'git -C "$A8_REPO_DIR" show-ref --verify --quiet "refs/heads/ai/$id"' "a8-queue: git поза обгорткою hgit"
+
+# 16b — git поза hgit, git у worktree, обгортка без GIT_NO_REPLACE_OBJECTS.
+mut16 "push знову з worktree" "$TICK_T" '      hgit push --receive-pack=git-receive-pack origin "$tip' \
+  '      git -C "$wt" push origin "$tip' "git поза обгорткою hgit"
+mut16 "diff знову з worktree" "$TICK_T" 'changed="$(hgit diff -z' 'changed="$(git --no-replace-objects -C "$wt" diff -z' \
+  'git із -C "$wt"'
+mut16 "deploy_key push повз hgit" "$TICK_T" '      hgit push --receive-pack=git-receive-pack "$A8_PUSH_SSH_URL"' \
+  '      git -C "$A8_REPO_DIR" push "$A8_PUSH_SSH_URL"' "git поза обгорткою hgit"
+mut16 "V18d знову голим git на хості" "infra/ansible/roles/a8/tasks/verify.yml" '      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env' '      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ a8_repo_dir }}"
+          - worktree
+          - remove
+          - --force
+          - "{{ a8_worktrees_dir }}/verify-cad"' \
+  "git на хості поза hgit (#291, #302 E)"
+# 16b (yml), #302 E — інші форми голого git у задачах ролі: shell-рядок, flow-список
+# argv, sudo перед git, повний шлях, модуль ansible.builtin.git.
+V18D_TAIL='      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env'
+V18D_OK="      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+$V18D_TAIL"
+mut16 "V18d: shell: git …" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        git -C {{ a8_repo_dir }} worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: argv: [git, …]" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        argv: [git, -C, "{{ a8_repo_dir }}", worktree, prune]
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: sudo -u agent git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.shell: >-
+        sudo -u agent git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: /usr/bin/git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.command:
+        cmd: /usr/bin/git -C {{ a8_repo_dir }} worktree prune
+'"$V18D_TAIL" "git на хості поза hgit (#291, #302 E)"
+mut16 "V18d: модуль ansible.builtin.git" "$VERIFY_Y" "$V18D_OK" '      ansible.builtin.git:
+        repo: "{{ a8_repo_dir }}"
+        dest: /tmp/x
+'"$V18D_TAIL" "модуль git"
+mut16 "hgit без GIT_NO_REPLACE_OBJECTS" "$GIT_LIB_T" '    GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}"' '    git "${HGIT_SAFE[@]}"' \
+  "git без GIT_NO_REPLACE_OBJECTS=1"
+
+# 16d — core.hooksPath контейнера: прибрано зовсім (pnpm install упреться в
+# .git/hooks :ro) або на /tmp (git commit агента й check-hook-loud — без хуків).
+mut16 "контейнер без core.hooksPath" "$RUN_T" '  -e GIT_CONFIG_KEY_0=core.hooksPath \
+' '' "без -e GIT_CONFIG_KEY_0=core.hooksPath"
+mut16 "core.hooksPath контейнера на /tmp" "$RUN_T" 'GIT_CONFIG_VALUE_0="{{ a8_container_home }}/.a8-git-hooks"' \
+  'GIT_CONFIG_VALUE_0="/tmp/a8-hooks"' 'без -e GIT_CONFIG_VALUE_0="{{ a8_container_home }}/'
+
+# 16e — V23b не звіряє .git/hooks до і після pnpm install агента.
+mut16 "V23b без звірки .git/hooks" "$VERIFY_Y" ' && echo HOOKS_UNCHANGED &&' ' &&' "pnpm install агента в контейнері не змінює .git/hooks"
+
+# 16e — зонд V23a знову через `touch <файл>/…` (хибне «RO»).
+mut16 "V23a пише в config як у теку" "$VERIFY_Y" 'if : >> "{{ a8_repo_dir }}/.git/config" 2>/dev/null; then' \
+  'if touch "{{ a8_repo_dir }}/.git/config/.a8probe" 2>/dev/null; then' "дає ENOTDIR при будь-яких правах"
 
 if [[ "$fail" -eq 0 ]]; then
   echo "check-ansible-a8: усі перевірки пройдено"

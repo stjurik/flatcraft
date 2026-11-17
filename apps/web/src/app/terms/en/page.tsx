@@ -23,8 +23,7 @@ const SECTIONS: ReadonlyArray<Section> = [
     title: "1. About the service",
     body:
       "hart.crimea.ua is a non-profit social platform for parametric configuration of standard sheet-metal " +
-      "parts and free download of drawings (DXF + PDF + STEP). The source code is open under the MIT licence " +
-      "on GitHub.",
+      "parts and free download of drawings (DXF + PDF + STEP). The source code is open under the MIT licence.",
   },
   {
     id: "usage",
@@ -65,7 +64,7 @@ const SECTIONS: ReadonlyArray<Section> = [
     id: "ip",
     title: "6. Intellectual property",
     body:
-      "Platform code — MIT (github.com/stjurik/flatcraft). Design, page copy, and logo remain our property. " +
+      "Platform code — MIT. Design, page copy, and logo remain our property. " +
       "Drawings you generated from your parameters are yours (unrestricted use, including commercial).",
   },
   {
@@ -73,7 +72,7 @@ const SECTIONS: ReadonlyArray<Section> = [
     title: "7. Changes to the terms",
     body:
       "We may update these terms (add pages, adjust limits, change our approach to paid features if/when they " +
-      "appear). Material changes will be announced in the Discord community and the GitHub repository. " +
+      "appear). Material changes will be announced in the Discord community. " +
       "Continued use after a change means acceptance of the new terms.",
   },
   {

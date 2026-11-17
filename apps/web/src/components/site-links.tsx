@@ -15,7 +15,6 @@ interface ColumnDef {
   readonly items: ReadonlyArray<LinkItem>;
 }
 
-const GITHUB_URL = "https://github.com/stjurik/flatcraft";
 const DISCORD_URL = "https://discord.gg/Zx88FAFtkS";
 
 interface SiteLinksProps {
@@ -28,8 +27,8 @@ interface SiteLinksProps {
  * футера. Tap-target ≥44px — через мінімальний padding по вертикалі.
  *
  * `locale` перемикає лейбли/маршрути на EN-дзеркала (ADR-037 §2); лінки на
- * "GitHub"/"Discord"/"Privacy"/"Terms"/"Cookies" лишаються тими самими
- * англомовними словами в обох локалях (уже нейтральні на uk-сайті).
+ * "Discord"/"Privacy"/"Terms"/"Cookies" лишаються тими самими англомовними
+ * словами в обох локалях (уже нейтральні на uk-сайті).
  */
 export function SiteLinks({ locale }: SiteLinksProps) {
   const dict = dictionaries[locale];
@@ -47,10 +46,7 @@ export function SiteLinks({ locale }: SiteLinksProps) {
     },
     {
       title: sl.communityTitle,
-      items: [
-        { label: sl.github, href: GITHUB_URL, external: true },
-        { label: sl.discord, href: DISCORD_URL, external: true },
-      ],
+      items: [{ label: sl.discord, href: DISCORD_URL, external: true }],
     },
     {
       title: sl.legalTitle,

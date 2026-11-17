@@ -10,7 +10,7 @@
 # підмінено лише `docker` (друкує свої аргументи) і `a8-guard`.
 #
 # Чого НЕ доводить: що docker справді монтує так, як написано в аргументах, і
-# що agy в контейнері бачить свою теку. Це живий вимір V23 у verify.yml.
+# що agy в контейнері бачить свою теку. Це живий вимір V26 у verify.yml.
 #
 # Мутації в кінці: ламаємо шаблон по одному місцю — набір мусить почервоніти.
 #
@@ -33,6 +33,9 @@ bad() {
 CH="/home/agent/container-home"
 AGYBIN="/usr/local/bin/agy"
 mkdir -p "$ROOT/etc" "$ROOT/bin" "$ROOT/repo" "$ROOT/wt" "$ROOT/agy-home"
+# Головний клон з .git/config і .git/hooks: без них обгортка відмовляє ще до
+# docker (#276), і жоден сценарій нижче не дійшов би до вибору виконавця.
+git init -q "$ROOT/repo"
 : >"$ROOT/etc/a8.env"
 # a8-guard: код зі змінної GUARD_RC (за замовчуванням 0 — запобіжники мовчать).
 cat >"$ROOT/bin/a8-guard" <<'STUB'
@@ -83,7 +86,7 @@ if ((rc == 0)) && has_arg CLAUDE_CODE_OAUTH_TOKEN && ! mentions tok; then
 else
   bad "claude: токен (rc=$rc): $(tr '\n' ' ' <"$ROOT/docker-args" 2>/dev/null)"
 fi
-if mentions .gemini || mentions "$AGYBIN" || mentions /opt/agy-lib; then
+if [[ ! -e "$ROOT/docker-args" ]] || mentions .gemini || mentions "$AGYBIN" || mentions /opt/agy-lib; then
   bad "claude: у контейнері є тека agy або сам agy: $(tr '\n' ' ' <"$ROOT/docker-args")"
 else
   ok "claude: ні теки налаштувань agy, ні agy, ні його бібліотек у контейнері"
@@ -112,8 +115,11 @@ if ((rc == 0)) && has_arg "$ROOT/agy-home:$CH/.gemini" && has_arg "$AGYBIN:/usr/
 else
   bad "gemini: монтування (rc=$rc): $(tr '\n' ' ' <"$ROOT/docker-args" 2>/dev/null) $(cat "$ROOT/out")"
 fi
-mentions CLAUDE_CODE_OAUTH_TOKEN && bad "gemini: у контейнер іде CLAUDE_CODE_OAUTH_TOKEN" ||
+if [[ ! -e "$ROOT/docker-args" ]] || mentions CLAUDE_CODE_OAUTH_TOKEN; then
+  bad "gemini: docker не викликано або в контейнер іде CLAUDE_CODE_OAUTH_TOKEN"
+else
   ok "gemini: CLAUDE_CODE_OAUTH_TOKEN у контейнер не йде"
+fi
 
 # 5. Gemini, а токен Claude у середовищі є → відмова, контейнер не стартує.
 rc=0

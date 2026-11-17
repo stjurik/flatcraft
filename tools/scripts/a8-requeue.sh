@@ -11,8 +11,10 @@
 #
 # ЩО РОБИТЬ. Для кожного id, окремо від інших, лише коли ВСІ перевірки пройшли:
 #   1. у failed/ рівно один файл із полем .id == id;
-#   2. у running/ і в корені черги задачі з цим id немає, і в корені немає файла
-#      з такою самою назвою (mv мовчки затер би його);
+#   2. у running/, urgent/ і в корені черги задачі з цим id немає, і там, куди
+#      файл повертається, немає файла з такою самою назвою (mv мовчки затер би
+#      його); невідкладна (urgent-…) — лише коли в urgent/ порожньо (одночасно лише
+#      одна, рішення yurii 2026-10-19);
 #   3. origin/main свіжий (`git fetch` один раз на запуск — інакше перевірка
 #      комітів нижче порівнює з минулим);
 #   4. гілка ai/<id>, якщо є: 0 комітів понад origin/main, не заблокована
@@ -24,6 +26,10 @@
 # Тоді: worktree remove --force, прибрати залишок теки, worktree prune, branch -D,
 # файл задачі з failed/ у корінь черги, подія журналу `requeue`. Перевірка не
 # пройшла — для цього id нічого не змінено, рядок `SKIP <id>: <причина>`.
+# Невідкладна (назва urgent-…, a8-queue enqueue --urgent) повертається в urgent/, а
+# не в корінь: там вона стала б останньою з планових, на паузі планового потоку не
+# взялась би, а її префікс у running/ блокував би нову невідкладну (контрприклад 1,
+# PR #272). Назва файла не змінюється — задача повертається на своє місце в черзі.
 #
 # ЧОГО НЕ РОБИТЬ.
 #   - Не чіпає гілку з комітами і брудний worktree: це чиясь робота, а не залишок.
@@ -36,6 +42,10 @@
 # LOCK. Перед усім — `flock -n` на tick.lock, той самий файл, що й у тіку. Тік
 # працює (або інший requeue) — вихід 3, нічого не змінено. Lock тримається до
 # кінця: тік не візьме задачу, яку ми щойно повернули, посеред наших дій.
+# Саме переміщення файла — ще й під queue.lock, як кожне переміщення в тіку й
+# перевірка a8-queue enqueue: інакше enqueue, що перевіряє теки по черзі, не
+# знайшов би задачу, яку ми переносимо посеред його перевірки (контрприклад 3,
+# PR #272).
 #
 # --reset-pause. Кожне падіння записане в last-results рядком `failed`, а в runs.log —
 # рядком event=run з task і result=failed; три `failed` в кінці ставлять паузу
@@ -191,15 +201,25 @@ for t in jq flock git realpath timeout awk; do
   command -v "$t" >/dev/null || die "немає команди $t"
 done
 Q="$A8_QUEUE_DIR"
+URGENT="$Q/urgent"
 STATE="$A8_LOGS_DIR/last-results"
 [[ -d "$Q" ]] || die "немає теки черги $Q"
-git -C "$A8_REPO_DIR" rev-parse --git-dir >/dev/null 2>&1 || die "$A8_REPO_DIR — не git-репозиторій"
-
-# git без fd 9: фоновий `git gc --auto` після fetch успадкував би lock і тримав
-# його після нашого виходу. `--no-replace-objects`: git replace у спільному
-# репозиторії міг би сховати коміти гілки від rev-list (як у backstop тіку).
-repo() { git --no-replace-objects -C "$A8_REPO_DIR" "$@" 9>&-; }
-wtgit() { git --no-replace-objects -C "$wt" "$@" 9>&-; }
+# Спільна обгортка git на хості (#291): УСІ git-виклики requeue йдуть через hgit
+# — ті самі перевірки .git (commondir, симлінки, alternates, пастка-симлінк у
+# .git/worktrees, знімок) і безпечні -c, що в тіку. Контейнер бачить .git
+# головного клону на запис. hgit вшиває -C "$A8_REPO_DIR" і
+# GIT_NO_REPLACE_OBJECTS (git replace інакше сховав би коміти гілки від rev-list).
+GIT_LIB="${A8_GIT_LIB:-/usr/local/lib/a8/a8-git-lib.sh}"
+# shellcheck source=tools/scripts/a8-git-lib.sh
+[[ -r "$GIT_LIB" ]] || die "немає $GIT_LIB — спільної обгортки hgit немає"
+source "$GIT_LIB" || die "не вдалося прочитати $GIT_LIB"
+hgit rev-parse --git-dir >/dev/null 2>&1 || die "$A8_REPO_DIR — не git-репозиторій або небезпечна .git"
+repo() { hgit "$@"; }
+# gc.auto=0 у HGIT_SAFE знімає стару потребу закривати fd 9: фоновий `git gc
+# --auto` після fetch більше не стартує, тож не успадкує tick.lock. Дерево
+# worktree контейнера читаємо ТІЛЬКИ з головного клону за SHA (wtree_of/
+# wttree_clean нижче), ніколи `git -C "$wt"` — gitdir worktree контейнер міг
+# переписати на власний зі своїм конфігом і хуками (#291).
 
 # ─── Lock: тік працює — нічого не змінюємо ──────────────────────────────────
 if ! { exec 9>"$A8_LOGS_DIR/tick.lock"; } 2>/dev/null; then
@@ -212,9 +232,11 @@ fi
 
 # ─── Свіжий origin/main — один раз ──────────────────────────────────────────
 # GIT_TERMINAL_PROMPT=0: під `ssh -t` є термінал, і git спитав би пароль замість
-# того, щоб упасти. timeout: завислий fetch тримав би lock тіку без кінця.
+# того, щоб упасти. HGIT_TIMEOUT: завислий fetch тримав би lock тіку без кінця
+# (hgit пускає його під `timeout`). --upload-pack: програму на тому боці задає
+# опція, а не remote.origin.uploadpack із конфігу репо (той самий захист, що в тіку).
 export GIT_TERMINAL_PROMPT=0
-if ! timeout 120 git -C "$A8_REPO_DIR" fetch --quiet origin main 9>&-; then
+if ! HGIT_TIMEOUT=120 hgit fetch --quiet --upload-pack=git-upload-pack origin main; then
   die "git fetch origin main не вдався — без свіжого origin/main перевірка комітів хибна; нічого не змінено"
 fi
 repo rev-parse --verify --quiet refs/remotes/origin/main >/dev/null || die "після fetch немає origin/main"
@@ -241,14 +263,22 @@ scan_dir() {
 
 # inspect_worktrees <id> <реальний шлях worktree> → REG (шлях зареєстровано в
 # головному клоні), LOCKED, ELSEWHERE (де ще, крім цього шляху, відкрита гілка;
-# записи про вже неіснуючі теки не рахуються — їх прибере prune).
+# записи про вже неіснуючі теки не рахуються — їх прибере prune). Плюс для
+# ШЛЯХУ $2: WT_HEAD (SHA HEAD) і WT_HEADREF (гілка HEAD, або порожньо — тоді
+# відокремлений HEAD). Усе — з `worktree list --porcelain` головного клону
+# (#291): стан worktree беремо з адмінки в .git головного клону, а не
+# `git -C "$wt"` — контейнер міг переписати "$wt/.git" на власний gitdir.
 REG=0
 LOCKED=0
 ELSEWHERE=""
+WT_HEAD=""
+WT_HEADREF=""
 inspect_worktrees() {
   REG=0
   LOCKED=0
   ELSEWHERE=""
+  WT_HEAD=""
+  WT_HEADREF=""
   local out line cur=""
   out="$(repo worktree list --porcelain)" || return 1
   while IFS= read -r line; do
@@ -257,27 +287,39 @@ inspect_worktrees() {
         cur="$(realpath -m -- "${line#worktree }")"
         if [[ "$cur" == "$2" ]]; then REG=1; fi
         ;;
+      "HEAD "*)
+        if [[ "$cur" == "$2" ]]; then WT_HEAD="${line#HEAD }"; fi
+        ;;
+      "branch "*)
+        if [[ "$cur" == "$2" ]]; then WT_HEADREF="${line#branch }"; fi
+        if [[ "$line" == "branch refs/heads/ai/$1" && "$cur" != "$2" && -e "$cur" ]]; then ELSEWHERE="$cur"; fi
+        ;;
       locked*)
         if [[ "$cur" == "$2" ]]; then LOCKED=1; fi
-        ;;
-      "branch refs/heads/ai/$1")
-        if [[ "$cur" != "$2" && -e "$cur" ]]; then ELSEWHERE="$cur"; fi
         ;;
     esac
   done <<<"$out"
   return 0
 }
 
+# urgent_busy — невідкладна вже є: чекає в urgent/ або йде (running/urgent-*, з
+# будь-яким id). Те саме правило, що в a8-queue enqueue --urgent (контрприклад
+# Argon 5а, PR #272): одночасно лише одна.
+urgent_busy() {
+  compgen -G "$URGENT/*.json" >/dev/null || compgen -G "$Q/running/urgent-*.json" >/dev/null
+}
+
 # ─── Одна задача: 0 — OK/WOULD, 1 — SKIP ────────────────────────────────────
 # Викликається в умові `if`, тож set -e тут не діє: кожну команду перевіряємо явно.
 process_id() {
   local id="$1" branch="ai/$1" bref="refs/heads/ai/$1"
-  local wt="$A8_WORKTREES_DIR/$1" wtr wdr taskfile destfile
-  local has_branch=0 has_wt=0 rc n st top head_ref removed=""
+  local wt="$A8_WORKTREES_DIR/$1" wtr wdr taskfile destdir destfile
+  local has_branch=0 has_wt=0 rc n cleanidx wttree removed=""
   skip() {
     printf 'SKIP %s: %s\n' "$id" "$*"
     return 1
   }
+  dest_label() { if [[ "$destdir" == "$URGENT" ]]; then echo urgent/; else echo черга; fi; }
 
   # 1. Рівно один файл у failed/.
   scan_dir "$Q/failed" "$id"
@@ -294,9 +336,12 @@ process_id() {
     return 1
   fi
   taskfile="${MATCHES[0]}"
-  destfile="$Q/$(basename "$taskfile")"
+  destdir="$Q"
+  [[ "$(basename "$taskfile")" == urgent-* ]] && destdir="$URGENT"
+  destfile="$destdir/$(basename "$taskfile")"
 
-  # 2. Ні в running/, ні в черзі. Файл, який не вдалося розібрати, міг бути саме ним.
+  # 2. Ні в running/, ні в urgent/, ні в черзі. Файл, який не вдалося розібрати, міг
+  # бути саме ним.
   scan_dir "$Q/running" "$id"
   if ((${#MATCHES[@]} > 0)); then
     skip "задача з таким id зараз у running/"
@@ -315,8 +360,21 @@ process_id() {
     skip "у черзі є файл, який не розібрано як JSON — не можу переконатися, що це не ця задача"
     return 1
   fi
+  scan_dir "$URGENT" "$id"
+  if ((${#MATCHES[@]} > 0)); then
+    skip "задача з таким id уже в urgent/ (${MATCHES[0]##*/})"
+    return 1
+  fi
+  if ((UNPARSED > 0)); then
+    skip "в urgent/ є файл, який не розібрано як JSON — не можу переконатися, що це не ця задача"
+    return 1
+  fi
   if [[ -e "$destfile" ]]; then
     skip "у черзі вже є файл ${destfile##*/} — перезапис затер би його"
+    return 1
+  fi
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
+    skip "невідкладна, а інша вже чекає в urgent/ чи йде — одночасно лише одна; поверни, коли та піде"
     return 1
   fi
 
@@ -373,50 +431,70 @@ process_id() {
       return 1
     fi
     if ((LOCKED)); then
-      skip "worktree $wt заблоковано (git worktree lock)"
+      skip "worktree $wt заблоковано через git worktree lock"
       return 1
     fi
-    # Без цього `git -C` піднявся б до батьківського репозиторію і показав би його
-    # чистий статус замість статусу теки.
-    top="$(wtgit rev-parse --show-toplevel 2>/dev/null)" || top=""
-    if [[ -z "$top" || "$(realpath -m -- "$top")" != "$wtr" ]]; then
-      skip "$wt не є коренем git-worktree"
+    # Стан worktree беремо з ГОЛОВНОГО клону (#291), ніколи `git -C "$wt"`:
+    # контейнер міг переписати "$wt/.git" на власний gitdir зі своїм конфігом і
+    # хуками. REG уже підтвердив реєстрацію $wtr; HEAD, гілку й стан дерева даємо
+    # з worktree list і --work-tree, як чиста-перевірка тіку (#294).
+    if [[ -z "$WT_HEAD" ]]; then
+      skip "worktree list не дав HEAD для $wt — не можу перевірити стан"
       return 1
     fi
-    st="$(wtgit --no-optional-locks status --porcelain 2>/dev/null)" ||
-      {
-        skip "git status у $wt не вдався — не git чи пошкоджено"
-        return 1
-      }
-    if [[ -n "$st" ]]; then
-      skip "брудний worktree: $(grep -c '' <<<"$st") змін у git status --porcelain"
+    # Інша відкрита гілка в теці — чиясь робота, не залишок падіння. Порожній
+    # WT_HEADREF — відокремлений HEAD: не «чужа гілка», коміти на ньому ловить
+    # перевірка нижче.
+    if [[ -n "$WT_HEADREF" && "$WT_HEADREF" != "$bref" ]]; then
+      skip "у $wt відкрита інша гілка ($WT_HEADREF), а не $branch — не чіпаю"
       return 1
     fi
-    # У теці задачі чекаутили іншу гілку — це не залишок падіння, а чиясь робота.
-    # `symbolic-ref -q`: 0 — HEAD на гілці, 1 — відокремлений, інше — помилка.
-    rc=0
-    head_ref="$(wtgit symbolic-ref -q HEAD 2>/dev/null)" || rc=$?
-    case "$rc" in
-      0)
-        if [[ "$head_ref" != "$bref" ]]; then
-          skip "у $wt відкрита інша гілка ($head_ref), а не $branch — не чіпаю"
-          return 1
-        fi
-        ;;
-      1) ;; # відокремлений HEAD: коміти на ньому ловить перевірка нижче
-      *)
-        skip "git symbolic-ref HEAD у $wt не вдався (код $rc)"
-        return 1
-        ;;
-    esac
+    # Брудне дерево: будуємо дерево $wt у тимчасовому індексі головного клону
+    # (--work-tree + read-tree HEAD + add -A + write-tree, як #294) і звіряємо з
+    # деревом HEAD. Жодного git у теці worktree — лише в головному клоні за SHA.
+    # Плюс неіндексоване з правилами .gitignore свіжого origin/main (#302 B):
+    # `add -A` бере правила ігнору з самого $wt і .git/info/exclude, які пише
+    # агент, — файл під вкладеним `.gitignore` з «*» пішов би під `rm -rf` як
+    # «чисте». origin/main щойно оновив fetch вище, агент його не змінить.
+    # `--attr-source`, як у тіку (рецензія #315, G), тут не потрібен: гілку з
+    # комітами понад origin/main requeue відкидає раніше, тож HEAD worktree =
+    # origin/main і закомічених агентом .gitattributes у ньому немає;
+    # .git/info/attributes відкидає git_unsafe_reason.
+    cleanidx="$A8_LOGS_DIR/.requeue-clean.$id.$$"
+    local cleanrules="$cleanidx.ignore" cleanextra="$cleanidx.untracked" extra
+    rm -f "$cleanidx" "$cleanrules" "$cleanextra"
+    wttree=""
+    if GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" read-tree "$WT_HEAD" >/dev/null 2>&1 &&
+      GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" add -A >/dev/null 2>&1; then
+      wttree="$(GIT_INDEX_FILE="$cleanidx" hgit --work-tree="$wt" write-tree 2>/dev/null)"
+    fi
+    if [[ -n "$wttree" ]] && ! { trusted_ignore_rules refs/remotes/origin/main "$cleanrules" 2>/dev/null &&
+      untracked_outside_rules "$wt" "$cleanidx" "$cleanrules" "$cleanextra" 2>/dev/null; }; then
+      wttree=""
+    fi
+    extra=""
+    [[ -s "$cleanextra" ]] && extra="$(tr '\0' '\n' <"$cleanextra" | LC_ALL=C sort | head -n 5 | tr '\n' ' ')"
+    rm -f "$cleanidx" "$cleanrules" "$cleanextra"
+    if [[ -z "$wttree" ]]; then
+      skip "не вдалося побудувати дерево $wt (небезпечна .git чи пошкоджено) — не чіпаю"
+      return 1
+    fi
+    if [[ "$wttree" != "$(hgit rev-parse --verify --quiet "$WT_HEAD^{commit}^{tree}")" ]]; then
+      skip "брудний worktree: робоче дерево $wt не збігається з його HEAD"
+      return 1
+    fi
+    if [[ -n "$extra" ]]; then
+      skip "брудний worktree: неіндексовані файли поза правилами ігнору origin/main (${extra% }) — не чіпаю"
+      return 1
+    fi
     # Коміт на відокремленому HEAD не видно ні в статусі, ні на гілці.
-    n="$(wtgit rev-list --count refs/remotes/origin/main..HEAD 2>/dev/null)" ||
+    n="$(hgit rev-list --count "refs/remotes/origin/main..$WT_HEAD" 2>/dev/null)" ||
       {
-        skip "git rev-list у $wt не вдався — не можу перевірити коміти"
+        skip "git rev-list не вдався — не можу перевірити коміти $wt"
         return 1
       }
     if [[ ! "$n" =~ ^[0-9]+$ ]]; then
-      skip "git rev-list у $wt повернув '$n' замість числа"
+      skip "git rev-list повернув '$n' замість числа для $wt"
       return 1
     fi
     if ((n != 0)); then
@@ -426,7 +504,7 @@ process_id() {
   fi
 
   if ((dry)); then
-    printf 'WOULD %s: %s → черга; прибрав би:%s%s\n' "$id" "${taskfile##*/}" \
+    printf 'WOULD %s: %s → %s; прибрав би:%s%s\n' "$id" "${taskfile##*/}" "$(dest_label)" \
       "$( ((has_branch)) && echo " гілку $branch")" "$( ((has_wt)) && echo " worktree")"
     return 0
   fi
@@ -456,10 +534,26 @@ process_id() {
     }
     removed=" гілку $branch$removed"
   fi
-  mv -n -- "$taskfile" "$Q/" || {
+  # Під queue.lock (див. LOCK у заголовку). Перевірку «в urgent/ порожньо» —
+  # повторно, вже під lock'ом: enqueue --urgent міг поставити невідкладну, поки ми
+  # прибирали залишки.
+  if ! { exec 8>"$A8_LOGS_DIR/queue.lock"; } 2>/dev/null || ! flock -w 30 8; then
+    exec 8>&-
+    skip "ЧАСТКОВО: queue.lock не взято за 30 с — файл задачі лишився в failed/"
+    return 1
+  fi
+  if [[ "$destdir" == "$URGENT" ]] && urgent_busy; then
+    exec 8>&-
+    skip "ЧАСТКОВО: поки прибирали залишки, з'явилась інша невідкладна — файл задачі лишився в failed/"
+    return 1
+  fi
+  rc=0
+  { mkdir -p -- "$destdir" && mv -n -- "$taskfile" "$destdir/"; } || rc=$?
+  exec 8>&-
+  if ((rc != 0)); then
     skip "ЧАСТКОВО: mv ${taskfile##*/} у чергу не вдався"
     return 1
-  }
+  fi
   if [[ -e "$taskfile" || ! -e "$destfile" ]]; then
     skip "ЧАСТКОВО: файл задачі не опинився в черзі"
     return 1
@@ -471,7 +565,7 @@ process_id() {
     echo "УВАГА $id: подію requeue в журнал не записано (a8-journal впав)" >&2
     journal_failed=1
   fi
-  printf 'OK %s: %s → черга; прибрано:%s\n' "$id" "${taskfile##*/}" "${removed:- нічого (залишків не було)}"
+  printf 'OK %s: %s → %s; прибрано:%s\n' "$id" "${taskfile##*/}" "$(dest_label)" "${removed:- нічого (залишків не було)}"
   return 0
 }
 

@@ -122,14 +122,64 @@ describe("render-gate: perforated_panel (RegistryTemplateViewport, Run 7 Ета�
   });
 });
 
-// enclosed_shelf — `def.validators` порожній (ADR-033): `validateProfile` НЕ
-// підтримує `templateSlug: "enclosed_shelf"`, те саме задокументоване рішення,
-// що вже лежить у `export-gate.ts` (`case "enclosed_shelf": return []`) і
-// `template-studio.tsx` (`SLUGS_WITH_PROFILE` без `enclosed_shelf`) — тож тут
-// нема "невалідні параметри → fallback" кейсу (нема validator'а, що міг би
-// його дати); лишається перевірка, що сцена рендериться на дефолтах.
+// enclosed_shelf — `def.validators` НЕ порожній (issue #237 п.2, ADR-026):
+// `validateProfile` і далі НЕ підтримує `templateSlug: "enclosed_shelf"` (той
+// самий задокументований розрив, що лежить у `export-gate.ts`
+// (`case "enclosed_shelf": return []`) і `template-studio.tsx`
+// (`SLUGS_WITH_PROFILE` без `enclosed_shelf`) — cross-розгортка profile-кейс
+// не моделюється), але `enclosedShelfDefinition.validators` тепер має
+// Zod-schema-валідатор + bend-matrix thickness-валідатор +
+// `stiffeningRibValidator` + `sidePerforationValidator`
+// (`packages/templates/src/enclosed-shelf/index.ts`, доробка #275 —
+// Argon-контрприклади 1 і 3), тож "невалідні параметри → fallback" кейс тут
+// є, як і для інших шаблонів.
 describe("render-gate: enclosed_shelf (RegistryTemplateViewport, Run 7 Етап 2)", () => {
   const def = TEMPLATE_REGISTRY.enclosed_shelf;
+
+  it("невалідний width_mm (< min 300) → fallback, без сцени", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{ ...def.defaults, width_mm: 50 }}
+        thicknessMm={T}
+      />,
+    );
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
+  });
+
+  it("Argon #1: ребро height_mm <= t+r (5 <= 2.5+2.5) → fallback, без сцени", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{
+          ...def.defaults,
+          bend_radius_mm: 2.5,
+          stiffening_rib: { height_mm: 5 },
+        }}
+        thicknessMm={2.5}
+      />,
+    );
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
+  });
+
+  it("Argon #3: margin занадто великий для depth-(t+r) (0 отворів у розгортці) → fallback", () => {
+    const html = renderToString(
+      <RegistryTemplateViewport
+        def={def}
+        parameters={{
+          ...def.defaults,
+          depth_mm: 100,
+          bend_radius_mm: 2.5,
+          side_perforation: { hole_size_mm: 10, pitch_x_mm: 20, pitch_y_mm: 20, margin_mm: 48 },
+        }}
+        thicknessMm={2}
+      />,
+    );
+    expect(html).toContain(FALLBACK);
+    expect(html).not.toContain(LOADING);
+  });
 
   it("валідні параметри → сцена (composed, dynamic loading), без fallback", () => {
     const html = renderToString(

@@ -20,6 +20,8 @@ import {
   sheetDimensionsFor,
   validateExportBends,
   validateExportHoles,
+  validateExportPerforation,
+  validateExportProfile,
   validateExportSheet,
 } from "./export-gate.js";
 
@@ -490,5 +492,67 @@ describe("sheetDimensionsFor — K за матеріалом у кожному �
       return d!.widthMm + d!.heightMm;
     };
     expect(dims("aluminum_5754")).toBeLessThan(dims("cold_rolled_steel") - 1e-3);
+  });
+});
+
+describe("validateExportProfile/validateExportPerforation — enclosed_shelf (issue #283)", () => {
+  // Серверний гейт — ребро і перфорація боковин, через ExportRequest, не лише
+  // через внутрішні функції enclosed-shelf.ts: доводить, що export-gate.ts
+  // справді викликає їх у switch-кейсі "enclosed_shelf".
+  function req(overrides: Record<string, unknown>, thickness_mm: number): ExportRequest {
+    return {
+      template_slug: "enclosed_shelf",
+      parameters: { ...ENCLOSED_SHELF_DEFAULT_PARAMETERS, ...overrides },
+      material_code: "cold_rolled_steel",
+      thickness_mm,
+    } as ExportRequest;
+  }
+
+  it("ребро 5 мм при t=2.5 r=2.5 → FLANGE_TOO_SHORT через validateExportProfile", () => {
+    const issues = validateExportProfile(
+      req({ bend_radius_mm: 2.5, stiffening_rib: { height_mm: 5 } }, 2.5),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "FLANGE_TOO_SHORT",
+      field: "stiffening_rib.height_mm",
+      value: 5,
+    });
+  });
+
+  it("ребро 5.5 мм при t=2.5 r=2.5 → []", () => {
+    expect(
+      validateExportProfile(req({ bend_radius_mm: 2.5, stiffening_rib: { height_mm: 5.5 } }, 2.5)),
+    ).toEqual([]);
+  });
+
+  it("перфорація боковин margin=48 при d=100 t=2 r=2.5 → PERFORATION_DOES_NOT_FIT через validateExportPerforation", () => {
+    const side = { hole_size_mm: 10, pitch_x_mm: 20, pitch_y_mm: 20, margin_mm: 48 };
+    const issues = validateExportPerforation(
+      req({ depth_mm: 100, bend_radius_mm: 2.5, side_perforation: side }, 2),
+    );
+    expect(
+      issues.find(
+        (e) => e.code === "PERFORATION_DOES_NOT_FIT" && e.field === "side_perforation.margin_mm",
+      ),
+    ).toBeDefined();
+  });
+
+  it("крок перфорації боковин 10 == отвір 10 → HOLES_OVERLAP через validateExportPerforation", () => {
+    const side = { hole_size_mm: 10, pitch_x_mm: 10, pitch_y_mm: 20, margin_mm: 20 };
+    const issues = validateExportPerforation(req({ side_perforation: side }, 2));
+    expect(
+      issues.find((e) => e.code === "HOLES_OVERLAP" && e.field === "side_perforation.pitch_x_mm"),
+    ).toBeDefined();
+  });
+
+  it("валідна перфорація боковин → []", () => {
+    const side = { hole_size_mm: 10, pitch_x_mm: 20, pitch_y_mm: 20, margin_mm: 20 };
+    expect(validateExportPerforation(req({ side_perforation: side }, 2))).toEqual([]);
+  });
+
+  it("без side_perforation/stiffening_rib (default null) → обидва порожні", () => {
+    expect(validateExportProfile(req({}, 2))).toEqual([]);
+    expect(validateExportPerforation(req({}, 2))).toEqual([]);
   });
 });

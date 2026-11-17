@@ -68,7 +68,8 @@ out="$(run "$CTX")"
 rc=$?
 MODEL_LINE="Модель рецензента (з modelUsage, не з прапорця): claude-sonnet-5-5; службові: claude-haiku-4-5-20251001"
 LABEL_LINE="Мітка для agy-stats.md: claude-sonnet-5-5 (окрема сесія)"
-if [[ $rc == 0 && "$out" == "stub-review"$'\n\n'"$MODEL_LINE"$'\n'"$LABEL_LINE" ]] && has_arg -p && has_arg --restricted &&
+COUNTER_ROLE_LINE="Роль для agy-stats.md: контрприклади"
+if [[ $rc == 0 && "$out" == "stub-review"$'\n\n'"$MODEL_LINE"$'\n'"$LABEL_LINE"$'\n'"$COUNTER_ROLE_LINE" ]] && has_arg -p && has_arg --restricted &&
   has_arg --no-session-persistence && [[ "$(after --tools)" == "Read,Grep,Glob" &&
   "$(after --permission-mode)" == dontAsk && "$(after --model)" == claude-sonnet-5-5 &&
   "$(after --settings)" == *'"deny":["Read(**/.env*)"]'* && "$(after --output-format)" == json ]]; then
@@ -96,6 +97,75 @@ run "$CTX" sonnet >/dev/null
 out="$(run "$CTX" 'opus --dangerously-skip-permissions')"
 [[ $? == 2 && ! -f "$ARGS" ]] && ok "модель із пробілами й прапорцем — відмова, claude не запущено" ||
   bad "модель із прапорцем пройшла: $out"
+
+# ─── 2b. Режим --main — основна рецензія PR, написаного Gemini ────────────
+prompt_of() { grep -A1 -xF -- -p "$1" | tail -1; }       # аргумент — шлях до файла args
+flags_of() { grep -vxF -- "$(prompt_of "$1")" "$1"; }    # усе, крім тексту промпту
+last_line() { printf '%s\n' "${1##*$'\n'}"; }
+
+run "$CTX" >/dev/null
+cp "$ARGS" "$T/args.counter"
+out_main="$(run --main "$CTX")"
+rc=$?
+cp "$ARGS" "$T/args.main"
+
+F_COUNTER="$(flags_of "$T/args.counter")"
+F_MAIN="$(flags_of "$T/args.main")"
+P_MAIN="$(prompt_of "$T/args.main")"
+if [[ $rc == 0 && -n "$F_MAIN" && "$F_MAIN" == "$F_COUNTER" ]]; then
+  ok "--main: усі аргументи claude, крім тексту промпту, ідентичні режиму контрприкладів"
+else
+  bad "--main: аргументи claude відрізняються (rc=$rc): $(diff <(echo "$F_COUNTER") <(echo "$F_MAIN") | tr '\n' ' ')"
+fi
+
+miss=""
+for s in "$CTX" "незалежний основний рецензент" "постановк" "тести приймання" "поза дозволеними шляхами" \
+  "файл:рядок" "НЕ ПЕРЕВІРЕНО" "Вердикт: ✅ готово" "Вердикт: ❌ доробка"; do
+  [[ "$P_MAIN" == *"$s"* ]] || miss+="[$s] "
+done
+if [[ -z "$miss" && "$P_MAIN" != *"лише контрприклади"* ]]; then
+  ok "--main: промпт основної рецензії містить усі обов'язкові складові"
+else
+  bad "--main: промпт без $miss (або з текстом контрприкладів): $P_MAIN"
+fi
+
+MAIN_MODEL_LINE="Модель рецензента (з modelUsage, не з прапорця): claude-sonnet-5-5; службові: claude-haiku-4-5-20251001"
+MAIN_LABEL_LINE="Мітка для agy-stats.md: claude-sonnet-5-5 (окрема сесія)"
+MAIN_ROLE_LINE="Роль для agy-stats.md: основна рецензія"
+if [[ $rc == 0 && "$out_main" == "stub-review"$'\n\n'"$MAIN_MODEL_LINE"$'\n'"$MAIN_LABEL_LINE"$'\n'"$MAIN_ROLE_LINE" ]]; then
+  ok "--main: рецензія, мітка моделі й роль «основна рецензія» — останній рядок"
+else
+  bad "--main: вивід не відповідає очікуваному: $out_main"
+fi
+
+run --main "$CTX" claude-opus-4-6 >/dev/null
+[[ "$(after --model)" == claude-opus-4-6 ]] && ok "--main: модель третім аргументом" ||
+  bad "--main: модель не передано: $(after --model)"
+
+out="$(STUB_ACTUAL=claude-sonnet-5 run --main "$CTX")"
+if [[ "$out" == *"⚠ запитано claude-sonnet-5-5, відповіла claude-sonnet-5"* && "$(last_line "$out")" == "$MAIN_ROLE_LINE" ]]; then
+  ok "--main + підміна моделі: попередження є, роль — усе одно останній рядок"
+else
+  bad "--main + підміна моделі: $out"
+fi
+
+# ─── 2c. Режим --main — відмови до запуску ─────────────────────────────────
+check_refuse_main() { # check_refuse_main <назва> <підрядок> <аргументи>...
+  local name="$1" needle="$2" out rc
+  shift 2
+  out="$(run "$@")"
+  rc=$?
+  [[ $rc == 2 && "$out" == *"$needle"* && ! -f "$ARGS" ]] && ok "$name — відмова, claude не запущено" ||
+    bad "$name — rc=$rc, запущено=$([[ -f "$ARGS" ]] && echo так || echo ні): $out"
+}
+check_refuse_main "--main без файла" "використання" --main
+check_refuse_main "невідомий прапорець" "абсолютним" --foo "$CTX"
+check_refuse_main "--main двічі" "абсолютним" --main --main "$CTX"
+check_refuse_main "--main на місці моделі" "дивна назва моделі" "$CTX" --main
+check_refuse_main "модель з дефісу" "дивна назва моделі" "$CTX" -x
+check_refuse_main "--main + модель з дефісу" "дивна назва моделі" --main "$CTX" -x
+check_refuse_main "--main + --main на місці моделі" "дивна назва моделі" --main "$CTX" --main
+check_refuse_main "--main + три аргументи" "використання" --main "$CTX" opus зайвий
 
 # ─── 3. Відмови до запуску ─────────────────────────────────────────────────
 check_refuse() { # check_refuse <назва> <підрядок> <аргументи>...
@@ -171,7 +241,8 @@ if [[ -z "${REVIEW_SESSION_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "з Bash" '  --tools Read,Grep,Glob \' '  --tools Read,Grep,Glob,Bash \'
     mutate "без перевірки версії" 'for flag in --restricted --tools' 'for flag in --tools'
     mutate "без перевірки «поза деревом»" '[[ "$CTX" == "$ROOT"/* ]] ||' 'true ||'
-    mutate "модель без перевірки" '[[ "$MODEL" =~ ^[a-z0-9.-]+$ ]] ||' 'true ||'
+    mutate "модель без перевірки" '[[ "$MODEL" =~ ^[a-z0-9][a-z0-9.-]*$ ]] ||' 'true ||'
+    mutate "дефіс на початку моделі знову проходить" '^[a-z0-9][a-z0-9.-]*$' '^[a-z0-9.-]+$'
     mutate "без deny .env" '"deny":["Read(**/.env*)"]' '"deny":[]'
     mutate "stdin не закрито" '--output-format json </dev/null >"$OUT"' '--output-format json >"$OUT"'
     mutate "модель з прапорця, а не з відповіді" 'shown="$main"' 'shown="$MODEL"'
@@ -181,6 +252,10 @@ if [[ -z "${REVIEW_SESSION_UNDER_TEST:-}" && $fail == 0 ]]; then
     mutate "псевдонім замість повного id" 'MODEL="${2:-claude-sonnet-5-5}"' 'MODEL="${2:-sonnet}"'
     mutate "мітка без «(окрема сесія)»" 'echo "Мітка для agy-stats.md: $shown (окрема сесія)"' 'echo "Мітка для agy-stats.md: $shown"'
     mutate "дві моделі — мітка однієї" ' && "$shown" != *,* ]]; then' ' ]]; then'
+    mutate "роль завжди контрприклади" 'echo "Роль для agy-stats.md: $ROLE_LABEL"' 'echo "Роль для agy-stats.md: контрприклади"'
+    mutate "--main бере той самий промпт" 'PROMPT="$PROMPT_MAIN"' 'PROMPT="$PROMPT_COUNTEREXAMPLES"'
+    mutate "--main без вердикту в промпті" 'Перший рядок відповіді — рівно «Вердикт: ✅ готово» або «Вердикт: ❌ доробка», решта — обґрунтування.' 'Відповідь — лише текст рецензії.'
+    mutate "--main приймає три аргументи" '(($# >= 1 && $# <= 2)) || refuse' '(($# >= 1 && $# <= 3)) || refuse'
   }
 fi
 

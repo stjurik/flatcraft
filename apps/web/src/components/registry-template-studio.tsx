@@ -52,6 +52,7 @@ export function RegistryTemplateStudio<Params extends Record<string, unknown>>({
       initialParameters={initialParameters}
       materials={materials}
       schema={def.schema}
+      validators={def.validators}
       testId={`${def.slug.replaceAll("_", "-")}-studio`}
       {...(product ? { product } : {})}
       renderEditor={(props) => (

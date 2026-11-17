@@ -28,6 +28,14 @@ FORBIDDEN_PATTERNS=(
   # Bend-матриця — єдине джерело істини для гибки (CLAUDE.md §6.1, §13).
   '^packages/cad-engine/data/bend-machine-esi\.yaml$'
   '^workers/cad/tests/snapshots(/|$)'
+  # Скрипти, які роль A8 ставить на хост і виконує від root чи agent поза
+  # контейнером: обгортка git (a8-git-lib.sh), дієслова черги, requeue, логіка
+  # тіку, ssh-обгортки — і сам цей backstop (#302 D, рецензія #299). Агент, що
+  # змінив би їх у своєму PR, змінив би межу, яка його ж стримує. Шаблон — на
+  # весь префікс a8-: новий скрипт ролі потрапляє сюди сам; що кожен скрипт,
+  # який роль копіює з tools/scripts, тут є, тримає інваріант 18 check-ansible-a8.sh.
+  '^tools/scripts/a8-[^/]*$'
+  '^tools/scripts/check-forbidden-paths(\.test)?\.sh$'
 )
 
 violations=()

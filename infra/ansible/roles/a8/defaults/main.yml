@@ -54,7 +54,7 @@ a8_gemini_model: gemini-3.8-flash-high
 # /usr/local/bin/agy (вивід yurii, #233, 19.10); налаштування дозволів agy —
 # ~/.gemini/antigravity-cli/settings.json (install-agy-permissions.sh).
 # НЕ ПЕРЕВІРЕНО: чи agy — один самодостатній файл і чи вся автентифікація лежить
-# у ~/.gemini. Обидва питання закриває V23 (agy у контейнері відповідає) і вимір
+# у ~/.gemini. Обидва питання закриває V26 (agy у контейнері відповідає) і вимір
 # у #78. Якщо agy тягне за собою теку з бібліотеками — її шлях сюди, у
 # a8_agy_extra_ro_paths: обгортка змонтує її лише для читання і лише для gemini.
 a8_agy_bin: /usr/local/bin/agy
@@ -153,3 +153,34 @@ a8_claude_token_file: /home/agent/.claude-oauth-token # звірено read-only
 # реалізовані й не покриті тестом, демон приймає лише human.
 a8_sources_allowed: human
 a8_push_ssh_url: "git@github.com:stjurik/flatcraft.git"
+
+# ─── Ключ оркестратора для a8-ctl (#231, #262) ─────────────────────────────
+# Публічний ключ T470 (рядок з ~/.ssh/<ключ>.pub: `ssh-ed25519 AAAA… коментар`).
+# Роль кладе його в authorized_keys агента ЛИШЕ з `restrict,command="/usr/local/bin/a8-ctl"`:
+# через цей ключ виконується тільки a8-ctl, без pty і без forwarding. Ключ
+# публічний — йому можна бути в git. Порожньо — роль ключа не ставить (дефолт:
+# новий ключ — рішення yurii, клас A).
+a8_ctl_pubkey: ""
+
+# Усі поточні ключі a8-ctl одним списком (#301). Роль ставить кожен з них і
+# ВІДКЛИКАЄ з authorized_keys агента кожен рядок a8-ctl, ключа якого тут немає;
+# V22 (a8-ssh-doors.sh) вимагає рівно ці рядки. S3 (ADR-044 п.3) допише сюди
+# a8_ctl_local_pubkey — тут, а не окремою задачею, щоб відкликання бачило обидва.
+a8_ctl_pubkeys: "{{ [a8_ctl_pubkey] | map('trim') | select | list }}"
+
+# Формат ключа a8-ctl — одне джерело для assert ролі і для CI (інваріант 17
+# check-ansible-a8.sh читає обидві змінні звідси й звіряє group_vars тим самим
+# виразом через grep -E). Рядок формату на тип: тип і base64 рівно тієї довжини,
+# яку дає ssh-keygen (виміряно 2026-11-09: ed25519 — 68, ecdsa 256/384/521 —
+# 140/184/232, rsa ≥2048 біт — ≥372); далі необов'язковий коментар друкованими
+# ASCII. Короткий base64 (`A==`) не проходить: інакше regexp задач ролі зачепив
+# би чужі рядки authorized_keys (#301 п.3). Власні опції (`command=…`, `from=…`)
+# і другий рядок не проходять: вираз починається з типу і не пускає переносу.
+# Лише конструкції, однакові в Python re і POSIX ERE; без зворотної риски.
+a8_ctl_pubkey_formats:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]{43}"
+  - "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY[A-Za-z0-9+/=]{109}"
+  - "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQ[A-Za-z0-9+/=]{153}"
+  - "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjE[A-Za-z0-9+/=]{201}"
+  - "ssh-rsa AAAAB3NzaC1yc2E[A-Za-z0-9+/=]{357,}"
+a8_ctl_pubkey_re: "^({{ a8_ctl_pubkey_formats | join('|') }})( [ -~]*)?$"

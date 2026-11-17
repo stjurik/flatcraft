@@ -66,6 +66,14 @@ fi
 # якого agent читати не може: `find` тоді друкує «Failed to restore initial
 # working directory», і це вже одного разу прочиталось як «тік завис».
 remote() { ssh "$HOST" "cd /tmp && $*" 2>&1; }
+# git на A8 — лише через hgit і лише коли тік не працює (#302 F): головний клон
+# контейнер агента бачить на запис, а голий `git -C /home/agent/hart …` від agent
+# виконав би підкладене в .git (#276, #291). `flock -n` на tick.lock: тік
+# тримає його всю задачу, тож вільний lock — контейнера немає; зайнятий — звіт
+# чесно каже, що git не запускав. Сам lock тримається лише на цей виклик.
+rgit() { # rgit '<аргументи git>' — рядок, вставляється в bash -c у лапках '…'
+  remote "sudo -u agent flock -n /home/agent/agent-logs/tick.lock env A8_REPO_DIR=/home/agent/hart A8_KILL_SWITCH=/home/agent/STOP bash -c '. /usr/local/lib/a8/a8-git-lib.sh && hgit $1' || echo '(git не запущено: тік працює чи hgit відмовив — див. рядок вище)'"
+}
 
 section() {
   {
@@ -130,7 +138,7 @@ emit "хвіст last-results:"
 emit "$(remote 'sudo -u agent tail -6 /home/agent/agent-logs/last-results 2>/dev/null || echo "(немає)"')"
 
 section "Черга"
-emit "$(remote 'sudo -u agent ls -la /home/agent/agent-queue/ /home/agent/agent-queue/running/ /home/agent/agent-queue/done/ /home/agent/agent-queue/failed/ /home/agent/agent-queue/rejected/ 2>&1')"
+emit "$(remote 'sudo -u agent ls -la /home/agent/agent-queue/ /home/agent/agent-queue/urgent/ /home/agent/agent-queue/running/ /home/agent/agent-queue/done/ /home/agent/agent-queue/failed/ /home/agent/agent-queue/rejected/ 2>&1')"
 
 section "Worktree і диск"
 # Worktree після успішної задачі НЕ прибираються — кожен несе node_modules і
@@ -146,10 +154,10 @@ emit ""
 emit "$(remote 'df -h /home | tail -1')"
 emit ""
 emit "гілки ai/*:"
-emit "$(remote "sudo -u agent git -C /home/agent/hart branch --list 'ai/*'" )"
+emit "$(rgit 'branch --list "ai/*"')"
 emit ""
 emit "зареєстровані worktree у git:"
-emit "$(remote 'sudo -u agent git -C /home/agent/hart worktree list')"
+emit "$(rgit 'worktree list')"
 emit ""
 # Тека, вилучена `rm -rf` замість `git worktree remove`, лишає реєстрацію в
 # git: гілка стає `+` у `branch --list`, її не видалити, а `du` по теках чесно
@@ -158,7 +166,7 @@ emit ""
 # окремий факт саме тому: `du` і реєстрація git можуть розходитись, і доки їх
 # не питають нарізно, одне видає себе за інше.
 emit "осиротілі реєстрації (порожньо = добре):"
-emit "$(remote 'sudo -u agent git -C /home/agent/hart worktree prune --dry-run -v')"
+emit "$(rgit 'worktree prune --dry-run -v')"
 
 section "Egress"
 emit "$(remote 'sudo a8-egress-rules status')"

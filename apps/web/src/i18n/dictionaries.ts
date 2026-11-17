@@ -29,7 +29,6 @@ export interface Dictionary {
       readonly about: string;
       readonly unlock: string;
       readonly communityTitle: string;
-      readonly github: string;
       readonly discord: string;
       readonly legalTitle: string;
       readonly privacy: string;
@@ -56,8 +55,6 @@ export interface Dictionary {
     readonly trustExports: string;
     readonly trustDonate: string;
     readonly trustDonateLink: string;
-    readonly trustOpenSource: string;
-    readonly trustGithubLink: string;
   };
   readonly about: {
     readonly metaTitle: string;
@@ -77,16 +74,13 @@ export interface Dictionary {
     readonly zsuNote: string;
     readonly feedbackTitle: string;
     readonly feedbackBody: string;
-    readonly feedbackGithubLabel: string;
     readonly feedbackDiscordLabel: string;
   };
   readonly soon: {
     readonly metaTitle: string;
     readonly eyebrow: string;
     readonly title: string;
-    readonly body1: string;
-    readonly githubLabel: string;
-    readonly body2: string;
+    readonly body: string;
     readonly backHome: string;
   };
   readonly catalog: {
@@ -169,7 +163,6 @@ const uk: Dictionary = {
       about: "Про проєкт",
       unlock: "Розблокувати",
       communityTitle: "Спільнота",
-      github: "GitHub ↗",
       discord: "Discord ↗",
       legalTitle: "Юридичне",
       privacy: "Privacy",
@@ -211,8 +204,6 @@ const uk: Dictionary = {
     trustExports: "10 експортів/міс безкоштовно",
     trustDonate: "Донати йдуть на ЗСУ",
     trustDonateLink: "UNITED24 ↗",
-    trustOpenSource: "Open Source · MIT",
-    trustGithubLink: "github.com/stjurik/flatcraft ↗",
   },
   about: {
     metaTitle: "Про hart.crimea.ua",
@@ -240,7 +231,7 @@ const uk: Dictionary = {
       },
       {
         title: "Open Source MIT",
-        body: "Код відкритий: github.com/stjurik/flatcraft. Можна форкнути, вивчати, контриб'ютити.",
+        body: "Код відкритий під ліцензією MIT.",
       },
     ],
     zsuTitle: "Підтримати ЗСУ",
@@ -251,16 +242,13 @@ const uk: Dictionary = {
     feedbackTitle: "Зворотний зв'язок",
     feedbackBody:
       "Знайшли помилку в кресленні чи маєте ідею? Напишіть — у BETA кожен відгук цінний.",
-    feedbackGithubLabel: "GitHub Issues ↗",
     feedbackDiscordLabel: "Discord-спільнота ↗",
   },
   soon: {
     metaTitle: "Скоро з'явиться · hart",
     eyebrow: "Скоро з'явиться",
     title: "Запланована сторінка",
-    body1: "Ця секція ще не активна. Слідкуйте за оновленнями у нашому",
-    githubLabel: "GitHub",
-    body2: "— там видно, що зараз у розробці.",
+    body: "Ця секція ще не активна. Слідкуйте за оновленнями — скоро буде видно, що зараз у розробці.",
     backHome: "← На головну",
   },
   catalog: {
@@ -345,7 +333,6 @@ const en: Dictionary = {
       about: "About",
       unlock: "Unlock",
       communityTitle: "Community",
-      github: "GitHub ↗",
       discord: "Discord ↗",
       legalTitle: "Legal",
       privacy: "Privacy",
@@ -387,8 +374,6 @@ const en: Dictionary = {
     trustExports: "10 free exports/month",
     trustDonate: "Donations go to Ukraine's defense",
     trustDonateLink: "UNITED24 ↗",
-    trustOpenSource: "Open Source · MIT",
-    trustGithubLink: "github.com/stjurik/flatcraft ↗",
   },
   about: {
     metaTitle: "About hart.crimea.ua",
@@ -416,7 +401,7 @@ const en: Dictionary = {
       },
       {
         title: "Open Source MIT",
-        body: "The code is open: github.com/stjurik/flatcraft. Fork it, study it, contribute.",
+        body: "The code is open under the MIT licence.",
       },
     ],
     zsuTitle: "Support Ukraine's defense",
@@ -427,16 +412,13 @@ const en: Dictionary = {
     feedbackTitle: "Feedback",
     feedbackBody:
       "Found a drawing bug or have an idea? Let us know — every bit of feedback matters during BETA.",
-    feedbackGithubLabel: "GitHub Issues ↗",
     feedbackDiscordLabel: "Discord community ↗",
   },
   soon: {
     metaTitle: "Coming soon · hart",
     eyebrow: "Coming soon",
     title: "Planned page",
-    body1: "This section isn't active yet. Follow updates on our",
-    githubLabel: "GitHub",
-    body2: "— it shows what's currently in progress.",
+    body: "This section isn't active yet. Stay tuned — updates on what's in progress are coming soon.",
     backHome: "← Back home",
   },
   catalog: {

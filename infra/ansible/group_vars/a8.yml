@@ -33,3 +33,13 @@ a8_egress_enforce: true
 # (OnBootSec=10min) і продовжив. При порожній черзі тік нічого не пише в
 # журнал, тож доказ дає лічильник стартів сервісу, а не runs.log.
 a8_tick_timer_enabled: true
+
+# Ключ оркестратора T470 для a8-ctl. Рішення yurii 2026-11-02 (клас A): ключ
+# T470 → A8 створити (зведення спринту 02.11). Публічний — йому можна бути в git.
+# Що він дає — доведено, а не обіцяно: роль кладе рядок у authorized_keys агента
+# лише як `restrict,command="/usr/local/bin/a8-ctl"` (V22, інваріант 15
+# check-ansible-a8.sh). Межа: п'ять дієслів a8-queue (status, enqueue, requeue,
+# pause, resume) без оболонки, pty і forwarding; `--reset-pause` через a8-ctl —
+# відмова (рішення yurii 2026-10-21), будь-який символ поза [A-Za-z0-9._ -] — 126.
+# Ключ оркестратора на самому A8 (ADR-044 п.3) — окремою змінною, не цією.
+a8_ctl_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlNFDkKQRcRq2c1i1TaZWUtvoCpy8sbgQEOOzluehSS a8-ctl@t470"

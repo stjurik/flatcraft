@@ -591,6 +591,169 @@
     success_msg: "backstop заборонених шляхів: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
     quiet: true
 
+# ─── V24. Спільна обгортка git на хості (a8-git-lib.sh, #291) ───────────────
+- name: V24a — checksum of the installed host-git wrapper
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/a8-git-lib.sh
+    checksum_algorithm: sha256
+  register: a8_v_gitlib
+
+- name: V24b — checksum of the wrapper in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/a8-git-lib.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_gitlib_repo
+
+- name: V24c — hgit wrapper on A8 is byte-identical to the tested copy and owned by root
+  # Тік, a8-queue і a8-requeue сорсять саме цей файл. Інша копія або копія, яку
+  # може змінити agent, означала б, що зелений a8-tick.test.sh/a8-requeue.test.sh
+  # нічого не каже про перевірки .git на A8.
+  ansible.builtin.assert:
+    that:
+      - a8_v_gitlib.stat.exists
+      - a8_v_gitlib.stat.checksum == a8_v_gitlib_repo.stat.checksum
+      - a8_v_gitlib.stat.pw_name == 'root'
+      - not a8_v_gitlib.stat.woth
+      - not a8_v_gitlib.stat.wgrp
+    fail_msg: >-
+      /usr/local/lib/a8/a8-git-lib.sh: exists={{ a8_v_gitlib.stat.exists }},
+      sha256 A8={{ a8_v_gitlib.stat.checksum | default('—') }} repo={{ a8_v_gitlib_repo.stat.checksum }},
+      власник={{ a8_v_gitlib.stat.pw_name | default('—') }}
+    success_msg: "обгортка hgit: копія в /usr/local/lib/a8 = репозиторію, власник root, agent не пише"
+    quiet: true
+
+# ─── V22. Дієслова черги (a8-queue) і ssh-обгортка (a8-ctl) ─────────────────
+# Копії на A8 = доведені в CI (a8-queue.test.sh, a8-requeue.test.sh); status
+# працює від agent; обгортка відмовляє на метасимволі, нічого не виконавши. Двері
+# ssh (хто входить і чим) — V22h–j, a8-ssh-doors.sh.
+- name: V22a — checksums of the installed queue scripts
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    checksum_algorithm: sha256
+  loop: &a8_queue_scripts
+    - { src: a8-queue.sh, dest: /usr/local/bin/a8-queue }
+    - { src: a8-ctl.sh, dest: /usr/local/bin/a8-ctl }
+    - { src: a8-requeue.sh, dest: /usr/local/lib/a8/a8-requeue.sh }
+    - { src: a8-ssh-doors.sh, dest: /usr/local/lib/a8/a8-ssh-doors.sh }
+  register: a8_v_qs
+
+- name: V22b — checksums of the same scripts in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/{{ item.src }}"
+    checksum_algorithm: sha256
+  loop: *a8_queue_scripts
+  delegate_to: localhost
+  become: false
+  register: a8_v_qs_repo
+
+- name: V22c — queue scripts on A8 are byte-identical to the tested copies and owned by root
+  ansible.builtin.assert:
+    that:
+      - item.0.stat.exists
+      - item.0.stat.checksum == item.1.stat.checksum
+      - item.0.stat.pw_name == 'root'
+      - not item.0.stat.woth
+      - not item.0.stat.wgrp
+    fail_msg: >-
+      {{ item.0.item.dest }}: exists={{ item.0.stat.exists }},
+      sha256 A8={{ item.0.stat.checksum | default('—') }} repo={{ item.1.stat.checksum }},
+      власник={{ item.0.stat.pw_name | default('—') }}
+    quiet: true
+  loop: "{{ a8_v_qs.results | zip(a8_v_qs_repo.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item.dest }}"
+
+- name: V22d — a8-queue status runs as the agent
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-queue, status]
+  register: a8_v_qstatus
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22e — a8-ctl through ssh-style input refuses a second command
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-ctl]
+  environment:
+    SSH_ORIGINAL_COMMAND: "status; touch /tmp/a8-ctl-probe"
+  register: a8_v_ctl_deny
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22f — a8-ctl passes an allowed verb to a8-queue
+  ansible.builtin.command:
+    argv: [/usr/local/bin/a8-ctl]
+  environment:
+    SSH_ORIGINAL_COMMAND: "status"
+  register: a8_v_ctl_status
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V22g — stat the probe a refused command would have created
+  ansible.builtin.stat:
+    path: /tmp/a8-ctl-probe
+  register: a8_v_ctl_probe
+
+- name: V22i — status works locally and via the shim; shim refuses
+  ansible.builtin.assert:
+    that:
+      - a8_v_qstatus.rc == 0
+      - "'черга:' in a8_v_qstatus.stdout"
+      - a8_v_ctl_deny.rc == 126
+      - "'ВІДХИЛЕНО' in a8_v_ctl_deny.stderr"
+      - not a8_v_ctl_probe.stat.exists
+      - a8_v_ctl_status.rc == 0
+      - "'черга:' in a8_v_ctl_status.stdout"
+    fail_msg: >-
+      status rc={{ a8_v_qstatus.rc }} ({{ a8_v_qstatus.stderr | default('') }});
+      a8-ctl «status; touch …» rc={{ a8_v_ctl_deny.rc }}, probe={{ a8_v_ctl_probe.stat.exists }};
+      a8-ctl status rc={{ a8_v_ctl_status.rc }}
+    success_msg: a8-queue status і a8-ctl status — 0, a8-ctl відмовляє на метасимволі
+    quiet: true
+
+# V22h–j. Двері ssh: хто входить і чим (#305, #301). 2026-11-07 двері a8-ctl
+# виявились зачиненими при зеленому verify: ручний `AllowUsers yurii` відкидав
+# agent ще до перевірки ключа, а V22i бачив лише authorized_keys. Дописати agent
+# в AllowUsers — означає, що діє КОЖЕН ключ agent (група docker = root на хості),
+# тому межу доводить один скрипт з обох боків, лише читанням (роль sshd не чіпає):
+#   - sshd -T для адміністратора й agent: паролів і keyboard-interactive немає,
+#     root не входить, адмін проходить AllowUsers/DenyUsers/AllowGroups завжди, agent —
+#     коли задано ключ a8-ctl; Match за адресою — порушення (оцінити нічим);
+#   - кожен рядок кожного файла ключів agent (AuthorizedKeysFile, зокрема
+#     authorized_keys2) — рівно `restrict,command="/usr/local/bin/a8-ctl" <ключ>`
+#     з поточного a8_ctl_pubkeys; заданий ключ без рядка — теж порушення.
+# Адміністратор — той, хто зараз прийшов sudo на машину (SUDO_USER із фактів), а
+# не змінна play'ю: перевіряємо, що саме цей вхід не зачиниться. Сценарії й
+# мутації — a8-ssh-doors.test.sh; межа (адреса клієнта, живий процес sshd) — шапка скрипта.
+- name: V22h — who the admin is (the sudo user of this very login)
+  ansible.builtin.set_fact:
+    a8_v_admin: "{{ ansible_env.SUDO_USER | default(ansible_user | default(''), true) }}"
+
+- name: V22j — ssh doors — sshd lets the admin and the agent in, agent keys are exactly a8-ctl
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/lib/a8/a8-ssh-doors.sh', '--agent', a8_agent_user, '--admin', a8_v_admin]
+      + (a8_ctl_pubkeys | map('regex_replace', '^', '--key=') | list) }}"
+  register: a8_v_doors
+  changed_when: false
+  failed_when: false
+
+- name: V22k — ssh doors are as described
+  ansible.builtin.assert:
+    that:
+      - a8_v_doors.rc == 0
+    fail_msg: >-
+      a8-ssh-doors rc={{ a8_v_doors.rc }}: {{ a8_v_doors.stdout | default('') }}
+      {{ a8_v_doors.stderr | default('') }} {{ a8_v_doors.msg | default('') }} (docs/19 §B.2)
+    success_msg: "{{ a8_v_doors.stdout }}"
+    quiet: true
+
 # ─── V15. Образ агента: claude і uv справді є в контейнері ─────────────────
 - name: V15a — ask the container for claude, uv and pnpm versions
   # `pnpm --version` — не для повноти списку. Без pnpm у PATH перший же крок
@@ -641,26 +804,26 @@
   become_user: "{{ a8_agent_user }}"
   block:
     - name: V18a — drop a leftover worktree registration from an interrupted run
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - remove
-          - --force
-          - "{{ a8_worktrees_dir }}/verify-cad"
+      # #291: git на хості ТІЛЬКИ через спільний hgit — ті самі перевірки .git і
+      # безпечні -c, що в тіку. hgit вшиває -C "$A8_REPO_DIR".
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: &a8_v_hgit_env
+        A8_REPO_DIR: "{{ a8_repo_dir }}"
+        A8_KILL_SWITCH: "{{ a8_kill_switch_path }}"
       changed_when: false
       failed_when: false
 
     - name: V18a — prune stale worktree registrations
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - prune
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree prune
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
 
     - name: V18a — remove a leftover directory without registration
@@ -671,43 +834,38 @@
     - name: V18b — fetch origin/main, as the tick does before a task
       # Без fetch тест ішов би на тому origin/main, що лишився від останнього
       # тіку. Невдалий fetch не валить перевірку: тест піде на локальному
-      # origin/main, і V18e про це скаже.
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - fetch
-          - --quiet
-          - origin
-          - main
+      # origin/main, і V18e про це скаже. --upload-pack як у тіку (#276): програму
+      # на тому боці задає опція, а не remote.origin.uploadpack із конфігу репо.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit fetch --quiet --upload-pack=git-upload-pack origin main
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       register: a8_v_cad_fetch
       changed_when: false
       failed_when: false
 
     - name: V18b — create a throwaway worktree at origin/main
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - add
-          - --quiet
-          - --detach
-          - "{{ a8_worktrees_dir }}/verify-cad"
-          - origin/main
+      # Повне ім'я посилання, як у тіку (#276): коротке `origin/main` стає
+      # неоднозначним, щойно в .git з'являється refs/tags/origin/main.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree add --quiet --detach {{ a8_worktrees_dir }}/verify-cad 'refs/remotes/origin/main^{commit}'
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
 
     - name: V18b — which commit is under test
-      ansible.builtin.command:
-        argv:
-          - git
-          - -C
-          - "{{ a8_worktrees_dir }}/verify-cad"
-          - rev-parse
-          - --short
-          - HEAD
+      # Той самий коміт, що й у detached worktree, але з ГОЛОВНОГО клону за
+      # посиланням — не `git -C "$wt"` (підмінний gitdir worktree, #291).
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit rev-parse --short 'refs/remotes/origin/main^{commit}'
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       register: a8_v_cad_sha
       changed_when: false
 
@@ -727,17 +885,78 @@
       register: a8_v_cad
       changed_when: false
       failed_when: false
-  always:
-    - name: V18d — remove the throwaway worktree
+
+    - name: V23a — .git/config and .git/hooks of the main clone are read-only inside the container
+      # #276. Поведінка, не прапорець: пробуємо писати з контейнера, і причина
+      # відмови мусить бути саме EROFS. Для файла — дописування в сам файл, а НЕ
+      # `touch <файл>/.a8probe`: той дає ENOTDIR при будь-яких правах і звітував
+      # би «RO» про файл, доступний на запис (контрприклад 5). Контроль — запис у
+      # .git/info: решта .git записувана, інакше git агента не закомітив би.
+      # Запуск — на worktree, як у тіку, а не на головному клоні.
       ansible.builtin.command:
         argv:
-          - git
-          - -C
-          - "{{ a8_repo_dir }}"
-          - worktree
-          - remove
-          - --force
+          - /usr/local/bin/a8-run-agent
           - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - |
+            if : >> "{{ a8_repo_dir }}/.git/config" 2>/dev/null; then
+              echo "WRITABLE config"
+            elif ( : >> "{{ a8_repo_dir }}/.git/config" ) 2>&1 | grep -q "Read-only file system"; then
+              echo "EROFS config"
+            else
+              echo "OTHER config"
+            fi
+            if touch "{{ a8_repo_dir }}/.git/hooks/.a8probe" 2>/dev/null; then
+              rm -f "{{ a8_repo_dir }}/.git/hooks/.a8probe"; echo "WRITABLE hooks"
+            elif touch "{{ a8_repo_dir }}/.git/hooks/.a8probe" 2>&1 | grep -q "Read-only file system"; then
+              echo "EROFS hooks"
+            else
+              echo "OTHER hooks"
+            fi
+            touch "{{ a8_repo_dir }}/.git/info/.a8probe" && rm -f "{{ a8_repo_dir }}/.git/info/.a8probe" && echo CONTROL_WRITABLE
+            grep -qE " {{ a8_repo_dir }}/\.git " /proc/self/mountinfo && echo "MOUNT git" || echo "NOMOUNT git"
+            if [ -d "{{ a8_repo_dir }}/.git/worktrees" ]; then
+              grep -qE " {{ a8_repo_dir }}/\.git/worktrees " /proc/self/mountinfo && echo "MOUNT worktrees" || echo "NOMOUNT worktrees"
+            else echo "NO worktrees"; fi
+      register: a8_v_gitro
+      changed_when: false
+      failed_when: false
+
+    - name: V23b — the agent runs pnpm install itself, then the loud hook and git commit in the worktree
+      # Звичайна робота агента не зламалась від .git/hooks лише для читання.
+      # `pnpm install` — БЕЗ жодних змінних, як його запустив би сам агент: хуки
+      # lefthook іде ставити в теку container-home (core.hooksPath від
+      # a8-run-agent), тож rc=0, а .git/hooks не змінився — це звіряє сума вмісту
+      # до і після. Далі — перевірка хука і коміт із хуками з тієї теки. `uv sync`
+      # не повторюємо: V18c щойно зробив його в цьому ж worktree, через ту саму
+      # обгортку з тими самими монтуваннями. Маркери розділяють, на якому кроці
+      # зупинилось. Коміт — на відокремленому HEAD викидного worktree; V18d
+      # прибирає його разом із деревом.
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_worktrees_dir }}/verify-cad"
+          - bash
+          - -c
+          - >-
+            find "{{ a8_repo_dir }}/.git/hooks" -type f -exec sha256sum {} + | sort > /tmp/a8-hooks-before &&
+            pnpm install --frozen-lockfile && echo PNPM_OK &&
+            find "{{ a8_repo_dir }}/.git/hooks" -type f -exec sha256sum {} + | sort | cmp -s - /tmp/a8-hooks-before && echo HOOKS_UNCHANGED &&
+            bash tools/scripts/check-hook-loud.sh && echo HOOK_OK &&
+            git commit -q --allow-empty -m "a8 verify V23b" && echo COMMIT_OK
+      register: a8_v_gitwork
+      changed_when: false
+      failed_when: false
+  always:
+    - name: V18d — remove the throwaway worktree
+      # #291 (рецензія #299): git на хості — лише через спільний hgit, як V18a.
+      ansible.builtin.shell: >-
+        . /usr/local/lib/a8/a8-git-lib.sh
+        && hgit worktree remove --force {{ a8_worktrees_dir }}/verify-cad
+      args:
+        executable: /bin/bash
+      environment: *a8_v_hgit_env
       changed_when: false
       failed_when: false
 
@@ -763,24 +982,59 @@
       {{ (a8_v_cad.stdout_lines | default([''])) | last }}
     quiet: true
 
-# ─── V23. Смуга виконавця: креденшали двох виконавців не перетинаються ────
+- name: V23c — .git/config and .git/hooks give EROFS inside the container, the rest of .git is writable
+  ansible.builtin.assert:
+    that:
+      - "'EROFS config' in a8_v_gitro.stdout"
+      - "'EROFS hooks' in a8_v_gitro.stdout"
+      - "'CONTROL_WRITABLE' in a8_v_gitro.stdout"
+      - "'MOUNT git' in a8_v_gitro.stdout"
+      - "'MOUNT worktrees' in a8_v_gitro.stdout"
+    fail_msg: >-
+      #276: {{ a8_v_gitro.stdout | replace('\n', ' ') }} (rc={{ a8_v_gitro.rc }}).
+      WRITABLE — контейнер може підкласти хук чи ключ конфігу, який тік виконає на хості:
+      перевір монтування :ro в `/usr/local/bin/a8-run-agent`. OTHER — запис не вдався з іншої причини,
+      тобто вимір нічого не довів. Без CONTROL_WRITABLE — зламане монтування .git взагалі.
+      NOMOUNT git/worktrees — саму .git (чи .git/worktrees) не змонтовано bind onto self,
+      тож `mv .git` з контейнера пройде (EBUSY дає лише підмонтування; виміряно unshare -Urm).
+      stderr: {{ a8_v_gitro.stderr | default('') }}
+    success_msg: "{{ a8_v_gitro.stdout | replace('\n', ' ') }}"
+    quiet: true
+
+- name: V23d — the agent's ordinary work survives read-only .git/hooks
+  ansible.builtin.assert:
+    that:
+      - a8_v_gitwork.rc == 0
+      - "'HOOKS_UNCHANGED' in a8_v_gitwork.stdout"
+      - "'COMMIT_OK' in a8_v_gitwork.stdout"
+    fail_msg: >-
+      rc={{ a8_v_gitwork.rc }}; дійшло до:
+      {{ ['PNPM_OK', 'HOOKS_UNCHANGED', 'HOOK_OK', 'COMMIT_OK'] | select('in', a8_v_gitwork.stdout) | list | join(', ') or 'нічого' }}.
+      Без PNPM_OK і з EROFS у хвості — `lefthook install` пише в .git/hooks:
+      перевір `-e GIT_CONFIG_*` (core.hooksPath) у `/usr/local/bin/a8-run-agent`.
+      PNPM_OK без HOOKS_UNCHANGED — .git/hooks змінився з контейнера, тобто вона не :ro.
+      Без HOOK_OK — у теці хуків container-home немає хука від lefthook.
+      Хвіст stderr: {{ (a8_v_gitwork.stderr_lines | default([]))[-5:] | join(' | ') }}
+    success_msg: "pnpm install агента — rc=0, .git/hooks не змінився; check-hook-loud і git commit у worktree через `a8-run-agent` — OK (uv sync — V18c)"
+
+# ─── V26. Смуга виконавця: креденшали двох виконавців не перетинаються ────
 # PR-B #262 (orchestrator-autonomy.md §8). Рішення yurii: креденшали Google —
 # лише в контейнер agy; у контейнері agy немає токена Claude, у контейнері Claude
 # — креденшалів Google. a8-run-agent.test.sh доводить це на аргументах docker,
-# інваріант 16 — на тексті шаблону; V23 — на живій машині, тим самим шляхом,
+# інваріант 19 — на тексті шаблону; V26 — на живій машині, тим самим шляхом,
 # яким іде тік: обгортка, режим gemini, тимчасова копія теки agy.
 #
 # Заодно це ВИМІР, якого в git ще немає (README, «Смуга виконавця»): чи agy —
 # самодостатній файл і чи вся його автентифікація лежить у a8_agy_config_dir.
 # `agy models` у контейнері відповів — так; ні — stderr у fail_msg каже, чого
 # бракує.
-- name: V23a — checksum of the installed agy executor profile
+- name: V26a — checksum of the installed agy executor profile
   ansible.builtin.stat:
     path: /usr/local/lib/a8/agy-executor-permissions.json
     checksum_algorithm: sha256
   register: a8_v_agy_profile
 
-- name: V23a — checksum of the executor profile in the repository
+- name: V26a — checksum of the executor profile in the repository
   ansible.builtin.stat:
     path: "{{ playbook_dir }}/../../tools/agy/executor-permissions.json"
     checksum_algorithm: sha256
@@ -788,7 +1042,7 @@
   become: false
   register: a8_v_agy_profile_repo
 
-- name: V23b — the Claude container sees neither agy nor its settings
+- name: V26b — the Claude container sees neither agy nor its settings
   # Режим за замовчуванням — той, у якому йдуть агент Claude, залежності, хук і
   # оракул. Тека <container-home>/.gemini тут — порожня точка монтування з ролі.
   ansible.builtin.command:
@@ -807,18 +1061,18 @@
   become: true
   become_user: "{{ a8_agent_user }}"
 
-- name: V23 — agy container through the wrapper, with a throwaway settings copy
+- name: V26 — agy container through the wrapper, with a throwaway settings copy
   become: true
   become_user: "{{ a8_agent_user }}"
   block:
-    - name: V23c — fresh copy directory, as the tick makes it
+    - name: V26c — fresh copy directory, as the tick makes it
       ansible.builtin.file:
         path: "{{ a8_logs_dir }}/agy-verify"
         state: "{{ item }}"
         mode: "0700"
       loop: [absent, directory]
 
-    - name: V23c — copy the agy settings and login
+    - name: V26c — copy the agy settings and login
       ansible.builtin.command:
         argv:
           - cp
@@ -829,7 +1083,7 @@
       changed_when: false
       failed_when: false
 
-    - name: V23d — agy answers inside the container, and no Claude token is there
+    - name: V26d — agy answers inside the container, and no Claude token is there
       ansible.builtin.command:
         argv:
           - /usr/local/bin/a8-run-agent
@@ -847,7 +1101,7 @@
       changed_when: false
       failed_when: false
 
-    - name: V23e — the wrapper refuses the agy container when a Claude token is in the environment
+    - name: V26e — the wrapper refuses the agy container when a Claude token is in the environment
       ansible.builtin.command:
         argv:
           - /usr/local/bin/a8-run-agent
@@ -863,15 +1117,15 @@
       changed_when: false
       failed_when: false
   always:
-    - name: V23c — remove the settings copy (it holds the Google login)
+    - name: V26c — remove the settings copy (it holds the Google login)
       ansible.builtin.file:
         path: "{{ a8_logs_dir }}/agy-verify"
         state: absent
 
-- name: V23f — the Claude token is nowhere in the container home that agy sees
+- name: V26f — the Claude token is nowhere in the container home that agy sees
   # Контейнер agy бачить container-home (спільний $HOME). Якщо токен Claude колись
   # опиниться там файлом, «не передали змінну» вже нічого не гарантує. rc 3 —
-  # токена немає чи не прочитати: перевірка не відбулась, і V23g так і скаже.
+  # токена немає чи не прочитати: перевірка не відбулась, і V26g так і скаже.
   ansible.builtin.shell: |
     t="$(cat {{ a8_claude_token_file }} 2>/dev/null)"
     [ -n "$t" ] || exit 3
@@ -884,7 +1138,7 @@
   become: true
   become_user: "{{ a8_agent_user }}"
 
-- name: V23g — Google credentials only in the agy container, the Claude token only in the Claude container
+- name: V26g — Google credentials only in the agy container, the Claude token only in the Claude container
   ansible.builtin.assert:
     that:
       - a8_v_agy_profile.stat.exists
@@ -1269,3 +1523,51 @@
       Ключ розгортання адміністратором НЕ є, тож захист main на нього діє;
       токен, що працює іменем адміністратора, — інша річ (вимір №7).
   when: a8_v_push_kind != 'none'
+
+# ─── V25. Ручні правки A8 — такі, як описано (#306) ────────────────────────
+# Роль sshd і ufw свідомо не чіпає (main.yml, шапка), тож частина стану A8 —
+# ручна. Конфігурація, якої немає в git, не існує (CLAUDE.md §0 п.5): тут
+# машина звіряється з описом, лише читанням. ufw — docs/19 §B.3 (увімкнено,
+# deny incoming, жодного дозволу з Anywhere без прив'язки до інтерфейсу);
+# docker.service.d/ufw-reload.conf і блок DOCKER-USER в after.rules — README
+# ролі. sshd — V22 (a8-ssh-doors.sh, PR #305). 99-a8.conf опису не має: лише
+# `a8-manual-state.sh inventory` (docs/19 §B.7).
+- name: V25a — checksum of the installed manual-state check
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/a8-manual-state.sh
+    checksum_algorithm: sha256
+  register: a8_v_ms
+
+- name: V25b — checksum of the same check in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/scripts/a8-manual-state.sh"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_ms_repo
+
+- name: V25c — run the manual-state check (read-only)
+  ansible.builtin.command:
+    argv: [/usr/local/lib/a8/a8-manual-state.sh, check]
+  register: a8_v_manual
+  changed_when: false
+  failed_when: false
+  when: a8_v_ms.stat.exists
+
+- name: V25d — manual state of A8 matches its description
+  ansible.builtin.assert:
+    that:
+      - a8_v_ms.stat.exists
+      - a8_v_ms.stat.checksum == a8_v_ms_repo.stat.checksum
+      - a8_v_ms.stat.pw_name == 'root'
+      - not a8_v_ms.stat.woth
+      - not a8_v_ms.stat.wgrp
+      - a8_v_manual.rc == 0
+    fail_msg: >-
+      /usr/local/lib/a8/a8-manual-state.sh: exists={{ a8_v_ms.stat.exists }},
+      sha256 A8={{ a8_v_ms.stat.checksum | default('—') }} repo={{ a8_v_ms_repo.stat.checksum }};
+      check rc={{ a8_v_manual.rc | default('—') }}: {{ a8_v_manual.stdout | default('') }}
+      {{ a8_v_manual.stderr | default('') }} — розбіжність: оновити опис (docs/19 §B.7) або машину,
+      повний стан — `sudo /usr/local/lib/a8/a8-manual-state.sh inventory`
+    success_msg: "{{ a8_v_manual.stdout | default('') }}"
+    quiet: true

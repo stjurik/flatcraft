@@ -1,10 +1,9 @@
-import { Gift, Github, Heart, type LucideIcon } from "@flatcraft/ui";
+import { Check, Gift, Heart, type LucideIcon } from "@flatcraft/ui";
 
 import { dictionaries } from "../i18n/dictionaries";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import { TemplateThumb } from "./template-thumb";
 
-const GITHUB_ISSUES_URL = "https://github.com/stjurik/flatcraft/issues";
 const MONOBANK_JAR_URL = "https://send.monobank.ua/jar/A1u3M7VqQz";
 const UNITED24_URL = "https://u24.gov.ua/";
 const FEEDBACK_EMAIL = "feedback@hart.crimea.ua";
@@ -20,7 +19,7 @@ interface AboutContentProps {
  */
 export function AboutContent({ locale = DEFAULT_LOCALE }: AboutContentProps = {}) {
   const dict = dictionaries[locale].about;
-  const icons: readonly LucideIcon[] = [Gift, Heart, Github];
+  const icons: readonly LucideIcon[] = [Gift, Heart, Check];
 
   return (
     <main className="bg-bg">
@@ -114,17 +113,6 @@ export function AboutContent({ locale = DEFAULT_LOCALE }: AboutContentProps = {}
                 className="text-primary hover:text-primary-hover min-h-tap inline-flex items-center text-sm font-medium"
               >
                 {FEEDBACK_EMAIL}
-              </a>
-            </li>
-            <li>
-              <a
-                data-testid="about-feedback-github"
-                href={GITHUB_ISSUES_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:text-primary-hover min-h-tap inline-flex items-center text-sm font-medium"
-              >
-                {dict.feedbackGithubLabel}
               </a>
             </li>
             <li>

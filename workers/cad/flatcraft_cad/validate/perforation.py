@@ -61,7 +61,18 @@ def validate_perforation(
     else:
         return []
 
-    if hole_size is None or hole_size <= 0:
+    try:
+        # issue #274: `hole_size_mm`/`pitch_*_mm` можуть лишитися рядком, якщо
+        # Pydantic-модель у `_params_with_defaults` (server.py) провалилась з
+        # ІНШОЇ причини (напр. поза діапазоном) — тоді вона повертає сирі
+        # parameters без коерсії. Гейт — остання лінія оборони, тож рядок-
+        # число приводить сам, а не падає на голому порівнянні str/float.
+        if hole_size is None:
+            return []
+        hole_size = float(hole_size)
+    except (TypeError, ValueError):
+        return []
+    if hole_size <= 0:
         return []
 
     errors: list[PerforationError] = []
@@ -69,13 +80,17 @@ def validate_perforation(
         pitch = parameters.get(which)
         if pitch is None:
             continue
+        try:
+            pitch = float(pitch)
+        except (TypeError, ValueError):
+            continue
         # Валідно при pitch > hole_size. pitch <= hole_size → торкання/перетин.
         if pitch <= hole_size:
             errors.append(
                 PerforationError(
                     code="HOLES_OVERLAP",
                     field=which,
-                    detail=_overlap_msg(which, float(pitch), float(hole_size), shape_word),
+                    detail=_overlap_msg(which, pitch, hole_size, shape_word),
                 )
             )
     return errors

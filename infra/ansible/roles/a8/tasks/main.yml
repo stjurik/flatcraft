@@ -588,10 +588,22 @@
     group: root
     mode: "0755"
 
+- name: Install the shared host-git wrapper (hgit)
+  # Єдина обгортка git на хості (#276, #291): перевірки .git + безпечні -c +
+  # знімок identity. Сорситься тіком, a8-queue, a8-requeue (і verify V18) — одна
+  # копія, а не копія в кожному. Та сама, що доведена в CI (a8-tick.test.sh її
+  # мутує); V24 у verify звіряє контрольну суму з репозиторієм, як V14 для логіки.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-git-lib.sh"
+    dest: /usr/local/lib/a8/a8-git-lib.sh
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install agy executor permission profile
   # Крок 5 тіку: профіль дозволів agy для виконавця gemini — читання й запис
   # лише worktree задачі, команди тестів. Копія під root — агент не може її
-  # розширити; охорону шаблону робить a8-tick-logic.sh agy-settings, V23 у
+  # розширити; охорону шаблону робить a8-tick-logic.sh agy-settings, V26 у
   # verify звіряє контрольну суму з репозиторієм.
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../tools/agy/executor-permissions.json"
@@ -607,6 +619,95 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../tools/scripts/check-forbidden-paths.sh"
     dest: /usr/local/lib/a8/check-forbidden-paths.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install requeue script for failed tasks
+  # a8-requeue.sh (#234) — дієслово `requeue` в a8-queue кличе саме цю копію під
+  # root. Та сама копія, що доведена в CI (a8-requeue.test.sh); V22 звіряє суму.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-requeue.sh"
+    dest: /usr/local/lib/a8/a8-requeue.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install queue verbs and the ssh shim for them
+  # a8-queue — уся логіка дієслів status/enqueue/requeue/pause/resume, однаково
+  # для локального виклику й ssh (рішення yurii 2026-10-20). a8-ctl — лише
+  # forced-command ключа оркестратора: SSH_ORIGINAL_COMMAND → аргументи a8-queue.
+  # Ключ оркестратора роль кладе нижче, якщо задано a8_ctl_pubkey. V22 звіряє копії
+  # з репозиторієм і перевіряє, що обгортка відмовляє.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/{{ item }}.sh"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - a8-queue
+    - a8-ctl
+
+- name: Check the a8-ctl public key format
+  # Лише голий публічний ключ: тип, base64 точної для типу довжини, необов'язковий
+  # коментар (a8_ctl_pubkey_re у defaults — той самий вираз CI звіряє з group_vars,
+  # інваріант 17). Власні опції (`command=…`, `from=…`) чи другий рядок у змінній
+  # обійшли б restrict нижче; короткий base64 зробив би regexp відкликання ширшим.
+  ansible.builtin.assert:
+    that:
+      - item is match(a8_ctl_pubkey_re)
+    fail_msg: "ключ a8-ctl не схожий на рядок .pub (тип, base64 повної довжини, коментар) — ключ не ставлю: {{ item[:40] }}…"
+    quiet: true
+  loop: "{{ a8_ctl_pubkeys }}"
+
+- name: Ensure agent ssh directory exists for the a8-ctl key
+  ansible.builtin.file:
+    path: "{{ a8_agent_home }}/.ssh"
+    state: directory
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0700"
+  when: a8_ctl_pubkeys | length > 0
+
+- name: Revoke a8-ctl key lines that are not current
+  # Відкликання (#301 п.1). Без цієї задачі очищений чи змінений a8_ctl_pubkey
+  # лишав старий рядок у файлі: lineinfile нижче лише додає. Прибирається кожен
+  # рядок, що згадує a8-ctl АБО base64 поточного ключа, якщо він не рівно рядок,
+  # який ставить задача нижче: старий ключ, той самий ключ без restrict, з pty
+  # чи з іншою командою. Інші ключі файла роль не чіпає — але V22j (a8-ssh-doors)
+  # на кожному з них падає: після `AllowUsers … agent` кожен ключ agent діє.
+  # Порожній список ключів — прибираються всі рядки a8-ctl. Файла немає — нічого.
+  vars:
+    a8_ctl_keep_re: >-
+      {{ a8_ctl_pubkeys | map('regex_replace', '^', 'restrict,command="/usr/local/bin/a8-ctl" ')
+         | map('regex_escape') | join('|') }}
+    a8_ctl_b64_re: >-
+      {{ a8_ctl_pubkeys | map('regex_replace', '^\S+ (\S+).*$', '\1') | map('regex_escape') | join('|') }}
+  ansible.builtin.lineinfile:
+    path: "{{ a8_agent_home }}/.ssh/authorized_keys"
+    regexp: >-
+      {{ ('^(?!(?:' ~ a8_ctl_keep_re ~ ')$)' if a8_ctl_pubkeys | length > 0 else '')
+         ~ '.*(?:/usr/local/bin/a8-ctl' ~ (('|' ~ a8_ctl_b64_re) if a8_ctl_pubkeys | length > 0 else '') ~ ')' }}
+    state: absent
+
+- name: Authorize the orchestrator key for a8-ctl only
+  # Рядок — точно такий, і жодного іншого з цим ключем (задача вище прибрала).
+  ansible.builtin.lineinfile:
+    path: "{{ a8_agent_home }}/.ssh/authorized_keys"
+    line: 'restrict,command="/usr/local/bin/a8-ctl" {{ item }}'
+    create: true
+    owner: "{{ a8_agent_user }}"
+    group: "{{ a8_agent_user }}"
+    mode: "0600"
+  loop: "{{ a8_ctl_pubkeys }}"
+
+- name: Install ssh doors check for verify
+  # a8-ssh-doors.sh (#305, #301) — V22j кличе саме цю копію під root; та сама, що
+  # доведена в CI (a8-ssh-doors.test.sh). V22 звіряє суму з репозиторієм.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-ssh-doors.sh"
+    dest: /usr/local/lib/a8/a8-ssh-doors.sh
     owner: root
     group: root
     mode: "0755"
@@ -683,6 +784,17 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../tools/scripts/a8-ro-shell.sh"
     dest: /usr/local/bin/a8-ro-shell
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the manual-state check for verify
+  # a8-manual-state.sh (#306) — ручні правки A8, яких роль свідомо не робить (ufw,
+  # docker.service.d/ufw-reload.conf, блок DOCKER-USER в after.rules), проти їхнього
+  # опису в docs/19 і README; лише читання. V25 кличе саме цю копію і звіряє суму.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/scripts/a8-manual-state.sh"
+    dest: /usr/local/lib/a8/a8-manual-state.sh
     owner: root
     group: root
     mode: "0755"
