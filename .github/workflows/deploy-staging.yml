@@ -29,7 +29,7 @@ permissions:
 jobs:
   deploy:
     name: Ansible deploy to staging
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # workflow_run тригериться навіть коли release впав — деплоїмо лише на success.
     # Ручний workflow_dispatch проходить завжди.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}

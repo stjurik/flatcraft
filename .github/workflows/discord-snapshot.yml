@@ -30,7 +30,7 @@ env:
 jobs:
   snapshot:
     name: Snapshot + drift auto-commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
