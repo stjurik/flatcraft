@@ -136,7 +136,7 @@ prod-переїзду — **ADR-041 (Proposed)**.
    SSH key-only, UFW, swap), C (Docker, Node 22, pnpm, uv, Playwright), D (deploy key →
    private → runner → токени → тунель → Discord). _Критерій виходу:_ **Checkpoints A, B,
    C, D зелені** (команди перевірки — у самому документі), усі пункти чеклиста в
-   issue #78 викреслені. **Блокує кроки 5–8.**
+   issue #78 викреслені (на той час — «Черга yurii»; з 2026-11-15 архів). **Блокує кроки 5–8.**
 3. ✅ **Інспекція + контракт — Master Run 14.** Стадія 1 — PR **#104**
    (`docs/promts/inputs/inspection-2026-08.md`, таблиці A–G з доказами). Стадія 2 —
    цей PR: ADR-038, ADR-039, ADR-040, ADR-041 + `docs/promts/inputs/claude-md-2.0.md`.
