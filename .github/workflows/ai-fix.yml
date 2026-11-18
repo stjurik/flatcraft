@@ -36,7 +36,7 @@ env:
 jobs:
   fix:
     if: github.event.label.name == 'ai-approved'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # Дослівно з job `test` у ci.yml: без БД Будівельник не прожене *.int.test.ts.
     services:

@@ -18,6 +18,11 @@ on:
 permissions:
   contents: read
 
+# Раннер — ubuntu-24.04, а не ubuntu-latest, у КОЖНОМУ workflow (рішення yurii 2026-11-17).
+# 17.11 GitHub перевів ubuntu-latest на 26.04, а Playwright 1.60 там не встановлює
+# chromium («does not support chromium on ubuntu26.04-x64») — e2e падав у кожному PR.
+# Повернути ubuntu-latest — коли Playwright підтримає 26.04 (flatcraft #326).
+
 # Скасовуємо застарілі запуски на тому ж референсі — економить minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +36,7 @@ jobs:
   # Валідація самих workflow-файлів (syntax, expressions, shellcheck).
   actionlint:
     name: Lint workflows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: docker://rhysd/actionlint:1.7.7
@@ -43,7 +48,7 @@ jobs:
   # тобто зламаний guard помітили б лише постфактум, на живому прогоні агента.
   guards:
     name: Guard-скрипти (shell-тести)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Прогін усіх tools/scripts/*.test.sh
@@ -73,7 +78,7 @@ jobs:
   journals:
     name: Журнали (docs/13, agy-stats)
     if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/ai/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
@@ -86,7 +91,7 @@ jobs:
 
   install:
     name: Install + lockfile check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -101,7 +106,7 @@ jobs:
   lint:
     name: Lint + format
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -118,7 +123,7 @@ jobs:
   typecheck:
     name: Typecheck
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -134,7 +139,7 @@ jobs:
   test:
     name: Unit tests
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Postgres service для майбутніх integration-тестів @flatcraft/db.
     services:
       postgres:
@@ -167,7 +172,7 @@ jobs:
   build:
     name: Build
     needs: [lint, typecheck]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5
@@ -183,7 +188,7 @@ jobs:
   compose-validate:
     name: Validate prod compose + Caddyfile
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Render .env.prod from example (placeholder values)
@@ -201,7 +206,7 @@ jobs:
   ansible-validate:
     name: Ansible — syntax-check + ansible-lint
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: infra/ansible
@@ -228,7 +233,7 @@ jobs:
   python:
     name: Python CAD worker (ruff + mypy + pytest)
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: workers/cad
@@ -255,7 +260,7 @@ jobs:
   e2e:
     name: Playwright e2e (web + api)
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine

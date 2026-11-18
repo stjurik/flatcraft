@@ -27,3 +27,11 @@ docs/discord-config/README.md
 # Затверджений макет пульта розробки — еталон вигляду для ADR-042 (чернетка),
 # зберігається дослівно, як його погодив yurii 2026-09-30.
 docs/promts/inputs/pult-rozrobky-maket-v3.html
+
+# Журнали рецензій agy — дані, які дописує оркестратор (CLAUDE.md §0 п.2). Prettier на
+# T470 йому заборонено (#318: код гілок там не виконується, `npx`/`pnpm` — deny), а
+# вирівнювання таблиці скриптам журналу не потрібне: journal_norm (journal-rules.sh)
+# обрізає пробіли в кожній клітинці. Без цього рядка кожен новий рядок журналу валив би
+# «Lint + format» або вимагав prettier там, де його запускати не можна.
+docs/promts/inputs/agy-stats/
+docs/promts/inputs/agy-stats.md
