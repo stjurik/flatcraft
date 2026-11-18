@@ -7,9 +7,13 @@
 #   DISCORD_GUILD_ID  — ID сервера hart.crimea.ua (крок 2)
 name: Discord snapshot
 
+# Розклад вимкнено рішенням yurii 2026-11-17 (hart-inbox #21, «а»): з 15.06 запуск
+# щопонеділка падав — бот не доданий на сервер (flatcraft #189), а Discord-спільнота ще
+# не запущена, тож знімок нікому читати. Ручний запуск лишився. Повернути розклад — рядки
+# нижче, разом із кроком 3 у infra/discord/MANUAL_SETUP.md (бот на сервері).
+#   schedule:
+#     - cron: "0 6 * * 1" # понеділок 06:00 UTC
 on:
-  schedule:
-    - cron: "0 6 * * 1" # понеділок 06:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -26,7 +30,7 @@ env:
 jobs:
   snapshot:
     name: Snapshot + drift auto-commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v5

@@ -39,7 +39,7 @@ permissions:
 jobs:
   build:
     name: Build & push ${{ matrix.service }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Захист від zombie-runs: коли GHCR віддає 5xx, buildx робить exponential
     # backoff і може висіти до дефолтних 360 хв. 45 хв — це з запасом навіть
     # для cad-worker (~2GB): build ~3хв, push ~2хв на здоровому GHCR.
