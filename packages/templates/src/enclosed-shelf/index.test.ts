@@ -113,7 +113,9 @@ describe("enclosedShelfDefinition — stiffeningRibValidator (Argon-контрп
     expect(ribIssue?.message).toBeTruthy();
   });
 
-  it("height_mm > t+r (5.5 при t=2.5, r=2.5) → без issue на stiffening_rib.height_mm", () => {
+  // Доробка #304 (рішення yurii 06.11): ребро — це полиця, тож 5.5 > t+r=5
+  // більше НЕ достатньо — потрібно ще й >= M (min_flange_mm = 7.5).
+  it("height_mm > t+r, але < M (5.5 при t=2.5, r=2.5) → issue FLANGE_TOO_SHORT", () => {
     const issues = runValidators(
       {
         ...enclosedShelfDefinition.defaults,
@@ -121,6 +123,44 @@ describe("enclosedShelfDefinition — stiffeningRibValidator (Argon-контрп
         stiffening_rib: { height_mm: 5.5 },
       },
       2.5,
+    );
+    const ribIssue = issues.find((i) => i.field === "stiffening_rib.height_mm");
+    expect(ribIssue?.code).toBe("FLANGE_TOO_SHORT");
+  });
+
+  it("height_mm >= M (7.5 при t=2.5, r=2.5) → без issue на stiffening_rib.height_mm", () => {
+    const issues = runValidators(
+      {
+        ...enclosedShelfDefinition.defaults,
+        bend_radius_mm: 2.5,
+        stiffening_rib: { height_mm: 7.5 },
+      },
+      2.5,
+    );
+    expect(issues.filter((i) => i.field === "stiffening_rib.height_mm")).toEqual([]);
+  });
+
+  it("height_mm >= M, але <= t+r (13 при t=8, r=5) → issue FLANGE_TOO_SHORT", () => {
+    const issues = runValidators(
+      {
+        ...enclosedShelfDefinition.defaults,
+        bend_radius_mm: 5,
+        stiffening_rib: { height_mm: 13 },
+      },
+      8,
+    );
+    const ribIssue = issues.find((i) => i.field === "stiffening_rib.height_mm");
+    expect(ribIssue?.code).toBe("FLANGE_TOO_SHORT");
+  });
+
+  it("height_mm > t+r > M (13.5 при t=8, r=5) → без issue на stiffening_rib.height_mm", () => {
+    const issues = runValidators(
+      {
+        ...enclosedShelfDefinition.defaults,
+        bend_radius_mm: 5,
+        stiffening_rib: { height_mm: 13.5 },
+      },
+      8,
     );
     expect(issues.filter((i) => i.field === "stiffening_rib.height_mm")).toEqual([]);
   });
