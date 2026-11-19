@@ -12,6 +12,7 @@
 #   a8-tick-logic.sh guard-state <rc>            → ok | kill_switch | daily_limit | paused | guard_error
 #   a8-tick-logic.sh classify <rc> <log>         → "<клас> <деталь>"
 #   a8-tick-logic.sh should-pause <limit> <файл> → "pause" (exit 0) | "continue" (exit 1)
+#   a8-tick-logic.sh quota-wait <файл> <epoch>   → "wait <epoch>" (exit 0) | "go[ expired|invalid]" (exit 1)
 #
 # Або `source` і виклик функцій a8_* напряму.
 set -uo pipefail
@@ -125,9 +126,14 @@ a8_guard_state() {
 # (docs/13_PROGRESS_LOG.md, п'ять прогонів 2026-07; docs/17 §9):
 #   `Failed to authenticate. API Error: 401 Invalid bearer token`, миттєвий
 #   `is_error`, 0–1 turn, `total_cost_usd: 0`.
-# Класу «quota» НЕМАЄ: сигнатуру вичерпаної квоти в проєкті не спостерігали
-# жодного разу (ADR-039 §4, вимір №3 відкритий). Вигадати її регулярку — рівно
-# та помилка, проти якої написаний CLAUDE.md §0 п.3. Усе невідоме → failed.
+# Клас «quota» — ЛИШЕ за сигнатурою, баченою тричі (runs.log A8: 062 15.11 13:03Z,
+# 058 17.11 22:41Z, 062 17.11 22:56Z; дослівно — hart-inbox #14, 19.11):
+#   rc=1, JSON-результат з `terminal_reason: "api_error"` і `api_error_status: 429`
+#   (поле `subtype` там було `success` — на нього НЕ спираємось).
+# Збігаються лише службові поля CLI, не текст `result`: агент, що процитував «429»
+# чи «rate limit», квотою не стає. Сирий вивід без JSON-результату — теж ні: такої
+# форми 429 не бачили. Усе інше невідоме → failed (CLAUDE.md §0 п.3). Що тік
+# робить із quota (прибрати дерево, повернути в чергу, пауза) — a8-tick.sh.j2, крок 6.
 #
 # НА ВХОДІ — ЛИШЕ вивід `claude` (демон пише його в окремий файл), а не спільний
 # лог тіку: там `git fetch`, `pnpm install`, `check-hook-loud`.
@@ -163,7 +169,7 @@ a8_result_why() { # a8_result_why <файл виводу> → « k=v …» аб�
 a8_classify() {
   local line
   line="$(a8_classify_core "$@")"
-  if [[ "$line" == "failed "* ]]; then line+="$(a8_result_why "$2")"; fi
+  if [[ "$line" == "failed "* || "$line" == "quota "* ]]; then line+="$(a8_result_why "$2")"; fi
   echo "$line"
 }
 
@@ -194,6 +200,12 @@ a8_classify_core() {
       return
       ;;
   esac
+  if [[ "$rc" == 1 && -n "$res" ]] &&
+    jq -e '.terminal_reason == "api_error" and ((.api_error_status // "") | tostring) == "429"' \
+      <<<"$res" >/dev/null 2>&1; then
+    echo "quota 429"
+    return
+  fi
   if [[ "$rc" == 0 ]] && ((!is_error)); then
     echo "ok -"
   elif [[ "$rc" == 124 ]]; then
@@ -222,6 +234,32 @@ a8_should_pause() { # a8_should_pause <limit> <файл last-results>
   return 1
 }
 
+# ─── Пауза після quota ──────────────────────────────────────────────────────
+# Після класу quota тік пише в quota-until момент (epoch, секунди), раніше за
+# який задач не бере — жодних, і невідкладних теж: квота спільна. Тут лише
+# рішення від вмісту файлу й «зараз»; файл пише й прибирає тік.
+#   wait <epoch>  (exit 0) — ще рано;
+#   go expired    (exit 1) — момент минув: файл можна прибрати;
+#   go invalid    (exit 1) — у файлі не число: не чекаємо вічно на сміття, файл
+#                            прибираємо, подія в журналі (тихо застрягла черга
+#                            гірша за один зайвий прогін, що знову отримає 429);
+#   go            (exit 1) — файлу немає.
+a8_quota_wait() { # a8_quota_wait <файл quota-until> <зараз, epoch>
+  local file="$1" now="$2" v
+  [[ -e "$file" ]] || { echo go; return 1; }
+  v="$(tr -d '[:space:]' <"$file" 2>/dev/null)"
+  if [[ ! "$v" =~ ^[0-9]{1,12}$ ]]; then
+    echo "go invalid"
+    return 1
+  fi
+  if ((now < 10#$v)); then
+    echo "wait $((10#$v))"
+    return 0
+  fi
+  echo "go expired"
+  return 1
+}
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   cmd="${1:-}"
@@ -231,8 +269,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     guard-state) a8_guard_state "$@" ;;
     classify) a8_classify "$@" ;;
     should-pause) a8_should_pause "$@" ;;
+    quota-wait) a8_quota_wait "$@" ;;
     *)
-      echo "використання: $0 {validate|guard-state|classify|should-pause} ..." >&2
+      echo "використання: $0 {validate|guard-state|classify|should-pause|quota-wait} ..." >&2
       exit 1
       ;;
   esac

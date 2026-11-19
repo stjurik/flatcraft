@@ -54,6 +54,7 @@ A8_WORKTREES_DIR=$ROOT/wt
 A8_TASK_TIMEOUT=${TASK_TIMEOUT:-20}
 A8_ORACLE_TIMEOUT=${ORACLE_TIMEOUT:-20}
 A8_MAX_TURNS=10
+A8_QUOTA_COOLDOWN_S=${QUOTA_COOLDOWN_S:-3600}
 A8_CONTAINER_IMAGE=hart-agent:test
 A8_DEFAULT_MODEL=sonnet
 A8_CLAUDE_TOKEN_FILE=$ROOT/token
@@ -461,6 +462,16 @@ body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest(
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
+  quota | quota-commit)
+    # 429 посеред сесії — форма з runs.log A8 (15–17.11). Агент лишає НЕЗАКОМІЧЕНУ
+    # роботу (як 058/062: змінений трекований і новий файл); quota-commit — ще й
+    # один коміт: таку гілку прибирати не можна.
+    [[ "$AGENT_MODE" == quota-commit ]] &&
+      git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
+    echo changed >>"$wt/CLAUDE.md"
+    echo half >"$wt/half-done.txt"
+    echo '{"type":"result","subtype":"success","is_error":true,"num_turns":40,"terminal_reason":"api_error","api_error_status":429,"result":"x"}'
+    exit 1 ;;
   paused) exit 12 ;;
   hang)
     # Мітка «агент стартував»: watch_start іде перед запуском агента, тож мітка
@@ -673,6 +684,61 @@ run_scenarios() {
   tick
   [[ "$(jl .result)" == no-credential && "$(jl .task)" == a ]] &&
     ok "після зняття STOP повернута задача виконується (порожню гілку прибрано)" || bad "requeue після 401: $(last)"
+  teardown
+
+  # 6q. 429 (клас quota): брудне дерево прибрано, задача в черзі, падіння НЕ
+  # рахується, черга чекає паузу — і після неї задача виконується з нуля.
+  # До цього кожне 429 лишало дерево, і requeue вимагав ручного rm (#20, #26).
+  setup
+  enqueue 001-a "$(valid a)"
+  printf 'failed\nfailed\n' >"$LOGS/last-results"
+  AGENT_MODE=quota tick
+  [[ "$(jl .result)" == quota && "$(jl .exit_class)" == quota && -e "$QD/001-a.json" ]] &&
+    ok "429 → result quota, задача повернута в чергу" || bad "429: $(last)"
+  [[ "$(jl .detail)" == "429 subtype=success terminal_reason=api_error api_error_status=429; пауза до "* ]] &&
+    ok "429: деталь — службові поля і момент кінця паузи" || bad "429 деталь: $(jl .detail)"
+  [[ ! -e "$ROOT/wt/a" ]] && ! git -C "$ROOT/repo" rev-parse --verify -q refs/heads/ai/a >/dev/null &&
+    ok "429: брудне дерево й порожню гілку прибрано без людини" || bad "429: дерево/гілка лишились"
+  [[ "$(cat "$LOGS/last-results")" == $'failed\nfailed' && ! -e "$ROOT/STOP" ]] &&
+    ok "429 не зараховано в падіння поспіль (два було — два й лишилось)" ||
+    bad "429 у last-results: $(tr '\n' ' ' <"$LOGS/last-results")"
+  q="$(cat "$LOGS/quota-until" 2>/dev/null)"
+  [[ "$q" =~ ^[0-9]+$ ]] && ((q >= $(date +%s) + 3500 && q <= $(date +%s) + 3600)) &&
+    ok "429: quota-until = зараз + A8_QUOTA_COOLDOWN_S" || bad "quota-until: '${q:-немає}'"
+  printf '%s\n' "$(valid z)" >"$QD/urgent/000-z.json"
+  calls_before="$(wc -l <"$LOGS/runner-calls")"
+  tick
+  [[ "$(jl .event)" == quota_wait && -e "$QD/001-a.json" && -e "$QD/urgent/000-z.json" &&
+    "$(wc -l <"$LOGS/runner-calls")" == "$calls_before" ]] &&
+    ok "під час паузи задач не беруть — і невідкладних теж, агента не викликано" || bad "пауза quota: $(last)"
+  echo $(($(date +%s) - 1)) >"$LOGS/quota-until"
+  tick
+  [[ "$(jl .result)" == no-credential && "$(jl .task)" == z && ! -e "$LOGS/quota-until" ]] &&
+    ok "пауза минула → файл прибрано, черга йде (спершу невідкладна)" || bad "після паузи: $(last)"
+  tick
+  [[ "$(jl .result)" == no-credential && "$(jl .task)" == a ]] &&
+    ok "повернута після 429 задача виконується з нуля (гілка не заважає)" || bad "requeue після 429: $(last)"
+  teardown
+
+  # 6q-commit. 429, але агент уже закомітив: гілку не чіпаємо, задача — failed/
+  # з поясненням, і все одно без запису в падіння поспіль; пауза — та сама.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=quota-commit tick
+  [[ "$(jl .result)" == quota && "$(jl .detail)" == *"гілка має коміти — не повертаю в чергу" &&
+    -e "$QD/failed/001-a.json" && -d "$ROOT/wt/a" && -e "$LOGS/quota-until" ]] &&
+    ok "429 з комітами → гілка й дерево цілі, задача у failed/ з причиною, пауза є" || bad "429 з комітами: $(last)"
+  ! grep -q failed "$LOGS/last-results" 2>/dev/null &&
+    ok "429 з комітами теж не рахується в падіння поспіль" || bad "429 з комітами записано як failed"
+  teardown
+
+  # 6q-bad. Сміття в quota-until не тримає чергу вічно: подія, файл прибрано, задачу взято.
+  setup
+  enqueue 001-a "$(valid a)"
+  echo завтра >"$LOGS/quota-until"
+  tick
+  grep -q '"event":"quota_invalid"' "$LOGS/runs.log" && [[ "$(jl .task)" == a && ! -e "$LOGS/quota-until" ]] &&
+    ok "quota-until не число → подія quota_invalid, черга йде" || bad "quota-until сміття: $(last)"
   teardown
 
   # 6b. Запобіжник спрацював в обгортці (код 12) → stopped, задача в черзі,
@@ -1827,6 +1893,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
   mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
+  mutate "quota обробляється як невідомий клас" 's/\n  quota\)\n/\n  quota_never)\n/'
+  mutate "quota: дерево не прибирається" 's/(q_note="пауза до[^\n]*\n    if )release_or_keep/${1}false/'
+  mutate "quota: пауза нульова" 's/q_until=\$\(\(\$\(now\) \+ A8_QUOTA_COOLDOWN_S\)\)/q_until=\$(now)/'
+  mutate "quota: пауза не зупиняє тік" 's/(quota_wait "після 429[^\n]*\n)    exit 0\n/${1}/'
+  mutate "quota рахується як падіння" 's/(\n    q_until=)/\n    "\$GUARD" record failed$1/'
+  mutate "quota: минулу паузу не прибрано" 's/\[\[ -n "\$\{qarg:-\}" \]\] && rm -f "\$quota_file"/:/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
   mutate "перевірку хука прибрано" 's/if \(\(hrc != 0\)\); then/if false; then/'
