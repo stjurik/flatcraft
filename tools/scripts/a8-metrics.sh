@@ -16,7 +16,7 @@
 #   end-to-end   — запис `run` з result=ok: оракул зелений і гілку запушено.
 #                  Draft PR створює Action a8-pr.yml, з журналу його не видно;
 #   поспіль      — серед записів `run`, у порядку часу; `no-credential`,
-#                  `failed`, `stopped`, `auth_stop` серію рвуть, події — ні;
+#                  `failed`, `stopped`, `auth_stop`, `quota` серію рвуть, події — ні;
 #   вікно        — записи з ts у [зараз − N днів, зараз] (крок 6: N = 14);
 #   покриття     — частка ЗАДАЧ у вікні (docs/02: «≥ 80 % задач»), чий
 #                  останній вердикт оракула однозначний — зелений (rc=0) чи
@@ -39,7 +39,7 @@
 #                  зупинка — момент, коли створено STOP) — інакше auth_stop за
 #                  хвилину до межі вікна губився б;
 #   правило трьох — клас = exit_class + перше слово detail до « :;=» (rc=1 і
-#                  rc=2 — один клас «rc»); рахуються failed, auth_stop і кожне
+#                  rc=2 — один клас «rc»); рахуються failed, auth_stop, quota і кожне
 #                  поле відхилення (reject:<поле>); ≥ 3 за весь переданий
 #                  журнал (ADR-039 §8). Журнал на A8 живе 14 днів (logrotate).
 #
@@ -197,7 +197,7 @@ def verdict: select(.result != "stopped") | (.oracle_rc // "-")
 | [ $wruns | group_by(.task // "")[]
     | {branch: (.[0].branch // ("ai/" + (.[0].task // ""))), last: ([ .[] | verdict ] | last)}
     | . + {merged: (.branch | IN($mset[]))} ] as $tasks
-| ([ $runs[] | select(.result == "failed" or .result == "auth_stop") | cls ]
+| ([ $runs[] | select(.result == "failed" or .result == "auth_stop" or .result == "quota") | cls ]
    + [ $all[] | select(.event == "reject") | (.fields // [])[] | "reject:" + . ]
    | group_by(.) | map({key: .[0], value: length}) | from_entries) as $classes
 | {

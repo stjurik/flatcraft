@@ -208,6 +208,45 @@ run_scenarios() {
   check "gemini: rc=0 → ok" 0 "ok -" -- L classify 0 "$TMP/ok.log" gemini
   check "claude явно: 401 → auth_stop, як і без аргументу" 0 "auth_stop 401" -- L classify 1 "$TMP/401.log" claude
 
+  # ── quota: лише бачена сигнатура (runs.log A8, тричі 15–17.11) ────────────
+  # Форма з журналу: rc=1, subtype=success, terminal_reason=api_error, статус 429.
+  printf 'stderr line\n{"type":"result","subtype":"success","is_error":true,"num_turns":40,"terminal_reason":"api_error","api_error_status":429,"result":"щось від агента"}\n' >"$TMP/q429.log"
+  printf '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":"429","result":"x"}\n' >"$TMP/q429s.log"
+  # Статус 429 без terminal_reason=api_error — такої форми не бачили.
+  printf '{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"max_turns","api_error_status":429,"result":"x"}\n' >"$TMP/q429-other.log"
+  # Агент процитував 429 у тексті — не квота.
+  printf '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":200,"result":"api_error_status 429 terminal_reason api_error rate_limit_error"}\n' >"$TMP/q429-text.log"
+  check "quota: бачена сигнатура, rc=1 → quota + службові поля" 0 \
+    "quota 429 subtype=success terminal_reason=api_error api_error_status=429" -- L classify 1 "$TMP/q429.log"
+  check "quota: статус рядком \"429\" → теж quota" 0 \
+    "quota 429 subtype=success terminal_reason=api_error api_error_status=429" -- L classify 1 "$TMP/q429s.log"
+  check "quota: та сама форма, але rc=0 → failed is_error (не бачили)" 0 \
+    "failed is_error subtype=success terminal_reason=api_error api_error_status=429" -- L classify 0 "$TMP/q429.log"
+  check "quota: та сама форма, але rc=2 → failed (не бачили)" 0 \
+    "failed rc=2 subtype=success terminal_reason=api_error api_error_status=429" -- L classify 2 "$TMP/q429.log"
+  check "quota: 429 без terminal_reason=api_error → failed" 0 \
+    "failed rc=1 subtype=error_during_execution terminal_reason=max_turns api_error_status=429" -- L classify 1 "$TMP/q429-other.log"
+  # Виконавець gemini: JSON квоти Claude у виводі agy — цитата, черга не стає на паузу.
+  check "gemini: бачена сигнатура quota у виводі agy → failed, не quota" 0 \
+    "failed rc=1 subtype=success terminal_reason=api_error api_error_status=429" -- L classify 1 "$TMP/q429.log" gemini
+  check "quota: 429 лише в тексті result → failed" 0 "failed rc=1 subtype=error_max_turns" -- L classify 1 "$TMP/q429-text.log"
+  check "quota: api_error 529 → failed, не quota" 0 \
+    "failed rc=1 subtype=error_during_execution terminal_reason=api_error api_error_status=529 error=overloadedrm-rf" -- \
+    L classify 1 "$TMP/why.log"
+
+  # ── Пауза після quota ─────────────────────────────────────────────────────
+  printf '1000\n' >"$TMP/qu-1000"
+  printf '  0001000 \n' >"$TMP/qu-pad"
+  printf 'завтра\n' >"$TMP/qu-bad"
+  : >"$TMP/qu-empty"
+  check "quota-wait: файлу немає → go" 1 "go" -- L quota-wait "$TMP/qu-none" 999
+  check "quota-wait: ще рано → wait <момент>" 0 "wait 1000" -- L quota-wait "$TMP/qu-1000" 999
+  check "quota-wait: рівно в момент → go expired" 1 "go expired" -- L quota-wait "$TMP/qu-1000" 1000
+  check "quota-wait: минуло → go expired" 1 "go expired" -- L quota-wait "$TMP/qu-1000" 5000
+  check "quota-wait: пробіли й нулі попереду → те саме число" 0 "wait 1000" -- L quota-wait "$TMP/qu-pad" 999
+  check "quota-wait: не число → go invalid (не чекати вічно)" 1 "go invalid" -- L quota-wait "$TMP/qu-bad" 999
+  check "quota-wait: порожній файл → go invalid" 1 "go invalid" -- L quota-wait "$TMP/qu-empty" 999
+
   # ── Пауза рівно на третьому ───────────────────────────────────────────────
   printf 'failed\nfailed\n' >"$TMP/r2"
   printf 'failed\nfailed\nfailed\n' >"$TMP/r3"
@@ -258,6 +297,13 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "401 без умови is_error" 's/    if ((is_error)) \&\&$/    if true \&\&/'
   mutate "401 у сирому виводі навіть при rc=0" 's/  elif \[\[ "\$rc" != 0 \]\] \&\& grep -Fq/  elif grep -Fq/'
   mutate "клас quota з повітря" 's/echo "failed rc=\$rc"/echo "quota -"/'
+  mutate "quota без умови rc=1" 's/ \&\& "\$rc" == 1 \&\& -n "\$res" \]\] \&\&/ \&\& -n "$res" ]] \&\&/'
+  mutate "quota без умови terminal_reason" 's/\.terminal_reason == "api_error" and //'
+  mutate "quota без умови статусу 429" 's/ and ((\.api_error_status \/\/ "") | tostring) == "429"//'
+  mutate "quota лише для статусу-рядка" 's/ | tostring) == "429"/) == "429"/'
+  mutate "quota без службових полів у деталі" 's/ || "\$line" == "quota "\*//'
+  mutate "quota-wait: межа включно" 's/if ((now < 10#\$v)); then/if ((now <= 10#$v)); then/'
+  mutate "quota-wait: сміття у файлі не відсіюється" 's/\^\[0-9\]{1,12}\$/^.*$/'
   mutate "причина падіння не дописується" 's/then line+="\$(a8_result_why "\$2")"; fi/then :; fi/'
   mutate "у деталь іде вільний текст result" 's/("subtype", "terminal_reason"/("result", "subtype", "terminal_reason"/'
   mutate "значення причини без фільтра символів" 's/gsub("\[^A-Za-z0-9_.-\]"; "")/./'
@@ -290,6 +336,7 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "профіль: * у команді пропущено" 's/A-Za-z0-9\._-\]+/A-Za-z0-9._ *-]+/'
   mutate "профіль без deny /tmp" 's/index("write_file(\/tmp)") != null/true/'
   mutate "профіль: дужка у worktree пропущена" 's/"\$wt" != \*\[\\(\\)\\\*\\ \]\*/true/'
+  mutate "gemini: квота Claude ставить чергу на паузу" 's/if \[\[ "\$executor" != gemini \&\& "\$rc" == 1/if [[ "$rc" == 1/'
   mutate "gemini: 401 зупиняє чергу" 's/  \[\[ "\$executor" == gemini \]\] \&\& auth=0/  :/'
 fi
 

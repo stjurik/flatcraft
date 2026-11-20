@@ -16,6 +16,11 @@ a8_container_home: /home/agent/container-home # записуваний $HOME д�
 a8_kill_switch_path: /home/agent/STOP
 a8_daily_task_limit: 12
 a8_consecutive_failure_limit: 3
+# Пауза черги після 429 (клас quota в a8-tick-logic.sh), секунди. НЕ ВИМІРЯНО:
+# три 429 (15–17.11) мали між собою й наступним успіхом лише простій черги, тож
+# тривалості вікна квоти з журналу не вивести. 5 год — припущення про
+# п'ятигодинне вікно підписки; уточнити за подіями quota_wait/quota у runs.log.
+a8_quota_cooldown_s: 18000
 a8_config_dir: /etc/a8
 
 # ─── Контейнер агента ──────────────────────────────────────────────────────

@@ -26,6 +26,7 @@
 #   <queue>/failed/     — failed; причина — у журналі
 #   <queue>/rejected/   — запис невалідний; які саме поля — у журналі
 # Задача, зупинена запобіжником або 401, повертається в чергу: її не виконали.
+# Так само після 429 (клас quota): дерево прибирається, черга чекає паузу (крок 1a).
 # Без образу агента задачу не беруть зовсім (крок 2a): подія env_broken, не failed.
 # Якщо агент уже встиг закомітити — лишається у failed/ з позначкою.
 set -uo pipefail
@@ -48,6 +49,7 @@ export A8_SOURCES_ALLOWED
 : "${A8_GEMINI_MODEL:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 : "${A8_AGY_CONFIG_DIR:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 : "${A8_CONTAINER_HOME:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_QUOTA_COOLDOWN_S:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 
 # Точки підміни — ЛИШЕ для тесту (tools/scripts/a8-tick.test.sh). systemd-юніт
 # їх не задає, тож на A8 завжди діють шляхи за замовчуванням.
@@ -186,6 +188,31 @@ if [[ "$gstate" != ok ]]; then
   [[ "$gstate" == guard_error ]] && exit 1
   exit 0
 fi
+
+# ─── 1a. Пауза після quota (429) ───────────────────────────────────────────
+# Після прогону класу quota (крок 6) тік пише сюди момент, раніше за який задач
+# не бере — ЖОДНИХ, і невідкладних теж: квота спільна для всіх задач. Без паузи
+# повернута задача бралась би наступним тіком і знову отримувала 429, з'їдаючи
+# денний ліміт. Рішення — у логіці (quota-wait, під тестом); тут лише дія.
+quota_file="$A8_LOGS_DIR/quota-until"
+read -r qstate qarg < <(logic quota-wait "$quota_file" "$(now)")
+case "$qstate" in
+  wait)
+    "$JOURNAL" event quota_wait "після 429 задач не беру до $(date -u -d "@$qarg" +%FT%TZ)"
+    exit 0
+    ;;
+  go)
+    if [[ "${qarg:-}" == invalid ]]; then
+      "$JOURNAL" event quota_invalid "quota-until не число — прибираю, черга йде далі"
+    fi
+    [[ -n "${qarg:-}" ]] && rm -f "$quota_file"
+    ;;
+  *)
+    # Логіка не відповіла (файлу логіки немає) — fail closed, як guard_error.
+    "$JOURNAL" event guard_error "quota-wait: '${qstate:-}'"
+    exit 1
+    ;;
+esac
 
 # ─── 2. Найстаріша ВАЛІДНА задача ──────────────────────────────────────────
 # Спершу urgent/, потім плановий потік — якщо він не на паузі. Пауза планового
@@ -710,6 +737,32 @@ case "$cls" in
       finish stopped stopped "$detail" queue
     else
       finish stopped stopped "$detail; $keep_why — не повертаю в чергу" failed
+    fi
+    exit 0
+    ;;
+  quota)
+    # 429 посеред сесії (сигнатура — a8-tick-logic.sh). Задача ні в чому не
+    # винна, тож це НЕ падіння: у last-results нічого не пишемо (серію «N
+    # поспіль» quota ні рве, ні подовжує), задачу повертаємо туди, звідки взяли.
+    # Незакомічену роботу агента НЕ зберігаємо — задача почнеться з нуля
+    # (рішення Архітектора 17.11); її дерево прибирає release_or_keep, як після
+    # 401. Раніше таке дерево лишалось, і requeue відмовляв на ньому: кожне 429
+    # коштувало yurii ручного `rm` на A8 (hart-inbox #20, #26).
+    # Гілку З КОМІТАМИ не чіпаємо (чия-то робота) — задача йде у failed/ з
+    # поясненням, але теж без запису в last-results.
+    # Паузу пишемо ДО повернення в чергу: інакше тік, що встиг між ними, узяв би
+    # задачу одразу. Не вдалося записати паузу — повернення стало б циклом 429,
+    # тож fail closed: звичайне падіння.
+    q_until=$(($(now) + A8_QUOTA_COOLDOWN_S))
+    if ! { printf '%s\n' "$q_until" >"$quota_file.tmp" && mv -f "$quota_file.tmp" "$quota_file"; } 2>/dev/null; then
+      fail_task "$detail; не вдалося записати $quota_file"
+      exit 0
+    fi
+    q_note="пауза до $(date -u -d "@$q_until" +%FT%TZ)"
+    if release_or_keep; then
+      finish quota quota "$detail; $q_note" queue
+    else
+      finish quota quota "$detail; $q_note; $keep_why — не повертаю в чергу" failed
     fi
     exit 0
     ;;
