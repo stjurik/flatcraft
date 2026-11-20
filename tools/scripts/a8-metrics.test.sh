@@ -153,10 +153,14 @@ got="$("$SCRIPT" --json --now "$NOW" "$tmp/busy" | jq -c .step6.kill_switch_dril
   reject 2026-09-28T16:00:00Z g "oracle:missing"
   reject 2026-09-28T17:00:00Z h "oracle:missing,source:missing"
   reject 2026-09-28T18:00:00Z i "oracle:missing"
+  # 429 (клас quota) — не падіння, але повтор квоти — теж сигнал процесу.
+  run 2026-09-28T19:00:00Z j quota quota "429 subtype=success; пауза до 2026-09-29T00:00:00Z" -
+  run 2026-09-28T20:00:00Z k quota quota "429 api_error_status=429; пауза до 2026-09-29T01:00:00Z" -
+  run 2026-09-28T21:00:00Z l quota quota "429; пауза до 2026-09-29T02:00:00Z; гілка має коміти — не повертаю в чергу" -
 } >"$tmp/classes"
 got="$("$SCRIPT" --json --now "$NOW" "$tmp/classes" | jq -c '.rule_of_three_hits | sort')"
-[[ "$got" == '["auth_stop:401","failed:rc","reject:oracle:missing"]' ]] &&
-  ok "правило трьох: rc=N — один клас, auth_stop і відхилення рахуються" || bad "класи падінь: $got"
+[[ "$got" == '["auth_stop:401","failed:rc","quota:429","reject:oracle:missing"]' ]] &&
+  ok "правило трьох: rc=N — один клас, auth_stop, quota і відхилення рахуються" || bad "класи падінь: $got"
 
 # Покриття — по ЗАДАЧАХ і за ОСТАННІМ вердиктом (рішення yurii 2026-09-27):
 # зелений чи червоний — покрито; тайм-аут оракула — не вердикт; змерджена
@@ -281,6 +285,7 @@ elif [[ -z "${A8_METRICS_UNDER_TEST:-}" ]]; then
       ok "мутація «$1» убита"
     fi
   }
+  mutate "quota не рахується в правило трьох" 's/ or \.result == "auth_stop" or \.result == "quota"\)/ or .result == "auth_stop")/'
   mutate "серія не рветься на падінні" 's/else \.cur = 0 end/else . end/'
   mutate "no-credential рахується в серію" 's/if \$r\.result == "ok" then \.cur \+= 1/if \$r.exit_class == "ok" then .cur += 1/'
   mutate "подія рве серію" 's/reduce \(\$runs\[\] \| select/reduce (\$all[] | select/'
@@ -296,7 +301,7 @@ elif [[ -z "${A8_METRICS_UNDER_TEST:-}" ]]; then
   mutate "епізоди рахуються лише у вікні" 's/reduce \$all\[\] as \$r \(\{in: false/reduce \$win[] as \$r ({in: false/'
   mutate "пауза не розділяє епізоди" 's/\(\$rt - \.last_ks\) > \$gap/false/'
   mutate "rc=N дробить клас" 's/splits\("\[ :;=\]"\)/splits("[ :;]")/'
-  mutate "auth_stop не в правилі трьох" 's/select\(\.result == "failed" or \.result == "auth_stop"\)/select(.result == "failed")/'
+  mutate "auth_stop не в правилі трьох" 's/ or \.result == "auth_stop" or \.result == "quota"\)/ or .result == "quota")/'
   mutate "stopped рахується виконаним оракулом" 's/def verdict: select\(\.result != "stopped"\) \| /def verdict: /'
   mutate "тайм-аут оракула — вердикт" 's/ \| select\(\. <= 123\)//'
   mutate "перший вердикт замість останнього" 's/\[ \.\[\] \| verdict \] \| last/[ .[] | verdict ] | first/'
