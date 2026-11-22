@@ -125,6 +125,15 @@ run_suite() { # run_suite <local|ssh>
   [[ "$(ctl .verb)" == status && "$(ctl .via)" == "$MODE" && "$(ctl .rc)" == 0 ]] &&
     ok "$T status → рядок у ctl.log (via=$MODE, rc=0)" || bad "$T ctl.log status: $(lastctl)"
   [[ "$OUT" == *"tick.lock: вільний"* ]] && ok "$T status: tick.lock вільний" || bad "$T lock вільний: $OUT"
+  [[ "$OUT" == *"пауза квоти (429): немає"* ]] && ok "$T status: паузи квоти немає" || bad "$T пауза квоти немає: $OUT"
+  echo $(($(date +%s) + 3600)) >"$LOGS/quota-until"
+  call status </dev/null
+  [[ "$RC" == 0 && "$OUT" == *"пауза квоти (429): ДО "*"— тік не бере жодних задач, і urgent/ теж"* ]] &&
+    ok "$T status: пауза квоти видна з моментом кінця" || bad "$T пауза квоти не видна: $OUT"
+  echo $(($(date +%s) - 10)) >"$LOGS/quota-until"
+  call status </dev/null
+  [[ "$OUT" == *"пауза квоти (429): немає"* ]] && ok "$T status: минула пауза квоти — «немає»" || bad "$T минула пауза: $OUT"
+  rm -f "$LOGS/quota-until"
   # Тік працює (тримає tick.lock) — status це бачить і сам не зависає.
   : >"$LOGS/tick.lock"
   flock "$LOGS/tick.lock" sleep 3 &
