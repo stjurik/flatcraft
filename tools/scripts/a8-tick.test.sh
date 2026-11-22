@@ -1946,7 +1946,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "quota обробляється як невідомий клас" 's/\n  quota\)\n/\n  quota_never)\n/'
-  mutate "quota: дерево не прибирається" 's/(q_note="пауза до[^\n]*\n    if )release_or_keep/${1}false/'
+  mutate "quota: дерево не прибирається" 's/if release_or_keep; then\n      finish quota quota/if false; then\n      finish quota quota/'
   mutate "quota: пауза нульова" 's/q_until=\$\(\(\$\(now\) \+ A8_QUOTA_COOLDOWN_S\)\)/q_until=\$(now)/'
   mutate "quota: пауза не зупиняє тік" 's/(quota_wait "після 429[^\n]*\n)    exit 0\n/${1}/'
   mutate "quota рахується як падіння" 's/(\n    q_until=)/\n    "\$GUARD" record failed$1/'
