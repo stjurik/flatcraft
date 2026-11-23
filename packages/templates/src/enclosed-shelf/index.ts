@@ -41,7 +41,11 @@
  *     дає `flat_rib_y <= 0` у `unfold.py` (`_build_enclosed_shelf_cross`,
  *     `workers/cad/flatcraft_cad/unfold.py:799-805`) → `ValueError`, 500 у
  *     воркері (`server.py:345` поза `try`, окреме issue #283 — тут лише
- *     render-gate, без серверного боку);
+ *     render-gate, без серверного боку). Доробка #304 (рішення yurii
+ *     06.11): ребро — це полиця, тож додатково `height_mm >= M`
+ *     (`bakedSpec.global.min_flange_mm`, CLAUDE.md §7), паритет з
+ *     export-gate (`enclosed-shelf.ts::validateEnclosedShelfRib`) і
+ *     воркером;
  *   - `sidePerforationValidator` — Argon-контрприклади 2 і 3: `side_rect.w_mm`
  *     у `_enclosed_shelf_side_holes` (`unfold.py:626-640`) — це
  *     `depth_mm - (t + r)`, не `depth_mm` (3D-сцена рахує отвори від повного
@@ -113,17 +117,22 @@ const thicknessSupportedValidator: ProfileValidator<EnclosedShelfParameters> = (
 const stiffeningRibValidator: ProfileValidator<EnclosedShelfParameters> = (params, thicknessMm) => {
   const rib = params.stiffening_rib;
   if (!rib) return [];
-  const min = thicknessMm + params.bend_radius_mm;
-  if (rib.height_mm > min) return [];
+  const tr = thicknessMm + params.bend_radius_mm;
+  const minFlangeMm = bakedSpec.global.min_flange_mm;
+  if (rib.height_mm >= minFlangeMm && rib.height_mm > tr) return [];
+  const threshold = Math.max(minFlangeMm, tr);
+  const message =
+    minFlangeMm >= tr
+      ? `Збільшіть «Висота ребра» до мінімум ${fmt(threshold)} мм (мінімальна полиця після гиба) — зараз ${fmt(rib.height_mm)} мм.`
+      : `Збільшіть «Висота ребра» до більше ${fmt(threshold)} мм ` +
+        `(товщина ${fmt(thicknessMm)} + радіус ${fmt(params.bend_radius_mm)}) — ` +
+        `інакше гиб ребра вироджується (нульова чи від'ємна полиця після гибу).`;
   return [
     {
       field: "stiffening_rib.height_mm",
       code: "FLANGE_TOO_SHORT",
       value: rib.height_mm,
-      message:
-        `Збільшіть «Висота ребра» до більше ${fmt(min)} мм ` +
-        `(товщина ${fmt(thicknessMm)} + радіус ${fmt(params.bend_radius_mm)}) — ` +
-        `інакше гиб ребра вироджується (нульова чи від'ємна полиця після гибу).`,
+      message,
     },
   ];
 };

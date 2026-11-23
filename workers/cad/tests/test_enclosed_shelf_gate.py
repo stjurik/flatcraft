@@ -47,12 +47,48 @@ class TestEnclosedShelfGateUnit:
         assert errs[0].field == "stiffening_rib.height_mm"
         assert "5" in errs[0].detail
 
-    def test_ребро_трохи_більше_валідне(self) -> None:
+    def test_ребро_трохи_більше_t_r_але_менше_m_невалідне(self) -> None:
+        # Доробка #304 (issue #304, рішення yurii 06.11): ребро — це полиця,
+        # тож h > t+r=5 само по собі більше не достатньо — потрібно ще й
+        # h >= M (global.min_flange_mm = 7.5).
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {"stiffening_rib": {"height_mm": 5.5}, "bend_radius_mm": 2.5},
+            2.5,
+        )
+        assert len(errs) == 1
+        assert errs[0].code == "FLANGE_TOO_SHORT"
+        assert "полиц" in errs[0].detail.lower()
+
+    def test_ребро_на_межі_m_валідне(self) -> None:
         assert (
             validate_enclosed_shelf(
                 "enclosed_shelf",
-                {"stiffening_rib": {"height_mm": 5.5}, "bend_radius_mm": 2.5},
+                {"stiffening_rib": {"height_mm": 7.5}, "bend_radius_mm": 2.5},
                 2.5,
+            )
+            == []
+        )
+
+    def test_ребро_більше_m_але_на_межі_t_r_невалідне(self) -> None:
+        # M=7.5 < t+r=13 — тут діє геометрія (товщина+радіус), не мінімальна полиця.
+        errs = validate_enclosed_shelf(
+            "enclosed_shelf",
+            {"stiffening_rib": {"height_mm": 13}, "bend_radius_mm": 5},
+            8,
+        )
+        assert len(errs) == 1
+        assert errs[0].code == "FLANGE_TOO_SHORT"
+        detail_lower = errs[0].detail.lower()
+        assert "товщин" in detail_lower
+        assert "радіус" in detail_lower
+
+    def test_ребро_трохи_більше_t_r_і_більше_m_валідне(self) -> None:
+        assert (
+            validate_enclosed_shelf(
+                "enclosed_shelf",
+                {"stiffening_rib": {"height_mm": 13.5}, "bend_radius_mm": 5},
+                8,
             )
             == []
         )
@@ -325,10 +361,18 @@ class TestEnclosedShelfGateServer:
         assert status == 422
         assert ("PERFORATION_DOES_NOT_FIT", "side_perforation.hole_size_mm") in codes, codes
 
-    def test_ребро_трохи_більше_t_r_через_export_200(self) -> None:
-        # Межа правила 1: 5.5 > t + r = 5 → експорт проходить.
+    def test_ребро_на_межі_t_r_але_менше_m_через_export_422(self) -> None:
+        # Доробка #304: 5.5 > t+r=5, але < M=7.5 — ребро — це полиця.
         status, codes = self._export(
             {"bend_radius_mm": 2.5, "stiffening_rib": {"height_mm": 5.5}}, 2.5
+        )
+        assert status == 422
+        assert ("FLANGE_TOO_SHORT", "stiffening_rib.height_mm") in codes, codes
+
+    def test_ребро_на_межі_m_через_export_200(self) -> None:
+        # Межа правила 1 (M=7.5): 7.5 >= M і 7.5 > t+r=5 → експорт проходить.
+        status, codes = self._export(
+            {"bend_radius_mm": 2.5, "stiffening_rib": {"height_mm": 7.5}}, 2.5
         )
         assert status == 200, codes
 
