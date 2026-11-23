@@ -520,9 +520,22 @@ describe("validateExportProfile/validateExportPerforation — enclosed_shelf (is
     });
   });
 
-  it("ребро 5.5 мм при t=2.5 r=2.5 → []", () => {
+  // Доробка #304: 5.5 > t+r=5, але < M=7.5 — ребро — це полиця, тож тепер невалідне.
+  it("ребро 5.5 мм при t=2.5 r=2.5 → FLANGE_TOO_SHORT (< M=7.5)", () => {
+    const issues = validateExportProfile(
+      req({ bend_radius_mm: 2.5, stiffening_rib: { height_mm: 5.5 } }, 2.5),
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "FLANGE_TOO_SHORT",
+      field: "stiffening_rib.height_mm",
+      value: 5.5,
+    });
+  });
+
+  it("ребро 7.5 мм (== M) при t=2.5 r=2.5 → []", () => {
     expect(
-      validateExportProfile(req({ bend_radius_mm: 2.5, stiffening_rib: { height_mm: 5.5 } }, 2.5)),
+      validateExportProfile(req({ bend_radius_mm: 2.5, stiffening_rib: { height_mm: 7.5 } }, 2.5)),
     ).toEqual([]);
   });
 

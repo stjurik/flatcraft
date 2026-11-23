@@ -50,10 +50,14 @@ export interface EnclosedShelfRibParams {
 }
 
 /**
- * Ребро жорсткості (issue #283 п.1): валідно при `height_mm > t + r`
- * (строго) — як flange у z_bracket/wall_shelf/perforated_panel
- * (`profile.ts`), той самий код `FLANGE_TOO_SHORT`. `null` — ребра немає,
- * нічого перевіряти.
+ * Ребро жорсткості (issue #283 п.1, доробка #304): ребро — це полиця, тож
+ * валідно при `height_mm >= M` (глобальний `global.min_flange_mm`,
+ * bend-machine spec, CLAUDE.md §7) **і** `height_mm > t + r` (строго, як
+ * flange у z_bracket/wall_shelf/perforated_panel, `profile.ts`) — обидві
+ * умови одночасно, той самий код `FLANGE_TOO_SHORT`. Повідомлення називає
+ * діючий порог `max(M, t + r)`: коли `M >= t + r`, діє мінімальна полиця;
+ * інакше — геометрія (товщина + радіус). `null` — ребра немає, нічого
+ * перевіряти.
  */
 export function validateEnclosedShelfRib(
   params: EnclosedShelfRibParams,
@@ -63,14 +67,20 @@ export function validateEnclosedShelfRib(
   const t = thicknessMm;
   const r = params.bend_radius_mm;
   const h = params.stiffening_rib.height_mm;
-  const min = t + r;
-  if (h > min) return [];
+  const tr = t + r;
+  const minFlangeMm = bakedSpec.global.min_flange_mm;
+  if (h >= minFlangeMm && h > tr) return [];
+  const threshold = Math.max(minFlangeMm, tr);
+  const message =
+    minFlangeMm >= tr
+      ? `Збільшіть «Висота ребра»: потрібно не менше ${fmt(threshold)} мм (мінімальна полиця після гиба) — зараз ${fmt(h)} мм.`
+      : `Збільшіть «Висота ребра»: потрібно більше за ${fmt(threshold)} мм (товщина ${fmt(t)} + радіус ${fmt(r)}) — зараз ${fmt(h)} мм.`;
   return [
     {
       field: "stiffening_rib.height_mm",
       code: "FLANGE_TOO_SHORT",
       value: h,
-      message: `Збільшіть «Висота ребра»: потрібно більше за ${fmt(min)} мм (товщина ${fmt(t)} + радіус ${fmt(r)}) — зараз ${fmt(h)} мм.`,
+      message,
     },
   ];
 }
