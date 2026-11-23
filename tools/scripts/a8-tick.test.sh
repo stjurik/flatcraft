@@ -462,12 +462,17 @@ body[i:i+20]=b; open(p,"wb").write(bytes(body)+hashlib.sha1(bytes(body)).digest(
   nocommit) echo '{"type":"result","is_error":false,"result":"nothing"}' ;;
   fail) echo '{"type":"result","is_error":true,"result":"boom"}'; exit 1 ;;
   auth) echo '{"type":"result","is_error":true,"num_turns":1,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}'; exit 1 ;;
-  quota | quota-commit)
+  quota | quota-commit | quota-detach)
     # 429 посеред сесії — форма з runs.log A8 (15–17.11). Агент лишає НЕЗАКОМІЧЕНУ
     # роботу (як 058/062: змінений трекований і новий файл); quota-commit — ще й
-    # один коміт: таку гілку прибирати не можна.
+    # один коміт: таку гілку прибирати не можна; quota-detach — коміт на
+    # ВІДОКРЕМЛЕНОМУ HEAD, гілка на базі (контрприклад Neon №2, #331).
     [[ "$AGENT_MODE" == quota-commit ]] &&
       git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m work
+    if [[ "$AGENT_MODE" == quota-detach ]]; then
+      git -C "$wt" checkout -q --detach
+      git -C "$wt" -c user.email=a@a -c user.name=a commit -q --allow-empty -m detached-work
+    fi
     echo changed >>"$wt/CLAUDE.md"
     echo half >"$wt/half-done.txt"
     echo '{"type":"result","subtype":"success","is_error":true,"num_turns":40,"terminal_reason":"api_error","api_error_status":429,"result":"x"}'
@@ -730,6 +735,53 @@ run_scenarios() {
     ok "429 з комітами → гілка й дерево цілі, задача у failed/ з причиною, пауза є" || bad "429 з комітами: $(last)"
   ! grep -q failed "$LOGS/last-results" 2>/dev/null &&
     ok "429 з комітами теж не рахується в падіння поспіль" || bad "429 з комітами записано як failed"
+  teardown
+
+  # 6q-detach. 429, а агент закомітив на відокремленому HEAD: гілка на базі, але
+  # `worktree remove --force` забрав би коміт — дерево лишається, задача у failed/.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=quota-detach tick
+  [[ "$(jl .result)" == quota && "$(jl .detail)" == *"HEAD worktree має коміти (відокремлений HEAD) — не повертаю в чергу" &&
+    -e "$QD/failed/001-a.json" && -d "$ROOT/wt/a" ]] &&
+    ok "429 з комітом на відокремленому HEAD → дерево ціле, задача у failed/" || bad "429 detached HEAD: $(last)"
+  teardown
+
+  # 6q-межа. 429 поспіль без кінця — черга мовчки стояла б (контрприклади #331).
+  # Третій поспіль → STOP із причиною; будь-який інший результат серію скидає.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=quota tick
+  rm -f "$LOGS/quota-until"
+  AGENT_MODE=quota tick
+  [[ ! -e "$ROOT/STOP" && "$(cat "$LOGS/quota-streak" 2>/dev/null)" == 2 ]] &&
+    ok "два 429 поспіль → серія 2, STOP ще немає" || bad "серія 429: '$(cat "$LOGS/quota-streak" 2>/dev/null)' STOP=$([[ -e "$ROOT/STOP" ]] && echo є)"
+  rm -f "$LOGS/quota-until"
+  AGENT_MODE=quota tick
+  grep -q '^429 (квота) 3 разів поспіль, останній — задача a' "$ROOT/STOP" 2>/dev/null &&
+    [[ "$(jl .detail)" == *"3 поспіль — STOP" && -e "$QD/001-a.json" ]] &&
+    ok "третій 429 поспіль → STOP із причиною й ліками, задача в черзі" || bad "межа 429: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=quota tick
+  rm -f "$LOGS/quota-until"
+  AGENT_MODE=quota tick
+  rm -f "$LOGS/quota-until"
+  tick
+  [[ "$(jl .task)" == a && "$(jl .result)" == no-credential && ! -e "$LOGS/quota-streak" ]] &&
+    ok "успішний прогін після двох 429 скидає серію" || bad "скидання серії 429: $(last)"
+  teardown
+
+  # 6q-запис. Паузу не вдалося записати → fail closed: звичайне падіння (без
+  # паузи повернута задача крутилась би «429 → одразу знову»).
+  setup
+  enqueue 001-a "$(valid a)"
+  mkdir -p "$LOGS/quota-until.tmp"
+  AGENT_MODE=quota tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"не вдалося записати"* && -e "$QD/failed/001-a.json" ]] &&
+    grep -q '^failed$' "$LOGS/last-results" &&
+    ok "quota-until не записався → failed, рахується в падіння" || bad "збій запису паузи: $(last)"
   teardown
 
   # 6q-bad. Сміття в quota-until не тримає чергу вічно: подія, файл прибрано, задачу взято.
@@ -1894,10 +1946,15 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "quota обробляється як невідомий клас" 's/\n  quota\)\n/\n  quota_never)\n/'
-  mutate "quota: дерево не прибирається" 's/(q_note="пауза до[^\n]*\n    if )release_or_keep/${1}false/'
+  mutate "quota: дерево не прибирається" 's/if release_or_keep; then\n      finish quota quota/if false; then\n      finish quota quota/'
   mutate "quota: пауза нульова" 's/q_until=\$\(\(\$\(now\) \+ A8_QUOTA_COOLDOWN_S\)\)/q_until=\$(now)/'
   mutate "quota: пауза не зупиняє тік" 's/(quota_wait "після 429[^\n]*\n)    exit 0\n/${1}/'
   mutate "quota рахується як падіння" 's/(\n    q_until=)/\n    "\$GUARD" record failed$1/'
+  mutate "quota: серія не росте" 's/q_streak=\$\(\(10#\$q_streak \+ 1\)\)/q_streak=1/'
+  mutate "quota: серія не скидається" 's/\[\[ "\$cls" == quota \]\] \|\| rm -f "\$quota_streak_file"\n//'
+  mutate "quota: межа без STOP" 's/("\$A8_QUOTA_COOLDOWN_S" "\$A8_KILL_SWITCH") >"\$A8_KILL_SWITCH"/$1 >\/dev\/null/'
+  mutate "quota: збій запису паузи без fail_task" 's/      fail_task "\$detail; не вдалося записати \$quota_file"\n//'
+  mutate "HEAD дерева не перевіряється" 's/    keep_why="HEAD worktree має коміти \(відокремлений HEAD\)"\n    return 1\n/    :\n/'
   mutate "quota: минулу паузу не прибрано" 's/\[\[ -n "\$\{qarg:-\}" \]\] && rm -f "\$quota_file"/:/'
   mutate "no-credential як ok" 's/finish no-credential ok/finish ok ok/'
   mutate "відхилений запис лишається в черзі" 's/  qmv "\$f" "\$Q\/rejected\/"\n//'
