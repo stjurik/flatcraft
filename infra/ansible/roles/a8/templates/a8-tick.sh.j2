@@ -195,6 +195,7 @@ fi
 # повернута задача бралась би наступним тіком і знову отримувала 429, з'їдаючи
 # денний ліміт. Рішення — у логіці (quota-wait, під тестом); тут лише дія.
 quota_file="$A8_LOGS_DIR/quota-until"
+quota_streak_file="$A8_LOGS_DIR/quota-streak"
 read -r qstate qarg < <(logic quota-wait "$quota_file" "$(now)")
 case "$qstate" in
   wait)
@@ -376,6 +377,26 @@ finish() { # finish <результат> <клас> <деталь> <куди>
 # Викликається лише після кроку 3, коли $base уже записано.
 # Чому не повернули — у $keep_why: це йде в журнал.
 keep_why=""
+# wt_head → SHA HEAD дерева $wt з `worktree list --porcelain` головного клону; 1 —
+# дерево не зареєстроване чи git відмовив. Шлях порівнюється після realpath: git
+# друкує канонічний шлях, а $wt зібрано з конфігу.
+wt_head() {
+  local out line cur="" want
+  want="$(realpath -m -- "$wt")"
+  out="$(hgit worktree list --porcelain 2>>"$log")" || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) cur="$(realpath -m -- "${line#worktree }")" ;;
+      "HEAD "*)
+        if [[ "$cur" == "$want" && "${line#HEAD }" =~ ^[0-9a-f]{40,64}$ ]]; then
+          echo "${line#HEAD }"
+          return 0
+        fi
+        ;;
+    esac
+  done <<<"$out"
+  return 1
+}
 release_or_keep() {
   local cnt
   # #291: перш ніж чіпати git на хості (hgit нижче), переконатись, що контейнер
@@ -401,6 +422,20 @@ release_or_keep() {
   fi
   if [[ "$cnt" != 0 ]]; then
     keep_why="гілка має коміти"
+    return 1
+  fi
+  # Коміти на ВІДОКРЕМЛЕНОМУ HEAD дерева гілка не бачить, а `worktree remove
+  # --force` забрав би їх разом із reflog дерева (контрприклад Neon №2, #331 —
+  # quota кличе цю функцію посеред сесії). HEAD — з адмінки головного клону
+  # (`worktree list --porcelain`), як у a8-requeue.sh, не з "$wt/.git". Не
+  # знайшли HEAD чи не порахували — лишаємо: fail closed.
+  local wh
+  if ! wh="$(wt_head)" || ! cnt="$(hgit rev-list --count "$base..$wh" 2>>"$log")"; then
+    keep_why="не вдалось визначити HEAD worktree — гілку й worktree лишаю"
+    return 1
+  fi
+  if [[ "$cnt" != 0 ]]; then
+    keep_why="HEAD worktree має коміти (відокремлений HEAD)"
     return 1
   fi
   if ! hgit worktree remove --force "$wt" >>"$log" 2>&1; then
@@ -718,6 +753,9 @@ read -r cls detail < <(logic classify "$rc" "$out" "$executor")
 # Виняток — 401: його причина (потрібен claude setup-token) мусить потрапити і
 # в журнал, і в сам файл STOP, інакше людина зніме STOP, а наступна задача
 # знову впаде на 401.
+# Серія quota поспіль (межа — у гілці quota нижче) рветься будь-яким іншим
+# результатом агента: квота, значить, відновилась.
+[[ "$cls" == quota ]] || rm -f "$quota_streak_file"
 if [[ "$cls" != auth_stop ]] && stop_requested; then stop_task "під час агента"; fi
 case "$cls" in
   auth_stop)
@@ -759,6 +797,26 @@ case "$cls" in
       exit 0
     fi
     q_note="пауза до $(date -u -d "@$q_until" +%FT%TZ)"
+    # МЕЖА (контрприклади Argon №2 і Neon №1, #331): без неї довгий ліміт
+    # (тиждень, білінг) крутив би «прогін → 429 → пауза» без кінця, і черга
+    # мовчки стояла б. quota поспіль рахує quota-streak (будь-який інший клас
+    # скидає її нижче, до case); на A8_CONSECUTIVE_FAILURE_LIMIT-й — STOP із
+    # причиною й ліками: зняти його — рішення людини, як після 401. Не вдалося
+    # записати серію — лічити нічим, тож сигнал одразу.
+    q_streak="$(cat "$quota_streak_file" 2>/dev/null)"
+    [[ "$q_streak" =~ ^[0-9]{1,6}$ ]] || q_streak=0
+    q_streak=$((10#$q_streak + 1))
+    if ! { printf '%s\n' "$q_streak" >"$quota_streak_file.tmp" && mv -f "$quota_streak_file.tmp" "$quota_streak_file"; } 2>/dev/null; then
+      q_streak="$A8_CONSECUTIVE_FAILURE_LIMIT"
+    fi
+    if ((q_streak >= A8_CONSECUTIVE_FAILURE_LIMIT)); then
+      (
+        set -o noclobber
+        printf '429 (квота) %s разів поспіль, останній — задача %s, %s: квота не відновлюється за паузу %s с. Ліки: перевірити ліміт підписки Claude, потім rm %s.\n' \
+          "$q_streak" "$id" "$(date -u +%FT%TZ)" "$A8_QUOTA_COOLDOWN_S" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+      ) 2>/dev/null
+      q_note+="; $q_streak поспіль — STOP"
+    fi
     if release_or_keep; then
       finish quota quota "$detail; $q_note" queue
     else
