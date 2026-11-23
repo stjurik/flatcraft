@@ -7,9 +7,13 @@
 `avail_x < 0` → `()`) чи падає 500 (`unfold_enclosed_shelf` кидає `ValueError`
 на замале ребро поза `try` у `server.py`).
 
-Правила (позначення: t=thickness_mm, r=bend_radius_mm, d=depth_mm):
-  1. stiffening_rib.height_mm > t + r (строго) — інакше FLANGE_TOO_SHORT
-     (той самий код, що rib_height у perforated_panel, `validate/profile.py`).
+Правила (позначення: t=thickness_mm, r=bend_radius_mm, d=depth_mm,
+M=global.min_flange_mm з bend-machine spec):
+  1. (доробка #304) ребро — це полиця: stiffening_rib.height_mm >= M **і**
+     > t + r (строго) — обидві умови одночасно, інакше FLANGE_TOO_SHORT (той
+     самий код, що rib_height у perforated_panel, `validate/profile.py`).
+     Повідомлення називає діючий порог max(M, t + r): коли M >= t + r, діє
+     мінімальна полиця; інакше — геометрія (товщина + радіус).
   2. side_perforation (h=hole_size_mm, m=margin_mm, w = d − (t+r) — вужча вісь
      боковини, та сама формула, що `avail_x` у `_enclosed_shelf_side_holes`):
      a. pitch_x_mm > h, pitch_y_mm > h — інакше HOLES_OVERLAP (окремо на кожну вісь).
@@ -82,9 +86,14 @@ def _as_float(value: Any) -> float | None:
     return f if f is not None and math.isfinite(f) else None
 
 
-def _rib_msg(h: float, tr: float, t: float, r: float) -> str:
+def _rib_msg(h: float, threshold: float, t: float, r: float, min_flange: float) -> str:
+    if min_flange >= t + r:
+        return (
+            f"Збільшіть «Висота ребра»: потрібно не менше {_fmt(threshold)} мм "
+            f"(мінімальна полиця після гиба) — зараз {_fmt(h)} мм."
+        )
     return (
-        f"Збільшіть «Висота ребра»: потрібно більше за {_fmt(tr)} мм "
+        f"Збільшіть «Висота ребра»: потрібно більше за {_fmt(threshold)} мм "
         f"(товщина {_fmt(t)} + радіус {_fmt(r)}) — зараз {_fmt(h)} мм."
     )
 
@@ -181,12 +190,13 @@ def validate_enclosed_shelf(
         h_rib = _as_float(rib.get("height_mm"))
         if h_rib is not None and t is not None and r is not None:
             tr = t + r
-            if h_rib <= tr:
+            min_flange = float(load_spec()["global"]["min_flange_mm"])
+            if h_rib < min_flange or h_rib <= tr:
                 errors.append(
                     EnclosedShelfError(
                         code="FLANGE_TOO_SHORT",
                         field="stiffening_rib.height_mm",
-                        detail=_rib_msg(h_rib, tr, t, r),
+                        detail=_rib_msg(h_rib, max(min_flange, tr), t, r, min_flange),
                     )
                 )
 
