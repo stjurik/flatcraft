@@ -781,6 +781,23 @@ run_executor_scenarios() {
     ok "немає налаштувань agy → failed agy-profile, agy не запущено, копії немає" || bad "agy-profile: $(last)"
   teardown
 
+  # 26j. Серія 429 Claude (#332) і прогін gemini між ними: agy на іншому пулі,
+  # тож серію не скидає — третій 429 Claude таки ставить STOP.
+  setup
+  enqueue 001-a "$(valid a)"
+  AGENT_MODE=quota tick
+  rm -f "$LOGS/quota-until"
+  AGENT_MODE=quota tick
+  rm -f "$LOGS/quota-until"
+  enqueue 000-g "$(gem g true)"
+  tick
+  [[ "$(jl .task)" == g && "$(jl .executor)" == gemini && "$(cat "$LOGS/quota-streak" 2>/dev/null)" == 2 ]] &&
+    ok "прогін gemini між 429 Claude серію quota не скидає" || bad "серія після gemini: '$(cat "$LOGS/quota-streak" 2>/dev/null)'; $(last)"
+  AGENT_MODE=quota tick
+  [[ "$(jl .task)" == a ]] && grep -q '^429 (квота) 3 разів поспіль, останній — задача a' "$ROOT/STOP" 2>/dev/null &&
+    ok "третій 429 Claude після прогону gemini → STOP" || bad "межа 429 з gemini між ними: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
+
   # 26i. Невідомий executor відхиляє і тік (поле названо).
   setup
   enqueue 001-x "$(jq -c '.executor = "codex"' <<<"$(valid x)")"
@@ -2150,7 +2167,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "quota: пауза не зупиняє тік" 's/(quota_wait "після 429[^\n]*\n)    exit 0\n/${1}/'
   mutate "quota рахується як падіння" 's/(\n    q_until=)/\n    "\$GUARD" record failed$1/'
   mutate "quota: серія не росте" 's/q_streak=\$\(\(10#\$q_streak \+ 1\)\)/q_streak=1/'
-  mutate "quota: серія не скидається" 's/\[\[ "\$cls" == quota \]\] \|\| rm -f "\$quota_streak_file"\n//'
+  mutate "quota: серія не скидається" 's/\[\[ "\$cls" == quota \|\| "\$executor" == gemini \]\] \|\| rm -f "\$quota_streak_file"\n//'
+  mutate "quota: прогін gemini скидає серію Claude" 's/\[\[ "\$cls" == quota \|\| "\$executor" == gemini \]\]/[[ "\$cls" == quota ]]/'
   mutate "quota: межа без STOP" 's/("\$A8_QUOTA_COOLDOWN_S" "\$A8_KILL_SWITCH") >"\$A8_KILL_SWITCH"/$1 >\/dev\/null/'
   mutate "quota: збій запису паузи без fail_task" 's/      fail_task "\$detail; не вдалося записати \$quota_file"\n//'
   mutate "HEAD дерева не перевіряється" 's/    keep_why="HEAD worktree має коміти \(відокремлений HEAD\)"\n    return 1\n/    :\n/'

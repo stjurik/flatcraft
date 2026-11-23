@@ -754,8 +754,11 @@ read -r cls detail < <(logic classify "$rc" "$out" "$executor")
 # в журнал, і в сам файл STOP, інакше людина зніме STOP, а наступна задача
 # знову впаде на 401.
 # Серія quota поспіль (межа — у гілці quota нижче) рветься будь-яким іншим
-# результатом агента: квота, значить, відновилась.
-[[ "$cls" == quota ]] || rm -f "$quota_streak_file"
+# результатом агента Claude: квота, значить, відновилась. Прогін agy (executor
+# gemini) серії не чіпає: він на іншому пулі й про квоту Claude нічого не каже,
+# а задача gemini з urgent/ чи раніша за іменем між двома 429 інакше скидала б
+# межу, і STOP не настав би ніколи.
+[[ "$cls" == quota || "$executor" == gemini ]] || rm -f "$quota_streak_file"
 if [[ "$cls" != auth_stop ]] && stop_requested; then stop_task "під час агента"; fi
 case "$cls" in
   auth_stop)
