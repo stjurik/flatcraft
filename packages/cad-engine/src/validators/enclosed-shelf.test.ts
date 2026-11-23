@@ -38,9 +38,47 @@ describe("validateEnclosedShelfRib", () => {
     expect(issues[0]?.message).toContain("4.9");
   });
 
-  it("height_mm 5.5 > t+r → []", () => {
+  // Доробка #304 (issue #304, рішення yurii 06.11): ребро — це полиця, тож
+  // h > t+r самого по собі більше не достатньо — потрібно ще й h >= M
+  // (bakedSpec.global.min_flange_mm = 7.5).
+  it("height_mm 5.5 > t+r, але < M (7.5) → FLANGE_TOO_SHORT", () => {
+    const issues = validateEnclosedShelfRib(
+      { stiffening_rib: { height_mm: 5.5 }, bend_radius_mm: 2.5 },
+      2.5,
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "FLANGE_TOO_SHORT",
+      field: "stiffening_rib.height_mm",
+      value: 5.5,
+    });
+    expect(issues[0]?.message).toContain("полиц");
+  });
+
+  it("height_mm == M (7.5, t=2.5 r=2.5) → []", () => {
     expect(
-      validateEnclosedShelfRib({ stiffening_rib: { height_mm: 5.5 }, bend_radius_mm: 2.5 }, 2.5),
+      validateEnclosedShelfRib({ stiffening_rib: { height_mm: 7.5 }, bend_radius_mm: 2.5 }, 2.5),
+    ).toEqual([]);
+  });
+
+  it("height_mm >= M, але <= t+r (13 при t=8, r=5) → FLANGE_TOO_SHORT, повідомлення про товщину+радіус", () => {
+    const issues = validateEnclosedShelfRib(
+      { stiffening_rib: { height_mm: 13 }, bend_radius_mm: 5 },
+      8,
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      code: "FLANGE_TOO_SHORT",
+      field: "stiffening_rib.height_mm",
+      value: 13,
+    });
+    expect(issues[0]?.message).toContain("товщина");
+    expect(issues[0]?.message).toContain("радіус");
+  });
+
+  it("height_mm > t+r > M (13.5 при t=8, r=5) → []", () => {
+    expect(
+      validateEnclosedShelfRib({ stiffening_rib: { height_mm: 13.5 }, bend_radius_mm: 5 }, 8),
     ).toEqual([]);
   });
 });
