@@ -76,7 +76,7 @@ fi
 # docker не викликано).
 run() {
   rm -f "$ROOT/docker-args"
-  env -i PATH="$ROOT/bin:/usr/bin:/bin" "$@" bash "$ROOT/a8-run-agent" "$ROOT/wt" agy -p x >"$ROOT/out" 2>&1
+  env -i PATH="$ROOT/bin:/usr/bin:/bin" "$@" bash "$ROOT/a8-run-agent" "${RUN_WT:-$ROOT/wt}" agy -p x >"$ROOT/out" 2>&1
 }
 has_arg() { grep -qxF -- "$1" "$ROOT/docker-args" 2>/dev/null; }
 mentions() { grep -qF -- "$1" "$ROOT/docker-args" 2>/dev/null; }
@@ -189,6 +189,38 @@ run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
 ((rc == 0)) && has_arg "$CH:$CH" &&
   ok "claude з токеном — спільний container-home, як і був" || bad "claude спільний home: rc=$rc"
 
+# 14–17. Головний клон (повторний погляд Sonnet на безпеку, PR #277): задача зі
+# своїм $HOME бачить його лише для читання (.git — на запис, окремо) і не має
+# його node_modules/.bin у PATH; смуга Claude — як і була.
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
+((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo:ro" && ! has_arg "$ROOT/repo:$ROOT/repo" &&
+  has_arg "$ROOT/repo/.git:$ROOT/repo/.git" &&
+  ok "gemini: головний клон лише для читання, його .git — на запис" ||
+  bad "gemini repo (rc=$rc): $(grep -F "$ROOT/repo" "$ROOT/docker-args" 2>/dev/null | tr '\n' ' ')"
+((rc == 0)) && has_arg "PATH=$ROOT/wt/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" &&
+  ok "gemini: у PATH лише node_modules/.bin свого worktree, без головного клону" ||
+  bad "gemini PATH: $(grep '^PATH=' "$ROOT/docker-args" 2>/dev/null)"
+rc=0
+run A8_EXECUTOR=claude A8_HOME_SRC="$LANE" || rc=$?
+((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo:ro" && ! mentions "$ROOT/repo/node_modules/.bin" &&
+  ok "claude без токена з текою задачі gemini (оракул, залежності) — так само: клон лише для читання" ||
+  bad "claude з LANE repo (rc=$rc)"
+rc=0
+run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
+((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo" && mentions "$ROOT/repo/node_modules/.bin" &&
+  ok "смуга Claude — головний клон на запис і його node_modules/.bin у PATH, як і були" ||
+  bad "claude repo (rc=$rc)"
+rc=0
+RUN_WT="$ROOT/repo" run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "задача зі своїм \$HOME, а worktree — головний клон → відмова (2)" || bad "worktree=репо: rc=$rc"
+ln -s "$ROOT/agy-home" "$ROOT/agy-link"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-link" A8_HOME_SRC="$LANE" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "A8_AGY_HOME — симлінк → відмова (2)" || bad "A8_AGY_HOME симлінк: rc=$rc"
+
 if [[ -z "${A8_RUNNER_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
   echo "✗ мутації НЕ ганялись: базовий набір червоний (на червоному базисі кожен мутант «вбитий»)."
 elif [[ -z "${A8_RUNNER_UNDER_TEST:-}" ]]; then
@@ -221,6 +253,10 @@ elif [[ -z "${A8_RUNNER_UNDER_TEST:-}" ]]; then
   mutate "\$HOME контейнера завжди спільний" 's/  -v "\$HOME_SRC:\{\{ a8_container_home \}\}"/  -v "{{ a8_container_home }}:{{ a8_container_home }}"/'
   mutate "токен Claude з текою задачі gemini" 's/      if \(\(!shared_home\)\); then/      if false; then/'
   mutate "A8_HOME_SRC-симлінк прийнято" 's/\[\[ -L "\$A8_HOME_SRC" \|\| ! -d/[[ ! -d/'
+  mutate "головний клон на запис і для задачі gemini" 's/  REPO_RO=":ro"\n//'
+  mutate "node_modules/.bin головного клону в PATH задачі gemini" 's/  CPATH="\$WORKTREE\/node_modules\/.bin:\/usr\/local\/sbin/  CPATH="\$WORKTREE\/node_modules\/.bin:{{ a8_repo_dir }}\/node_modules\/.bin:\/usr\/local\/sbin/'
+  mutate "worktree = головний клон прийнято" 's/(    echo "a8-run-agent: worktree задачі зі своїм[^\n]*\n)    exit 2\n/$1/'
+  mutate "A8_AGY_HOME-симлінк прийнято" 's/ \|\| -L "\$A8_AGY_HOME" \]\]/ ]]/'
   mutate "спільність home за рядком, не за realpath" 's/\[\[ "\$\(realpath -m -- "\$HOME_SRC"\)" == "\$\(realpath -m -- "\{\{ a8_container_home \}\}"\)" \]\]/[[ "\$HOME_SRC" == "{{ a8_container_home }}" ]]/'
 fi
 

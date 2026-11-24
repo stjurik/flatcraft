@@ -154,7 +154,15 @@ fi
 # убитий посеред задачі, лишив би копію з креденшалами Google на диску — її
 # прибирає наступний тік, уже під lock'ом. Задача виконавця gemini, на якій
 # червоніє оракул, повертається в чергу (gemini_retry нижче, §8 п.4).
-rm -rf "$A8_LOGS_DIR/agy-run"
+# rm_tree <тека> — прибрати теку, писану контейнером: `chmod 000` всередині
+# інакше тихо зупинив би `rm -rf`, і копія з логіном Google лишилась би на
+# диску (повторний погляд Sonnet, PR #277). chmod -R за симлінками під час
+# обходу не йде, rm -rf — теж; саму теку робить тік, вона не симлінк.
+rm_tree() {
+  chmod -R u+rwX -- "$1" 2>/dev/null
+  rm -rf -- "$1"
+}
+rm_tree "$A8_LOGS_DIR/agy-run"
 
 # ─── 0. Сирота з попереднього тіку ─────────────────────────────────────────
 # Файл у running/ при вільному lock означає: попередній тік помер посеред
@@ -373,7 +381,7 @@ finish() { # finish <результат> <клас> <деталь> <куди>
   fi
   # rm -rf за симлінками всередині не йде, тож те, що контейнер підклав у
   # теку задачі, поза нею нічого не зачепить.
-  [[ -n "${lane_root:-}" ]] && rm -rf "$lane_root"
+  [[ -n "${lane_root:-}" ]] && rm_tree "$lane_root"
   return 0
 }
 
@@ -639,7 +647,7 @@ snapshot_git
 # виконує код залежностей (postinstall), а хуки ставить у $HOME/.a8-git-hooks.
 # Ціна — кеші pnpm/uv для задачі gemini щоразу порожні (повне завантаження).
 if [[ -n "$lane_root" ]]; then
-  if ! herr="$( (umask 077 && rm -rf "$lane_root" && mkdir -p "$lane_root/home") 2>&1)"; then
+  if ! herr="$( (umask 077 && rm_tree "$lane_root" && mkdir -p "$lane_root/home") 2>&1)"; then
     "$GUARD" count >/dev/null
     fail_task "lane-home: ${herr%%$'\n'*}"
     exit 0
@@ -709,11 +717,15 @@ if [[ "$executor" == gemini ]]; then
   agy_home="$lane_root/gemini"
   asettings="$agy_home/antigravity-cli/settings.json"
   # Ланцюжок `&&`, а не `set -e`: у підоболонці в умові `if` bash ігнорує -e.
+  # Симлінк у скопійованій теці (antigravity-cli чи settings.json) повів би запис
+  # профілю нижче за межі копії — у хостову теку (повторний погляд Sonnet №4).
   if ! aerr="$(umask 077 && mkdir -p "$agy_home" &&
     cp -a "$A8_AGY_CONFIG_DIR/." "$agy_home/" 2>&1 &&
+    { [[ ! -L "$agy_home/antigravity-cli" && ! -L "$asettings" ]] ||
+      { echo "у теці agy симлінк (antigravity-cli чи settings.json) — профіль не пишу"; false; }; } &&
     logic agy-settings "$asettings" "$AGY_TEMPLATE" "$wt" 2>&1 >"$asettings.new" &&
     mv -f "$asettings.new" "$asettings")"; then
-    rm -rf "$agy_home"
+    rm_tree "$agy_home"
     printf '%s\n' "$aerr" >>"$log"
     "$GUARD" count >/dev/null
     fail_task "agy-profile: ${aerr%%$'\n'*}"
@@ -730,7 +742,7 @@ if [[ "$executor" == gemini ]]; then
   # якщо бачить його в середовищі (a8-run-agent.test.sh). Режим і тека — лише
   # в середовищі ЦЬОГО виклику: залежності, хук і оракул ідуть без них.
   A8_EXECUTOR=gemini A8_AGY_HOME="$agy_home" \
-    timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" agy -p "$prompt" \
+    timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" /usr/local/bin/agy -p "$prompt" \
     --model "$model" \
     --log-file "$A8_CONTAINER_HOME/.gemini/agy.log" >"$out" 2>&1 || rc=$?
 fi
@@ -760,11 +772,16 @@ fi
 # на запис, тож agy.log — шлях агента: лише звичайний файл (симлінк на токен
 # Claude ліг би в tasks/ як «доказ»), лише після того, як контейнер зник, і з -T
 # (тека на місці цілі не стає місцем запису). Рецензія Sonnet №2, PR #277.
+# Контейнер мусить зникнути за БУДЬ-ЯКОГО коду, не лише за таймауту: клієнт
+# docker, що загинув інакше (OOM, 137), лишив би живий контейнер, і той підмінив
+# би agy.log між перевіркою й `mv` (повторний погляд Sonnet №7). Не зник —
+# логу не беремо, копію прибираємо однаково.
 if [[ -n "$agy_home" ]]; then
-  if [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
+  if ensure_container_gone "$A8_CONTAINER_NAME" &&
+    [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
     mv -fT "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
   fi
-  rm -rf "$agy_home"
+  rm_tree "$agy_home"
 fi
 
 # Лічимо ПІСЛЯ запуску. Причина була в тому, що обгортка кликала `a8-guard

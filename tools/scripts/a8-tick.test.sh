@@ -133,22 +133,29 @@ exec 9>&-
 # би на демоні, який на останній задачі дня валить власний оракул кодом 11.
 "$A8_GUARD" check-run >/dev/null 2>&1 || exit $?
 echo "run-agent $*" >>"$CALLS"
+# Ім'я команди без шляху: agy тік кличе як /usr/local/bin/agy (не через PATH).
+c1="${1##*/}"
+[[ "$c1" == agy ]] && echo "agy-path $1" >>"$CALLS"
 # Що бачить «контейнер» у середовищі: токен Claude, режим і теку agy (лише
 # факт наявності — значення в журнал не пишемо).
-echo "env ${1} executor=${A8_EXECUTOR:-none} token=${CLAUDE_CODE_OAUTH_TOKEN:+set} agy_home=${A8_AGY_HOME:+set}" >>"$CALLS"
+echo "env ${c1} executor=${A8_EXECUTOR:-none} token=${CLAUDE_CODE_OAUTH_TOKEN:+set} agy_home=${A8_AGY_HOME:+set}" >>"$CALLS"
 # $HOME контейнера: тека задачі (A8_HOME_SRC) чи спільний container-home.
-echo "home ${1} ${A8_HOME_SRC:-shared}${A8_HOME_SRC:+ $([[ -d "$A8_HOME_SRC" && ! -L "$A8_HOME_SRC" ]] && echo dir || echo missing)}" >>"$CALLS"
+echo "home ${c1} ${A8_HOME_SRC:-shared}${A8_HOME_SRC:+ $([[ -d "$A8_HOME_SRC" && ! -L "$A8_HOME_SRC" ]] && echo dir || echo missing)}" >>"$CALLS"
 # Промпт багаторядковий, тож модель і лог — окремим рядком.
-if [[ "$1" == agy || "$1" == claude ]]; then
+if [[ "$c1" == agy || "$c1" == claude ]]; then
   m="" lf="" prev=""
   for a in "$@"; do
     [[ "$prev" == --model ]] && m="$a"
     [[ "$prev" == --log-file ]] && lf="$a"
     prev="$a"
   done
-  echo "args $1 model=$m log=$lf" >>"$CALLS"
+  echo "args $c1 model=$m log=$lf" >>"$CALLS"
 fi
-if [[ "$1" == agy ]]; then
+if [[ "$c1" == agy ]]; then
+  # chmod 000 у теці агента (AGY_CHMOD000): прибирання мусить пережити й це.
+  if [[ -n "${AGY_CHMOD000:-}" ]]; then
+    mkdir -p "$A8_AGY_HOME/locked/x" "$A8_HOME_SRC/locked/x" && chmod 000 "$A8_AGY_HOME/locked" "$A8_HOME_SRC/locked"
+  fi
   cp "$A8_AGY_HOME/antigravity-cli/settings.json" "$PIDS/agy-settings-seen" 2>/dev/null
   ls "$A8_AGY_HOME" >"$PIDS/agy-home-seen" 2>/dev/null
   # У справжньому контейнері --log-file пише в копію, змонтовану на $HOME/.gemini.
@@ -669,6 +676,9 @@ run_executor_scenarios() {
     ! grep -q "^args claude" "$LOGS/runner-calls" &&
     ok "executor gemini → запущено agy з моделлю Flash за замовчуванням, claude — ні" ||
     bad "gemini: $(grep '^args' "$LOGS/runner-calls")"
+  grep -qx "agy-path /usr/local/bin/agy" "$LOGS/runner-calls" &&
+    ok "agy — за абсолютним шляхом, не через PATH контейнера (node_modules/.bin)" ||
+    bad "шлях agy: $(grep '^agy-path' "$LOGS/runner-calls")"
   [[ "$(agent_env agy)" == "env agy executor=gemini token= agy_home=set" ]] &&
     ok "контейнер agy: токена Claude немає, тека agy є" || bad "середовище agy: $(agent_env agy)"
   [[ "$(jq -c .permissions "$LOGS/agy-settings-seen" 2>/dev/null)" == \
@@ -881,6 +891,27 @@ run_executor_scenarios() {
   tick
   [[ ! -e "$LOGS/agy-run/old" ]] && ok "осиротілу теку задачі gemini (логін Google) прибрав наступний тік" ||
     bad "agy-run/old лишився: $(ls -R "$LOGS/agy-run" 2>&1 | tr '\n' ' ')"
+  teardown
+
+  # 26p. Агент зробив chmod 000 у своїй теці — і копія з логіном Google, і
+  # $HOME задачі однаково прибрані (повторний погляд Sonnet №3, PR #277).
+  setup
+  enqueue 001-g "$(gem g true)"
+  AGY_CHMOD000=1 tick
+  [[ "$(jl .result)" == no-credential && ! -e "$LOGS/agy-run/g" ]] &&
+    ok "chmod 000 у теці агента не зупиняє прибирання копії з логіном і \$HOME задачі" ||
+    bad "chmod 000: $(ls -laR "$LOGS/agy-run" 2>&1 | head -5 | tr '\n' ' '); $(last)"
+  chmod -R u+rwX "$LOGS/agy-run" 2>/dev/null
+  teardown
+
+  # 26q. Контейнер агента не зник (клієнт docker загинув не за таймаутом):
+  # agy.log — шлях живого агента, його не беремо (повторний погляд Sonnet №7).
+  setup
+  enqueue 001-g "$(gem g true)"
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 tick
+  [[ ! -e "$LOGS/tasks/g.agy.log" && ! -e "$LOGS/agy-run/g/gemini" ]] &&
+    ok "контейнер агента не зник → agy.log не перенесено, копію з логіном прибрано" ||
+    bad "agy.log при живому контейнері: $(ls -l "$LOGS/tasks/g.agy.log" 2>&1); $(last)"
   teardown
 
   # 26i. Невідомий executor відхиляє і тік (поле названо).
@@ -2298,7 +2329,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "executor ігнорується — завжди claude" 's/if \[\[ "\$executor" == gemini \]\]; then\n  # Токена/if false; then\n  # Токена/'
   mutate "токен Claude і в контейнері agy" 's/\nrc=0\nif \[\[ "\$executor" == gemini \]\]; then\n/\nrc=0\nexport CLAUDE_CODE_OAUTH_TOKEN=tok\nif [[ "\$executor" == gemini ]]; then\n/'
   mutate "тека agy і для оракула" 's/  A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home" \\\n    timeout/  export A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home"\n  timeout/'
-  mutate "копію з логіном agy не прибрано" 's/(    mv -fT "\$agy_home\/agy\.log"[^\n]*\n  fi\n)  rm -rf "\$agy_home"\n/$1/'
+  mutate "копію з логіном agy не прибрано" 's/(    mv -fT "\$agy_home\/agy\.log"[^\n]*\n  fi\n)  rm_tree "\$agy_home"\n/$1/'
   mutate "профіль виконавця не підставлено" 's/ &&\n    mv -f "\$asettings\.new" "\$asettings"\)/)/'
   mutate "gemini з моделлю claude за замовчуванням" 's/model="\$\{model:-\$A8_GEMINI_MODEL\}"/model="\${model:-\$A8_DEFAULT_MODEL}"/'
   mutate "backstop тестів приймання прибрано" 's/if ! aviol="/if false \&\& ! aviol="/'
@@ -2310,10 +2341,13 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "model не прибрано при переведенні" 's/\.executor = "claude" \| del\(\.model\) \|/.executor = "claude" |/'
   mutate "гілку спроби gemini видалено" 's/branch -m "\$branch" "\$keep"/branch -D "\$branch"/'
   mutate "повтору gemini немає" 's/  \[\[ "\$executor" == gemini \]\] && gemini_retry "\$orc"\n//'
-  mutate "осиротілу теку agy-run не прибрано" 's/\nrm -rf "\$A8_LOGS_DIR\/agy-run"\n/\n/'
+  mutate "осиротілу теку agy-run не прибрано" 's/\nrm_tree "\$A8_LOGS_DIR\/agy-run"\n/\n/'
+  mutate "agy через PATH контейнера" 's/"\$RUNNER" "\$wt" \/usr\/local\/bin\/agy -p/"\$RUNNER" "\$wt" agy -p/'
+  mutate "прибирання без chmod" 's/  chmod -R u\+rwX -- "\$1" 2>\/dev\/null\n//'
+  mutate "лог agy без перевірки, що контейнер зник" 's/  if ensure_container_gone "\$A8_CONTAINER_NAME" &&\n    \[\[ -f/  if [[ -f/'
   mutate "задача gemini — спільний \$HOME" 's/  export A8_HOME_SRC="\$lane_root\/home"\n//'
-  mutate "теку задачі gemini не прибрано" 's/  \[\[ -n "\$\{lane_root:-\}" \]\] && rm -rf "\$lane_root"\n//'
-  mutate "agy.log переноситься й симлінком" 's/if \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/if true; then/'
+  mutate "теку задачі gemini не прибрано" 's/  \[\[ -n "\$\{lane_root:-\}" \]\] && rm_tree "\$lane_root"\n//'
+  mutate "agy.log переноситься й симлінком" 's/    \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/    true; then/'
   mutate "gemini_retry не чекає контейнера оракула" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    retry_why="повтору gemini немає: контейнер/  if false; then\n    retry_why="повтору gemini немає: контейнер/'
   mutate "gemini_retry не перевіряє гілку спроби" 's/  if hgit rev-parse --verify --quiet "refs\/heads\/\$keep" >\/dev\/null; then/  if false; then/'
   mutate "падіння оракула gemini без причини відмови повтору" 's/fail_task "oracle rc=\$orc\$\{retry_why:\+; \$retry_why\}"/fail_task "oracle rc=\$orc"/'

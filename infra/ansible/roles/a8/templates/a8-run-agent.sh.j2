@@ -114,6 +114,28 @@ if [[ -n "${A8_HOME_SRC:-}" ]]; then
 fi
 shared_home=0
 [[ "$(realpath -m -- "$HOME_SRC")" == "$(realpath -m -- "{{ a8_container_home }}")" ]] && shared_home=1
+# Задача gemini (свій $HOME) не пише й у робоче дерево головного клону: воно
+# спільне з контейнерами Claude, а `node_modules/.bin` головного клону стоїть у
+# їхньому PATH перед /usr/bin — підкладений туди `git` чи `claude` виконався б
+# поруч із токеном (повторний погляд Sonnet на безпеку, PR #277). Тому:
+# головний клон — лише для читання (`.git` і `.git/worktrees` — окремими
+# монтуваннями на запис вище, без них коміт неможливий), а в PATH — лише
+# node_modules/.bin свого worktree. Навпаки так само: те, що Claude поклав у
+# node_modules/.bin головного клону, контейнер gemini не виконає. Worktree на
+# місці головного клону змонтував би його на запис — відмова.
+# Суфікс — у самому `-v` нижче, а не готовий рядок: інваріант 16
+# (check-ansible-a8.sh) впізнає обгортку, що монтує головний клон, саме за
+# `-v "{{ a8_repo_dir }}:{{ a8_repo_dir }}`.
+REPO_RO=""
+CPATH="$WORKTREE/node_modules/.bin:{{ a8_repo_dir }}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if ((!shared_home)); then
+  if [[ "$(realpath -m -- "$WORKTREE")" == "$(realpath -m -- "{{ a8_repo_dir }}")" ]]; then
+    echo "a8-run-agent: worktree задачі зі своїм \$HOME — це головний клон ($WORKTREE), відмовляю" >&2
+    exit 2
+  fi
+  REPO_RO=":ro"
+  CPATH="$WORKTREE/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
 case "${A8_EXECUTOR:-claude}" in
   claude)
     if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
@@ -131,7 +153,7 @@ case "${A8_EXECUTOR:-claude}" in
       echo "a8-run-agent: виконавець gemini, а в середовищі є CLAUDE_CODE_OAUTH_TOKEN — відмовляю" >&2
       exit 2
     fi
-    if [[ -z "${A8_AGY_HOME:-}" || ! -d "$A8_AGY_HOME" ]]; then
+    if [[ -z "${A8_AGY_HOME:-}" || ! -d "$A8_AGY_HOME" || -L "$A8_AGY_HOME" ]]; then
       echo "a8-run-agent: виконавець gemini без теки налаштувань agy (A8_AGY_HOME='${A8_AGY_HOME:-}')" >&2
       exit 2
     fi
@@ -159,7 +181,7 @@ exec docker run --rm \
   "${OPT_ARGS[@]}" \
   --user {{ a8_container_uid }}:{{ a8_container_gid }} \
   `# вимір №6 §4 п.1: UID контейнера = власник репо, інакше git 128 dubious ownership` \
-  -v "{{ a8_repo_dir }}:{{ a8_repo_dir }}" \
+  -v "{{ a8_repo_dir }}:{{ a8_repo_dir }}${REPO_RO}" \
   -v "$WORKTREE:$WORKTREE" \
   -v "$HOME_SRC:{{ a8_container_home }}" \
   "${RO_ARGS[@]}" \
@@ -196,7 +218,7 @@ exec docker run --rm \
   `# вимір №7: підстраховка. Несуча конструкція — ВІДСУТНІСТЬ -t нижче:` \
   `# з псевдотерміналом push зависає (exit 124), без нього падає одразу (128).` \
   `# Прапорця -t тут немає і не має з'явитися.` \
-  -e PATH="$WORKTREE/node_modules/.bin:{{ a8_repo_dir }}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  -e PATH="$CPATH" \
   `# вимір №7: без node_modules/.bin у PATH pre-commit — тихий no-op:` \
   `# хук виконується, lefthook не знаходиться, коміт проходить із exit 0.` \
   `# ПОРЯДОК важить: worktree ПЕРШИЙ. Тік ставить залежності саме туди` \
