@@ -207,35 +207,43 @@ a8_result_why() { # a8_result_why <файл виводу> → « k=v …» аб�
 }
 
 #
-# Виконавець gemini (agy) — третій аргумент: сигнатуру 401 Claude не шукаємо
-# зовсім. У виводі agy вона може бути лише цитатою (агент читав ADR-039), а STOP
-# із ліками «claude setup-token» тоді зупинив би чергу не з тієї причини.
-# Сигнатур відмов самого agy на A8 ще не бачили — тож усе, крім 0, для нього failed.
+# Виконавець gemini (agy) — третій аргумент: вивід agy НЕ розбирається як JSON
+# Claude CLI зовсім — ні результат (is_error), ні 401, ні 429, ні службові поля.
+# agy викликається без --output-format json, тож такий JSON у його виводі може
+# бути лише цитатою (агент читав ADR-039 чи фікстуру тесту): STOP із ліками
+# «claude setup-token», пауза черги через квоту Claude чи `failed is_error` на
+# успішній сесії були б не з тієї причини (рецензія Argon №3, PR #277).
+# Сигнатур відмов самого agy на A8 ще не бачили — тож для нього рішення лише за
+# кодом виходу: 0 — ok, решта — failed.
 a8_classify() { # a8_classify <rc> <вивід> [виконавець]
   local line
   line="$(a8_classify_core "$@")"
-  if [[ "$line" == "failed "* || "$line" == "quota "* ]]; then line+="$(a8_result_why "$2")"; fi
+  if [[ "${3:-claude}" != gemini ]] && [[ "$line" == "failed "* || "$line" == "quota "* ]]; then
+    line+="$(a8_result_why "$2")"
+  fi
   echo "$line"
 }
 
 a8_classify_core() {
-  local rc="$1" out="$2" executor="${3:-claude}" res is_error=0 auth=0
+  local rc="$1" out="$2" executor="${3:-claude}" res="" is_error=0 auth=0
   # Останній JSON-об'єкт із полем is_error — результат прогону.
   # Порядково і толерантно: поруч із JSON-результатом бувають рядки stderr, а
   # звичайний `jq` на першому не-JSON рядку зупинився б і результату не знайшов.
-  res="$(jq -cR 'fromjson? | select(type == "object" and has("is_error"))' "$out" 2>/dev/null | tail -n 1)"
-  if [[ -n "$res" ]]; then
-    [[ "$(jq -r '.is_error' <<<"$res")" == true ]] && is_error=1
-    if ((is_error)) &&
-      jq -e --arg s "$A8_SIG_401" '(.result // "" | tostring | contains($s)) and ((.num_turns // 0) <= 1)' \
-        <<<"$res" >/dev/null; then
+  # Лише для Claude: для gemini res, is_error і auth лишаються порожніми (вище).
+  if [[ "$executor" != gemini ]]; then
+    res="$(jq -cR 'fromjson? | select(type == "object" and has("is_error"))' "$out" 2>/dev/null | tail -n 1)"
+    if [[ -n "$res" ]]; then
+      [[ "$(jq -r '.is_error' <<<"$res")" == true ]] && is_error=1
+      if ((is_error)) &&
+        jq -e --arg s "$A8_SIG_401" '(.result // "" | tostring | contains($s)) and ((.num_turns // 0) <= 1)' \
+          <<<"$res" >/dev/null; then
+        auth=1
+      fi
+    elif [[ "$rc" != 0 ]] && grep -Fq "$A8_SIG_401" "$out" 2>/dev/null; then
       auth=1
     fi
-  elif [[ "$rc" != 0 ]] && grep -Fq "$A8_SIG_401" "$out" 2>/dev/null; then
-    auth=1
   fi
 
-  [[ "$executor" == gemini ]] && auth=0
   if ((auth)); then
     echo "auth_stop 401"
     return
@@ -246,10 +254,9 @@ a8_classify_core() {
       return
       ;;
   esac
-  # quota — сигнатура Claude CLI; agy працює на іншому пулі, і такий JSON у його
-  # виводі може бути лише цитатою — пауза всієї черги через квоту Claude тоді
-  # була б хибною (та сама причина, що й для 401 вище).
-  if [[ "$executor" != gemini && "$rc" == 1 && -n "$res" ]] &&
+  # quota — сигнатура Claude CLI; для gemini res порожній (вище), тож agy, що
+  # працює на іншому пулі, паузу черги через квоту Claude не поставить.
+  if [[ "$rc" == 1 && -n "$res" ]] &&
     jq -e '.terminal_reason == "api_error" and ((.api_error_status // "") | tostring) == "429"' \
       <<<"$res" >/dev/null 2>&1; then
     echo "quota 429"

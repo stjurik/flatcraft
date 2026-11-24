@@ -1073,17 +1073,23 @@
       loop: [absent, directory]
 
     - name: V26c — copy the agy settings and login, then lay the executor profile over them as the tick does
-      # Як у тіку (a8-tick.sh.j2, крок 5): копія + `agy-settings` з шаблоном під
-      # root. Без профілю V26d довів би, що agy відповідає з профілем рецензента,
-      # а не з урізаним профілем виконавця (рецензія Flash PR #277, п.2). Worktree
-      # у профілі — головний клон: саме його V26d дає обгортці.
+      # Як у тіку (a8-tick.sh.j2): gemini/ — копія + `agy-settings` з шаблоном під
+      # root (без профілю V26d довів би, що agy відповідає з профілем рецензента,
+      # рецензія Flash PR #277, п.2); home/ — свій $HOME задачі (рецензії Argon
+      # №1, Sonnet №1). Worktree у профілі — головний клон: саме його V26d дає
+      # обгортці. Мітка в спільному container-home — щоб V26d довів, що контейнер
+      # agy його не бачить.
       ansible.builtin.shell: |
         set -e
-        cp -a {{ a8_agy_config_dir | quote }}/. {{ (a8_logs_dir ~ '/agy-verify/') | quote }}
-        s={{ (a8_logs_dir ~ '/agy-verify/antigravity-cli/settings.json') | quote }}
+        umask 077
+        v={{ (a8_logs_dir ~ '/agy-verify') | quote }}
+        mkdir -p "$v/gemini" "$v/home"
+        cp -a {{ a8_agy_config_dir | quote }}/. "$v/gemini/"
+        s="$v/gemini/antigravity-cli/settings.json"
         bash /usr/local/lib/a8/a8-tick-logic.sh agy-settings "$s" \
           /usr/local/lib/a8/agy-executor-permissions.json {{ a8_repo_dir | quote }} >"$s.new"
         mv -f "$s.new" "$s"
+        : >{{ (a8_container_home ~ '/.a8-verify-shared-home') | quote }}
       register: a8_v_agy_copy
       changed_when: false
       failed_when: false
@@ -1098,10 +1104,12 @@
           - >-
             printenv CLAUDE_CODE_OAUTH_TOKEN >/dev/null && echo CLAUDE_TOKEN_VISIBLE || echo CLAUDE_TOKEN_ABSENT;
             test -e {{ a8_claude_token_file }} && echo TOKEN_FILE_VISIBLE || echo TOKEN_FILE_HIDDEN;
+            test -e {{ a8_container_home }}/.a8-verify-shared-home && echo SHARED_HOME_VISIBLE || echo SHARED_HOME_HIDDEN;
             agy models && echo AGY_OK
       environment:
         A8_EXECUTOR: gemini
-        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify"
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify/gemini"
+        A8_HOME_SRC: "{{ a8_logs_dir }}/agy-verify/home"
       register: a8_v_gemini_side
       changed_when: false
       failed_when: false
@@ -1116,21 +1124,27 @@
           - echo CONTAINER_STARTED
       environment:
         A8_EXECUTOR: gemini
-        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify"
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify/gemini"
+        A8_HOME_SRC: "{{ a8_logs_dir }}/agy-verify/home"
         CLAUDE_CODE_OAUTH_TOKEN: verify-not-a-token
       register: a8_v_gemini_refuse
       changed_when: false
       failed_when: false
   always:
-    - name: V26c — remove the settings copy (it holds the Google login)
+    - name: V26c — remove the settings copy (it holds the Google login) and the shared-home marker
       ansible.builtin.file:
-        path: "{{ a8_logs_dir }}/agy-verify"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ a8_logs_dir }}/agy-verify"
+        - "{{ a8_container_home }}/.a8-verify-shared-home"
 
-- name: V26f — the Claude token is nowhere in the container home that agy sees
-  # Контейнер agy бачить container-home (спільний $HOME). Якщо токен Claude колись
-  # опиниться там файлом, «не передали змінну» вже нічого не гарантує. rc 3 —
-  # токена немає чи не прочитати: перевірка не відбулась, і V26g так і скаже.
+- name: V26f — the Claude token is not stored as a file in the shared container home
+  # Спільний container-home бачать і контейнери без токена (залежності, оракул
+  # задач claude). Якщо токен Claude колись опиниться там файлом, «не передали
+  # змінну» вже нічого не гарантує. Контейнер agy спільного home не бачить зовсім
+  # (V26d, SHARED_HOME_HIDDEN). rc 3 — токена немає чи не прочитати: перевірка не
+  # відбулась, і V26g так і скаже.
   ansible.builtin.shell: |
     t="$(cat {{ a8_claude_token_file }} 2>/dev/null)"
     [ -n "$t" ] || exit 3
@@ -1155,8 +1169,10 @@
       - a8_v_agy_copy.rc == 0
       - "'CLAUDE_TOKEN_ABSENT' in a8_v_gemini_side.stdout"
       - "'TOKEN_FILE_HIDDEN' in a8_v_gemini_side.stdout"
+      - "'SHARED_HOME_HIDDEN' in a8_v_gemini_side.stdout"
       - "'AGY_OK' in a8_v_gemini_side.stdout"
       - a8_v_gemini_refuse.rc == 2
+      - "'CLAUDE_CODE_OAUTH_TOKEN' in a8_v_gemini_refuse.stderr"
       - "'CONTAINER_STARTED' not in a8_v_gemini_refuse.stdout"
       - a8_v_token_in_home.rc == 0
     fail_msg: >-
@@ -1168,12 +1184,13 @@
       stderr agy: {{ (a8_v_gemini_side.stderr_lines | default([]))[-6:] | join(' | ') }}
       (agy не знайдено чи бракує бібліотеки — agy не самодостатній, його теку — в a8_agy_extra_ro_paths;
       просить логін — автентифікація не лише в {{ a8_agy_config_dir }});
-      відмова з токеном Claude: rc={{ a8_v_gemini_refuse.rc }} (очікував 2);
+      відмова з токеном Claude: rc={{ a8_v_gemini_refuse.rc }} (очікував 2) {{ a8_v_gemini_refuse.stderr | default('') }};
+      SHARED_HOME_VISIBLE у виводі agy — контейнер agy бачить спільний container-home (A8_HOME_SRC не діє);
       токен Claude у {{ a8_container_home }}: rc={{ a8_v_token_in_home.rc }}
       (0 — немає, 1 — Є, 3 — токен не прочитати, перевірку не виконано)
     success_msg: >-
       смуга виконавця: контейнер Claude не бачить agy і його теки; контейнер agy з профілем
-      виконавця відповідає (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
+      виконавця і своїм $HOME (спільного container-home не бачить) відповідає (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
       середовищі обгортка відмовляє (2); у container-home токена немає
     quiet: true
 

@@ -1071,6 +1071,34 @@ if [[ -d "$TASKS" ]]; then
       END { flush() }')"$'\n'
   done
 fi
+# Розбирач вище знає одну форму: `src: "{{ playbook_dir }}/../../tools/…"` одним
+# рядком і `{{ item }}` з плоского `loop:`. Будь-яка інша форма з tools/ (блоковий
+# скаляр, role_path, item.<поле>, with_items) пройшла б повз нього мовчки, тож
+# така форма — сама порушення: fail closed замість «не розібрав — значить
+# нічого немає» (контрприклад Argon №5, PR #277).
+if [[ -d "$TASKS" ]]; then
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    while IFS= read -r why; do
+      [[ -n "$why" ]] && violations+=("інваріант 18: ${tf##*/}: $why — backstop цього файла не перевірить; пиши src одним рядком \"{{ playbook_dir }}/../../tools/…\" (з {{ item }} — лише з плоским loop:)")
+    done < <(strip_comments "$tf" | cut -f2- | awk '
+      function flush() {
+        if (itemsrc && !hasloop) print "src з tools/ через {{ item }} без loop:"
+        itemsrc = 0; hasloop = 0
+      }
+      /^- / { flush() }
+      /^[[:space:]]*loop:/ { hasloop = 1 }
+      /src:[[:space:]]*[>|]/ { print "src блоковим скаляром"; next }
+      /src:/ && /tools\// && !/src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// {
+        print "src з tools/ у формі, яку інваріант 18 не розбирає"; next
+      }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// && /\{\{ *item\./ {
+        print "src з tools/ через item.<поле>"; next
+      }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// && /\{\{ *item *\}\}/ { itemsrc = 1 }
+      END { flush() }')
+  done
+fi
 if [[ -n "${role_scripts//[[:space:]]/}" ]]; then
   if [[ ! -f "$FORBIDDEN_SH" ]]; then
     violations+=("роль ставить файли з tools/, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")

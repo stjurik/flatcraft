@@ -98,9 +98,33 @@ RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config:$GITDIR/config:ro" -v "$GITDIR
 # зупинку, а не як падіння.
 OPT_ARGS=()
 [[ -n "${A8_CONTAINER_NAME:-}" ]] && OPT_ARGS+=(--name "$A8_CONTAINER_NAME")
+# $HOME контейнера. За замовчуванням — спільний container-home: його переживають
+# кеші pnpm/uv і хуки (core.hooksPath нижче), і саме тому він спільний лише в
+# межах смуги Claude. Задача gemini приносить свою теку (A8_HOME_SRC, свіжа на
+# задачу, її робить і прибирає тік): інакше gemini лишив би в спільному $HOME
+# хук чи кеш, що виконається в наступному контейнері Claude з токеном, а Claude —
+# поруч із логіном Google (рецензії Argon №1 і Sonnet №1, PR #277).
+HOME_SRC="{{ a8_container_home }}"
+if [[ -n "${A8_HOME_SRC:-}" ]]; then
+  if [[ -L "$A8_HOME_SRC" || ! -d "$A8_HOME_SRC" ]]; then
+    echo "a8-run-agent: A8_HOME_SRC='$A8_HOME_SRC' — не тека або симлінк, відмовляю" >&2
+    exit 2
+  fi
+  HOME_SRC="$A8_HOME_SRC"
+fi
+shared_home=0
+[[ "$(realpath -m -- "$HOME_SRC")" == "$(realpath -m -- "{{ a8_container_home }}")" ]] && shared_home=1
 case "${A8_EXECUTOR:-claude}" in
   claude)
-    [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+    if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      # Токен Claude — лише в $HOME смуги Claude: тека задачі gemini писана агентом
+      # gemini, і токен поруч із нею — той самий міст, лише навпаки.
+      if ((!shared_home)); then
+        echo "a8-run-agent: токен Claude з \$HOME задачі gemini (A8_HOME_SRC='$HOME_SRC') — відмовляю" >&2
+        exit 2
+      fi
+      OPT_ARGS+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+    fi
     ;;
   gemini)
     if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
@@ -109,6 +133,10 @@ case "${A8_EXECUTOR:-claude}" in
     fi
     if [[ -z "${A8_AGY_HOME:-}" || ! -d "$A8_AGY_HOME" ]]; then
       echo "a8-run-agent: виконавець gemini без теки налаштувань agy (A8_AGY_HOME='${A8_AGY_HOME:-}')" >&2
+      exit 2
+    fi
+    if ((shared_home)); then
+      echo "a8-run-agent: виконавець gemini зі спільним container-home — потрібна своя тека (A8_HOME_SRC), відмовляю" >&2
       exit 2
     fi
     # Тека налаштувань — на $HOME/.gemini контейнера, де agy її шукає
@@ -133,7 +161,7 @@ exec docker run --rm \
   `# вимір №6 §4 п.1: UID контейнера = власник репо, інакше git 128 dubious ownership` \
   -v "{{ a8_repo_dir }}:{{ a8_repo_dir }}" \
   -v "$WORKTREE:$WORKTREE" \
-  -v "{{ a8_container_home }}:{{ a8_container_home }}" \
+  -v "$HOME_SRC:{{ a8_container_home }}" \
   "${RO_ARGS[@]}" \
   -e UV_PYTHON="{{ a8_python_version }}" \
   -e UV_LINK_MODE=copy \

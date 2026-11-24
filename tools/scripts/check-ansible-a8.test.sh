@@ -1857,6 +1857,39 @@ open(p, "w").write(s.replace(old, "", 1))
 PY2
 assert_exit "мутація 37c/інв.18: backstop без tools/agy → 1" 1 "$mut" "роль ставить tools/agy/executor-permissions.json на хост"
 cp "$REPO/$FPS_T" "$mut/$FPS_T"
+# 37d–g (контрприклад Argon №5, PR #277): форми src, яких розбирач не знає, —
+# fail closed, а не «нічого не знайшов». Кожна — окремим блоком у кінці задач.
+inv18_form() { # inv18_form <назва> <очікуваний фрагмент> <yaml-блок>
+  cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+  printf '\n%s\n' "$3" >>"$mut/$TASKS_M"
+  # Порушень може бути й два (item.<поле> бачить і розбирач вище) — тож код і
+  # назву перевіряємо окремо, як у 37a.
+  assert_exit "мутація $1/інв.18 → 1" 1 "$mut"
+  grep -qF "$2" "$tmproot/out" ||
+    { echo "✗ мутація $1/інв.18: порушення не називає «$2»"; sed 's/^/    /' "$tmproot/out"; fail=1; }
+  cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+}
+inv18_form "37d: src блоковим скаляром" "src блоковим скаляром" '- name: Install a helper
+  ansible.builtin.copy:
+    src: >-
+      {{ playbook_dir }}/../../tools/agy/extra.json
+    dest: /usr/local/lib/a8/extra.json'
+inv18_form "37e: src через role_path" "src з tools/ у формі, яку інваріант 18 не розбирає" '- name: Install a helper
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../tools/agy/extra.json"
+    dest: /usr/local/lib/a8/extra.json'
+inv18_form "37f: src через item.<поле>" "src з tools/ через item.<поле>" '- name: Install helpers
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/{{ item.src }}"
+    dest: "{{ item.dest }}"
+  loop:
+    - { src: agy/extra.json, dest: /usr/local/lib/a8/extra.json }'
+inv18_form "37g: src з {{ item }} через with_items" "src з tools/ через {{ item }} без loop:" '- name: Install helpers
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../tools/agy/{{ item }}"
+    dest: /usr/local/lib/a8/
+  with_items:
+    - extra.json'
 
 # Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
 # 38: ключ без restrict — pty і forwarding.

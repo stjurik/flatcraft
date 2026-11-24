@@ -309,6 +309,14 @@ if [[ "$executor" == gemini ]]; then
 else
   model="${model:-$A8_DEFAULT_MODEL}"
 fi
+# Тека задачі gemini: home/ — її власний $HOME для ВСІХ контейнерів задачі
+# (залежності, хук, агент, оракул), gemini/ — копія налаштувань agy лише на час
+# агента. Спільний container-home лишається смузі Claude: інакше gemini лишив
+# би там хук чи кеш, що виконається в наступному контейнері Claude з токеном
+# (рецензії Argon №1, Sonnet №1, PR #277). Прибирає finish; тік, убитий посеред
+# задачі, — наступний тік (sweep agy-run на початку).
+lane_root=""
+[[ "$executor" == gemini ]] && lane_root="$A8_LOGS_DIR/agy-run/$id"
 branch="ai/$id"
 wt="$A8_WORKTREES_DIR/$id"
 # Ім'я контейнера агента відоме одразу за id і потрібне раніше за крок 5: STOP на
@@ -363,6 +371,10 @@ finish() { # finish <результат> <клас> <деталь> <куди>
   else
     qmv "$claimed" "$Q/$4/"
   fi
+  # rm -rf за симлінками всередині не йде, тож те, що контейнер підклав у
+  # теку задачі, поза нею нічого не зачепить.
+  [[ -n "${lane_root:-}" ]] && rm -rf "$lane_root"
+  return 0
 }
 
 # Повернути задачу в чергу можна, лише прибравши її порожню гілку і worktree:
@@ -469,12 +481,22 @@ release_or_keep() {
 #
 # Git — лише через hgit і лише коли контейнер оракула зник (#276, #291): так само,
 # як release_or_keep. Живий контейнер устиг би підмінити .git між перевіркою і git.
+# Не вийшло — причина в $retry_why (іде в detail падіння): «oracle rc=1» сам
+# по собі не каже людині, чому повтору не було (Argon №2, PR #277).
+retry_why=""
 gemini_retry() { # gemini_retry <код оракула> — успіх: exit 0; ні — return 1
   local n keep
   n=$(($(jq -r '.oracle_failures // 0' "$claimed") + 1))
   keep="ai-attempt/$id/gemini-$n"
-  ensure_container_gone "$A8_CONTAINER_NAME" || return 1
-  hgit rev-parse --verify --quiet "refs/heads/$keep" >/dev/null && return 1
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    retry_why="повтору gemini немає: контейнер $A8_CONTAINER_NAME не зник — git не чіпаю"
+    return 1
+  fi
+  if hgit rev-parse --verify --quiet "refs/heads/$keep" >/dev/null; then
+    retry_why="повтору gemini немає: гілка спроби $keep уже є"
+    return 1
+  fi
+  retry_why="повтору gemini немає: git не переніс спробу в $keep"
   hgit worktree remove --force "$wt" >>"$log" 2>&1 || return 1
   hgit branch -m "$branch" "$keep" >>"$log" 2>&1 || return 1
   if ((n >= 2)); then
@@ -613,6 +635,17 @@ snapshot_git
 # лише для читання, #276), а в теку container-home: core.hooksPath для всього
 # контейнера задає a8-run-agent. Саме звідти їх потім бачать check-hook-loud.sh
 # і git commit агента.
+# Задача gemini — свій $HOME з першого ж контейнера: `pnpm install` тут уже
+# виконує код залежностей (postinstall), а хуки ставить у $HOME/.a8-git-hooks.
+# Ціна — кеші pnpm/uv для задачі gemini щоразу порожні (повне завантаження).
+if [[ -n "$lane_root" ]]; then
+  if ! herr="$( (umask 077 && rm -rf "$lane_root" && mkdir -p "$lane_root/home") 2>&1)"; then
+    "$GUARD" count >/dev/null
+    fail_task "lane-home: ${herr%%$'\n'*}"
+    exit 0
+  fi
+  export A8_HOME_SRC="$lane_root/home"
+fi
 drc=0
 "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
 #
@@ -673,7 +706,7 @@ $(field prompt "$claimed")"
 AGY_TEMPLATE="${A8_AGY_EXECUTOR_TEMPLATE:-/usr/local/lib/a8/agy-executor-permissions.json}"
 agy_home=""
 if [[ "$executor" == gemini ]]; then
-  agy_home="$A8_LOGS_DIR/agy-run/$id"
+  agy_home="$lane_root/gemini"
   asettings="$agy_home/antigravity-cli/settings.json"
   # Ланцюжок `&&`, а не `set -e`: у підоболонці в умові `if` bash ігнорує -e.
   if ! aerr="$(umask 077 && mkdir -p "$agy_home" &&
@@ -714,18 +747,24 @@ if [[ "$executor" == claude ]]; then
 fi
 watch_stop
 unset CLAUDE_CODE_OAUTH_TOKEN
-# Лог agy — доказ для людини (сигнатури відмов, мітка моделі); копія з
-# креденшалами — ні, і на диску вона не лишається.
-if [[ -n "$agy_home" ]]; then
-  mv -f "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
-  rm -rf "$agy_home"
-fi
 
 # `timeout` вбиває КЛІЄНТ docker run, а не контейнер: без цього агент працював би
 # далі без нагляду. Вбиваємо контейнер і переконуємось, що він зник, перш ніж
 # нижче кликати git (#290): живий контейнер — вікно гонки над `.git`.
 if [[ "$rc" == 124 ]] && ! ensure_container_gone "$A8_CONTAINER_NAME"; then
   container_stuck "$A8_CONTAINER_NAME" "агент" count
+fi
+
+# Лог agy — доказ для людини (сигнатури відмов, мітка моделі); копія з
+# креденшалами — ні, і на диску вона не лишається. Тека змонтована в контейнер
+# на запис, тож agy.log — шлях агента: лише звичайний файл (симлінк на токен
+# Claude ліг би в tasks/ як «доказ»), лише після того, як контейнер зник, і з -T
+# (тека на місці цілі не стає місцем запису). Рецензія Sonnet №2, PR #277.
+if [[ -n "$agy_home" ]]; then
+  if [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
+    mv -fT "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
+  fi
+  rm -rf "$agy_home"
 fi
 
 # Лічимо ПІСЛЯ запуску. Причина була в тому, що обгортка кликала `a8-guard
@@ -1017,7 +1056,7 @@ if ((orc != 0)); then
   # рішенні. Код 10 сам по собі тут не доказ: його може повернути й оракул.
   if stop_requested; then stop_task "під час оракула"; fi
   [[ "$executor" == gemini ]] && gemini_retry "$orc"
-  fail_task "oracle rc=$orc"
+  fail_task "oracle rc=$orc${retry_why:+; $retry_why}"
   exit 0
 fi
 

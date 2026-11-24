@@ -136,6 +136,8 @@ echo "run-agent $*" >>"$CALLS"
 # Що бачить «контейнер» у середовищі: токен Claude, режим і теку agy (лише
 # факт наявності — значення в журнал не пишемо).
 echo "env ${1} executor=${A8_EXECUTOR:-none} token=${CLAUDE_CODE_OAUTH_TOKEN:+set} agy_home=${A8_AGY_HOME:+set}" >>"$CALLS"
+# $HOME контейнера: тека задачі (A8_HOME_SRC) чи спільний container-home.
+echo "home ${1} ${A8_HOME_SRC:-shared}${A8_HOME_SRC:+ $([[ -d "$A8_HOME_SRC" && ! -L "$A8_HOME_SRC" ]] && echo dir || echo missing)}" >>"$CALLS"
 # Промпт багаторядковий, тож модель і лог — окремим рядком.
 if [[ "$1" == agy || "$1" == claude ]]; then
   m="" lf="" prev=""
@@ -150,7 +152,12 @@ if [[ "$1" == agy ]]; then
   cp "$A8_AGY_HOME/antigravity-cli/settings.json" "$PIDS/agy-settings-seen" 2>/dev/null
   ls "$A8_AGY_HOME" >"$PIDS/agy-home-seen" 2>/dev/null
   # У справжньому контейнері --log-file пише в копію, змонтовану на $HOME/.gemini.
-  echo "agy log" >"$A8_AGY_HOME/agy.log"
+  # AGY_LOG_SYMLINK: агент підміняє лог симлінком (на токен Claude, на теку).
+  if [[ -n "${AGY_LOG_SYMLINK:-}" ]]; then
+    ln -sfn "$AGY_LOG_SYMLINK" "$A8_AGY_HOME/agy.log"
+  else
+    echo "agy log" >"$A8_AGY_HOME/agy.log"
+  fi
 fi
 # IMAGE_MISSING: образу немає — справжній `docker run` падає одразу (125).
 if [[ -n "${IMAGE_MISSING:-}" ]]; then
@@ -804,7 +811,8 @@ run_executor_scenarios() {
   setup
   enqueue 001-g "$(gem g 'grep -q GOOD result.txt')"
   A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=work tick
-  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1" && -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1; повтору gemini немає: контейнер a8-g-oracle не зник — git не чіпаю" &&
+    -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
     git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
     ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai-attempt/g/gemini-1 >/dev/null &&
     ok "контейнер оракула не зник → без повтору gemini, git на хості не чіпали" ||
@@ -818,11 +826,59 @@ run_executor_scenarios() {
   before="$(git -C "$ROOT/repo" rev-parse ai-attempt/g/gemini-1)"
   enqueue 001-g "$(gem g 'grep -q GOOD result.txt')"
   AGENT_MODE=work tick
-  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1" && -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1; повтору gemini немає: гілка спроби ai-attempt/g/gemini-1 уже є" &&
+    -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
     [[ "$(git -C "$ROOT/repo" rev-parse ai-attempt/g/gemini-1)" == "$before" ]] &&
     git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
     ok "гілка спроби вже є → без повтору, її не затерто, worktree лишено" ||
     bad "колізія гілки спроби: $(last); wt: $([[ -d "$ROOT/wt/g" ]] && echo є || echo нема)"
+  teardown
+
+  # 26m. Свій $HOME задачі gemini (рецензії Argon №1, Sonnet №1, PR #277): УСІ
+  # контейнери задачі gemini — залежності, хук, агент, оракул — бачать теку
+  # задачі, а не спільний container-home; задача claude — спільний, як і була.
+  # Після задачі тека зникає.
+  setup
+  enqueue 001-g "$(gem g true)"
+  tick
+  homes="$(grep '^home ' "$LOGS/runner-calls" | sort -u)"
+  [[ "$(jl .result)" == no-credential && -n "$homes" ]] &&
+    ! grep -qv " $LOGS/agy-run/g/home dir$" <<<"$homes" &&
+    grep -q "^home agy " <<<"$homes" && grep -q "^home pnpm " <<<"$homes" &&
+    ok "задача gemini: усі контейнери (залежності, хук, агент, оракул) — зі своїм \$HOME" ||
+    bad "home задачі gemini: $(tr '\n' ';' <<<"$homes"); $(last)"
+  [[ ! -e "$LOGS/agy-run/g" ]] && ok "тека задачі gemini (home і копія agy) після задачі прибрана" ||
+    bad "тека задачі лишилась: $(ls -A "$LOGS/agy-run/g" 2>&1 | tr '\n' ' ')"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  tick
+  homes="$(grep '^home ' "$LOGS/runner-calls" | sort -u)"
+  [[ -n "$homes" ]] && ! grep -qv ' shared$' <<<"$homes" &&
+    ok "задача claude: спільний container-home, як і була" || bad "home задачі claude: $(tr '\n' ';' <<<"$homes")"
+  teardown
+
+  # 26n. agy.log — шлях агента (тека змонтована на запис): симлінк на файл з
+  # токеном не стає «доказом» у tasks/, ціль не зачеплено (рецензія Sonnet №2).
+  setup
+  echo SECRET-TOKEN >"$ROOT/secret"
+  enqueue 001-g "$(gem g true)"
+  AGY_LOG_SYMLINK="$ROOT/secret" tick
+  [[ "$(jl .result)" == no-credential && ! -L "$LOGS/tasks/g.agy.log" ]] &&
+    ! grep -qs SECRET-TOKEN "$LOGS/tasks/g.agy.log" && [[ "$(cat "$ROOT/secret")" == SECRET-TOKEN ]] &&
+    ok "agy.log-симлінк не перенесено в tasks/, ціль не зачеплено" ||
+    bad "agy.log-симлінк: $(ls -l "$LOGS/tasks/g.agy.log" 2>&1); $(last)"
+  teardown
+
+  # 26o. Тік, убитий посеред задачі gemini, лишив копію з логіном Google і
+  # $HOME задачі — наступний тік прибирає їх під lock'ом (Argon №4, PR #277).
+  setup
+  mkdir -p "$LOGS/agy-run/old/gemini" "$LOGS/agy-run/old/home"
+  echo login >"$LOGS/agy-run/old/gemini/oauth.json"
+  enqueue 001-a "$(valid a)"
+  tick
+  [[ ! -e "$LOGS/agy-run/old" ]] && ok "осиротілу теку задачі gemini (логін Google) прибрав наступний тік" ||
+    bad "agy-run/old лишився: $(ls -R "$LOGS/agy-run" 2>&1 | tr '\n' ' ')"
   teardown
 
   # 26i. Невідомий executor відхиляє і тік (поле названо).
@@ -2252,8 +2308,13 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "model не прибрано при переведенні" 's/\.executor = "claude" \| del\(\.model\) \|/.executor = "claude" |/'
   mutate "гілку спроби gemini видалено" 's/branch -m "\$branch" "\$keep"/branch -D "\$branch"/'
   mutate "повтору gemini немає" 's/  \[\[ "\$executor" == gemini \]\] && gemini_retry "\$orc"\n//'
-  mutate "gemini_retry не чекає контейнера оракула" 's/  ensure_container_gone "\$A8_CONTAINER_NAME" \|\| return 1\n  hgit rev-parse --verify --quiet "refs\/heads\/\$keep"/  hgit rev-parse --verify --quiet "refs\/heads\/\$keep"/'
-  mutate "gemini_retry не перевіряє гілку спроби" 's/  hgit rev-parse --verify --quiet "refs\/heads\/\$keep" >\/dev\/null && return 1\n//'
+  mutate "осиротілу теку agy-run не прибрано" 's/\nrm -rf "\$A8_LOGS_DIR\/agy-run"\n/\n/'
+  mutate "задача gemini — спільний \$HOME" 's/  export A8_HOME_SRC="\$lane_root\/home"\n//'
+  mutate "теку задачі gemini не прибрано" 's/  \[\[ -n "\$\{lane_root:-\}" \]\] && rm -rf "\$lane_root"\n//'
+  mutate "agy.log переноситься й симлінком" 's/if \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/if true; then/'
+  mutate "gemini_retry не чекає контейнера оракула" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    retry_why="повтору gemini немає: контейнер/  if false; then\n    retry_why="повтору gemini немає: контейнер/'
+  mutate "gemini_retry не перевіряє гілку спроби" 's/  if hgit rev-parse --verify --quiet "refs\/heads\/\$keep" >\/dev\/null; then/  if false; then/'
+  mutate "падіння оракула gemini без причини відмови повтору" 's/fail_task "oracle rc=\$orc\$\{retry_why:\+; \$retry_why\}"/fail_task "oracle rc=\$orc"/'
   mutate "класифікатор не знає виконавця" 's/logic classify "\$rc" "\$out" "\$executor"/logic classify "\$rc" "\$out"/'
   mutate "журнал без виконавця" 's/ executor="\$executor"\n/\n/'
   # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.

@@ -30,9 +30,12 @@ bad() {
   fail=1
 }
 
-CH="/home/agent/container-home"
+# Спільний container-home і тека задачі gemini — справжні теки: обгортка звіряє
+# їх через realpath і відмовляє на симлінку.
+CH="$ROOT/chome"
+LANE="$ROOT/lane-home"
 AGYBIN="/usr/local/bin/agy"
-mkdir -p "$ROOT/etc" "$ROOT/bin" "$ROOT/repo" "$ROOT/wt" "$ROOT/agy-home"
+mkdir -p "$ROOT/etc" "$ROOT/bin" "$ROOT/repo" "$ROOT/wt" "$ROOT/agy-home" "$CH" "$LANE"
 # Головний клон з .git/config і .git/hooks: без них обгортка відмовляє ще до
 # docker (#276), і жоден сценарій нижче не дійшов би до вибору виконавця.
 git init -q "$ROOT/repo"
@@ -108,7 +111,7 @@ run A8_EXECUTOR=claude A8_AGY_HOME="$ROOT/agy-home" || rc=$?
 
 # 4. Gemini — тека agy на $HOME/.gemini, agy лише для читання, токена Claude немає.
 rc=0
-run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" || rc=$?
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
 if ((rc == 0)) && has_arg "$ROOT/agy-home:$CH/.gemini" && has_arg "$AGYBIN:/usr/local/bin/agy:ro" &&
   has_arg "/opt/agy-lib:/opt/agy-lib:ro"; then
   ok "gemini: тека agy на \$HOME/.gemini, agy і його бібліотеки — лише читання"
@@ -123,7 +126,7 @@ fi
 
 # 5. Gemini, а токен Claude у середовищі є → відмова, контейнер не стартує.
 rc=0
-run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
 ((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] && grep -q CLAUDE_CODE_OAUTH_TOKEN "$ROOT/out" &&
   ok "gemini з токеном Claude у середовищі → відмова (2), docker не викликано" ||
   bad "gemini з токеном Claude: rc=$rc, docker $([[ -e "$ROOT/docker-args" ]] && echo викликано || echo ні)"
@@ -131,12 +134,12 @@ run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" CLAUDE_CODE_OAUTH_TOKEN=tok 
 # 6. Gemini без теки налаштувань → відмова: agy без профілю «виконавець» —
 # це agy з профілем, який лежить на хості (рецензент або ширший).
 rc=0
-run A8_EXECUTOR=gemini || rc=$?
-((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+run A8_EXECUTOR=gemini A8_HOME_SRC="$LANE" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] && grep -q 'без теки налаштувань agy' "$ROOT/out" &&
   ok "gemini без A8_AGY_HOME → відмова (2), docker не викликано" || bad "gemini без A8_AGY_HOME: rc=$rc"
 rc=0
-run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/none" || rc=$?
-((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/none" A8_HOME_SRC="$LANE" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] && grep -q 'без теки налаштувань agy' "$ROOT/out" &&
   ok "gemini з A8_AGY_HOME на неіснуючу теку → відмова (2)" || bad "gemini з неіснуючою текою: rc=$rc"
 
 # 7. Невідомий виконавець → відмова, а не «мабуть, claude».
@@ -147,9 +150,44 @@ run A8_EXECUTOR=codex CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
 
 # 8. Kill switch в обгортці — як і раніше, код запобіжника, контейнер не стартує.
 rc=0
-run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" GUARD_RC=10 || rc=$?
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" GUARD_RC=10 || rc=$?
 ((rc == 10)) && [[ ! -e "$ROOT/docker-args" ]] &&
   ok "STOP → 10 і для gemini, контейнер не стартує" || bad "STOP для gemini: rc=$rc"
+
+# 9–13. $HOME контейнера (рецензії Argon №1, Sonnet №1, PR #277): спільний
+# container-home — лише смузі Claude; gemini — лише зі своєю текою задачі; токен
+# Claude — лише зі спільним.
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
+((rc == 0)) && has_arg "$LANE:$CH" && ! has_arg "$CH:$CH" &&
+  ok "gemini: \$HOME контейнера — тека задачі, спільний container-home не змонтовано" ||
+  bad "gemini home (rc=$rc): $(tr '\n' ' ' <"$ROOT/docker-args" 2>/dev/null)"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] && grep -q 'спільним container-home' "$ROOT/out" &&
+  ok "gemini без своєї теки (спільний container-home) → відмова (2), docker не викликано" ||
+  bad "gemini зі спільним home: rc=$rc $(cat "$ROOT/out")"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$CH/" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "gemini з A8_HOME_SRC = спільний container-home (інше написання) → відмова (2)" || bad "gemini з A8_HOME_SRC=CH/: rc=$rc"
+ln -s "$LANE" "$ROOT/lane-link"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$ROOT/lane-link" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "A8_HOME_SRC — симлінк → відмова (2)" || bad "A8_HOME_SRC симлінк: rc=$rc"
+rc=0
+run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok A8_HOME_SRC="$LANE" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "токен Claude з текою задачі gemini → відмова (2), docker не викликано" || bad "claude+токен з LANE: rc=$rc"
+rc=0
+run A8_EXECUTOR=claude A8_HOME_SRC="$LANE" || rc=$?
+((rc == 0)) && has_arg "$LANE:$CH" && ! mentions CLAUDE_CODE_OAUTH_TOKEN &&
+  ok "claude без токена (залежності, оракул задачі gemini) — з текою задачі" || bad "claude без токена з LANE: rc=$rc"
+rc=0
+run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
+((rc == 0)) && has_arg "$CH:$CH" &&
+  ok "claude з токеном — спільний container-home, як і був" || bad "claude спільний home: rc=$rc"
 
 if [[ -z "${A8_RUNNER_UNDER_TEST:-}" && "$fail" -ne 0 ]]; then
   echo "✗ мутації НЕ ганялись: базовий набір червоний (на червоному базисі кожен мутант «вбитий»)."
@@ -179,6 +217,11 @@ elif [[ -z "${A8_RUNNER_UNDER_TEST:-}" ]]; then
   mutate "agy з хоста на запис" 's/:\/usr\/local\/bin\/agy:ro/:\/usr\/local\/bin\/agy/'
   mutate "gemini без перевірки теки налаштувань" 's/ \|\| ! -d "\$A8_AGY_HOME"//; s/-z "\$\{A8_AGY_HOME:-\}" \|\| //'
   mutate "бібліотеки agy на запис" 's/OPT_ARGS\+=\(-v "\$p:\$p:ro"\)/OPT_ARGS+=(-v "\$p:\$p")/'
+  mutate "gemini зі спільним container-home" 's/    if \(\(shared_home\)\); then\n/    if false; then\n/'
+  mutate "\$HOME контейнера завжди спільний" 's/  -v "\$HOME_SRC:\{\{ a8_container_home \}\}"/  -v "{{ a8_container_home }}:{{ a8_container_home }}"/'
+  mutate "токен Claude з текою задачі gemini" 's/      if \(\(!shared_home\)\); then/      if false; then/'
+  mutate "A8_HOME_SRC-симлінк прийнято" 's/\[\[ -L "\$A8_HOME_SRC" \|\| ! -d/[[ ! -d/'
+  mutate "спільність home за рядком, не за realpath" 's/\[\[ "\$\(realpath -m -- "\$HOME_SRC"\)" == "\$\(realpath -m -- "\{\{ a8_container_home \}\}"\)" \]\]/[[ "\$HOME_SRC" == "{{ a8_container_home }}" ]]/'
 fi
 
 if ((fail)); then
