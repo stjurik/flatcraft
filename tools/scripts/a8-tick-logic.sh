@@ -120,14 +120,15 @@ a8_validate_task() {
   fi
 
   # Шлях тесту приймання — відносний, без `..` і без порожніх частин (тож і без
-  # провідного «/» — він дає порожню першу частину): інакше
+  # провідного «/» — він дає порожню першу частину; частина з самих пробілів —
+  # теж порожня, рецензія Flash PR #277): інакше
   # backstop порівнював би не ті рядки, що дає `git diff --name-only`, і
   # мовчки нічого не захищав.
   if jq -e 'has("acceptance_tests") and (.acceptance_tests | type) != "array"' "$file" >/dev/null; then
     reasons+=("acceptance_tests:not-array")
   elif jq -e '(.acceptance_tests // [])
       | any(type != "string" or . == "" or test("\n")
-            or (rtrimstr("/") | split("/") | any(. == "" or . == "." or . == "..")))' \
+            or (rtrimstr("/") | split("/") | any(test("^[[:space:]]*$") or . == "." or . == "..")))' \
     "$file" >/dev/null; then
     reasons+=("acceptance_tests:invalid")
   fi

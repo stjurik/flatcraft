@@ -1035,15 +1035,17 @@ while IFS= read -r -d $'\036' blk; do
     violations+=("задача ролі пише authorized_keys без command=\"/usr/local/bin/…\" (ключ дасть повну оболонку agent): ${blk%%:*} «$name»")
 done < <(printf '%s' "$akey_blocks")
 
-# Інваріант 18 — кожен скрипт, який роль ставить на хост з tools/scripts, —
-# у backstop'і заборонених шляхів (#302 D, рецензія #299).
+# Інваріант 18 — кожен файл, який роль ставить на хост з tools/ (скрипти з
+# tools/scripts, профіль agy з tools/agy, …), — у backstop'і заборонених шляхів
+# (#302 D, рецензія #299; tools/agy — рецензія Flash PR #277).
 #
 # ЧОМУ. a8-git-lib.sh (обгортка git на хості) лежав у tools/scripts, поза
 # check-forbidden-paths.sh (там `^infra`), тож агент міг змінити межу, що його
 # стримує, у власному PR. Тепер backstop забороняє a8-* і сам себе; цей
-# інваріант не дає новому скрипту ролі вислизнути: кожне `src: …/tools/scripts/X`
-# у задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати
-# exit 1 у check-forbidden-paths.sh.
+# інваріант не дає новому файлу ролі вислизнути: кожне `src: …/tools/X` у
+# задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати exit 1
+# у check-forbidden-paths.sh. Саме tools/, а не лише tools/scripts: шаблон
+# профілю agy лежав у tools/agy і цим вислизав.
 FORBIDDEN_SH="$ROOT/tools/scripts/check-forbidden-paths.sh"
 role_scripts=""
 if [[ -d "$TASKS" ]]; then
@@ -1060,8 +1062,8 @@ if [[ -d "$TASKS" ]]; then
         src = ""; items = ""; inloop = 0
       }
       /^- / { flush() }
-      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\/scripts\// {
-        s = $0; sub(/.*tools\/scripts\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/scripts/" s
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// {
+        s = $0; sub(/.*\/\.\.\/\.\.\/tools\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/" s
       }
       /^[[:space:]]*loop:[[:space:]]*$/ { inloop = 1; next }
       inloop && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- */, "", v); items = items v "\n"; next }
@@ -1071,7 +1073,7 @@ if [[ -d "$TASKS" ]]; then
 fi
 if [[ -n "${role_scripts//[[:space:]]/}" ]]; then
   if [[ ! -f "$FORBIDDEN_SH" ]]; then
-    violations+=("роль ставить скрипти з tools/scripts, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
+    violations+=("роль ставить файли з tools/, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
   else
     while IFS= read -r rs; do
       [[ -z "$rs" ]] && continue

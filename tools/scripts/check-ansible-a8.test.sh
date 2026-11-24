@@ -1846,6 +1846,17 @@ cat >>"$mut/$TASKS_M" <<'YML'
 YML
 assert_exit "мутація 37b/інв.18: роль ставить tools/scripts/host-helper.sh поза backstop'ом → 1" 1 "$mut" "роль ставить tools/scripts/host-helper.sh на хост"
 cp "$REPO/$TASKS_M" "$mut/$TASKS_M"
+# 37c (рецензія Flash PR #277): backstop без tools/agy — шаблон профілю виконавця
+# роль ставить на хост з tools/agy, не з tools/scripts; інваріант мусить його бачити.
+python3 - "$mut/$FPS_T" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "  '^tools/agy(/|$)'\n"
+assert s.count(old) == 1, "фікстура застаріла: шаблон tools/agy у backstop'і виглядає інакше"
+open(p, "w").write(s.replace(old, "", 1))
+PY2
+assert_exit "мутація 37c/інв.18: backstop без tools/agy → 1" 1 "$mut" "роль ставить tools/agy/executor-permissions.json на хост"
+cp "$REPO/$FPS_T" "$mut/$FPS_T"
 
 # Мутації 38–39 — інваріант 15, ключ оркестратора (#231).
 # 38: ключ без restrict — pty і forwarding.

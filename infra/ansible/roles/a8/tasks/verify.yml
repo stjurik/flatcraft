@@ -1072,13 +1072,18 @@
         mode: "0700"
       loop: [absent, directory]
 
-    - name: V26c — copy the agy settings and login
-      ansible.builtin.command:
-        argv:
-          - cp
-          - -a
-          - "{{ a8_agy_config_dir }}/."
-          - "{{ a8_logs_dir }}/agy-verify/"
+    - name: V26c — copy the agy settings and login, then lay the executor profile over them as the tick does
+      # Як у тіку (a8-tick.sh.j2, крок 5): копія + `agy-settings` з шаблоном під
+      # root. Без профілю V26d довів би, що agy відповідає з профілем рецензента,
+      # а не з урізаним профілем виконавця (рецензія Flash PR #277, п.2). Worktree
+      # у профілі — головний клон: саме його V26d дає обгортці.
+      ansible.builtin.shell: |
+        set -e
+        cp -a {{ a8_agy_config_dir | quote }}/. {{ (a8_logs_dir ~ '/agy-verify/') | quote }}
+        s={{ (a8_logs_dir ~ '/agy-verify/antigravity-cli/settings.json') | quote }}
+        bash /usr/local/lib/a8/a8-tick-logic.sh agy-settings "$s" \
+          /usr/local/lib/a8/agy-executor-permissions.json {{ a8_repo_dir | quote }} >"$s.new"
+        mv -f "$s.new" "$s"
       register: a8_v_agy_copy
       changed_when: false
       failed_when: false
@@ -1158,7 +1163,7 @@
       профіль виконавця: exists={{ a8_v_agy_profile.stat.exists }},
       sha256 A8={{ a8_v_agy_profile.stat.checksum | default('—') }} repo={{ a8_v_agy_profile_repo.stat.checksum }};
       контейнер Claude (rc={{ a8_v_claude_side.rc }}): {{ a8_v_claude_side.stdout_lines | default([]) | join(' ') }};
-      копія {{ a8_agy_config_dir }}: rc={{ a8_v_agy_copy.rc }} {{ a8_v_agy_copy.stderr | default('') }};
+      копія {{ a8_agy_config_dir }} з профілем виконавця: rc={{ a8_v_agy_copy.rc }} {{ a8_v_agy_copy.stderr | default('') }};
       контейнер agy (rc={{ a8_v_gemini_side.rc }}): {{ (a8_v_gemini_side.stdout_lines | default([]))[-6:] | join(' | ') }};
       stderr agy: {{ (a8_v_gemini_side.stderr_lines | default([]))[-6:] | join(' | ') }}
       (agy не знайдено чи бракує бібліотеки — agy не самодостатній, його теку — в a8_agy_extra_ro_paths;
@@ -1167,8 +1172,8 @@
       токен Claude у {{ a8_container_home }}: rc={{ a8_v_token_in_home.rc }}
       (0 — немає, 1 — Є, 3 — токен не прочитати, перевірку не виконано)
     success_msg: >-
-      смуга виконавця: контейнер Claude не бачить agy і його теки; контейнер agy відповідає
-      (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
+      смуга виконавця: контейнер Claude не бачить agy і його теки; контейнер agy з профілем
+      виконавця відповідає (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
       середовищі обгортка відмовляє (2); у container-home токена немає
     quiet: true
 

@@ -798,6 +798,33 @@ run_executor_scenarios() {
     ok "третій 429 Claude після прогону gemini → STOP" || bad "межа 429 з gemini між ними: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
   teardown
 
+  # 26k. Оракул gemini червоний, а контейнер оракула не зник: gemini_retry не
+  # чіпає git на хості (#291) — звичайне падіння, гілку й worktree лишено, гілки
+  # спроби немає (рецензія Flash PR #277, п.4).
+  setup
+  enqueue 001-g "$(gem g 'grep -q GOOD result.txt')"
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=work tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1" && -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
+    git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai-attempt/g/gemini-1 >/dev/null &&
+    ok "контейнер оракула не зник → без повтору gemini, git на хості не чіпали" ||
+    bad "gemini_retry при живому контейнері: $(last); гілки: $(git -C "$ROOT/repo" branch | tr '\n' ' ')"
+  teardown
+
+  # 26l. Гілка спроби вже є (лишилась від попереднього прогону): gemini_retry
+  # її не затирає і worktree не прибирає — звичайне падіння.
+  setup
+  git -C "$ROOT/repo" branch ai-attempt/g/gemini-1
+  before="$(git -C "$ROOT/repo" rev-parse ai-attempt/g/gemini-1)"
+  enqueue 001-g "$(gem g 'grep -q GOOD result.txt')"
+  AGENT_MODE=work tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1" && -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
+    [[ "$(git -C "$ROOT/repo" rev-parse ai-attempt/g/gemini-1)" == "$before" ]] &&
+    git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "гілка спроби вже є → без повтору, її не затерто, worktree лишено" ||
+    bad "колізія гілки спроби: $(last); wt: $([[ -d "$ROOT/wt/g" ]] && echo є || echo нема)"
+  teardown
+
   # 26i. Невідомий executor відхиляє і тік (поле названо).
   setup
   enqueue 001-x "$(jq -c '.executor = "codex"' <<<"$(valid x)")"
@@ -2225,6 +2252,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "model не прибрано при переведенні" 's/\.executor = "claude" \| del\(\.model\) \|/.executor = "claude" |/'
   mutate "гілку спроби gemini видалено" 's/branch -m "\$branch" "\$keep"/branch -D "\$branch"/'
   mutate "повтору gemini немає" 's/  \[\[ "\$executor" == gemini \]\] && gemini_retry "\$orc"\n//'
+  mutate "gemini_retry не чекає контейнера оракула" 's/  ensure_container_gone "\$A8_CONTAINER_NAME" \|\| return 1\n  hgit rev-parse --verify --quiet "refs\/heads\/\$keep"/  hgit rev-parse --verify --quiet "refs\/heads\/\$keep"/'
+  mutate "gemini_retry не перевіряє гілку спроби" 's/  hgit rev-parse --verify --quiet "refs\/heads\/\$keep" >\/dev\/null && return 1\n//'
   mutate "класифікатор не знає виконавця" 's/logic classify "\$rc" "\$out" "\$executor"/logic classify "\$rc" "\$out"/'
   mutate "журнал без виконавця" 's/ executor="\$executor"\n/\n/'
   # Kill switch посеред задачі (сценарії 20): кожне рішення — окрема мутація.

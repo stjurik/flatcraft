@@ -110,11 +110,19 @@ run_scenarios() {
     L validate "$(task at-empty "{$b,\"acceptance_tests\":[\"\"]}")"
   check "acceptance_tests з числом → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
     L validate "$(task at-num "{$b,\"acceptance_tests\":[1]}")"
+  check "acceptance_tests з самих пробілів → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-blank "{$b,\"acceptance_tests\":[\"   \"]}")"
+  check "acceptance_tests з частиною з пробілів (a/ /b) → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-blank-part "{$b,\"acceptance_tests\":[\"a/ /b.test.ts\"]}")"
+  check "acceptance_tests з пробілом усередині назви → прийнято" 0 "ok" -- \
+    L validate "$(task at-space-name "{$b,\"acceptance_tests\":[\"tests/my test.ts\"]}")"
   check "oracle_failures 1 → прийнято" 0 "ok" -- L validate "$(task of-1 "{$b,\"oracle_failures\":1}")"
   check "oracle_failures -1 → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
     L validate "$(task of-neg "{$b,\"oracle_failures\":-1}")"
   check "oracle_failures \"1\" → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
     L validate "$(task of-str "{$b,\"oracle_failures\":\"1\"}")"
+  check "oracle_failures 1.5 → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
+    L validate "$(task of-frac "{$b,\"oracle_failures\":1.5}")"
 
   # Backstop тестів приймання: точний шлях і шлях у теці — так; схожий префікс — ні.
   local at
@@ -328,6 +336,8 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "acceptance_tests не масив — прийнято" 's/    reasons+=("acceptance_tests:not-array")/    :/'
   mutate "acceptance_tests з .. — прийнято" 's/ or \. == "\.\."//'
   mutate "oracle_failures не перевіряється" 's/    reasons+=("oracle_failures:invalid")/    :/'
+  mutate "acceptance_tests: частина з пробілів — прийнято" 's/any(test("^\[\[:space:\]\]\*\$") or/any(. == "" or/'
+  mutate "oracle_failures: дробове — прийнято" 's/ or \.oracle_failures != (\.oracle_failures | floor)//'
   mutate "backstop тестів лише на точний шлях" 's/ || "\$path" == "\$t\/"\*//'
   mutate "backstop тестів за префіксом рядка" 's/"\$path" == "\$t\/"\*/"$path" == "$t"*/'
   mutate "backstop тестів завжди зелений" 's/  ((hit == 0))$/  true/'
