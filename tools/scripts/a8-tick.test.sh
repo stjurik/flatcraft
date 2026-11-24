@@ -839,7 +839,9 @@ run_executor_scenarios() {
   # задачі, а не спільний container-home; задача claude — спільний, як і була.
   # Після задачі тека зникає.
   setup
-  enqueue 001-g "$(gem g true)"
+  # Оракул сам перевіряє: копії з логіном Google уже немає (прибрано одразу
+  # після агента, оракулу вона ні до чого), а $HOME задачі ще є.
+  enqueue 001-g "$(gem g "test ! -e '$LOGS/agy-run/g/gemini' && test -d '$LOGS/agy-run/g/home'")"
   tick
   homes="$(grep '^home ' "$LOGS/runner-calls" | sort -u)"
   [[ "$(jl .result)" == no-credential && -n "$homes" ]] &&
@@ -2296,7 +2298,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "executor ігнорується — завжди claude" 's/if \[\[ "\$executor" == gemini \]\]; then\n  # Токена/if false; then\n  # Токена/'
   mutate "токен Claude і в контейнері agy" 's/\nrc=0\nif \[\[ "\$executor" == gemini \]\]; then\n/\nrc=0\nexport CLAUDE_CODE_OAUTH_TOKEN=tok\nif [[ "\$executor" == gemini ]]; then\n/'
   mutate "тека agy і для оракула" 's/  A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home" \\\n    timeout/  export A8_EXECUTOR=gemini A8_AGY_HOME="\$agy_home"\n  timeout/'
-  mutate "копію з логіном agy не прибрано" 's/(  mv -f "\$agy_home\/agy\.log"[^\n]*\n)  rm -rf "\$agy_home"\n/$1/'
+  mutate "копію з логіном agy не прибрано" 's/(    mv -fT "\$agy_home\/agy\.log"[^\n]*\n  fi\n)  rm -rf "\$agy_home"\n/$1/'
   mutate "профіль виконавця не підставлено" 's/ &&\n    mv -f "\$asettings\.new" "\$asettings"\)/)/'
   mutate "gemini з моделлю claude за замовчуванням" 's/model="\$\{model:-\$A8_GEMINI_MODEL\}"/model="\${model:-\$A8_DEFAULT_MODEL}"/'
   mutate "backstop тестів приймання прибрано" 's/if ! aviol="/if false \&\& ! aviol="/'
