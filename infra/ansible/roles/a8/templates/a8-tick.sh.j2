@@ -860,6 +860,11 @@ fi
 # index-pack сам рахує хеш кожного об'єкта, що приходить, тож підробленого
 # об'єкта в головне сховище не потрапить. Гілку $branch створює fetch. Контейнер
 # уже зник (ensure_container_gone вище). Не вийшло — failed, причина в detail.
+# worktree тоді прибираємо: його HEAD — коміт зі сховища задачі, а сховище
+# finish видаляє, тож лишене дерево показувало б на відсутні об'єкти, і
+# a8-requeue спіткнувся б об нього (rev-list → SKIP) — задачу довелося б
+# чистити руками. Ні гілки, ні коміту в головному клоні нема, тож нема й роботи,
+# яку можна було б зберегти; журнал agy вже перенесено в tasks/.
 if [[ -n "$lane_root" ]]; then
   ierr=""
   if ! wh="$(wt_head)"; then
@@ -872,6 +877,9 @@ if [[ -n "$lane_root" ]]; then
   fi
   if [[ -n "$ierr" ]]; then
     if stop_requested; then stop_task "під час агента"; fi
+    if ! hgit worktree remove --force "$wt" >>"$log" 2>&1; then
+      ierr="$ierr; worktree не прибрано"
+    fi
     fail_task "import: $ierr"
     exit 0
   fi

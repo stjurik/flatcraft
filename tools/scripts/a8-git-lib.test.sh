@@ -138,6 +138,9 @@ lgit "$l/obj.git" update-ref refs/heads/import "$h" 2>/dev/null &&
 rc=0; printf '%s\n' "$tmp/elsewhere" >"$l/obj.git/objects/info/alternates"
 lgit "$l/obj.git" rev-parse HEAD >/dev/null 2>&1 || rc=$?
 ((rc == 125)) && ok "lgit: alternates змінено → 125, git не запущено" || bad "lgit alternates: rc=$rc"
+rc=0; rm "$l/obj.git/objects/info/alternates"
+lgit "$l/obj.git" rev-parse HEAD >/dev/null 2>&1 || rc=$?
+((rc == 125)) && ok "lgit: alternates видалено → 125, git не запущено" || bad "lgit без alternates: rc=$rc"
 printf '%s\n' "$l/main/.git/objects" >"$l/obj.git/objects/info/alternates"
 rc=0; ln -s "$l/obj.git" "$l/obj-link"
 lgit "$l/obj-link" rev-parse HEAD >/dev/null 2>&1 || rc=$?

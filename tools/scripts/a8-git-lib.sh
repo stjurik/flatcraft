@@ -268,7 +268,8 @@ untracked_outside_rules() {
 # config, hooks і refs контейнер не бачить — змонтовано лише `objects`. Тож тут
 # лише дві перевірки того, що контейнер бачить: `objects` не симлінк і
 # `objects/info/alternates` — рівно рядок, який записав тік (головне сховище),
-# а не шлях до чужих об'єктів. Решту — як у hgit: безпечні -c, без replace-
+# а не шлях до чужих об'єктів і не порожнеча (файл видалено). Без alternates
+# можна лише `init --bare`, поки `objects` ще немає. Решту — як у hgit: безпечні -c, без replace-
 # об'єктів, `-C` на головний клон, а `--git-dir` — на сховище задачі.
 lgit() {
   local d="$1" why=""
@@ -277,9 +278,9 @@ lgit() {
     why="$d — симлінк"
   elif [[ -L "$d/objects" ]]; then
     why="$d/objects — симлінк"
-  elif [[ -e "$d/objects/info/alternates" &&
+  elif [[ -e "$d/objects" &&
     "$(cat "$d/objects/info/alternates" 2>/dev/null)" != "$A8_REPO_DIR/.git/objects" ]]; then
-    why="$d/objects/info/alternates змінено"
+    why="$d/objects/info/alternates змінено або видалено"
   fi
   if [[ -n "$why" ]]; then
     [[ -s "${unsafe:-/dev/null}" ]] || printf 'сховище задачі: %s\n' "$why" >"${unsafe:-/dev/null}"

@@ -217,17 +217,27 @@ case "${AGENT_MODE:-commit}" in
     git -C "$wt" add result.txt
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
-  forge | altswap)
+  forge | altswap | altdel | dotgit)
     # Задача gemini (сховище задачі, PR #277): коміт, а потім підміна. forge —
     # loose-блоб у сховищі задачі переписано іншим вмістом під тим самим іменем;
-    # altswap — alternates сховища показують на чужу теку об'єктів.
+    # altswap — alternates сховища показують на чужу теку об'єктів; dotgit —
+    # чесні за хешем об'єкти, але дерево з елементом `.GIT` (git на
+    # нечутливій до регістру ФС прочитав би його як .git): такий коміт
+    # відкидає лише fetch.fsckObjects, index-pack без нього пропускає.
     echo MARKER >"$wt/result.txt"
     git -C "$wt" add result.txt
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
-    if [[ "$AGENT_MODE" == forge ]]; then
+    if [[ "$AGENT_MODE" == dotgit ]]; then
+      b="$(git -C "$wt" rev-parse HEAD:result.txt)"
+      t="$(printf '100644 blob %s\t.GIT\n100644 blob %s\tresult.txt\n' "$b" "$b" | git -C "$wt" mktree)"
+      c="$(git -C "$wt" -c user.email=a@a -c user.name=a commit-tree "$t" -p HEAD -m evil)"
+      git -C "$wt" update-ref --no-deref HEAD "$c"
+    elif [[ "$AGENT_MODE" == forge ]]; then
       b="$(git -C "$wt" rev-parse HEAD:result.txt)"
       chmod u+w "$A8_OBJ_DIR/${b:0:2}/${b:2}"
       python3 -c 'import sys,zlib; open(sys.argv[1],"wb").write(zlib.compress(b"blob 5\x00evil\n"))' "$A8_OBJ_DIR/${b:0:2}/${b:2}"
+    elif [[ "$AGENT_MODE" == altdel ]]; then
+      rm -f "$A8_OBJ_DIR/info/alternates"
     else
       echo "$TMPR/elsewhere/objects" >"$A8_OBJ_DIR/info/alternates"
     fi
@@ -978,8 +988,16 @@ run_executor_scenarios() {
   enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
   AGENT_MODE=forge tick
   [[ "$(jl .result)" == failed && "$(jl .detail)" == "import: fetch із перевіркою об'єктів не вдався" ]] &&
-    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
-    ok "підмінений об'єкт у сховищі задачі → import відкинуто, гілки ai/g немає" || bad "forge: $(last)"
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null && [[ ! -e "$ROOT/wt/g" ]] &&
+    [[ -z "$(git -C "$ROOT/repo" worktree list --porcelain | grep -F "$ROOT/wt/g")" ]] &&
+    ok "підмінений об'єкт у сховищі задачі → import відкинуто, гілки ai/g і worktree немає" || bad "forge: $(last)"
+  teardown
+  setup
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  AGENT_MODE=dotgit tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "import: fetch із перевіркою об'єктів не вдався" ]] &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null && [[ ! -e "$ROOT/wt/g" ]] &&
+    ok "дерево з елементом .GIT → fsck відкинув import, гілки ai/g і worktree немає" || bad "dotgit: $(last)"
   teardown
   setup
   mkdir -p "$ROOT/elsewhere/objects"
@@ -988,6 +1006,13 @@ run_executor_scenarios() {
   [[ "$(jl .result)" == failed && "$(jl .detail)" == *"alternates змінено"* && "$(jl .detail)" == *"import:"* ]] &&
     ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
     ok "alternates сховища задачі змінено → lgit відмовив, import не відбувся" || bad "altswap: $(last)"
+  teardown
+  setup
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  AGENT_MODE=altdel tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"alternates змінено або видалено"* && "$(jl .detail)" == *"import:"* ]] &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "alternates сховища задачі видалено → lgit відмовив, import не відбувся" || bad "altdel: $(last)"
   teardown
 
   # 26s. STOP під час залежностей задачі gemini — до імпорту, гілки ще немає:
@@ -2363,7 +2388,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
   mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
   mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
-  mutate "lgit без перевірки alternates сховища задачі" 's/  elif \[\[ -e "\$d\/objects\/info\/alternates" &&\n/  elif false \&\& [[ -e "\$d\/objects\/info\/alternates" \&\&\n/' lib
+  mutate "lgit не помічає видалений alternates" 's/  elif \[\[ -e "\$d\/objects" &&\n/  elif [[ -e "\$d\/objects\/info\/alternates" \&\&\n/' lib
+  mutate "lgit без перевірки alternates сховища задачі" 's/  elif \[\[ -e "\$d\/objects" &&\n/  elif false \&\& [[ -e "\$d\/objects" \&\&\n/' lib
   mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "quota обробляється як невідомий клас" 's/\n  quota\)\n/\n  quota_never)\n/'
@@ -2433,6 +2459,8 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "осиротілу теку agy-run не прибрано" 's/\nrm_tree "\$A8_LOGS_DIR\/agy-run"\n/\n/'
   mutate "worktree gemini з гілкою, а не відокремлений" 's/hgit worktree add --quiet --detach "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/'
   mutate "сховище задачі не передано контейнерам" 's/ A8_WT_ADMIN="\$wt_admin" A8_OBJ_DIR="\$lane_root\/obj.git\/objects"\n/\n/'
+  mutate "імпорт без fetch.fsckObjects" 's/hgit -c fetch\.fsckObjects=true -c transfer\.fsckObjects=true fetch/hgit fetch/'
+  mutate "worktree після збою імпорту не прибрано" 's/    if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n      ierr="\$ierr; worktree не прибрано"\n    fi\n//'
   mutate "імпорт коміту gemini пропущено" 's/if \[\[ -n "\$lane_root" \]\]; then\n  ierr=""/if false; then\n  ierr=""/'
   mutate "release_or_keep: відсутня гілка gemini — як помилка" 's/  if \[\[ -n "\$\{lane_root:-\}" \]\] && ! hgit rev-parse --verify --quiet "refs\/heads\/\$branch" >\/dev\/null; then\n    cnt=0\n  elif/  if/'
   mutate "agy через PATH контейнера" 's/"\$RUNNER" "\$wt" \/usr\/local\/bin\/agy -p/"\$RUNNER" "\$wt" agy -p/'
