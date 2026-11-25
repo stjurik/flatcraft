@@ -189,18 +189,47 @@ run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
 ((rc == 0)) && has_arg "$CH:$CH" &&
   ok "claude з токеном — спільний container-home, як і був" || bad "claude спільний home: rc=$rc"
 
-# 14–17. Головний клон (повторний погляд Sonnet на безпеку, PR #277): задача зі
-# своїм $HOME бачить його лише для читання (.git — на запис, окремо) і не має
-# його node_modules/.bin у PATH; смуга Claude — як і була.
+# 14–17. Головний клон (повторний і третій погляди Sonnet на безпеку, PR #277;
+# рішення yurii 2026-11-25, варіант A): задача зі своїм $HOME бачить і робоче
+# дерево, і .git головного клону лише для читання, не має його node_modules/.bin
+# у PATH; на запис — лише своя адмінка worktree і своє сховище об'єктів. Смуга
+# Claude — як і була.
+mkdir -p "$ROOT/repo/.git/worktrees/wt" "$ROOT/obj/objects"
 rc=0
 run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
 ((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo:ro" && ! has_arg "$ROOT/repo:$ROOT/repo" &&
-  has_arg "$ROOT/repo/.git:$ROOT/repo/.git" &&
-  ok "gemini: головний клон лише для читання, його .git — на запис" ||
+  has_arg "$ROOT/repo/.git:$ROOT/repo/.git:ro" && ! has_arg "$ROOT/repo/.git:$ROOT/repo/.git" &&
+  has_arg "$ROOT/repo/.git/worktrees:$ROOT/repo/.git/worktrees:ro" &&
+  ok "gemini: головний клон і його .git (з адмінками worktree) — лише для читання" ||
   bad "gemini repo (rc=$rc): $(grep -F "$ROOT/repo" "$ROOT/docker-args" 2>/dev/null | tr '\n' ' ')"
 ((rc == 0)) && has_arg "PATH=$ROOT/wt/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" &&
   ok "gemini: у PATH лише node_modules/.bin свого worktree, без головного клону" ||
   bad "gemini PATH: $(grep '^PATH=' "$ROOT/docker-args" 2>/dev/null)"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" \
+  A8_WT_ADMIN="$ROOT/repo/.git/worktrees/wt" A8_OBJ_DIR="$ROOT/obj/objects" || rc=$?
+((rc == 0)) && has_arg "$ROOT/repo/.git/worktrees/wt:$ROOT/repo/.git/worktrees/wt" &&
+  has_arg "$ROOT/obj/objects:$ROOT/obj/objects" && has_arg "GIT_OBJECT_DIRECTORY=$ROOT/obj/objects" &&
+  has_arg "GIT_ALTERNATE_OBJECT_DIRECTORIES=$ROOT/repo/.git/objects" &&
+  ok "gemini: на запис — лише своя адмінка worktree і своє сховище об'єктів (GIT_OBJECT_DIRECTORY)" ||
+  bad "gemini admin/obj (rc=$rc): $(tr '\n' ' ' <"$ROOT/docker-args" 2>/dev/null) $(cat "$ROOT/out")"
+for badadm in "$ROOT/repo/.git" "$ROOT/repo/.git/worktrees" "$ROOT/elsewhere/worktrees/wt" "$ROOT/repo/.git/worktrees/.."; do
+  rc=0
+  run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" A8_WT_ADMIN="$badadm" || rc=$?
+  ((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+    ok "A8_WT_ADMIN=${badadm#"$ROOT"/} — не адмінка в .git/worktrees/ → відмова (2)" || bad "A8_WT_ADMIN=$badadm: rc=$rc"
+done
+ln -s "$ROOT/repo/.git" "$ROOT/repo/.git/worktrees/evil"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" A8_WT_ADMIN="$ROOT/repo/.git/worktrees/evil" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "A8_WT_ADMIN — симлінк (на весь .git) → відмова (2)" || bad "A8_WT_ADMIN симлінк: rc=$rc"
+rm -f "$ROOT/repo/.git/worktrees/evil"
+ln -s "$ROOT/obj/objects" "$ROOT/obj-link"
+rc=0
+run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" A8_OBJ_DIR="$ROOT/obj-link" || rc=$?
+((rc == 2)) && [[ ! -e "$ROOT/docker-args" ]] &&
+  ok "A8_OBJ_DIR — симлінк → відмова (2)" || bad "A8_OBJ_DIR симлінк: rc=$rc"
 rc=0
 run A8_EXECUTOR=claude A8_HOME_SRC="$LANE" || rc=$?
 ((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo:ro" && ! mentions "$ROOT/repo/node_modules/.bin" &&
@@ -209,7 +238,9 @@ run A8_EXECUTOR=claude A8_HOME_SRC="$LANE" || rc=$?
 rc=0
 run A8_EXECUTOR=claude CLAUDE_CODE_OAUTH_TOKEN=tok || rc=$?
 ((rc == 0)) && has_arg "$ROOT/repo:$ROOT/repo" && mentions "$ROOT/repo/node_modules/.bin" &&
-  ok "смуга Claude — головний клон на запис і його node_modules/.bin у PATH, як і були" ||
+  has_arg "$ROOT/repo/.git:$ROOT/repo/.git" && has_arg "$ROOT/repo/.git/worktrees:$ROOT/repo/.git/worktrees" &&
+  ! mentions GIT_OBJECT_DIRECTORY &&
+  ok "смуга Claude — головний клон і .git на запис, його node_modules/.bin у PATH, як і були" ||
   bad "claude repo (rc=$rc)"
 rc=0
 RUN_WT="$ROOT/repo" run A8_EXECUTOR=gemini A8_AGY_HOME="$ROOT/agy-home" A8_HOME_SRC="$LANE" || rc=$?
@@ -253,6 +284,11 @@ elif [[ -z "${A8_RUNNER_UNDER_TEST:-}" ]]; then
   mutate "\$HOME контейнера завжди спільний" 's/  -v "\$HOME_SRC:\{\{ a8_container_home \}\}"/  -v "{{ a8_container_home }}:{{ a8_container_home }}"/'
   mutate "токен Claude з текою задачі gemini" 's/      if \(\(!shared_home\)\); then/      if false; then/'
   mutate "A8_HOME_SRC-симлінк прийнято" 's/\[\[ -L "\$A8_HOME_SRC" \|\| ! -d/[[ ! -d/'
+  mutate ".git на запис і для задачі gemini" 's/      "\$GITDIR:\$GITDIR"\) GIT_RW\+=\("\$GITDIR:\$GITDIR:ro"\) ;;/      "\$GITDIR:\$GITDIR") GIT_RW+=("\$GITDIR:\$GITDIR") ;;/'
+  mutate "адмінки worktree на запис і для задачі gemini" 's/GIT_RW\+=\("\$GITDIR\/worktrees:\$GITDIR\/worktrees:ro"\)/GIT_RW+=("\$GITDIR\/worktrees:\$GITDIR\/worktrees")/'
+  mutate "A8_WT_ADMIN поза .git/worktrees прийнято" 's/    if \[\[ "\$\{A8_WT_ADMIN%\/\*\}" != "\$GITDIR\/worktrees" \|\| /    if [[ /'
+  mutate "A8_WT_ADMIN-симлінк прийнято" 's/      -L "\$A8_WT_ADMIN" \|\| ! -d "\$A8_WT_ADMIN"/      ! -d "\$A8_WT_ADMIN"/'
+  mutate "сховище задачі без GIT_OBJECT_DIRECTORY" 's/ -e GIT_OBJECT_DIRECTORY="\$A8_OBJ_DIR"\n/\n/'
   mutate "головний клон на запис і для задачі gemini" 's/  REPO_RO=":ro"\n//'
   mutate "node_modules/.bin головного клону в PATH задачі gemini" 's/  CPATH="\$WORKTREE\/node_modules\/.bin:\/usr\/local\/sbin/  CPATH="\$WORKTREE\/node_modules\/.bin:{{ a8_repo_dir }}\/node_modules\/.bin:\/usr\/local\/sbin/'
   mutate "worktree = головний клон прийнято" 's/(    echo "a8-run-agent: worktree задачі зі своїм[^\n]*\n)    exit 2\n/$1/'

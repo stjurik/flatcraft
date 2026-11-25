@@ -1097,8 +1097,9 @@
     - name: V26d — agy answers inside the container, and no Claude token is there
       # Worktree — порожня тека, а не головний клон: задачу зі своїм $HOME на
       # головному клоні обгортка відмовляє (він змонтувався б на запис). Головний
-      # клон тут — лише для читання, його node_modules/.bin поза PATH, .git — на
-      # запис (повторний погляд Sonnet на безпеку, PR #277).
+      # клон тут — лише для читання, його node_modules/.bin поза PATH, і .git
+      # головного клону — теж лише для читання, але читається (повторний і третій
+      # погляди Sonnet на безпеку, рішення yurii 2026-11-25, варіант A, PR #277).
       ansible.builtin.command:
         argv:
           - /usr/local/bin/a8-run-agent
@@ -1111,7 +1112,8 @@
             test -e {{ a8_container_home }}/.a8-verify-shared-home && echo SHARED_HOME_VISIBLE || echo SHARED_HOME_HIDDEN;
             touch {{ a8_repo_dir }}/.a8-verify-ro 2>/dev/null && { rm -f {{ a8_repo_dir }}/.a8-verify-ro; echo REPO_WRITABLE; } || echo REPO_READONLY;
             printenv PATH | grep -qF {{ a8_repo_dir }}/node_modules/.bin && echo REPO_BIN_IN_PATH || echo REPO_BIN_NOT_IN_PATH;
-            test -w {{ a8_repo_dir }}/.git && echo GIT_WRITABLE || echo GIT_READONLY;
+            touch {{ a8_repo_dir }}/.git/a8-verify-ro 2>/dev/null && { rm -f {{ a8_repo_dir }}/.git/a8-verify-ro; echo GIT_WRITABLE; } || echo GIT_READONLY;
+            git -C {{ a8_repo_dir }} rev-parse -q --verify HEAD >/dev/null && echo GIT_READABLE || echo GIT_UNREADABLE;
             /usr/local/bin/agy models && echo AGY_OK
       environment:
         A8_EXECUTOR: gemini
@@ -1179,7 +1181,8 @@
       - "'SHARED_HOME_HIDDEN' in a8_v_gemini_side.stdout"
       - "'REPO_READONLY' in a8_v_gemini_side.stdout"
       - "'REPO_BIN_NOT_IN_PATH' in a8_v_gemini_side.stdout"
-      - "'GIT_WRITABLE' in a8_v_gemini_side.stdout"
+      - "'GIT_READONLY' in a8_v_gemini_side.stdout"
+      - "'GIT_READABLE' in a8_v_gemini_side.stdout"
       - "'AGY_OK' in a8_v_gemini_side.stdout"
       - a8_v_gemini_refuse.rc == 2
       - "'CLAUDE_CODE_OAUTH_TOKEN' in a8_v_gemini_refuse.stderr"
@@ -1197,7 +1200,7 @@
       відмова з токеном Claude: rc={{ a8_v_gemini_refuse.rc }} (очікував 2) {{ a8_v_gemini_refuse.stderr | default('') }};
       SHARED_HOME_VISIBLE у виводі agy — контейнер agy бачить спільний container-home (A8_HOME_SRC не діє);
       REPO_WRITABLE / REPO_BIN_IN_PATH — контейнер agy пише в головний клон чи бере його node_modules/.bin (міст до смуги Claude);
-      GIT_READONLY — .git головного клону не змонтовано на запис, агент не закомітить;
+      GIT_WRITABLE — .git головного клону на запис (міст до смуги Claude через objects/refs); GIT_UNREADABLE — git у контейнері не читає .git;
       токен Claude у {{ a8_container_home }}: rc={{ a8_v_token_in_home.rc }}
       (0 — немає, 1 — Є, 3 — токен не прочитати, перевірку не виконано)
     success_msg: >-

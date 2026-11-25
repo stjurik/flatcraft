@@ -436,7 +436,12 @@ release_or_keep() {
     keep_why="контейнер $A8_CONTAINER_NAME не зник — git на хості не чіпаю"
     return 1
   fi
-  if ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
+  # Задача gemini до імпорту (крок 5′) гілки ще не має: нема що рахувати, рахує
+  # нижче HEAD worktree (його об'єктів у головному клоні нема — rev-list падає,
+  # і worktree лишається).
+  if [[ -n "${lane_root:-}" ]] && ! hgit rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    cnt=0
+  elif ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
     keep_why="не вдалось порахувати коміти гілки — гілку й worktree лишаю"
     return 1
   fi
@@ -462,7 +467,7 @@ release_or_keep() {
     keep_why="worktree remove не вдався — гілку й worktree лишаю"
     return 1
   fi
-  hgit branch -D "$branch" >>"$log" 2>&1
+  hgit rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && hgit branch -D "$branch" >>"$log" 2>&1
   return 0
 }
 
@@ -618,10 +623,23 @@ fi
 # створюється рівно на цьому SHA. Ref origin/main лежить у репозиторії, який
 # агент бачить на запис: `git update-ref` зробив би diff від нього порожнім.
 base="$(hgit rev-parse --verify --quiet "refs/remotes/origin/main^{commit}")"
-[[ -n "$base" ]] && hgit worktree add --quiet -b "$branch" "$wt" "$base" >>"$log" 2>&1
-# Merge-base guard: гілка worktree мусить стояти рівно на origin/main.
-if [[ -z "$base" || ! -f "$wt/.git" ||
-  "$(hgit rev-parse --verify --quiet "refs/heads/$branch^{commit}")" != "$base" ]]; then
+# Задача gemini — worktree з ВІДОКРЕМЛЕНИМ HEAD і без гілки: її контейнери бачать
+# .git головного клону лише для читання (свої лише адмінка worktree і сховище
+# об'єктів задачі, крок 4), тож посилань там створити не можуть. Гілку $branch
+# робить сам тік, імпортувавши коміт агента (крок 5′).
+if [[ -n "$base" && -n "$lane_root" ]]; then
+  hgit worktree add --quiet --detach "$wt" "$base" >>"$log" 2>&1
+elif [[ -n "$base" ]]; then
+  hgit worktree add --quiet -b "$branch" "$wt" "$base" >>"$log" 2>&1
+fi
+# Merge-base guard: гілка worktree (для gemini — HEAD worktree) мусить стояти
+# рівно на origin/main.
+if [[ -n "$lane_root" ]]; then
+  wt_start="$(wt_head 2>/dev/null)"
+else
+  wt_start="$(hgit rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+fi
+if [[ -z "$base" || ! -f "$wt/.git" || "$wt_start" != "$base" ]]; then
   "$GUARD" count >/dev/null
   fail_task "worktree не на origin/main"
   exit 0
@@ -646,13 +664,28 @@ snapshot_git
 # Задача gemini — свій $HOME з першого ж контейнера: `pnpm install` тут уже
 # виконує код залежностей (postinstall), а хуки ставить у $HOME/.a8-git-hooks.
 # Ціна — кеші pnpm/uv для задачі gemini щоразу порожні (повне завантаження).
+#
+# І своє сховище об'єктів (рішення yurii 2026-11-25, варіант A, PR #277): .git
+# головного клону контейнери задачі gemini бачать лише для читання, а нові
+# об'єкти git пише в `agy-run/<id>/obj.git/objects` (GIT_OBJECT_DIRECTORY, з
+# alternates на головне сховище). Інакше агент однієї смуги підмінив би об'єкт
+# чи ref у спільному .git, і worktree іншої смуги отримав би підроблений файл
+# (третій погляд Sonnet на безпеку). На запис — ще лише адмінка свого worktree
+# (HEAD, index). Коміт у головний клон тік забирає сам — `fetch` з перевіркою
+# об'єктів (крок 5′). obj.git робить тік, його config контейнер не бачить.
 if [[ -n "$lane_root" ]]; then
-  if ! herr="$( (umask 077 && rm_tree "$lane_root" && mkdir -p "$lane_root/home") 2>&1)"; then
+  wt_admin="$A8_REPO_DIR/.git/worktrees/${wt##*/}"
+  if ! herr="$( (umask 077 && rm_tree "$lane_root" && mkdir -p "$lane_root/home" &&
+    lgit "$lane_root/obj.git" init --quiet --bare &&
+    printf '%s\n' "$A8_REPO_DIR/.git/objects" >"$lane_root/obj.git/objects/info/alternates" &&
+    { [[ -d "$wt_admin" && ! -L "$wt_admin" &&
+      "$(realpath -m -- "$(cat "$wt_admin/gitdir" 2>/dev/null)")" == "$(realpath -m -- "$wt/.git")" ]] ||
+      { echo "адмінка worktree $wt_admin не та, що для $wt"; false; }; }) 2>&1)"; then
     "$GUARD" count >/dev/null
     fail_task "lane-home: ${herr%%$'\n'*}"
     exit 0
   fi
-  export A8_HOME_SRC="$lane_root/home"
+  export A8_HOME_SRC="$lane_root/home" A8_WT_ADMIN="$wt_admin" A8_OBJ_DIR="$lane_root/obj.git/objects"
 fi
 drc=0
 "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
@@ -690,11 +723,18 @@ if stop_requested; then stop_task "перед агентом"; fi
 # Тести приймання названо в самому промпті: заборону, про яку виконавець не
 # знає, він порушить не зі зла, а backstop (крок 6a) відхилить роботу.
 tests="$(jq -r '(.acceptance_tests // [])[]' "$claimed")"
+# Задача gemini — відокремлений HEAD (крок 3): гілки агент не створює і не
+# перемикає, а комітить прямо в HEAD; гілку ${branch} зробить тік.
+if [[ -n "$lane_root" ]]; then
+  commit_to="поточний HEAD (він відокремлений — так задумано: гілку ${branch} створить супервізор; не створюй і не перемикай гілок)"
+else
+  commit_to="поточну гілку ${branch}"
+fi
 prompt="Працюй за CLAUDE.md §0.
 
 Оракул приймання цієї задачі: ${oracle}
-Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
-ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${branch}: незакомічена робота не йде ні в
+Закоміть результат у ${commit_to}. Не пуш і не створюй PR — це робить супервізор.
+ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${commit_to}: незакомічена робота не йде ні в
 перевірки, ні в push, і задача впаде. Не завершуй хід в очікуванні фонової команди —
 спершу дочекайся її й закоміть результат.
 ${tests:+
@@ -812,6 +852,30 @@ fi
 # Що набір тримає ЗАРАЗ: кожна взята задача рахується рівно один раз
 # (сценарій 5b + мутація «задача не рахується після запуску»).
 "$GUARD" count >/dev/null
+
+# ─── 5′. Задача gemini: імпорт коміту агента в головний клон ──────────────
+# Коміт агента лежить у сховищі задачі (obj.git), HEAD — в адмінці worktree.
+# Тік читає HEAD як SHA (wt_head, з `worktree list` головного клону), ставить на
+# нього ref в obj.git і забирає в головний клон `fetch` з fetch.fsckObjects:
+# index-pack сам рахує хеш кожного об'єкта, що приходить, тож підробленого
+# об'єкта в головне сховище не потрапить. Гілку $branch створює fetch. Контейнер
+# уже зник (ensure_container_gone вище). Не вийшло — failed, причина в detail.
+if [[ -n "$lane_root" ]]; then
+  ierr=""
+  if ! wh="$(wt_head)"; then
+    ierr="HEAD worktree не прочитати"
+  elif ! lgit "$lane_root/obj.git" update-ref refs/heads/import "$wh" >>"$log" 2>&1; then
+    ierr="коміт $wh не знайдено в сховищі задачі"
+  elif ! hgit -c fetch.fsckObjects=true -c transfer.fsckObjects=true fetch --quiet --no-tags \
+    --upload-pack=git-upload-pack "$lane_root/obj.git" "+refs/heads/import:refs/heads/$branch" >>"$log" 2>&1; then
+    ierr="fetch із перевіркою об'єктів не вдався"
+  fi
+  if [[ -n "$ierr" ]]; then
+    if stop_requested; then stop_task "під час агента"; fi
+    fail_task "import: $ierr"
+    exit 0
+  fi
+fi
 
 # ─── 6. Класифікація ───────────────────────────────────────────────────────
 read -r cls detail < <(logic classify "$rc" "$out" "$executor")

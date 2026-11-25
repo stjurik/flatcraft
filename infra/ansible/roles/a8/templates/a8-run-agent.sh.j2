@@ -86,6 +86,10 @@ RO_ARGS+=(-v "$GITDIR:$GITDIR" -v "$GITDIR/config:$GITDIR/config:ro" -v "$GITDIR
 #     Claude, залежності, хук, оракул) | gemini (agy, смуга виконавця §8);
 #   A8_AGY_HOME — лише для gemini: ТИМЧАСОВА копія теки налаштувань agy з
 #     профілем «виконавець», яку тік робить на задачу і прибирає після неї.
+#   A8_HOME_SRC — свій $HOME задачі gemini (для всіх її контейнерів); з ним
+#     головний клон і його .git — лише для читання, а на запис іще
+#   A8_WT_ADMIN — адмінка worktree задачі (.git/worktrees/<id>: HEAD, index) і
+#   A8_OBJ_DIR — сховище об'єктів задачі (GIT_OBJECT_DIRECTORY). PR #277.
 #
 # КРЕДЕНШАЛИ НЕ ПЕРЕТИНАЮТЬСЯ (PR-B #262): у контейнері agy немає токена
 # Claude, у контейнері Claude немає креденшалів Google. Обидві половини — тут,
@@ -135,6 +139,36 @@ if ((!shared_home)); then
   fi
   REPO_RO=":ro"
   CPATH="$WORKTREE/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  # .git головного клону — теж лише для читання (рішення yurii 2026-11-25,
+  # варіант A; третій погляд Sonnet, PR #277): у спільних objects/refs агент
+  # gemini підмінив би об'єкт, і worktree смуги Claude отримав би підроблений
+  # файл — і навпаки. На запис — лише адмінка свого worktree (HEAD, index) і своє
+  # сховище об'єктів; коміт у головний клон забирає тік, перевіряючи об'єкти.
+  GIT_RW=()
+  for a in "${RO_ARGS[@]}"; do
+    case "$a" in
+      "$GITDIR:$GITDIR") GIT_RW+=("$GITDIR:$GITDIR:ro") ;;
+      "$GITDIR/worktrees:$GITDIR/worktrees") GIT_RW+=("$GITDIR/worktrees:$GITDIR/worktrees:ro") ;;
+      *) GIT_RW+=("$a") ;;
+    esac
+  done
+  RO_ARGS=("${GIT_RW[@]}")
+  if [[ -n "${A8_WT_ADMIN:-}" ]]; then
+    if [[ "${A8_WT_ADMIN%/*}" != "$GITDIR/worktrees" || "${A8_WT_ADMIN##*/}" == .* ||
+      -L "$A8_WT_ADMIN" || ! -d "$A8_WT_ADMIN" ]]; then
+      echo "a8-run-agent: A8_WT_ADMIN='$A8_WT_ADMIN' — не адмінка worktree у $GITDIR/worktrees/, відмовляю" >&2
+      exit 2
+    fi
+    OPT_ARGS+=(-v "$A8_WT_ADMIN:$A8_WT_ADMIN")
+  fi
+  if [[ -n "${A8_OBJ_DIR:-}" ]]; then
+    if [[ -L "$A8_OBJ_DIR" || ! -d "$A8_OBJ_DIR" ]]; then
+      echo "a8-run-agent: A8_OBJ_DIR='$A8_OBJ_DIR' — не тека або симлінк, відмовляю" >&2
+      exit 2
+    fi
+    OPT_ARGS+=(-v "$A8_OBJ_DIR:$A8_OBJ_DIR" -e GIT_OBJECT_DIRECTORY="$A8_OBJ_DIR"
+      -e GIT_ALTERNATE_OBJECT_DIRECTORIES="$GITDIR/objects")
+  fi
 fi
 case "${A8_EXECUTOR:-claude}" in
   claude)

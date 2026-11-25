@@ -135,6 +135,12 @@ exec 9>&-
 echo "run-agent $*" >>"$CALLS"
 # Ім'я команди без шляху: agy тік кличе як /usr/local/bin/agy (не через PATH).
 c1="${1##*/}"
+# Задача gemini: нові об'єкти — у сховище задачі, як у справжньому контейнері
+# (обгортка задає GIT_OBJECT_DIRECTORY); тоді імпорт тіку справді переносить їх.
+echo "objdir ${c1} ${A8_OBJ_DIR:+set} admin=${A8_WT_ADMIN:+set}" >>"$CALLS"
+if [[ -n "${A8_OBJ_DIR:-}" ]]; then
+  export GIT_OBJECT_DIRECTORY="$A8_OBJ_DIR" GIT_ALTERNATE_OBJECT_DIRECTORIES="$REPO/.git/objects"
+fi
 [[ "$c1" == agy ]] && echo "agy-path $1" >>"$CALLS"
 # Що бачить «контейнер» у середовищі: токен Claude, режим і теку agy (лише
 # факт наявності — значення в журнал не пишемо).
@@ -152,6 +158,8 @@ if [[ "$c1" == agy || "$c1" == claude ]]; then
   echo "args $c1 model=$m log=$lf" >>"$CALLS"
 fi
 if [[ "$c1" == agy ]]; then
+  # HEAD worktree на час агента: задача gemini — відокремлений (гілку робить тік).
+  echo "agyhead $(git -C "$wt" symbolic-ref -q HEAD || echo detached)" >>"$CALLS"
   # chmod 000 у теці агента (AGY_CHMOD000): прибирання мусить пережити й це.
   if [[ -n "${AGY_CHMOD000:-}" ]]; then
     mkdir -p "$A8_AGY_HOME/locked/x" "$A8_HOME_SRC/locked/x" && chmod 000 "$A8_AGY_HOME/locked" "$A8_HOME_SRC/locked"
@@ -208,6 +216,21 @@ case "${AGENT_MODE:-commit}" in
     echo MARKER >"$wt/result.txt"
     git -C "$wt" add result.txt
     git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
+    echo '{"type":"result","is_error":false,"result":"done"}' ;;
+  forge | altswap)
+    # Задача gemini (сховище задачі, PR #277): коміт, а потім підміна. forge —
+    # loose-блоб у сховищі задачі переписано іншим вмістом під тим самим іменем;
+    # altswap — alternates сховища показують на чужу теку об'єктів.
+    echo MARKER >"$wt/result.txt"
+    git -C "$wt" add result.txt
+    git -C "$wt" -c user.email=a@a -c user.name=a commit -q -m work
+    if [[ "$AGENT_MODE" == forge ]]; then
+      b="$(git -C "$wt" rev-parse HEAD:result.txt)"
+      chmod u+w "$A8_OBJ_DIR/${b:0:2}/${b:2}"
+      python3 -c 'import sys,zlib; open(sys.argv[1],"wb").write(zlib.compress(b"blob 5\x00evil\n"))' "$A8_OBJ_DIR/${b:0:2}/${b:2}"
+    else
+      echo "$TMPR/elsewhere/objects" >"$A8_OBJ_DIR/info/alternates"
+    fi
     echo '{"type":"result","is_error":false,"result":"done"}' ;;
   dirty)
     # #294: стартовий коміт (ncommits=1 пройде крок 6), далі — НЕЗАКОМІЧЕНА
@@ -919,6 +942,64 @@ run_executor_scenarios() {
     grep -q '^Контейнер a8-g не зник після агента gemini (код 0)' "$ROOT/STOP" 2>/dev/null &&
     ok "контейнер агента gemini не зник за rc=0 → STOP із причиною, failed, до оракула не дійшло" ||
     bad "живий контейнер gemini: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
+  teardown
+
+  # 26r. Своє сховище об'єктів задачі gemini (рішення yurii 2026-11-25, варіант A):
+  # усі контейнери задачі — зі сховищем і адмінкою worktree, задачі claude — без;
+  # коміт агента потрапляє в головний клон лише імпортом тіку; підмінений об'єкт
+  # і змінені alternates — failed без гілки.
+  setup
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  AGENT_MODE=work tick
+  objs="$(grep '^objdir ' "$LOGS/runner-calls" | sort -u)"
+  [[ "$(jl .result)" == no-credential && -n "$objs" ]] && ! grep -qv ' set admin=set$' <<<"$objs" &&
+    ok "задача gemini: усі контейнери — зі своїм сховищем об'єктів і адмінкою worktree" ||
+    bad "сховище задачі gemini: $(tr '\n' ';' <<<"$objs"); $(last)"
+  b="$(git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g 2>/dev/null)"
+  [[ -n "$b" ]] && git -C "$ROOT/repo" cat-file -e "$b:result.txt" 2>/dev/null &&
+    [[ "$(git -C "$ROOT/repo" cat-file -p "$b:result.txt")" == MARKER ]] &&
+    ok "коміт агента gemini — у головному клоні після імпорту, гілку ai/g створив тік" ||
+    bad "імпорт gemini: ai/g=$b; $(last)"
+  grep -q '^run-agent agy -p .*відокремлений' "$LOGS/runner-calls" 2>/dev/null ||
+    grep -q 'відокремлений' "$LOGS/runner-calls" &&
+    ok "промпт gemini: HEAD відокремлений, гілку створить супервізор" || bad "промпт gemini без відокремленого HEAD"
+  grep -qx 'agyhead detached' "$LOGS/runner-calls" &&
+    ok "агент gemini працює на відокремленому HEAD — гілки в головному клоні до імпорту немає" ||
+    bad "HEAD агента gemini: $(grep '^agyhead' "$LOGS/runner-calls")"
+  teardown
+  setup
+  enqueue 001-a "$(valid a)"
+  tick
+  objs="$(grep '^objdir ' "$LOGS/runner-calls" | sort -u)"
+  [[ -n "$objs" ]] && ! grep -qv ' admin=$' <<<"$objs" && ! grep -q ' set ' <<<"$objs" &&
+    ok "задача claude: без сховища задачі й адмінки — спільний .git, як і був" || bad "claude objdir: $(tr '\n' ';' <<<"$objs")"
+  teardown
+  setup
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  AGENT_MODE=forge tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "import: fetch із перевіркою об'єктів не вдався" ]] &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "підмінений об'єкт у сховищі задачі → import відкинуто, гілки ai/g немає" || bad "forge: $(last)"
+  teardown
+  setup
+  mkdir -p "$ROOT/elsewhere/objects"
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  AGENT_MODE=altswap tick
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == *"alternates змінено"* && "$(jl .detail)" == *"import:"* ]] &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "alternates сховища задачі змінено → lgit відмовив, import не відбувся" || bad "altswap: $(last)"
+  teardown
+
+  # 26s. STOP під час залежностей задачі gemini — до імпорту, гілки ще немає:
+  # release_or_keep не спотикається об її відсутність, порожній worktree
+  # прибрано, задача — назад у чергу (як у задачі claude).
+  setup
+  enqueue 001-g "$(gem g true)"
+  STOP_DURING=pnpm tick
+  [[ "$(jl .result)" == stopped && -e "$QD/001-g.json" && ! -e "$ROOT/wt/g" ]] &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "STOP до імпорту задачі gemini → stopped, у черзі, worktree прибрано" || bad "STOP gemini до імпорту: $(last)"
+  rm -f "$ROOT/STOP"
   teardown
 
   # 26i. Невідомий executor відхиляє і тік (поле названо).
@@ -2276,12 +2357,13 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   # поведінку не впливає — і мутація почала ВИЖИВАТИ (CI на PR #126). Мутація,
   # що не розрізняє правильне і зламане, гірша за відсутню: вона додає рядок
   # «убита» і забирає увагу. Замість неї нижче — інваріант, який досі правда.
-  mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 6\./\n\n# ─── 6./'
+  mutate "задача не рахується після запуску" 's/\n"\$GUARD" count >\/dev\/null\n\n# ─── 5′\./\n\n# ─── 5′./'
   mutate "контейнер не вбивається при таймауті" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/:/'
   mutate "таймаут не переконується, що контейнер зник" 's/if \[\[ "\$rc" == 124 \]\] && ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n  container_stuck "\$A8_CONTAINER_NAME" "агент" count\nfi/[[ "\$rc" == 124 ]] \&\& "\$DOCKER" kill "\$A8_CONTAINER_NAME" >\/dev\/null 2>\&1/'
   mutate "ensure_container_gone завжди каже «зник»" 's/    "\$DOCKER" inspect "\$c" >\/dev\/null 2>&1 \|\| return 0\n    sleep "\$\{A8_KILL_WAIT_S:-1\}"\n  done\n  return 1/    return 0\n  done\n  return 1/'
   mutate "container_stuck не рахує задачу" 's/  \[\[ "\$\{3:-\}" == count \]\] && "\$GUARD" count >\/dev\/null\n//'
   mutate "container_stuck не пише oracle_rc=124" 's/\n  oracle_rc=124\n  fail_task "таймаут/\n  fail_task "таймаут/'
+  mutate "lgit без перевірки alternates сховища задачі" 's/  elif \[\[ -e "\$d\/objects\/info\/alternates" &&\n/  elif false \&\& [[ -e "\$d\/objects\/info\/alternates" \&\&\n/' lib
   mutate "підміна .git не ставить STOP" 's/    if \[\[ "\$why" == \*"змінили identity"\* \]\]; then\n(.*?\n)*?    fi\n//' lib
   mutate "401 без kill switch" 's/"\$id" "\$\(date -u \+%FT%TZ\)" >"\$A8_KILL_SWITCH"/"\$id" "\$(date -u +%FT%TZ)" >\/dev\/null/'
   mutate "quota обробляється як невідомий клас" 's/\n  quota\)\n/\n  quota_never)\n/'
@@ -2304,12 +2386,12 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "залежності не ставляться" 's/if \(\(drc != 0\)\); then/if false; then/'
   mutate "режим OQ-34 не експортовано" 's/\nexport A8_SOURCES_ALLOWED\n/\n/'
   mutate "flock прибрано" 's/flock -n 9 \|\| \{/true || {/'
-  mutate "merge-base guard прибрано" 's/if \[\[ -z "\$base" \|\| ! -f "\$wt\/\.git" \|\|\n[^\n]*\]\]; then/if false; then/'
+  mutate "merge-base guard прибрано" 's/if \[\[ -z "\$base" \|\| ! -f "\$wt\/\.git" \|\| "\$wt_start" != "\$base" \]\]; then/if false; then/'
   mutate "падіння fetch ігнорується" 's/if ! hgit fetch/if ! true || hgit fetch/'
   mutate "сирота не записана як failed" 's/  "\$GUARD" count >\/dev\/null\n  "\$GUARD" record failed\n/  "\$GUARD" count >\/dev\/null\n/'
   mutate "guard_error виходить з 0" 's/\[\[ "\$gstate" == guard_error \]\] && exit 1/[[ "\$gstate" == guard_error ]] \&\& exit 0/'
   mutate "stopped як failed" 's/  stopped\)\n    if release_or_keep; then/  stopped)\n    fail_task stopped; exit 0\n    if release_or_keep; then/'
-  mutate "порожню гілку не прибрано" 's/  if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n    keep_why=[^\n]*\n    return 1\n  fi\n  hgit branch -D "\$branch" >>"\$log" 2>&1\n  return 0/  return 0/'
+  mutate "порожню гілку не прибрано" 's/  if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n    keep_why=[^\n]*\n    return 1\n  fi\n  hgit rev-parse --verify --quiet "refs\/heads\/\$branch" >\/dev\/null && hgit branch -D "\$branch" >>"\$log" 2>&1\n  return 0/  return 0/'
   # #291: release_or_keep не переконується, що контейнер зник, перед git на хості.
   mutate "release_or_keep не чекає контейнера" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then/  if false; then/'
   mutate "невідомий kind → ok" 's/    fail_task "невідомий A8_PUSH_CREDENTIAL_KIND"/    finish ok ok unknown done/'
@@ -2349,11 +2431,15 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "гілку спроби gemini видалено" 's/branch -m "\$branch" "\$keep"/branch -D "\$branch"/'
   mutate "повтору gemini немає" 's/  \[\[ "\$executor" == gemini \]\] && gemini_retry "\$orc"\n//'
   mutate "осиротілу теку agy-run не прибрано" 's/\nrm_tree "\$A8_LOGS_DIR\/agy-run"\n/\n/'
+  mutate "worktree gemini з гілкою, а не відокремлений" 's/hgit worktree add --quiet --detach "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/'
+  mutate "сховище задачі не передано контейнерам" 's/ A8_WT_ADMIN="\$wt_admin" A8_OBJ_DIR="\$lane_root\/obj.git\/objects"\n/\n/'
+  mutate "імпорт коміту gemini пропущено" 's/if \[\[ -n "\$lane_root" \]\]; then\n  ierr=""/if false; then\n  ierr=""/'
+  mutate "release_or_keep: відсутня гілка gemini — як помилка" 's/  if \[\[ -n "\$\{lane_root:-\}" \]\] && ! hgit rev-parse --verify --quiet "refs\/heads\/\$branch" >\/dev\/null; then\n    cnt=0\n  elif/  if/'
   mutate "agy через PATH контейнера" 's/"\$RUNNER" "\$wt" \/usr\/local\/bin\/agy -p/"\$RUNNER" "\$wt" agy -p/'
   mutate "прибирання без chmod" 's/  chmod -R u\+rwX -- "\$1" 2>\/dev\/null\n//'
   mutate "лог agy без перевірки, що контейнер зник" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    rm_tree "\$agy_home"\n/  if false; then\n    rm_tree "\$agy_home"\n/'
   mutate "живий контейнер gemini без STOP" 's/("\$A8_CONTAINER_NAME" "\$rc" "\$\(date -u \+%FT%TZ\)" "\$A8_KILL_SWITCH") >"\$A8_KILL_SWITCH"/$1 >\/dev\/null/'
-  mutate "задача gemini — спільний \$HOME" 's/  export A8_HOME_SRC="\$lane_root\/home"\n//'
+  mutate "задача gemini — спільний \$HOME" 's/  export A8_HOME_SRC="\$lane_root\/home" /  export /'
   mutate "теку задачі gemini не прибрано" 's/  \[\[ -n "\$\{lane_root:-\}" \]\] && rm_tree "\$lane_root"\n//'
   mutate "agy.log переноситься й симлінком" 's/  if \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/  if true; then/'
   mutate "gemini_retry не чекає контейнера оракула" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    retry_why="повтору gemini немає: контейнер/  if false; then\n    retry_why="повтору gemini немає: контейнер/'
@@ -2438,7 +2524,7 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "worktree add від короткого origin/main" 's/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" origin\/main/'
   mutate "база від короткого origin/main" 's/base="\$\(hgit rev-parse --verify --quiet "refs\/remotes\/origin\/main\^\{commit\}"\)"/base="\$(hgit rev-parse --verify --quiet origin\/main)"/'
   # release_or_keep.
-  mutate "release_or_keep: помилка rev-list як 0 комітів" 's/  if ! cnt="\$\(hgit rev-list --count "\$base\.\.refs\/heads\/\$branch" 2>>"\$log"\)"; then/  cnt="\$(hgit rev-list --count "\$base..refs\/heads\/\$branch" 2>>"\$log" || echo 0)"\n  if false; then/'
+  mutate "release_or_keep: помилка rev-list як 0 комітів" 's/  elif ! cnt="\$\(hgit rev-list --count "\$base\.\.refs\/heads\/\$branch" 2>>"\$log"\)"; then/  elif cnt="\$(hgit rev-list --count "\$base..refs\/heads\/\$branch" 2>>"\$log" || echo 0)"; false; then/'
   mutate "release_or_keep рахує від origin/main" 's/rev-list --count "\$base\.\.refs\/heads\/\$branch"/rev-list --count "refs\/remotes\/origin\/main..refs\/heads\/\$branch"/'
   # Після контейнера git не працює в "$wt".
   mutate "push з worktree" 's/      hgit push --receive-pack=git-receive-pack origin "\$tip:refs\/heads\/\$branch"/      git -C "\$wt" push origin "\$tip:refs\/heads\/\$branch"/'
