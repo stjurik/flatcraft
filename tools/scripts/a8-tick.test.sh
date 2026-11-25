@@ -236,6 +236,7 @@ case "${AGENT_MODE:-commit}" in
       b="$(git -C "$wt" rev-parse HEAD:result.txt)"
       chmod u+w "$A8_OBJ_DIR/${b:0:2}/${b:2}"
       python3 -c 'import sys,zlib; open(sys.argv[1],"wb").write(zlib.compress(b"blob 5\x00evil\n"))' "$A8_OBJ_DIR/${b:0:2}/${b:2}"
+      [[ -n "${STOP_AFTER:-}" ]] && touch "$STOPFILE"
     elif [[ "$AGENT_MODE" == altdel ]]; then
       rm -f "$A8_OBJ_DIR/info/alternates"
     else
@@ -991,6 +992,16 @@ run_executor_scenarios() {
     ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null && [[ ! -e "$ROOT/wt/g" ]] &&
     [[ -z "$(git -C "$ROOT/repo" worktree list --porcelain | grep -F "$ROOT/wt/g")" ]] &&
     ok "підмінений об'єкт у сховищі задачі → import відкинуто, гілки ai/g і worktree немає" || bad "forge: $(last)"
+  teardown
+  # STOP під час агента і збій імпорту разом: worktree однаково прибрано,
+  # задача — назад у чергу, `failed` у серію не пишеться (оркестратор, 25.11).
+  setup
+  enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
+  STOP_AFTER=1 AGENT_MODE=forge tick
+  [[ "$(jl .result)" == stopped && "$(jl .detail)" == "kill switch під час агента; import: fetch із перевіркою об'єктів не вдався" ]] &&
+    [[ -e "$QD/001-g.json" && ! -e "$ROOT/wt/g" ]] && ! grep -q failed "$LOGS/last-results" 2>/dev/null &&
+    ! git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
+    ok "STOP + збій імпорту → stopped, worktree прибрано, задача в черзі, failed не записано" || bad "stop+forge: $(last); wt: $([[ -e "$ROOT/wt/g" ]] && echo є || echo нема)"
   teardown
   setup
   enqueue 001-g "$(gem g 'grep -q MARKER result.txt')"
@@ -2460,7 +2471,9 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "worktree gemini з гілкою, а не відокремлений" 's/hgit worktree add --quiet --detach "\$wt" "\$base"/hgit worktree add --quiet -b "\$branch" "\$wt" "\$base"/'
   mutate "сховище задачі не передано контейнерам" 's/ A8_WT_ADMIN="\$wt_admin" A8_OBJ_DIR="\$lane_root\/obj.git\/objects"\n/\n/'
   mutate "імпорт без fetch.fsckObjects" 's/hgit -c fetch\.fsckObjects=true -c transfer\.fsckObjects=true fetch/hgit fetch/'
-  mutate "worktree після збою імпорту не прибрано" 's/    if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n      ierr="\$ierr; worktree не прибрано"\n    fi\n//'
+  mutate "збій імпорту: STOP перевірено до прибирання worktree" 's/    wt_left=""\n/    if stop_requested; then stop_task "під час агента"; fi\n    wt_left=""\n/'
+  mutate "збій імпорту при STOP рахується як failed" 's/        finish stopped stopped "kill switch під час агента; import: \$ierr" queue/        fail_task "import: \$ierr"/'
+  mutate "worktree після збою імпорту не прибрано" 's/    if ! hgit worktree remove --force "\$wt" >>"\$log" 2>&1; then\n      ierr="\$ierr; worktree не прибрано"\n      wt_left=1\n    fi\n//'
   mutate "імпорт коміту gemini пропущено" 's/if \[\[ -n "\$lane_root" \]\]; then\n  ierr=""/if false; then\n  ierr=""/'
   mutate "release_or_keep: відсутня гілка gemini — як помилка" 's/  if \[\[ -n "\$\{lane_root:-\}" \]\] && ! hgit rev-parse --verify --quiet "refs\/heads\/\$branch" >\/dev\/null; then\n    cnt=0\n  elif/  if/'
   mutate "agy через PATH контейнера" 's/"\$RUNNER" "\$wt" \/usr\/local\/bin\/agy -p/"\$RUNNER" "\$wt" agy -p/'

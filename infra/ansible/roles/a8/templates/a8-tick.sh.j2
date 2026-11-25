@@ -876,9 +876,24 @@ if [[ -n "$lane_root" ]]; then
     ierr="fetch із перевіркою об'єктів не вдався"
   fi
   if [[ -n "$ierr" ]]; then
-    if stop_requested; then stop_task "під час агента"; fi
+    # worktree прибираємо ДО перевірки STOP: stop_task → release_or_keep лишив би
+    # дерево, бо HEAD поза головним клоном (rev-list падає), — і a8-requeue
+    # пропустив би задачу (оркестратор, 25.11, на d4b04b5).
+    wt_left=""
     if ! hgit worktree remove --force "$wt" >>"$log" 2>&1; then
       ierr="$ierr; worktree не прибрано"
+      wt_left=1
+    fi
+    # Зупинка — рішення людини, не падіння (як stop_task): без `record failed`.
+    # Роботи після прибирання нема — задача назад у чергу; дерево лишилось —
+    # у failed/, як stop_task при лишеному worktree.
+    if stop_requested; then
+      if [[ -z "$wt_left" ]]; then
+        finish stopped stopped "kill switch під час агента; import: $ierr" queue
+      else
+        finish stopped stopped "kill switch під час агента; import: $ierr — не повертаю в чергу" failed
+      fi
+      exit 0
     fi
     fail_task "import: $ierr"
     exit 0
