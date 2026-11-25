@@ -584,7 +584,8 @@ if [[ "\$1" == inspect ]]; then
 fi
 if [[ "\$1" == kill ]]; then
   # KILL_NEVER: kill «успішний», та контейнер лишається — імітує, що не зупинився.
-  if [[ -z "\${KILL_NEVER:-}" ]]; then
+  # KILL_NEVER_ONLY=<ім'я>: так лише з цим контейнером (решта вмирають як слід).
+  if [[ -z "\${KILL_NEVER:-}" && "\${KILL_NEVER_ONLY:-}" != "\$2" ]]; then
     [[ -f "$LOGS/pid-\$2" ]] && kill -9 "\$(cat "$LOGS/pid-\$2")" 2>/dev/null
     rm -f "$LOGS/alive-\$2"
   fi
@@ -820,7 +821,7 @@ run_executor_scenarios() {
   # спроби немає (рецензія Flash PR #277, п.4).
   setup
   enqueue 001-g "$(gem g 'grep -q GOOD result.txt')"
-  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 AGENT_MODE=work tick
+  A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER_ONLY=a8-g-oracle AGENT_MODE=work tick
   [[ "$(jl .result)" == failed && "$(jl .detail)" == "oracle rc=1; повтору gemini немає: контейнер a8-g-oracle не зник — git не чіпаю" &&
     -e "$QD/failed/001-g.json" && -d "$ROOT/wt/g" ]] &&
     git -C "$ROOT/repo" rev-parse -q --verify refs/heads/ai/g >/dev/null &&
@@ -905,13 +906,19 @@ run_executor_scenarios() {
   teardown
 
   # 26q. Контейнер агента не зник (клієнт docker загинув не за таймаутом):
-  # agy.log — шлях живого агента, його не беремо (повторний погляд Sonnet №7).
+  # agy.log — шлях живого агента, його не беремо; як на таймауті — STOP із
+  # причиною, failed, git не чіпаємо, оракула немає (Sonnet №7, PR #277).
   setup
   enqueue 001-g "$(gem g true)"
   A8_KILL_WAIT_TRIES=2 A8_KILL_WAIT_S=0 KILL_NEVER=1 tick
   [[ ! -e "$LOGS/tasks/g.agy.log" && ! -e "$LOGS/agy-run/g/gemini" ]] &&
     ok "контейнер агента не зник → agy.log не перенесено, копію з логіном прибрано" ||
     bad "agy.log при живому контейнері: $(ls -l "$LOGS/tasks/g.agy.log" 2>&1); $(last)"
+  [[ "$(jl .result)" == failed && "$(jl .detail)" == "контейнер a8-g не зник після агента (rc=0) — git не чіпаю" &&
+    "$(jl .oracle_rc)" == "-" && -e "$QD/failed/001-g.json" ]] &&
+    grep -q '^Контейнер a8-g не зник після агента gemini (код 0)' "$ROOT/STOP" 2>/dev/null &&
+    ok "контейнер агента gemini не зник за rc=0 → STOP із причиною, failed, до оракула не дійшло" ||
+    bad "живий контейнер gemini: $(last); STOP: $(cat "$ROOT/STOP" 2>/dev/null)"
   teardown
 
   # 26i. Невідомий executor відхиляє і тік (поле названо).
@@ -2344,10 +2351,11 @@ elif [[ -z "${A8_TICK_UNDER_TEST:-}" && -z "${A8_GIT_LIB_UNDER_TEST:-}" ]]; then
   mutate "осиротілу теку agy-run не прибрано" 's/\nrm_tree "\$A8_LOGS_DIR\/agy-run"\n/\n/'
   mutate "agy через PATH контейнера" 's/"\$RUNNER" "\$wt" \/usr\/local\/bin\/agy -p/"\$RUNNER" "\$wt" agy -p/'
   mutate "прибирання без chmod" 's/  chmod -R u\+rwX -- "\$1" 2>\/dev\/null\n//'
-  mutate "лог agy без перевірки, що контейнер зник" 's/  if ensure_container_gone "\$A8_CONTAINER_NAME" &&\n    \[\[ -f/  if [[ -f/'
+  mutate "лог agy без перевірки, що контейнер зник" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    rm_tree "\$agy_home"\n/  if false; then\n    rm_tree "\$agy_home"\n/'
+  mutate "живий контейнер gemini без STOP" 's/("\$A8_CONTAINER_NAME" "\$rc" "\$\(date -u \+%FT%TZ\)" "\$A8_KILL_SWITCH") >"\$A8_KILL_SWITCH"/$1 >\/dev\/null/'
   mutate "задача gemini — спільний \$HOME" 's/  export A8_HOME_SRC="\$lane_root\/home"\n//'
   mutate "теку задачі gemini не прибрано" 's/  \[\[ -n "\$\{lane_root:-\}" \]\] && rm_tree "\$lane_root"\n//'
-  mutate "agy.log переноситься й симлінком" 's/    \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/    true; then/'
+  mutate "agy.log переноситься й симлінком" 's/  if \[\[ -f "\$agy_home\/agy.log" && ! -L "\$agy_home\/agy.log" \]\]; then/  if true; then/'
   mutate "gemini_retry не чекає контейнера оракула" 's/  if ! ensure_container_gone "\$A8_CONTAINER_NAME"; then\n    retry_why="повтору gemini немає: контейнер/  if false; then\n    retry_why="повтору gemini немає: контейнер/'
   mutate "gemini_retry не перевіряє гілку спроби" 's/  if hgit rev-parse --verify --quiet "refs\/heads\/\$keep" >\/dev\/null; then/  if false; then/'
   mutate "падіння оракула gemini без причини відмови повтору" 's/fail_task "oracle rc=\$orc\$\{retry_why:\+; \$retry_why\}"/fail_task "oracle rc=\$orc"/'

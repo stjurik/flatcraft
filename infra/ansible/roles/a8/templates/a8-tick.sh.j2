@@ -774,11 +774,23 @@ fi
 # (тека на місці цілі не стає місцем запису). Рецензія Sonnet №2, PR #277.
 # Контейнер мусить зникнути за БУДЬ-ЯКОГО коду, не лише за таймауту: клієнт
 # docker, що загинув інакше (OOM, 137), лишив би живий контейнер, і той підмінив
-# би agy.log між перевіркою й `mv` (повторний погляд Sonnet №7). Не зник —
-# логу не беремо, копію прибираємо однаково.
+# би agy.log між перевіркою й `mv` чи .git між hgit-перевіркою і git (повторний
+# погляд Sonnet №7, третій погляд №7). Не зник — як container_stuck на таймауті:
+# STOP із причиною, задача у failed, git на хості не чіпаємо; копію з логіном
+# Google прибираємо однаково, логу не беремо.
 if [[ -n "$agy_home" ]]; then
-  if ensure_container_gone "$A8_CONTAINER_NAME" &&
-    [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    rm_tree "$agy_home"
+    (
+      set -o noclobber
+      printf 'Контейнер %s не зник після агента gemini (код %s), %s. Можливо, ще живий — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
+        "$A8_CONTAINER_NAME" "$rc" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    ) 2>/dev/null
+    "$GUARD" count >/dev/null
+    fail_task "контейнер $A8_CONTAINER_NAME не зник після агента (rc=$rc) — git не чіпаю"
+    exit 0
+  fi
+  if [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
     mv -fT "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
   fi
   rm_tree "$agy_home"
