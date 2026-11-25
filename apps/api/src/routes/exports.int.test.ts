@@ -11,7 +11,7 @@
  * cad-worker fetch замоканий — тестуємо саме шлях api→Postgres (persist exports +
  * append events), не воркер.
  */
-import { createClient, runMigrations, schema, type DatabaseClient } from "@flatcraft/db";
+import { createClient, runMigrations, runSeed, schema, type DatabaseClient } from "@flatcraft/db";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -71,8 +71,14 @@ describe.skipIf(!DATABASE_URL)("exports персист телеметрії — 
   beforeAll(async () => {
     if (!DATABASE_URL) throw new Error("DATABASE_URL required");
     await runMigrations({ url: DATABASE_URL });
+    // Issue #261: без seed таблиця `materials` порожня — дефолтне джерело
+    // густини (createMaterialDensityLookup через app.db) не знайшло б навіть
+    // "cold_rolled_steel" із VALID_REQUEST. Seed ідемпотентний (як
+    // routes/materials.int.test.ts).
+    await runSeed({ url: DATABASE_URL });
     client = createClient(DATABASE_URL);
-    // Без telemetry-override → реальна drizzle-телеметрія через app.db.
+    // Без telemetry/materialDensity-override → реальна drizzle-телеметрія і
+    // дефолтне джерело густини через app.db.
     app = await createServer({
       logger: false,
       dbClient: client,
@@ -109,6 +115,12 @@ describe.skipIf(!DATABASE_URL)("exports персист телеметрії — 
     const res = await app.inject({ method: "POST", url: "/exports", payload: VALID_REQUEST });
     expect(res.statusCode).toBe(202);
     const { id } = res.json<{ id: string }>();
+
+    // Issue #261: густина cold_rolled_steel (seed) форвардиться у воркер.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0];
+    const forwarded = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(forwarded.density_kg_m3).toBe(7850);
 
     // export_completed — остання подія runJob'а; дочекаймося її.
     await waitFor(async () => {

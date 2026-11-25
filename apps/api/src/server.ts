@@ -25,6 +25,7 @@ import rateLimitPlugin from "./plugins/rate-limit.js";
 import { buildExportRoutes } from "./routes/exports.js";
 import { buildFeedbackRoutes } from "./routes/feedback.js";
 import type { JobStore } from "./lib/job-store.js";
+import type { MaterialDensityLookup } from "./lib/material-density.js";
 import type { Telemetry } from "./lib/telemetry.js";
 import { healthRoutes } from "./routes/health.js";
 import { materialRoutes } from "./routes/materials.js";
@@ -41,6 +42,13 @@ export interface CreateServerOptions {
   readonly jobStore?: JobStore;
   /** Override телеметрії (unit-тести: NOOP/recording; дефолт — drizzle через app.db). */
   readonly telemetry?: Telemetry;
+  /**
+   * Override джерела густини матеріалу (issue #261). Дефолт —
+   * `createMaterialDensityLookup(app.db)` (таблиця `materials`, лише
+   * `is_active = true`). Юніт-тести з фіктивною `dbUrl` мусять інжектити
+   * власну функцію — реальна БД там недосяжна.
+   */
+  readonly materialDensity?: MaterialDensityLookup;
 }
 
 export async function createServer(options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -79,6 +87,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     buildExportRoutes({
       ...(options.jobStore ? { store: options.jobStore } : {}),
       ...(options.telemetry ? { telemetry: options.telemetry } : {}),
+      ...(options.materialDensity ? { materialDensity: options.materialDensity } : {}),
     }),
   );
   await app.register(

@@ -39,6 +39,19 @@ function recordingTelemetry() {
 
 const DUMMY_DB_URL = "postgresql://dummy:dummy@127.0.0.1:1/dummy";
 
+/**
+ * Підмінне джерело густини (issue #261) — `dbUrl` вище фіктивний, реальна
+ * таблиця `materials` недосяжна. Покриває всі material_code, що вживаються
+ * в цьому файлі (включно з zBracketT8R5Geometry e1/e2 — stainless_304).
+ */
+const STUB_DENSITIES: Record<string, number> = {
+  cold_rolled_steel: 7850,
+  stainless_304: 7900,
+};
+async function stubMaterialDensity(code: string): Promise<number | null> {
+  return STUB_DENSITIES[code] ?? null;
+}
+
 const VALID_REQUEST = {
   template_slug: "l_bracket" as const,
   parameters: {
@@ -88,6 +101,7 @@ describe("POST /exports — async flow", () => {
       dbUrl: DUMMY_DB_URL,
       jobStore: store,
       telemetry: NOOP_TELEMETRY,
+      materialDensity: stubMaterialDensity,
     });
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
@@ -810,6 +824,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
       fetchSpy.mockResolvedValue(
         new Response(JSON.stringify(UPSTREAM_OK_BODY), {
@@ -851,6 +866,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
 
       const res = await app2.inject({
@@ -887,6 +903,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
       fetchSpy.mockResolvedValue(new Response("trace", { status: 500 }));
 
@@ -945,6 +962,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
 
       const res = await app2.inject({
@@ -976,6 +994,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
 
       await app2.inject({ method: "POST", url: "/exports", payload: MULTI_VIOLATION_REQUEST });
@@ -1007,6 +1026,7 @@ describe("POST /exports — async flow", () => {
         dbUrl: DUMMY_DB_URL,
         jobStore: new JobStore({ retentionMs: 60_000 }),
         telemetry: rec.telemetry,
+        materialDensity: stubMaterialDensity,
       });
       // Одне порушення — достатньо для одної події на запит.
       const payload = {
@@ -1049,6 +1069,124 @@ describe("POST /exports — async flow", () => {
       expect(String(attempt1)).not.toContain("127.0.0.1");
 
       await app2.close();
+    });
+  });
+
+  describe("issue #261: густина матеріалу з бази (MATERIAL_NOT_FOUND)", () => {
+    const ALUMINUM_REQUEST = { ...VALID_REQUEST, material_code: "aluminum_5754" };
+
+    it("aluminum_5754 → тіло запиту у воркер має density_kg_m3 з джерела", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const app3 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: NOOP_TELEMETRY,
+        materialDensity: async (code) => (code === "aluminum_5754" ? 2660 : null),
+      });
+      const create = await app3.inject({
+        method: "POST",
+        url: "/exports",
+        payload: ALUMINUM_REQUEST,
+      });
+      expect(create.statusCode).toBe(202);
+      await flushAsync();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [, init] = fetchSpy.mock.calls[0];
+      const forwarded = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(forwarded.density_kg_m3).toBe(2660);
+      expect(forwarded.material_code).toBe("aluminum_5754");
+
+      await app3.close();
+    });
+
+    it("поле density_kg_m3 у тілі від клієнта у воркер не потрапляє — лише база", async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify(UPSTREAM_OK_BODY), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const app3 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: NOOP_TELEMETRY,
+        materialDensity: async (code) => (code === "aluminum_5754" ? 2660 : null),
+      });
+      const create = await app3.inject({
+        method: "POST",
+        url: "/exports",
+        // Клієнт намагається підмінити густину — джерело (база) має перемогти.
+        payload: { ...ALUMINUM_REQUEST, density_kg_m3: 1 },
+      });
+      expect(create.statusCode).toBe(202);
+      await flushAsync();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [, init] = fetchSpy.mock.calls[0];
+      const forwarded = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(forwarded.density_kg_m3).toBe(2660);
+
+      await app3.close();
+    });
+
+    it("невідомий матеріал → 422 MATERIAL_NOT_FOUND на material_code, fetch не викликано", async () => {
+      const app3 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: new JobStore({ retentionMs: 60_000 }),
+        telemetry: NOOP_TELEMETRY,
+        materialDensity: async () => null,
+      });
+      // material_code проходить матричну валідацію гиба (cold_rolled_steel —
+      // відомий bend-machine spec'у), тож 422 тут — саме з density-гейта, а
+      // не з MATERIAL_NOT_ALLOWED раніше у ланцюжку.
+      const res = await app3.inject({
+        method: "POST",
+        url: "/exports",
+        payload: VALID_REQUEST,
+      });
+      expect(res.statusCode).toBe(422);
+      const problem = res.json<{ errors: { field: string; code: string }[] }>();
+      expect(
+        problem.errors.some((e) => e.code === "MATERIAL_NOT_FOUND" && e.field === "material_code"),
+      ).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      await app3.close();
+    });
+
+    it("неактивний матеріал (density lookup повертає null) → 422 MATERIAL_NOT_FOUND, job не створюється, insertExport не кликано", async () => {
+      const rec = recordingTelemetry();
+      const store3 = new JobStore({ retentionMs: 60_000 });
+      const app3 = await createServer({
+        logger: false,
+        dbUrl: DUMMY_DB_URL,
+        jobStore: store3,
+        telemetry: rec.telemetry,
+        materialDensity: async () => null,
+      });
+      const before = (store3 as unknown as { jobs: Map<string, unknown> }).jobs.size;
+
+      const res = await app3.inject({
+        method: "POST",
+        url: "/exports",
+        payload: VALID_REQUEST,
+      });
+      expect(res.statusCode).toBe(422);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(rec.inserts).toHaveLength(0);
+      expect(rec.events.some((e) => e.event_type === "export_requested")).toBe(false);
+      expect((store3 as unknown as { jobs: Map<string, unknown> }).jobs.size).toBe(before);
+
+      await app3.close();
     });
   });
 });

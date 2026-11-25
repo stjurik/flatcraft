@@ -341,6 +341,7 @@ class TestIncompleteParametersGiveSchema422NotCrash:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -424,6 +425,7 @@ class TestMaterialCodeWiredIntoBendValidation:
                 },
                 "thickness_mm": 10,
                 "material_code": "stainless_304",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -461,6 +463,7 @@ class TestMaterialCodeMandatory:
                 "parameters": self.VALID_L_BRACKET_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "unobtanium",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -551,6 +554,7 @@ class TestSheetGateUsesComputeKFactorByMaterial:
                 "parameters": self.CONTREXAMPLE_PARAMETERS,
                 "thickness_mm": 8,
                 "material_code": material_code,
+                "density_kg_m3": 7850,
             },
         )
         if exceeds:

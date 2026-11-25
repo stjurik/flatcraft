@@ -67,6 +67,12 @@
 }
 ```
 
+**Код `MATERIAL_NOT_FOUND` (`POST /exports`, issue #261).** Перед форвардом у cad-worker api резолвить густину матеріалу (`material_code`) з таблиці `materials` (`code` = `material_code`, `is_active = true`) — одне джерело істини для маси деталі у PDF (замість фіксованого 7850 для будь-якого матеріалу). Матеріалу немає в таблиці чи він неактивний → `422`, жоден артефакт не створюється, cad-worker не викликається. На відміну від `MATERIAL_NOT_ALLOWED` (матеріал існує, але не входить у групу `bend-machine-esi.yaml` для цієї товщини), `MATERIAL_NOT_FOUND` означає, що самого матеріалу в каталозі немає.
+
+| `code`               | Поле            | Додаткові поля | Коли                                                  |
+| -------------------- | --------------- | -------------- | ----------------------------------------------------- |
+| `MATERIAL_NOT_FOUND` | `material_code` | `message`      | Матеріал відсутній у `materials` чи `is_active=false` |
+
 **Код валідації перфорації (`POST /exports`, серверний gate — ADR-019/026).** Для `perforated_panel` (єдиний перфо-шаблон, ADR-031; форма отвору — параметр `hole_shape`) крок отворів має перевищувати розмір отвору `hole_size_mm` по кожній осі, інакше сусідні отвори торкаються/зливаються у суцільний проріз (заготовка не відповідає BOM «N окремих отворів»). Перевірка — `validatePerforation` (cad-engine), дзеркалена у Fastify-gate і Python-воркері; клієнт показує банер + блокує експорт (UX, не замінює сервер).
 
 | `code`          | Поле                        | Додаткові поля     | Коли                                                                   |
@@ -385,6 +391,10 @@ Read-API для `events` у MVP немає: дані споживають digest
 #### QR-permalink у PDF → export_id (issue #70)
 
 `POST /exports` (внутрішній wire-контракт api→cad-worker, не публічний): api генерує `export_id` (== `job.id` == майбутній `exports.id`) ДО форварду тіла у cad-worker і додає його як поле `export_id: uuid` (Zod `ExportRequestSchema`, optional — web-клієнт його не надсилає, лише api при форварді). cad-worker (`ExportRequest` Pydantic, `export_id: UUID | None`) використовує його для QR у PDF: `{BASE_URL}/f/{export_id}` замість fallback `flatcraft://<slug>/<article>` (не працює на телефонах). Без `export_id` або без env `BASE_URL` — fallback лишається (зворотна сумісність). `BASE_URL` — те саме значення, що `APP_BASE_URL` у api (`infra/compose/docker-compose.prod.yml`), окрема env-змінна для cad-worker-контейнера. DXF — без змін (ADR-024: жодного QR/TEXT у DXF, лише PDF).
+
+#### Густина матеріалу → маса у PDF (issue #261)
+
+`POST /exports` (той самий внутрішній wire-контракт api→cad-worker): api додає поле `density_kg_m3: number` (кг/м³, джерело — таблиця `materials`, див. `MATERIAL_NOT_FOUND` вище) до тіла, яке форвардиться у cad-worker, — клієнтське тіло (`ExportRequestSchema`) цього поля не має й не може його підмінити. cad-worker (`ExportRequest` Pydantic) приймає `density_kg_m3` **обов'язковим** полем (`> 0`, `≤ 25000`; без нього — 422 від схеми, мовчазного дефолту 7850 немає) і передає його у кожен з шести `export_*_pdf` — маса в PDF = об'єм розгортки × `density_kg_m3`.
 
 ---
 

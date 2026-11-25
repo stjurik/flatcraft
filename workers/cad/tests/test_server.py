@@ -136,6 +136,7 @@ class TestExportValidation:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -149,6 +150,7 @@ class TestExportValidation:
                 "parameters": {**VALID_PARAMS, "legA_mm": 10},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -163,6 +165,7 @@ class TestExportValidation:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
                 "extra_garbage": "x",
             },
         )
@@ -181,6 +184,7 @@ class TestExportHappy:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -213,6 +217,7 @@ class TestExportHappy:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         body = res.json()
@@ -228,6 +233,7 @@ class TestExportHappy:
             "parameters": VALID_PARAMS,
             "thickness_mm": 2,
             "material_code": "cold_rolled_steel",
+            "density_kg_m3": 7850,
         }
         a = client.post("/export", json=payload).json()
         b = client.post("/export", json=payload).json()
@@ -255,6 +261,7 @@ class TestZBracketExport:
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -275,6 +282,7 @@ class TestZBracketExport:
                 "parameters": {**Z_VALID_PARAMS, "offset_mm": 10},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -291,6 +299,7 @@ class TestZBracketExport:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         z_res = client.post(
@@ -300,6 +309,7 @@ class TestZBracketExport:
                 "parameters": Z_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -323,6 +333,7 @@ class TestCornerAngleExport:
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -342,6 +353,7 @@ class TestCornerAngleExport:
                 "parameters": {**CORNER_VALID_PARAMS, "hole_rows": 6},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -359,6 +371,7 @@ class TestCornerAngleExport:
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -383,6 +396,7 @@ class TestCornerAngleExport:
                 "parameters": {**VALID_PARAMS, "legA_mm": 50, "legB_mm": 50, "width_mm": 80},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         c_res = client.post(
@@ -392,6 +406,7 @@ class TestCornerAngleExport:
                 "parameters": CORNER_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -415,6 +430,7 @@ class TestWallShelfExport:
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -432,6 +448,7 @@ class TestWallShelfExport:
                 "parameters": {**WALL_SHELF_VALID_PARAMS, "back_height_mm": 10},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -449,6 +466,7 @@ class TestWallShelfExport:
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         # Без lip: 1 bend line.
@@ -459,6 +477,7 @@ class TestWallShelfExport:
                 "parameters": {**WALL_SHELF_VALID_PARAMS, "front_lip_mm": 0},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -493,6 +512,7 @@ class TestWallShelfExport:
                 "parameters": WALL_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -519,6 +539,7 @@ class TestPerforatedPanelExport:
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -538,6 +559,7 @@ class TestPerforatedPanelExport:
                 "parameters": {**PERFORATED_PANEL_VALID_PARAMS, "pitch_x_mm": 5},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -558,6 +580,7 @@ class TestPerforatedPanelExport:
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -589,6 +612,7 @@ class TestPerforatedPanelExport:
                 "parameters": PERFORATED_PANEL_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         big_pitch = client.post(
@@ -602,6 +626,7 @@ class TestPerforatedPanelExport:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         ).json()
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -635,6 +660,7 @@ class TestEnclosedShelfExport:
                 "parameters": ENCLOSED_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -660,6 +686,7 @@ class TestEnclosedShelfExport:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422
@@ -684,6 +711,7 @@ class TestExportIdPermalink:
                 "thickness_mm": 2,
                 "export_id": export_id,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -713,6 +741,7 @@ class TestExportIdPermalink:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -753,6 +782,7 @@ class TestSheetAndHolesGateParity:
                 },
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -797,6 +827,7 @@ class TestSheetAndHolesGateParity:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == expected_status, res.text
@@ -824,6 +855,7 @@ class TestSheetAndHolesGateParity:
                 },
                 "thickness_mm": 2,
                 "material_code": "aluminum_5754",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -846,6 +878,7 @@ class TestSheetAndHolesGateParity:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -871,6 +904,7 @@ class TestSheetAndHolesGateParity:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -885,6 +919,7 @@ class TestSheetAndHolesGateParity:
                 "parameters": ENCLOSED_SHELF_VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -901,6 +936,7 @@ class TestSheetAndHolesGateParity:
                 "thickness_mm": 2,
                 "export_id": "00000000-1111-2222-3333-444444444444",
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -952,6 +988,7 @@ class TestSheetAndHolesGateParity:
                 "parameters": self.PARAMS_T10_R5,
                 "thickness_mm": 10,
                 "material_code": "hot_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -970,6 +1007,7 @@ class TestSheetAndHolesGateParity:
                 "parameters": self.PARAMS_T10_R5,
                 "thickness_mm": 10,
                 "material_code": "aluminum_5754",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -1007,6 +1045,7 @@ class TestKFactorAffectsRealGeometry:
                 },
                 "thickness_mm": 2,
                 "material_code": material_code,
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -1082,6 +1121,7 @@ class TestKFactorByMaterialAllTemplates:
                 "parameters": params,
                 "thickness_mm": 2,
                 "material_code": material,
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -1145,6 +1185,7 @@ class TestKFactorByMaterialAllTemplates:
                 "parameters": VALID_PARAMS,
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -1179,6 +1220,7 @@ class TestMaterialLabelByMaterialAllTemplates:
                 "parameters": params,
                 "thickness_mm": 2,
                 "material_code": material,
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text

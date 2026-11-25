@@ -23,6 +23,10 @@ import { z } from "zod";
 import { env } from "../env.js";
 import type { ExportJob } from "../lib/job-store.js";
 import { JobStore } from "../lib/job-store.js";
+import {
+  createMaterialDensityLookup,
+  type MaterialDensityLookup,
+} from "../lib/material-density.js";
 import { sessionHash } from "../lib/session-hash.js";
 import { createTelemetry, type Telemetry } from "../lib/telemetry.js";
 import { EXPORT_RATE_LIMIT } from "../plugins/rate-limit.js";
@@ -164,6 +168,12 @@ export interface ExportRoutesOptions {
   readonly store?: JobStore;
   /** Override для тестів (NOOP/recording). Дефолт — drizzle через app.db. */
   readonly telemetry?: Telemetry;
+  /**
+   * Override джерела густини матеріалу (issue #261). Дефолт —
+   * `createMaterialDensityLookup(app.db)` (таблиця `materials`, лише
+   * `is_active = true`).
+   */
+  readonly materialDensity?: MaterialDensityLookup;
 }
 
 export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPluginAsyncZod {
@@ -173,6 +183,9 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
     // Best-effort телеметрія (ADR-032). За замовчуванням — drizzle через app.db
     // (декорований dbPlugin, зареєстрованим раніше у server.ts).
     const telemetry = options.telemetry ?? createTelemetry(app.db, app.log);
+    // Issue #261: густина матеріалу з бази — одне джерело істини для маси у
+    // PDF (замість фіксованого 7850 у cad-worker для будь-якого матеріалу).
+    const materialDensity = options.materialDensity ?? createMaterialDensityLookup(app.db);
 
     app.post(
       "/exports",
@@ -232,6 +245,37 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
           }
           return reply.code(422).send(buildProblem(errors, "/exports"));
         }
+        // Issue #261: густина — з бази (materials, is_active=true), не з
+        // клієнтського тіла (ExportRequestSchema такого поля навіть не має).
+        // Невідомий/неактивний матеріал → 422 ДО створення job/telemetry —
+        // так само, як геометричні помилки вище: жодного запису, жодного
+        // forward у cad-worker.
+        const density = await materialDensity(req.body.material_code);
+        if (density === null) {
+          const attemptId = randomUUID();
+          const rejectedParams = { ...params, attempt_id: attemptId };
+          await telemetry.writeEvent({
+            event_type: "validation_rejected",
+            template_slug: templateSlug,
+            process: DEFAULT_PROCESS,
+            session_hash: sh,
+            params: rejectedParams,
+            error_code: "MATERIAL_NOT_FOUND",
+          });
+          return reply.code(422).send(
+            buildProblem(
+              [
+                {
+                  field: "material_code",
+                  code: "MATERIAL_NOT_FOUND",
+                  value: req.body.material_code,
+                  message: `Матеріал «${req.body.material_code}» не знайдено або він неактивний.`,
+                },
+              ],
+              "/exports",
+            ),
+          );
+        }
         const job = store.create();
         await telemetry.insertExport({
           id: job.id,
@@ -247,12 +291,20 @@ export function buildExportRoutes(options: ExportRoutesOptions = {}): FastifyPlu
           params,
         });
         // background: не await runJob — щоб клієнт одразу отримав jobId.
-        void runJob(store, job.id, req.body, {
-          telemetry,
-          templateSlug,
-          sessionHash: sh,
-          requestStart: Date.now(),
-        });
+        // density_kg_m3 — з бази (вище), перемагає будь-яке однойменне поле,
+        // яке клієнт міг би додати в тіло (ExportRequestSchema його не
+        // форвардить, але тут — явна гарантія).
+        void runJob(
+          store,
+          job.id,
+          { ...(req.body as Record<string, unknown>), density_kg_m3: density },
+          {
+            telemetry,
+            templateSlug,
+            sessionHash: sh,
+            requestStart: Date.now(),
+          },
+        );
         return reply.code(202).send({ id: job.id, status: job.status });
       },
     );

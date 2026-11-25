@@ -66,6 +66,7 @@ def _export(client: TestClient, slug: str, params: dict[str, object], t: float =
             "parameters": params,
             "thickness_mm": t,
             "material_code": "cold_rolled_steel",
+            "density_kg_m3": 7850,
         },
     )
 
@@ -229,6 +230,7 @@ class TestGateCodesПоруч:
                 "parameters": {**Z_VALID_PARAMS, "offset_mm": "not-a-number"},
                 "thickness_mm": 10,
                 "material_code": "stainless_304",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
