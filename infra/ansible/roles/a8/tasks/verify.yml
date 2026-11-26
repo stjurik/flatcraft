@@ -1016,6 +1016,197 @@
       Без HOOK_OK — у теці хуків container-home немає хука від lefthook.
       Хвіст stderr: {{ (a8_v_gitwork.stderr_lines | default([]))[-5:] | join(' | ') }}
     success_msg: "pnpm install агента — rc=0, .git/hooks не змінився; check-hook-loud і git commit у worktree через `a8-run-agent` — OK (uv sync — V18c)"
+
+# ─── V26. Смуга виконавця: креденшали двох виконавців не перетинаються ────
+# PR-B #262 (orchestrator-autonomy.md §8). Рішення yurii: креденшали Google —
+# лише в контейнер agy; у контейнері agy немає токена Claude, у контейнері Claude
+# — креденшалів Google. a8-run-agent.test.sh доводить це на аргументах docker,
+# інваріант 19 — на тексті шаблону; V26 — на живій машині, тим самим шляхом,
+# яким іде тік: обгортка, режим gemini, тимчасова копія теки agy.
+#
+# Заодно це ВИМІР, якого в git ще немає (README, «Смуга виконавця»): чи agy —
+# самодостатній файл і чи вся його автентифікація лежить у a8_agy_config_dir.
+# `agy models` у контейнері відповів — так; ні — stderr у fail_msg каже, чого
+# бракує.
+- name: V26a — checksum of the installed agy executor profile
+  ansible.builtin.stat:
+    path: /usr/local/lib/a8/agy-executor-permissions.json
+    checksum_algorithm: sha256
+  register: a8_v_agy_profile
+
+- name: V26a — checksum of the executor profile in the repository
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../tools/agy/executor-permissions.json"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: a8_v_agy_profile_repo
+
+- name: V26b — the Claude container sees neither agy nor its settings
+  # Режим за замовчуванням — той, у якому йдуть агент Claude, залежності, хук і
+  # оракул. Тека <container-home>/.gemini тут — порожня точка монтування з ролі.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/a8-run-agent
+      - "{{ a8_repo_dir }}"
+      - bash
+      - -c
+      - >-
+        command -v agy >/dev/null && echo AGY_VISIBLE || echo AGY_ABSENT;
+        find {{ a8_container_home }}/.gemini -mindepth 1 2>/dev/null | grep -q . && echo GEMINI_NOT_EMPTY || echo GEMINI_EMPTY;
+        test -e {{ a8_agy_config_dir }} && echo HOST_AGY_VISIBLE || echo HOST_AGY_HIDDEN
+  register: a8_v_claude_side
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V26 — agy container through the wrapper, with a throwaway settings copy
+  become: true
+  become_user: "{{ a8_agent_user }}"
+  block:
+    - name: V26c — fresh copy directory, as the tick makes it
+      ansible.builtin.file:
+        path: "{{ a8_logs_dir }}/agy-verify"
+        state: "{{ item }}"
+        mode: "0700"
+      loop: [absent, directory]
+
+    - name: V26c — copy the agy settings and login, then lay the executor profile over them as the tick does
+      # Як у тіку (a8-tick.sh.j2): gemini/ — копія + `agy-settings` з шаблоном під
+      # root (без профілю V26d довів би, що agy відповідає з профілем рецензента,
+      # рецензія Flash PR #277, п.2); home/ — свій $HOME задачі (рецензії Argon
+      # №1, Sonnet №1). Worktree у профілі — головний клон: саме його V26d дає
+      # обгортці. Мітка в спільному container-home — щоб V26d довів, що контейнер
+      # agy його не бачить.
+      ansible.builtin.shell: |
+        set -e
+        umask 077
+        v={{ (a8_logs_dir ~ '/agy-verify') | quote }}
+        mkdir -p "$v/gemini" "$v/home" "$v/wt"
+        cp -a {{ a8_agy_config_dir | quote }}/. "$v/gemini/"
+        s="$v/gemini/antigravity-cli/settings.json"
+        bash /usr/local/lib/a8/a8-tick-logic.sh agy-settings "$s" \
+          /usr/local/lib/a8/agy-executor-permissions.json {{ a8_repo_dir | quote }} >"$s.new"
+        mv -f "$s.new" "$s"
+        : >{{ (a8_container_home ~ '/.a8-verify-shared-home') | quote }}
+      register: a8_v_agy_copy
+      changed_when: false
+      failed_when: false
+
+    - name: V26d — agy answers inside the container, and no Claude token is there
+      # Worktree — порожня тека, а не головний клон: задачу зі своїм $HOME на
+      # головному клоні обгортка відмовляє (він змонтувався б на запис). Головний
+      # клон тут — лише для читання, його node_modules/.bin поза PATH, і .git
+      # головного клону — теж лише для читання, але читається (повторний і третій
+      # погляди Sonnet на безпеку, рішення yurii 2026-11-25, варіант A, PR #277).
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_logs_dir }}/agy-verify/wt"
+          - bash
+          - -c
+          - >-
+            printenv CLAUDE_CODE_OAUTH_TOKEN >/dev/null && echo CLAUDE_TOKEN_VISIBLE || echo CLAUDE_TOKEN_ABSENT;
+            test -e {{ a8_claude_token_file }} && echo TOKEN_FILE_VISIBLE || echo TOKEN_FILE_HIDDEN;
+            test -e {{ a8_container_home }}/.a8-verify-shared-home && echo SHARED_HOME_VISIBLE || echo SHARED_HOME_HIDDEN;
+            touch {{ a8_repo_dir }}/.a8-verify-ro 2>/dev/null && { rm -f {{ a8_repo_dir }}/.a8-verify-ro; echo REPO_WRITABLE; } || echo REPO_READONLY;
+            printenv PATH | grep -qF {{ a8_repo_dir }}/node_modules/.bin && echo REPO_BIN_IN_PATH || echo REPO_BIN_NOT_IN_PATH;
+            touch {{ a8_repo_dir }}/.git/a8-verify-ro 2>/dev/null && { rm -f {{ a8_repo_dir }}/.git/a8-verify-ro; echo GIT_WRITABLE; } || echo GIT_READONLY;
+            git -C {{ a8_repo_dir }} rev-parse -q --verify HEAD >/dev/null && echo GIT_READABLE || echo GIT_UNREADABLE;
+            /usr/local/bin/agy models && echo AGY_OK
+      environment:
+        A8_EXECUTOR: gemini
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify/gemini"
+        A8_HOME_SRC: "{{ a8_logs_dir }}/agy-verify/home"
+      register: a8_v_gemini_side
+      changed_when: false
+      failed_when: false
+
+    - name: V26e — the wrapper refuses the agy container when a Claude token is in the environment
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/a8-run-agent
+          - "{{ a8_logs_dir }}/agy-verify/wt"
+          - bash
+          - -c
+          - echo CONTAINER_STARTED
+      environment:
+        A8_EXECUTOR: gemini
+        A8_AGY_HOME: "{{ a8_logs_dir }}/agy-verify/gemini"
+        A8_HOME_SRC: "{{ a8_logs_dir }}/agy-verify/home"
+        CLAUDE_CODE_OAUTH_TOKEN: verify-not-a-token
+      register: a8_v_gemini_refuse
+      changed_when: false
+      failed_when: false
+  always:
+    - name: V26c — remove the settings copy (it holds the Google login) and the shared-home marker
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ a8_logs_dir }}/agy-verify"
+        - "{{ a8_container_home }}/.a8-verify-shared-home"
+
+- name: V26f — the Claude token is not stored as a file in the shared container home
+  # Спільний container-home бачать і контейнери без токена (залежності, оракул
+  # задач claude). Якщо токен Claude колись опиниться там файлом, «не передали
+  # змінну» вже нічого не гарантує. Контейнер agy спільного home не бачить зовсім
+  # (V26d, SHARED_HOME_HIDDEN). rc 3 — токена немає чи не прочитати: перевірка не
+  # відбулась, і V26g так і скаже.
+  ansible.builtin.shell: |
+    t="$(cat {{ a8_claude_token_file }} 2>/dev/null)"
+    [ -n "$t" ] || exit 3
+    if grep -rqsF -- "$t" {{ a8_container_home }}; then exit 1; fi
+    exit 0
+  register: a8_v_token_in_home
+  changed_when: false
+  failed_when: false
+  no_log: true
+  become: true
+  become_user: "{{ a8_agent_user }}"
+
+- name: V26g — Google credentials only in the agy container, the Claude token only in the Claude container
+  ansible.builtin.assert:
+    that:
+      - a8_v_agy_profile.stat.exists
+      - a8_v_agy_profile.stat.checksum == a8_v_agy_profile_repo.stat.checksum
+      - a8_v_agy_profile.stat.pw_name == 'root'
+      - "'AGY_ABSENT' in a8_v_claude_side.stdout"
+      - "'GEMINI_EMPTY' in a8_v_claude_side.stdout"
+      - "'HOST_AGY_HIDDEN' in a8_v_claude_side.stdout"
+      - a8_v_agy_copy.rc == 0
+      - "'CLAUDE_TOKEN_ABSENT' in a8_v_gemini_side.stdout"
+      - "'TOKEN_FILE_HIDDEN' in a8_v_gemini_side.stdout"
+      - "'SHARED_HOME_HIDDEN' in a8_v_gemini_side.stdout"
+      - "'REPO_READONLY' in a8_v_gemini_side.stdout"
+      - "'REPO_BIN_NOT_IN_PATH' in a8_v_gemini_side.stdout"
+      - "'GIT_READONLY' in a8_v_gemini_side.stdout"
+      - "'GIT_READABLE' in a8_v_gemini_side.stdout"
+      - "'AGY_OK' in a8_v_gemini_side.stdout"
+      - a8_v_gemini_refuse.rc == 2
+      - "'CLAUDE_CODE_OAUTH_TOKEN' in a8_v_gemini_refuse.stderr"
+      - "'CONTAINER_STARTED' not in a8_v_gemini_refuse.stdout"
+      - a8_v_token_in_home.rc == 0
+    fail_msg: >-
+      профіль виконавця: exists={{ a8_v_agy_profile.stat.exists }},
+      sha256 A8={{ a8_v_agy_profile.stat.checksum | default('—') }} repo={{ a8_v_agy_profile_repo.stat.checksum }};
+      контейнер Claude (rc={{ a8_v_claude_side.rc }}): {{ a8_v_claude_side.stdout_lines | default([]) | join(' ') }};
+      копія {{ a8_agy_config_dir }} з профілем виконавця: rc={{ a8_v_agy_copy.rc }} {{ a8_v_agy_copy.stderr | default('') }};
+      контейнер agy (rc={{ a8_v_gemini_side.rc }}): {{ (a8_v_gemini_side.stdout_lines | default([]))[-6:] | join(' | ') }};
+      stderr agy: {{ (a8_v_gemini_side.stderr_lines | default([]))[-6:] | join(' | ') }}
+      (agy не знайдено чи бракує бібліотеки — agy не самодостатній, його теку — в a8_agy_extra_ro_paths;
+      просить логін — автентифікація не лише в {{ a8_agy_config_dir }});
+      відмова з токеном Claude: rc={{ a8_v_gemini_refuse.rc }} (очікував 2) {{ a8_v_gemini_refuse.stderr | default('') }};
+      SHARED_HOME_VISIBLE у виводі agy — контейнер agy бачить спільний container-home (A8_HOME_SRC не діє);
+      REPO_WRITABLE / REPO_BIN_IN_PATH — контейнер agy пише в головний клон чи бере його node_modules/.bin (міст до смуги Claude);
+      GIT_WRITABLE — .git головного клону на запис (міст до смуги Claude через objects/refs); GIT_UNREADABLE — git у контейнері не читає .git;
+      токен Claude у {{ a8_container_home }}: rc={{ a8_v_token_in_home.rc }}
+      (0 — немає, 1 — Є, 3 — токен не прочитати, перевірку не виконано)
+    success_msg: >-
+      смуга виконавця: контейнер Claude не бачить agy і його теки; контейнер agy з профілем
+      виконавця і своїм $HOME (спільного container-home не бачить) відповідає (agy models), токена Claude в ньому немає ні в середовищі, ні файлом; з токеном у
+      середовищі обгортка відмовляє (2); у container-home токена немає
     quiet: true
 
 # ─── V16. ssh-вхід лише на читання справді відмовляє ───────────────────────

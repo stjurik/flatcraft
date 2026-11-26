@@ -261,3 +261,31 @@ untracked_outside_rules() {
   GIT_INDEX_FILE="$2" hgit --work-tree="$1" ls-files -o -z --exclude-from="$3" >"$4"
 }
 
+
+# lgit <сховище> <аргументи git…> — git у сховищі об'єктів задачі gemini
+# (`agent-logs/agy-run/<id>/obj.git`, рішення yurii 2026-11-25, варіант A, PR #277).
+# Сховище робить тік (`lgit <сховище> init --bare`) до першого контейнера; його
+# config, hooks і refs контейнер не бачить — змонтовано лише `objects`. Тож тут
+# лише дві перевірки того, що контейнер бачить: `objects` не симлінк і
+# `objects/info/alternates` — рівно рядок, який записав тік (головне сховище),
+# а не шлях до чужих об'єктів і не порожнеча (файл видалено). Без alternates
+# можна лише `init --bare`, поки `objects` ще немає. Решту — як у hgit: безпечні -c, без replace-
+# об'єктів, `-C` на головний клон, а `--git-dir` — на сховище задачі.
+lgit() {
+  local d="$1" why=""
+  shift
+  if [[ -L "$d" ]]; then
+    why="$d — симлінк"
+  elif [[ -L "$d/objects" ]]; then
+    why="$d/objects — симлінк"
+  elif [[ -e "$d/objects" &&
+    "$(cat "$d/objects/info/alternates" 2>/dev/null)" != "$A8_REPO_DIR/.git/objects" ]]; then
+    why="$d/objects/info/alternates змінено або видалено"
+  fi
+  if [[ -n "$why" ]]; then
+    [[ -s "${unsafe:-/dev/null}" ]] || printf 'сховище задачі: %s\n' "$why" >"${unsafe:-/dev/null}"
+    echo "a8-git: небезпечне сховище задачі: $why — git не запущено" >&2
+    return 125
+  fi
+  GIT_NO_REPLACE_OBJECTS=1 git "${HGIT_SAFE[@]}" -C "$A8_REPO_DIR" --git-dir="$d" "$@"
+}
