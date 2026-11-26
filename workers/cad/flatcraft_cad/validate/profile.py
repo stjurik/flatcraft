@@ -56,6 +56,18 @@ def _gt_msg(which: str, threshold: float, t: float, r: float) -> str:
     )
 
 
+def _try_float(value: Any) -> float | None:
+    """`None` — значення відсутнє чи не конвертується (контракт як
+    `parameters.get(key)` з наступним безпечним `float()`). Рядок-число
+    ("80") — число, `float()` розбирає і його (паритет з Pydantic-коерсією)."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def validate_profile(
     template_slug: str,
     parameters: dict[str, Any],
@@ -64,9 +76,16 @@ def validate_profile(
     """Перевіряє геометричну достатність профілю. Порожній список → валідно.
 
     Невідомий slug → []. thickness <= 0 → [] (як `t <= 0` early-return у
-    geometry.ts; Pydantic відмовить окремо). Неповні `parameters` (KeyError/
-    TypeError/ValueError з прямого читання `parameters[...]`) → [] — схема
-    шаблону (Pydantic) відмовить пізніше зі своїм 422, а не 500 тут.
+    geometry.ts; Pydantic відмовить окремо).
+
+    Issue #296: кожна перевірка (кожна полиця/ребро/offset/shelf_depth)
+    незалежна — відсутнє чи нечислове (`None` після `sanitize_for_gates`)
+    значення скасовує ЛИШЕ ту перевірку, що від нього залежить, а не всі
+    перевірки шаблону (раніше одна спільна `try/except` на весь шаблон
+    губила решту помилок, щойно перше ж поле не конвертувалось у `float`).
+    Дефолти гейта (`bend_radius_mm` 2.5, `front_lip_mm` 0) — лише для
+    ВІДСУТНЬОГО ключа (`dict.get(key, default)` вже й так повертає `None`,
+    а не дефолт, коли ключ присутній зі зіпсованим значенням).
     """
     t = thickness_mm
     if t <= 0:
@@ -90,38 +109,58 @@ def validate_profile(
                 )
             )
 
-    try:
-        if template_slug in ("l_bracket", "corner_angle"):
-            r = float(parameters["bend_radius_mm"])
-            leg("legA", float(parameters["legA_mm"]), r)
-            leg("legB", float(parameters["legB_mm"]), r)
+    if template_slug in ("l_bracket", "corner_angle"):
+        r = _try_float(parameters.get("bend_radius_mm"))
+        if r is None:
             return errors
+        leg_a = _try_float(parameters.get("legA_mm"))
+        if leg_a is not None:
+            leg("legA", leg_a, r)
+        leg_b = _try_float(parameters.get("legB_mm"))
+        if leg_b is not None:
+            leg("legB", leg_b, r)
+        return errors
 
-        if template_slug == "z_bracket":
-            r = float(parameters["bend_radius_mm"])
-            off = float(parameters["offset_mm"])
-            if off <= r:
-                errors.append(
-                    ProfileError(
-                        code="OFFSET_TOO_SMALL", field="offset", detail=_gt_msg("offset", r, t, r)
-                    )
+    if template_slug == "z_bracket":
+        r = _try_float(parameters.get("bend_radius_mm"))
+        if r is None:
+            return errors
+        off = _try_float(parameters.get("offset_mm"))
+        if off is not None and off <= r:
+            errors.append(
+                ProfileError(
+                    code="OFFSET_TOO_SMALL", field="offset", detail=_gt_msg("offset", r, t, r)
                 )
-            flange("top_flange", float(parameters["top_flange_mm"]), r)
-            flange("bottom_flange", float(parameters["bottom_flange_mm"]), r)
-            return errors
+            )
+        top = _try_float(parameters.get("top_flange_mm"))
+        if top is not None:
+            flange("top_flange", top, r)
+        bottom = _try_float(parameters.get("bottom_flange_mm"))
+        if bottom is not None:
+            flange("bottom_flange", bottom, r)
+        return errors
 
-        if template_slug == "perforated_panel":
-            # Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
-            # має бути додатним → rib_height > t+r (як flange у z/wall).
-            r = float(parameters.get("bend_radius_mm", 2.5))
-            flange("rib_height", float(parameters["rib_height_mm"]), r)
+    if template_slug == "perforated_panel":
+        # Ребриста монтажна панель (ADR-030/031): flat-фланець = rib_height − (t+r)
+        # має бути додатним → rib_height > t+r (як flange у z/wall).
+        r = _try_float(parameters.get("bend_radius_mm", 2.5))
+        if r is None:
             return errors
+        rib = _try_float(parameters.get("rib_height_mm"))
+        if rib is not None:
+            flange("rib_height", rib, r)
+        return errors
 
-        if template_slug == "wall_shelf":
-            r = float(parameters["bend_radius_mm"])
-            flange("back_height", float(parameters["back_height_mm"]), r)
-            lip = float(parameters.get("front_lip_mm", 0))
-            sd = float(parameters["shelf_depth_mm"])
+    if template_slug == "wall_shelf":
+        r = _try_float(parameters.get("bend_radius_mm"))
+        if r is None:
+            return errors
+        back = _try_float(parameters.get("back_height_mm"))
+        if back is not None:
+            flange("back_height", back, r)
+        lip = _try_float(parameters.get("front_lip_mm", 0))
+        sd = _try_float(parameters.get("shelf_depth_mm"))
+        if sd is not None and lip is not None:
             threshold = 2 * (t + r) if lip > 0 else (t + r)
             if sd <= threshold:
                 errors.append(
@@ -131,9 +170,7 @@ def validate_profile(
                         detail=_gt_msg("shelf_depth", threshold, t, r),
                     )
                 )
-            return errors
-    except (KeyError, TypeError, ValueError):
-        return []
+        return errors
 
     return errors
 
