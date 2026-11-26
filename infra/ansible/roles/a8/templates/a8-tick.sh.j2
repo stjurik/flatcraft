@@ -46,6 +46,9 @@ export A8_SOURCES_ALLOWED
 # падіння безкоштовне, а повідомлення називає ліки.
 : "${A8_ORACLE_TIMEOUT:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 : "${A8_CONTAINER_IMAGE:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_GEMINI_MODEL:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_AGY_CONFIG_DIR:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
+: "${A8_CONTAINER_HOME:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 : "${A8_QUOTA_COOLDOWN_S:?немає в $CONFIG — застосуйте роль ще раз (ansible-playbook a8.yml)}"
 
 # Точки підміни — ЛИШЕ для тесту (tools/scripts/a8-tick.test.sh). systemd-юніт
@@ -146,6 +149,20 @@ image_probe() {
 if [[ -e "$streak_file" ]] && image_probe; then
   rm -f "$streak_file"
 fi
+
+# Тимчасові копії налаштувань agy (крок 5) живуть лише під час агента. Тік,
+# убитий посеред задачі, лишив би копію з креденшалами Google на диску — її
+# прибирає наступний тік, уже під lock'ом. Задача виконавця gemini, на якій
+# червоніє оракул, повертається в чергу (gemini_retry нижче, §8 п.4).
+# rm_tree <тека> — прибрати теку, писану контейнером: `chmod 000` всередині
+# інакше тихо зупинив би `rm -rf`, і копія з логіном Google лишилась би на
+# диску (повторний погляд Sonnet, PR #277). chmod -R за симлінками під час
+# обходу не йде, rm -rf — теж; саму теку робить тік, вона не симлінк.
+rm_tree() {
+  chmod -R u+rwX -- "$1" 2>/dev/null
+  rm -rf -- "$1"
+}
+rm_tree "$A8_LOGS_DIR/agy-run"
 
 # ─── 0. Сирота з попереднього тіку ─────────────────────────────────────────
 # Файл у running/ при вільному lock означає: попередній тік помер посеред
@@ -290,8 +307,24 @@ id="$(field id "$task")"
 src="$(field source "$task")"
 origin="$(field origin "$task")"
 oracle="$(field oracle "$task")"
+# Виконавець (§8): поля немає — claude, як до смуги. `model` — для того
+# виконавця, що в `executor`; без нього кожен має свій дефолт.
+executor="$(field executor "$task")"
+executor="${executor:-claude}"
 model="$(field model "$task")"
-model="${model:-$A8_DEFAULT_MODEL}"
+if [[ "$executor" == gemini ]]; then
+  model="${model:-$A8_GEMINI_MODEL}"
+else
+  model="${model:-$A8_DEFAULT_MODEL}"
+fi
+# Тека задачі gemini: home/ — її власний $HOME для ВСІХ контейнерів задачі
+# (залежності, хук, агент, оракул), gemini/ — копія налаштувань agy лише на час
+# агента. Спільний container-home лишається смузі Claude: інакше gemini лишив
+# би там хук чи кеш, що виконається в наступному контейнері Claude з токеном
+# (рецензії Argon №1, Sonnet №1, PR #277). Прибирає finish; тік, убитий посеред
+# задачі, — наступний тік (sweep agy-run на початку).
+lane_root=""
+[[ "$executor" == gemini ]] && lane_root="$A8_LOGS_DIR/agy-run/$id"
 branch="ai/$id"
 wt="$A8_WORKTREES_DIR/$id"
 # Ім'я контейнера агента відоме одразу за id і потрібне раніше за крок 5: STOP на
@@ -303,6 +336,7 @@ log="$A8_LOGS_DIR/tasks/$id.log"
 # Вивід САМОГО claude — окремо від логу тіку: класифікатор не має бачити
 # вивід git/pnpm/check-hook-loud (знайдено незалежним рев'ю №2 демона).
 out="$A8_LOGS_DIR/tasks/$id.claude.json"
+[[ "$executor" == gemini ]] && out="$A8_LOGS_DIR/tasks/$id.agy.out"
 # Причина, з якої hgit відмовився запускати git (#276). Порожньо — git довіряли.
 unsafe="$A8_LOGS_DIR/tasks/$id.git-unsafe"
 # `-`, а не 0: «до оракула не дійшло» і «оракул зелений» — різні факти, і в
@@ -339,12 +373,16 @@ finish() { # finish <результат> <клас> <деталь> <куди>
   [[ -s "$unsafe" ]] && detail="небезпечний .git: $(head -n 1 "$unsafe") — $detail"
   "$JOURNAL" append "$id" "$src" "$1" "$(($(now) - started))" "$model" "" \
     exit_class="$2" detail="$detail" origin="$origin" oracle="$oracle" \
-    oracle_rc="$oracle_rc" branch="$branch" worktree="$wt"
+    oracle_rc="$oracle_rc" branch="$branch" worktree="$wt" executor="$executor"
   if [[ "$4" == queue ]]; then
     qmv "$claimed" "$home/"
   else
     qmv "$claimed" "$Q/$4/"
   fi
+  # rm -rf за симлінками всередині не йде, тож те, що контейнер підклав у
+  # теку задачі, поза нею нічого не зачепить.
+  [[ -n "${lane_root:-}" ]] && rm_tree "$lane_root"
+  return 0
 }
 
 # Повернути задачу в чергу можна, лише прибравши її порожню гілку і worktree:
@@ -398,7 +436,12 @@ release_or_keep() {
     keep_why="контейнер $A8_CONTAINER_NAME не зник — git на хості не чіпаю"
     return 1
   fi
-  if ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
+  # Задача gemini до імпорту (крок 5′) гілки ще не має: нема що рахувати, рахує
+  # нижче HEAD worktree (його об'єктів у головному клоні нема — rev-list падає,
+  # і worktree лишається).
+  if [[ -n "${lane_root:-}" ]] && ! hgit rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    cnt=0
+  elif ! cnt="$(hgit rev-list --count "$base..refs/heads/$branch" 2>>"$log")"; then
     keep_why="не вдалось порахувати коміти гілки — гілку й worktree лишаю"
     return 1
   fi
@@ -424,8 +467,61 @@ release_or_keep() {
     keep_why="worktree remove не вдався — гілку й worktree лишаю"
     return 1
   fi
-  hgit branch -D "$branch" >>"$log" 2>&1
+  hgit rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && hgit branch -D "$branch" >>"$log" 2>&1
   return 0
+}
+
+# ─── Оракул gemini червоний: ще раз gemini або Claude (§8 п.4) ────────────
+# «Оракул упав двічі → задачу бере Claude, третьої спроби в agy немає.»
+#
+# Лічильник — поле `oracle_failures` у САМОМУ записі задачі: стан живе на диску
+# (ADR-039 §3), а не в пам'яті тіку. Перше падіння → задача повертається в
+# чергу, знову gemini, oracle_failures=1. Друге → executor: claude, поле `model`
+# прибрано (воно було для agy), oracle_failures=2.
+#
+# Чому без `record failed`: задача ще не завершена — вона в черзі і буде
+# виконана. «Три failed поспіль» — сигнал про зламане середовище; спроба
+# gemini, яку тік сам переводить далі, не має ні поставити чергу на паузу, ні
+# скинути серію чужих падінь (тому й не `record ok`). Денний ліміт спроба
+# витратила — `count` після агента вже був: кожен запуск рахується.
+#
+# Гілка спроби не видаляється: вона — доказ для людини й рецензента, і в ній
+# коміти. Тік ПЕРЕЙМЕНОВУЄ її в ai-attempt/<id>/gemini-<N> (простір імен поза
+# ai/, тож `a8-requeue` і перевірка «гілка ai/<id> уже є» її не бачать), а
+# worktree прибирає: наступна спроба стартує від свіжого origin/main, як будь-яка
+# задача. Не вдалося (така гілка вже є, git упав) — звичайне падіння оракула,
+# задача у failed/, гілка ai/<id> на місці.
+#
+# Git — лише через hgit і лише коли контейнер оракула зник (#276, #291): так само,
+# як release_or_keep. Живий контейнер устиг би підмінити .git між перевіркою і git.
+# Не вийшло — причина в $retry_why (іде в detail падіння): «oracle rc=1» сам
+# по собі не каже людині, чому повтору не було (Argon №2, PR #277).
+retry_why=""
+gemini_retry() { # gemini_retry <код оракула> — успіх: exit 0; ні — return 1
+  local n keep
+  n=$(($(jq -r '.oracle_failures // 0' "$claimed") + 1))
+  keep="ai-attempt/$id/gemini-$n"
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    retry_why="повтору gemini немає: контейнер $A8_CONTAINER_NAME не зник — git не чіпаю"
+    return 1
+  fi
+  if hgit rev-parse --verify --quiet "refs/heads/$keep" >/dev/null; then
+    retry_why="повтору gemini немає: гілка спроби $keep уже є"
+    return 1
+  fi
+  retry_why="повтору gemini немає: git не переніс спробу в $keep"
+  hgit worktree remove --force "$wt" >>"$log" 2>&1 || return 1
+  hgit branch -m "$branch" "$keep" >>"$log" 2>&1 || return 1
+  if ((n >= 2)); then
+    jq --argjson n "$n" '.executor = "claude" | del(.model) | .oracle_failures = $n' \
+      "$claimed" >"$claimed.tmp" && mv -f "$claimed.tmp" "$claimed" || return 1
+    finish escalated escalated "oracle rc=$1; gemini, спроба $n з 2 → executor claude; гілка спроби $keep" queue
+  else
+    jq --argjson n "$n" '.oracle_failures = $n' "$claimed" >"$claimed.tmp" &&
+      mv -f "$claimed.tmp" "$claimed" || return 1
+    finish retry retry "oracle rc=$1; gemini, спроба $n з 2 → ще раз gemini; гілка спроби $keep" queue
+  fi
+  exit 0
 }
 
 fail_task() { # fail_task <деталь>
@@ -527,10 +623,23 @@ fi
 # створюється рівно на цьому SHA. Ref origin/main лежить у репозиторії, який
 # агент бачить на запис: `git update-ref` зробив би diff від нього порожнім.
 base="$(hgit rev-parse --verify --quiet "refs/remotes/origin/main^{commit}")"
-[[ -n "$base" ]] && hgit worktree add --quiet -b "$branch" "$wt" "$base" >>"$log" 2>&1
-# Merge-base guard: гілка worktree мусить стояти рівно на origin/main.
-if [[ -z "$base" || ! -f "$wt/.git" ||
-  "$(hgit rev-parse --verify --quiet "refs/heads/$branch^{commit}")" != "$base" ]]; then
+# Задача gemini — worktree з ВІДОКРЕМЛЕНИМ HEAD і без гілки: її контейнери бачать
+# .git головного клону лише для читання (свої лише адмінка worktree і сховище
+# об'єктів задачі, крок 4), тож посилань там створити не можуть. Гілку $branch
+# робить сам тік, імпортувавши коміт агента (крок 5′).
+if [[ -n "$base" && -n "$lane_root" ]]; then
+  hgit worktree add --quiet --detach "$wt" "$base" >>"$log" 2>&1
+elif [[ -n "$base" ]]; then
+  hgit worktree add --quiet -b "$branch" "$wt" "$base" >>"$log" 2>&1
+fi
+# Merge-base guard: гілка worktree (для gemini — HEAD worktree) мусить стояти
+# рівно на origin/main.
+if [[ -n "$lane_root" ]]; then
+  wt_start="$(wt_head 2>/dev/null)"
+else
+  wt_start="$(hgit rev-parse --verify --quiet "refs/heads/$branch^{commit}")"
+fi
+if [[ -z "$base" || ! -f "$wt/.git" || "$wt_start" != "$base" ]]; then
   "$GUARD" count >/dev/null
   fail_task "worktree не на origin/main"
   exit 0
@@ -552,6 +661,32 @@ snapshot_git
 # лише для читання, #276), а в теку container-home: core.hooksPath для всього
 # контейнера задає a8-run-agent. Саме звідти їх потім бачать check-hook-loud.sh
 # і git commit агента.
+# Задача gemini — свій $HOME з першого ж контейнера: `pnpm install` тут уже
+# виконує код залежностей (postinstall), а хуки ставить у $HOME/.a8-git-hooks.
+# Ціна — кеші pnpm/uv для задачі gemini щоразу порожні (повне завантаження).
+#
+# І своє сховище об'єктів (рішення yurii 2026-11-25, варіант A, PR #277): .git
+# головного клону контейнери задачі gemini бачать лише для читання, а нові
+# об'єкти git пише в `agy-run/<id>/obj.git/objects` (GIT_OBJECT_DIRECTORY, з
+# alternates на головне сховище). Інакше агент однієї смуги підмінив би об'єкт
+# чи ref у спільному .git, і worktree іншої смуги отримав би підроблений файл
+# (третій погляд Sonnet на безпеку). На запис — ще лише адмінка свого worktree
+# (HEAD, index). Коміт у головний клон тік забирає сам — `fetch` з перевіркою
+# об'єктів (крок 5′). obj.git робить тік, його config контейнер не бачить.
+if [[ -n "$lane_root" ]]; then
+  wt_admin="$A8_REPO_DIR/.git/worktrees/${wt##*/}"
+  if ! herr="$( (umask 077 && rm_tree "$lane_root" && mkdir -p "$lane_root/home" &&
+    lgit "$lane_root/obj.git" init --quiet --bare &&
+    printf '%s\n' "$A8_REPO_DIR/.git/objects" >"$lane_root/obj.git/objects/info/alternates" &&
+    { [[ -d "$wt_admin" && ! -L "$wt_admin" &&
+      "$(realpath -m -- "$(cat "$wt_admin/gitdir" 2>/dev/null)")" == "$(realpath -m -- "$wt/.git")" ]] ||
+      { echo "адмінка worktree $wt_admin не та, що для $wt"; false; }; }) 2>&1)"; then
+    "$GUARD" count >/dev/null
+    fail_task "lane-home: ${herr%%$'\n'*}"
+    exit 0
+  fi
+  export A8_HOME_SRC="$lane_root/home" A8_WT_ADMIN="$wt_admin" A8_OBJ_DIR="$lane_root/obj.git/objects"
+fi
 drc=0
 "$RUNNER" "$wt" pnpm install --frozen-lockfile >>"$log" 2>&1 || drc=$?
 #
@@ -585,31 +720,83 @@ if stop_requested; then stop_task "перед агентом"; fi
 
 # ─── 5. Агент — лише через a8-run-agent ────────────────────────────────────
 # Формулювання пише СУПЕРВІЗОР; текст задачі — дані в ньому (OQ-34 п.3).
+# Тести приймання названо в самому промпті: заборону, про яку виконавець не
+# знає, він порушить не зі зла, а backstop (крок 6a) відхилить роботу.
+tests="$(jq -r '(.acceptance_tests // [])[]' "$claimed")"
+# Задача gemini — відокремлений HEAD (крок 3): гілки агент не створює і не
+# перемикає, а комітить прямо в HEAD; гілку ${branch} зробить тік.
+if [[ -n "$lane_root" ]]; then
+  commit_to="поточний HEAD (він відокремлений — так задумано: гілку ${branch} створить супервізор; не створюй і не перемикай гілок)"
+else
+  commit_to="поточну гілку ${branch}"
+fi
 prompt="Працюй за CLAUDE.md §0.
 
 Оракул приймання цієї задачі: ${oracle}
-Закоміть результат у поточну гілку ${branch}. Не пуш і не створюй PR — це робить супервізор.
-ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${branch}: незакомічена робота не йде ні в
+Закоміть результат у ${commit_to}. Не пуш і не створюй PR — це робить супервізор.
+ПЕРЕД КІНЦЕМ СЕСІЇ закоміть усі зміни в ${commit_to}: незакомічена робота не йде ні в
 перевірки, ні в push, і задача впаде. Не завершуй хід в очікуванні фонової команди —
 спершу дочекайся її й закоміть результат.
-
+${tests:+
+Тести приймання — НЕ змінюй їх (зміна будь-якого — і результат відхилено):
+${tests}
+}
 ЗАДАЧА:
 $(field prompt "$claimed")"
+
+# Виконавець gemini: тимчасова копія теки налаштувань agy, у якій профіль
+# дозволів замінено на «виконавець» — читання й запис лише worktree задачі,
+# команди тестів (tools/agy/executor-permissions.json). Копія, а не тека з
+# хоста: (1) профіль рецензента на хості лишається недоторканим — агент у
+# контейнері не може його розширити; (2) agy може писати у свою теку (оновлення
+# токена), і це не потребує запису в хостову. Прибирається одразу після агента.
+# Шаблон профілю — копія під root, агент її не змінить.
+AGY_TEMPLATE="${A8_AGY_EXECUTOR_TEMPLATE:-/usr/local/lib/a8/agy-executor-permissions.json}"
+agy_home=""
+if [[ "$executor" == gemini ]]; then
+  agy_home="$lane_root/gemini"
+  asettings="$agy_home/antigravity-cli/settings.json"
+  # Ланцюжок `&&`, а не `set -e`: у підоболонці в умові `if` bash ігнорує -e.
+  # Симлінк у скопійованій теці (antigravity-cli чи settings.json) повів би запис
+  # профілю нижче за межі копії — у хостову теку (повторний погляд Sonnet №4).
+  if ! aerr="$(umask 077 && mkdir -p "$agy_home" &&
+    cp -a "$A8_AGY_CONFIG_DIR/." "$agy_home/" 2>&1 &&
+    { [[ ! -L "$agy_home/antigravity-cli" && ! -L "$asettings" ]] ||
+      { echo "у теці agy симлінк (antigravity-cli чи settings.json) — профіль не пишу"; false; }; } &&
+    logic agy-settings "$asettings" "$AGY_TEMPLATE" "$wt" 2>&1 >"$asettings.new" &&
+    mv -f "$asettings.new" "$asettings")"; then
+    rm_tree "$agy_home"
+    printf '%s\n' "$aerr" >>"$log"
+    "$GUARD" count >/dev/null
+    fail_task "agy-profile: ${aerr%%$'\n'*}"
+    exit 0
+  fi
+fi
 
 # A8_CONTAINER_NAME задано й експортовано вище (одразу за id).
 # Спостерігач — ДО токена: його підоболонці токен у середовищі ні до чого.
 watch_start "$A8_CONTAINER_NAME" "під час агента"
-# Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
-CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
-export CLAUDE_CODE_OAUTH_TOKEN
-
 rc=0
-timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
-  --model "$model" \
-  --settings "$wt/.claude/settings.autonomous.json" \
-  --dangerously-skip-permissions \
-  --max-turns "$A8_MAX_TURNS" \
-  --output-format json >"$out" 2>&1 || rc=$?
+if [[ "$executor" == gemini ]]; then
+  # Токена Claude тут немає і не має бути: обгортка в режимі gemini відмовляє,
+  # якщо бачить його в середовищі (a8-run-agent.test.sh). Режим і тека — лише
+  # в середовищі ЦЬОГО виклику: залежності, хук і оракул ідуть без них.
+  A8_EXECUTOR=gemini A8_AGY_HOME="$agy_home" \
+    timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" /usr/local/bin/agy -p "$prompt" \
+    --model "$model" \
+    --log-file "$A8_CONTAINER_HOME/.gemini/agy.log" >"$out" 2>&1 || rc=$?
+fi
+# Токен іде через змінну середовища, а не аргумент: аргументи видно в `ps`.
+if [[ "$executor" == claude ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$A8_CLAUDE_TOKEN_FILE" 2>/dev/null)"
+  export CLAUDE_CODE_OAUTH_TOKEN
+  timeout "$A8_TASK_TIMEOUT" "$RUNNER" "$wt" claude -p "$prompt" \
+    --model "$model" \
+    --settings "$wt/.claude/settings.autonomous.json" \
+    --dangerously-skip-permissions \
+    --max-turns "$A8_MAX_TURNS" \
+    --output-format json >"$out" 2>&1 || rc=$?
+fi
 watch_stop
 unset CLAUDE_CODE_OAUTH_TOKEN
 
@@ -618,6 +805,35 @@ unset CLAUDE_CODE_OAUTH_TOKEN
 # нижче кликати git (#290): живий контейнер — вікно гонки над `.git`.
 if [[ "$rc" == 124 ]] && ! ensure_container_gone "$A8_CONTAINER_NAME"; then
   container_stuck "$A8_CONTAINER_NAME" "агент" count
+fi
+
+# Лог agy — доказ для людини (сигнатури відмов, мітка моделі); копія з
+# креденшалами — ні, і на диску вона не лишається. Тека змонтована в контейнер
+# на запис, тож agy.log — шлях агента: лише звичайний файл (симлінк на токен
+# Claude ліг би в tasks/ як «доказ»), лише після того, як контейнер зник, і з -T
+# (тека на місці цілі не стає місцем запису). Рецензія Sonnet №2, PR #277.
+# Контейнер мусить зникнути за БУДЬ-ЯКОГО коду, не лише за таймауту: клієнт
+# docker, що загинув інакше (OOM, 137), лишив би живий контейнер, і той підмінив
+# би agy.log між перевіркою й `mv` чи .git між hgit-перевіркою і git (повторний
+# погляд Sonnet №7, третій погляд №7). Не зник — як container_stuck на таймауті:
+# STOP із причиною, задача у failed, git на хості не чіпаємо; копію з логіном
+# Google прибираємо однаково, логу не беремо.
+if [[ -n "$agy_home" ]]; then
+  if ! ensure_container_gone "$A8_CONTAINER_NAME"; then
+    rm_tree "$agy_home"
+    (
+      set -o noclobber
+      printf 'Контейнер %s не зник після агента gemini (код %s), %s. Можливо, ще живий — git на хості не чіпаю. Ліки: перевірити docker на A8, зупинити контейнер, зняти %s.\n' \
+        "$A8_CONTAINER_NAME" "$rc" "$(date -u +%FT%TZ)" "$A8_KILL_SWITCH" >"$A8_KILL_SWITCH"
+    ) 2>/dev/null
+    "$GUARD" count >/dev/null
+    fail_task "контейнер $A8_CONTAINER_NAME не зник після агента (rc=$rc) — git не чіпаю"
+    exit 0
+  fi
+  if [[ -f "$agy_home/agy.log" && ! -L "$agy_home/agy.log" ]]; then
+    mv -fT "$agy_home/agy.log" "$A8_LOGS_DIR/tasks/$id.agy.log" 2>/dev/null
+  fi
+  rm_tree "$agy_home"
 fi
 
 # Лічимо ПІСЛЯ запуску. Причина була в тому, що обгортка кликала `a8-guard
@@ -637,8 +853,55 @@ fi
 # (сценарій 5b + мутація «задача не рахується після запуску»).
 "$GUARD" count >/dev/null
 
+# ─── 5′. Задача gemini: імпорт коміту агента в головний клон ──────────────
+# Коміт агента лежить у сховищі задачі (obj.git), HEAD — в адмінці worktree.
+# Тік читає HEAD як SHA (wt_head, з `worktree list` головного клону), ставить на
+# нього ref в obj.git і забирає в головний клон `fetch` з fetch.fsckObjects:
+# index-pack сам рахує хеш кожного об'єкта, що приходить, тож підробленого
+# об'єкта в головне сховище не потрапить. Гілку $branch створює fetch. Контейнер
+# уже зник (ensure_container_gone вище). Не вийшло — failed, причина в detail.
+# worktree тоді прибираємо: його HEAD — коміт зі сховища задачі, а сховище
+# finish видаляє, тож лишене дерево показувало б на відсутні об'єкти, і
+# a8-requeue спіткнувся б об нього (rev-list → SKIP) — задачу довелося б
+# чистити руками. Ні гілки, ні коміту в головному клоні нема, тож нема й роботи,
+# яку можна було б зберегти; журнал agy вже перенесено в tasks/.
+if [[ -n "$lane_root" ]]; then
+  ierr=""
+  if ! wh="$(wt_head)"; then
+    ierr="HEAD worktree не прочитати"
+  elif ! lgit "$lane_root/obj.git" update-ref refs/heads/import "$wh" >>"$log" 2>&1; then
+    ierr="коміт $wh не знайдено в сховищі задачі"
+  elif ! hgit -c fetch.fsckObjects=true -c transfer.fsckObjects=true fetch --quiet --no-tags \
+    --upload-pack=git-upload-pack "$lane_root/obj.git" "+refs/heads/import:refs/heads/$branch" >>"$log" 2>&1; then
+    ierr="fetch із перевіркою об'єктів не вдався"
+  fi
+  if [[ -n "$ierr" ]]; then
+    # worktree прибираємо ДО перевірки STOP: stop_task → release_or_keep лишив би
+    # дерево, бо HEAD поза головним клоном (rev-list падає), — і a8-requeue
+    # пропустив би задачу (оркестратор, 25.11, на d4b04b5).
+    wt_left=""
+    if ! hgit worktree remove --force "$wt" >>"$log" 2>&1; then
+      ierr="$ierr; worktree не прибрано"
+      wt_left=1
+    fi
+    # Зупинка — рішення людини, не падіння (як stop_task): без `record failed`.
+    # Роботи після прибирання нема — задача назад у чергу; дерево лишилось —
+    # у failed/, як stop_task при лишеному worktree.
+    if stop_requested; then
+      if [[ -z "$wt_left" ]]; then
+        finish stopped stopped "kill switch під час агента; import: $ierr" queue
+      else
+        finish stopped stopped "kill switch під час агента; import: $ierr — не повертаю в чергу" failed
+      fi
+      exit 0
+    fi
+    fail_task "import: $ierr"
+    exit 0
+  fi
+fi
+
 # ─── 6. Класифікація ───────────────────────────────────────────────────────
-read -r cls detail < <(logic classify "$rc" "$out")
+read -r cls detail < <(logic classify "$rc" "$out" "$executor")
 # STOP або мітка спостерігача → зупинка, який би код не повернув контейнер:
 # 137 від `docker kill`, 0, якщо агент устиг закінчити, 10 від обгортки.
 # Без них 137 іде в класифікатор і стає падінням (OOM, чуже вбивство).
@@ -646,8 +909,11 @@ read -r cls detail < <(logic classify "$rc" "$out")
 # в журнал, і в сам файл STOP, інакше людина зніме STOP, а наступна задача
 # знову впаде на 401.
 # Серія quota поспіль (межа — у гілці quota нижче) рветься будь-яким іншим
-# результатом агента: квота, значить, відновилась.
-[[ "$cls" == quota ]] || rm -f "$quota_streak_file"
+# результатом агента Claude: квота, значить, відновилась. Прогін agy (executor
+# gemini) серії не чіпає: він на іншому пулі й про квоту Claude нічого не каже,
+# а задача gemini з urgent/ чи раніша за іменем між двома 429 інакше скидала б
+# межу, і STOP не настав би ніколи.
+[[ "$cls" == quota || "$executor" == gemini ]] || rm -f "$quota_streak_file"
 if [[ "$cls" != auth_stop ]] && stop_requested; then stop_task "під час агента"; fi
 case "$cls" in
   auth_stop)
@@ -852,6 +1118,19 @@ if ! changed="$(hgit diff -z --name-only --no-renames "$base" "$tip" 2>>"$log" |
   exit 0
 fi
 
+# ─── 6a'. Тести приймання задачі — заборонені виконавцю (§8 п.1) ──────────
+# Тест і код від однієї моделі мають ту саму помилку в обох: виконавець, що
+# «виправив» тест приймання, робить оракул зеленим, не зробивши задачі. Тому
+# зміна будь-якого файла з `acceptance_tests` (зокрема видалення і перенесення
+# — diff той самий, `--no-renames`) відхиляє результат ДО оракула і push.
+# Діє для будь-якого виконавця: Claude, на якого задачу перевели, теж не пише
+# собі тест приймання. Падіння, а не повтор: це «запис поза смугою» (іспит §8).
+if ! aviol="$(printf '%s\n' "$changed" | logic acceptance-violations "$claimed" 2>&1)"; then
+  printf '%s\n' "$aviol" >>"$log"
+  fail_task "acceptance-tests: $(tr '\n' ' ' <<<"$aviol")"
+  exit 0
+fi
+
 # ─── 6b. Оракул приймання — доводить МАШИНА ────────────────────────────────
 # `ok` від моделі означає лише «сесія завершилась без помилки», а коміти —
 # лише «щось записано». ЩО саме записано, доводить оракул із запису черги.
@@ -892,7 +1171,8 @@ if ((orc != 0)); then
   # червоний» там, де людина натиснула стоп, і звинуватив би агента в чужому
   # рішенні. Код 10 сам по собі тут не доказ: його може повернути й оракул.
   if stop_requested; then stop_task "під час оракула"; fi
-  fail_task "oracle rc=$orc"
+  [[ "$executor" == gemini ]] && gemini_retry "$orc"
+  fail_task "oracle rc=$orc${retry_why:+; $retry_why}"
   exit 0
 fi
 
