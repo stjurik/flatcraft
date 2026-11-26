@@ -124,6 +124,31 @@ git_snapshot=""
 why="$(git_unsafe_reason)"
 [[ "$why" == ".git містить симлінк FETCH_HEAD"* ]] && ok "без знімка — той самий симлінк → «.git містить симлінк FETCH_HEAD»" || bad "симлінк: «$why»"
 
+# lgit — git у сховищі об'єктів задачі gemini (PR #277, варіант A): відмова (125),
+# якщо сховище чи його objects — симлінк або alternates уже не той, що записав тік.
+l="$tmp/lgit"
+mkdir -p "$l" && git init -q "$l/main" && git -C "$l/main" -c user.email=a@a -c user.name=a commit -q --allow-empty -m a
+export A8_REPO_DIR="$l/main"
+unsafe=""
+lgit "$l/obj.git" init --quiet --bare && ok "lgit init --bare → сховище задачі створено" || bad "lgit init"
+printf '%s\n' "$l/main/.git/objects" >"$l/obj.git/objects/info/alternates"
+h="$(git -C "$l/main" rev-parse HEAD)"
+lgit "$l/obj.git" update-ref refs/heads/import "$h" 2>/dev/null &&
+  ok "lgit: коміт головного сховища видно через alternates → update-ref" || bad "lgit update-ref через alternates"
+rc=0; printf '%s\n' "$tmp/elsewhere" >"$l/obj.git/objects/info/alternates"
+lgit "$l/obj.git" rev-parse HEAD >/dev/null 2>&1 || rc=$?
+((rc == 125)) && ok "lgit: alternates змінено → 125, git не запущено" || bad "lgit alternates: rc=$rc"
+rc=0; rm "$l/obj.git/objects/info/alternates"
+lgit "$l/obj.git" rev-parse HEAD >/dev/null 2>&1 || rc=$?
+((rc == 125)) && ok "lgit: alternates видалено → 125, git не запущено" || bad "lgit без alternates: rc=$rc"
+printf '%s\n' "$l/main/.git/objects" >"$l/obj.git/objects/info/alternates"
+rc=0; ln -s "$l/obj.git" "$l/obj-link"
+lgit "$l/obj-link" rev-parse HEAD >/dev/null 2>&1 || rc=$?
+((rc == 125)) && ok "lgit: сховище — симлінк → 125" || bad "lgit симлінк сховища: rc=$rc"
+rc=0; mv "$l/obj.git/objects" "$l/objects-real" && ln -s "$l/objects-real" "$l/obj.git/objects"
+lgit "$l/obj.git" rev-parse HEAD >/dev/null 2>&1 || rc=$?
+((rc == 125)) && ok "lgit: objects — симлінк → 125" || bad "lgit симлінк objects: rc=$rc"
+
 if [[ "$fail" -eq 0 ]]; then
   echo "a8-git-lib: усі перевірки пройдено"
 else

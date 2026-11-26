@@ -36,6 +36,12 @@ FORBIDDEN_PATTERNS=(
   # який роль копіює з tools/scripts, тут є, тримає інваріант 18 check-ansible-a8.sh.
   '^tools/scripts/a8-[^/]*$'
   '^tools/scripts/check-forbidden-paths(\.test)?\.sh$'
+  # Профілі дозволів agy: executor-permissions.json роль ставить на хост як
+  # шаблон профілю виконавця gemini, permissions.json — профіль рецензента.
+  # Агент, що розширив би їх (`command(bash)`, `write_file(*)`), розширив би
+  # власну межу, а після merge роль поставила б розширений профіль на A8
+  # (рецензія Flash PR #277, п.1). Весь каталог — новий профіль потрапляє сюди сам.
+  '^tools/agy(/|$)'
 )
 
 violations=()

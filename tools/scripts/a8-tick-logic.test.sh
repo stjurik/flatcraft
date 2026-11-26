@@ -85,6 +85,93 @@ run_scenarios() {
   check "id 65 символів → id:invalid" 3 "reject id:invalid" -- \
     L validate "$(task id65 "{\"id\":\"$(printf 'a%.0s' {1..65})\",\"source\":\"human\",\"origin\":\"direction\",\"oracle\":\"x\",\"prompt\":\"p\"}")"
 
+  # ── Смуга виконавця (PR-B #262): executor, тести приймання, лічильник ────
+  local b='"id":"t-1","source":"human","origin":"direction","oracle":"x","prompt":"p"'
+  check "executor відсутній → прийнято (виконує claude)" 0 "ok" -- L validate "$(task ex-none "{$b}")"
+  check "executor gemini → прийнято" 0 "ok" -- L validate "$(task ex-gem "{$b,\"executor\":\"gemini\"}")"
+  check "executor claude → прийнято" 0 "ok" -- L validate "$(task ex-cl "{$b,\"executor\":\"claude\"}")"
+  check "executor codex → executor:invalid" 3 "reject executor:invalid" -- \
+    L validate "$(task ex-bad "{$b,\"executor\":\"codex\"}")"
+  check "executor Gemini (регістр) → executor:invalid" 3 "reject executor:invalid" -- \
+    L validate "$(task ex-case "{$b,\"executor\":\"Gemini\"}")"
+  check "executor порожній → executor:invalid, не «claude за замовчуванням»" 3 "reject executor:invalid" -- \
+    L validate "$(task ex-empty "{$b,\"executor\":\"\"}")"
+  check "executor масив → executor:not-string" 3 "reject executor:not-string" -- \
+    L validate "$(task ex-arr "{$b,\"executor\":[\"gemini\"]}")"
+  check "acceptance_tests — масив шляхів → прийнято" 0 "ok" -- \
+    L validate "$(task at-ok "{$b,\"acceptance_tests\":[\"apps/web/a.test.ts\",\"tests/acc/\"]}")"
+  check "acceptance_tests — рядок → acceptance_tests:not-array" 3 "reject acceptance_tests:not-array" -- \
+    L validate "$(task at-str "{$b,\"acceptance_tests\":\"a.test.ts\"}")"
+  check "acceptance_tests з ../ → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-dots "{$b,\"acceptance_tests\":[\"apps/../CLAUDE.md\"]}")"
+  check "acceptance_tests з абсолютним шляхом → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-abs "{$b,\"acceptance_tests\":[\"/etc/x\"]}")"
+  check "acceptance_tests з порожнім рядком → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-empty "{$b,\"acceptance_tests\":[\"\"]}")"
+  check "acceptance_tests з числом → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-num "{$b,\"acceptance_tests\":[1]}")"
+  check "acceptance_tests з самих пробілів → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-blank "{$b,\"acceptance_tests\":[\"   \"]}")"
+  check "acceptance_tests з частиною з пробілів (a/ /b) → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-blank-part "{$b,\"acceptance_tests\":[\"a/ /b.test.ts\"]}")"
+  check "acceptance_tests з подвійним слешем (tests//a.ts) → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-dslash "{$b,\"acceptance_tests\":[\"tests//a.ts\"]}")"
+  check "acceptance_tests: тека з двома слешами в кінці (tests/acc//) → acceptance_tests:invalid" 3 "reject acceptance_tests:invalid" -- \
+    L validate "$(task at-dslash-end "{$b,\"acceptance_tests\":[\"tests/acc//\"]}")"
+  check "acceptance_tests з пробілом усередині назви → прийнято" 0 "ok" -- \
+    L validate "$(task at-space-name "{$b,\"acceptance_tests\":[\"tests/my test.ts\"]}")"
+  check "oracle_failures 1 → прийнято" 0 "ok" -- L validate "$(task of-1 "{$b,\"oracle_failures\":1}")"
+  check "oracle_failures -1 → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
+    L validate "$(task of-neg "{$b,\"oracle_failures\":-1}")"
+  check "oracle_failures \"1\" → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
+    L validate "$(task of-str "{$b,\"oracle_failures\":\"1\"}")"
+  check "oracle_failures 1.5 → oracle_failures:invalid" 3 "reject oracle_failures:invalid" -- \
+    L validate "$(task of-frac "{$b,\"oracle_failures\":1.5}")"
+
+  # Backstop тестів приймання: точний шлях і шлях у теці — так; схожий префікс — ні.
+  local at
+  at="$(task at-list "{$b,\"acceptance_tests\":[\"apps/web/a.test.ts\",\"tests/acc/\"]}")"
+  check "змінено файл тесту приймання → названо, exit 1" 1 "apps/web/a.test.ts" -- \
+    bash -c 'printf "%s\n" src/x.ts apps/web/a.test.ts | env -u A8_SOURCES_ALLOWED bash "$0" acceptance-violations "$1"' "$LOGIC" "$at"
+  check "змінено файл у теці тестів приймання → названо, exit 1" 1 "tests/acc/b.py" -- \
+    bash -c 'printf "%s\n" tests/acc/b.py | bash "$0" acceptance-violations "$1"' "$LOGIC" "$at"
+  check "схожий префікс (a.test.ts.bak, tests/accX) — не тест приймання → exit 0" 0 "" -- \
+    bash -c 'printf "%s\n" apps/web/a.test.ts.bak tests/accX/c.py | bash "$0" acceptance-violations "$1"' "$LOGIC" "$at"
+  check "задача без переліку → нічого не захищено, exit 0" 0 "" -- \
+    bash -c 'printf "%s\n" apps/web/a.test.ts | bash "$0" acceptance-violations "$1"' "$LOGIC" "$TMP/ex-none.json"
+
+  # Профіль agy «виконавець»: читання й запис — рівно worktree, команди — без agy.
+  printf '%s\n' '{"model":"m","permissions":{"allow":["write_file(*)"]}}' >"$TMP/agy-settings.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)","write_file(@WT@)","command(git)","command(pnpm)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-ok.json"
+  check "профіль виконавця: worktree підставлено, решта налаштувань ціла" 0 \
+    '{"model":"m","permissions":{"allow":["read_file(/w/t1)","write_file(/w/t1)","command(git)","command(pnpm)"],"deny":["write_file(/tmp)"]}}' -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 | jq -c .' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-ok.json"
+  check "шаблон репо (tools/agy/executor-permissions.json) проходить охорону" 0 "ok" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 >/dev/null && echo ok' "$LOGIC" "$TMP/agy-settings.json" "$HERE/../agy/executor-permissions.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)","write_file(*)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-wide.json"
+  check "запис будь-куди → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-wide.json"
+  # Argon №4: файлові дозволи поза worktree, не лише `*`.
+  printf '%s\n' '{"allow":["read_file(/home/agent)","write_file(@WT@)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-read-home.json"
+  check "читання поза worktree (read_file(/home/agent)) → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-read-home.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)","write_file(/home/agent/hart)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-write-repo.json"
+  check "запис у головний клон (write_file(/home/agent/hart)) → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-write-repo.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)","command(agy)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-agy.json"
+  check "command(agy) — agy запускає сам себе → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-agy.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)","command(pnpm *)"],"deny":["write_file(/tmp)"]}' >"$TMP/tpl-star.json"
+  check "command з * → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-star.json"
+  printf '%s\n' '{"allow":["read_file(@WT@)"]}' >"$TMP/tpl-nodeny.json"
+  check "без deny write_file(/tmp) → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-nodeny.json"
+  check "налаштувань agy немає → відмова" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" /w/t1 2>/dev/null' "$LOGIC" "$TMP/none.json" "$TMP/tpl-ok.json"
+  check "worktree з дужкою → відмова (вийшов би за межі правила)" 1 "" -- \
+    bash -c 'bash "$0" agy-settings "$1" "$2" "/w/t1) read_file(/" 2>/dev/null' "$LOGIC" "$TMP/agy-settings.json" "$TMP/tpl-ok.json"
+
   # ── Коди guard'а: три РІЗНІ стани ─────────────────────────────────────────
   check "guard 0 → ok" 0 "ok" -- L guard-state 0
   check "guard 10 → kill_switch" 0 "kill_switch" -- L guard-state 10
@@ -134,6 +221,11 @@ run_scenarios() {
   check "причина падіння: успіх не отримує полів" 0 "ok -" -- L classify 0 "$TMP/ok.log"
   check "таймаут 124 → failed timeout" 0 "failed timeout" -- L classify 124 "$TMP/ok.log"
   check "обгортка повернула 11 → stopped daily_limit, не failed" 0 "stopped daily_limit" -- L classify 11 "$TMP/ok.log"
+  # Виконавець gemini: сигнатура 401 Claude у виводі agy — цитата, не зупинка черги.
+  check "gemini: 401 Claude у виводі agy, rc=1 → failed, не auth_stop" 0 "failed rc=1" -- L classify 1 "$TMP/401-raw.log" gemini
+  check "gemini: 401 у JSON-формі → failed, не auth_stop" 0 "failed rc=1" -- L classify 1 "$TMP/401.log" gemini
+  check "gemini: rc=0 → ok" 0 "ok -" -- L classify 0 "$TMP/ok.log" gemini
+  check "claude явно: 401 → auth_stop, як і без аргументу" 0 "auth_stop 401" -- L classify 1 "$TMP/401.log" claude
 
   # ── quota: лише бачена сигнатура (runs.log A8, тричі 15–17.11) ────────────
   # Форма з журналу: rc=1, subtype=success, terminal_reason=api_error, статус 429.
@@ -153,6 +245,15 @@ run_scenarios() {
     "failed rc=2 subtype=success terminal_reason=api_error api_error_status=429" -- L classify 2 "$TMP/q429.log"
   check "quota: 429 без terminal_reason=api_error → failed" 0 \
     "failed rc=1 subtype=error_during_execution terminal_reason=max_turns api_error_status=429" -- L classify 1 "$TMP/q429-other.log"
+  # Виконавець gemini: JSON квоти Claude у виводі agy — цитата, черга не стає на паузу.
+  check "gemini: бачена сигнатура quota у виводі agy → failed, не quota, без полів цитати" 0 \
+    "failed rc=1" -- L classify 1 "$TMP/q429.log" gemini
+  # Argon №3: успішна сесія agy (rc=0), у виводі якої процитовано JSON Claude з
+  # is_error:true, — ok, а не failed is_error.
+  printf 'agent quoted: {"type":"result","is_error":true,"result":"boom"}\n' >"$TMP/agy-quote.log"
+  printf '{"type":"result","is_error":true,"result":"boom"}\n' >>"$TMP/agy-quote.log"
+  check "gemini: rc=0 з цитатою is_error:true → ok" 0 "ok -" -- L classify 0 "$TMP/agy-quote.log" gemini
+  check "claude: та сама форма, rc=0 → failed is_error (як і було)" 0 "failed is_error" -- L classify 0 "$TMP/agy-quote.log"
   check "quota: 429 лише в тексті result → failed" 0 "failed rc=1 subtype=error_max_turns" -- L classify 1 "$TMP/q429-text.log"
   check "quota: api_error 529 → failed, не quota" 0 \
     "failed rc=1 subtype=error_during_execution terminal_reason=api_error api_error_status=529 error=overloadedrm-rf" -- \
@@ -228,7 +329,7 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "quota без службових полів у деталі" 's/ || "\$line" == "quota "\*//'
   mutate "quota-wait: межа включно" 's/if ((now < 10#\$v)); then/if ((now <= 10#$v)); then/'
   mutate "quota-wait: сміття у файлі не відсіюється" 's/\^\[0-9\]{1,12}\$/^.*$/'
-  mutate "причина падіння не дописується" 's/then line+="\$(a8_result_why "\$2")"; fi/then :; fi/'
+  mutate "причина падіння не дописується" 's/^    line+="\$(a8_result_why "\$2")"$/    :/'
   mutate "у деталь іде вільний текст result" 's/("subtype", "terminal_reason"/("result", "subtype", "terminal_reason"/'
   mutate "значення причини без фільтра символів" 's/gsub("\[^A-Za-z0-9_.-\]"; "")/./'
   mutate "значення причини без обрізання" 's/ | \.\[0:40\]//'
@@ -244,6 +345,29 @@ if [[ -z "${A8_LOGIC_UNDER_TEST:-}" ]]; then
   mutate "лише перша причина" 's/echo "reject \${reasons\[\*\]}"/echo "reject ${reasons[0]}"/'
   mutate "guard 11 злитий з 12" 's/11) echo daily_limit/11) echo paused/'
   mutate "пробіли як оракул" 's/\${oracle\/\/\[\[:space:\]\]\/}/${oracle}/'
+  # Смуга виконавця (PR-B #262).
+  mutate "невідомий executor прийнято" 's/    reasons+=("executor:invalid")/    :/'
+  mutate "executor не перевіряється на тип" 's/for f in id source origin oracle prompt executor; do/for f in id source origin oracle prompt; do/'
+  mutate "codex у переліку виконавців" 's/A8_EXECUTORS_KNOWN="gemini claude"/A8_EXECUTORS_KNOWN="gemini claude codex"/'
+  mutate "порожній executor = claude" 's/has("executor") and (.executor | type) == "string"/has("executor") and (.executor | type) == "string" and .executor != ""/'
+  mutate "acceptance_tests не масив — прийнято" 's/    reasons+=("acceptance_tests:not-array")/    :/'
+  mutate "acceptance_tests з .. — прийнято" 's/ or \. == "\.\."//'
+  mutate "oracle_failures не перевіряється" 's/    reasons+=("oracle_failures:invalid")/    :/'
+  mutate "acceptance_tests: усі кінцеві слеші зрізаються (Argon №4)" 's/(rtrimstr("\/") | split("\/")/(gsub("\/+$"; "") | split("\/")/'
+  mutate "acceptance_tests: частина з пробілів — прийнято" 's/any(test("^\[\[:space:\]\]\*\$") or/any(. == "" or/'
+  mutate "oracle_failures: дробове — прийнято" 's/ or \.oracle_failures != (\.oracle_failures | floor)//'
+  mutate "backstop тестів лише на точний шлях" 's/ || "\$path" == "\$t\/"\*//'
+  mutate "backstop тестів за префіксом рядка" 's/"\$path" == "\$t\/"\*/"$path" == "$t"*/'
+  mutate "backstop тестів завжди зелений" 's/  ((hit == 0))$/  true/'
+  mutate "профіль: запис будь-куди пропущено" 's/select(\. != \$r and \. != \$w and/select(. != $r and/'
+  mutate "профіль: читання будь-де пропущено" 's/select(\. != \$r and \. != \$w and/select(. != $w and/'
+  mutate "профіль: будь-який файловий дозвіл без * пропущено" 's/select(\. != \$r and \. != \$w and (test("^command/select((test("^(command|read_file|write_file)/'
+  mutate "профіль: command(agy) пропущено" 's/select(\. == "command(agy)")/select(. == "command(none)")/'
+  mutate "профіль: * у команді пропущено" 's/A-Za-z0-9\._-\]+/A-Za-z0-9._ *-]+/'
+  mutate "профіль без deny /tmp" 's/index("write_file(\/tmp)") != null/true/'
+  mutate "профіль: дужка у worktree пропущена" 's/"\$wt" != \*\[\\(\\)\\\*\\ \]\*/true/'
+  mutate "gemini: вивід agy розбирається як JSON Claude (401, 429, is_error)" 's/^  if \[\[ "\$executor" != gemini \]\]; then$/  if true; then/'
+  mutate "gemini: службові поля з цитованого JSON у детальці" 's/  if \[\[ "\$\{3:-claude\}" != gemini \]\] \&\& \[\[/  if [[/'
 fi
 
 if [[ "$fail" -eq 1 ]]; then

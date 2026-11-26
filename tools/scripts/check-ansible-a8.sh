@@ -821,6 +821,88 @@ else
   done
 fi
 
+# Інваріант 19 — креденшали двох виконавців не перетинаються (PR-B #262).
+#
+# ЧОМУ. Смуга виконавця (orchestrator-autonomy.md §8) запускає в тому самому
+# образі два різні агенти: Claude (токен Claude) і agy (логін Google). Рішення
+# yurii: креденшали Google — лише в контейнер agy; у контейнері agy немає токена
+# Claude, у контейнері Claude — креденшалів Google. Поведінку доводить
+# a8-run-agent.test.sh на справжньому шаблоні; цей інваріант тримає ФОРМУ, яку
+# той тест перевіряє, щоб нова задача ролі чи нове монтування в обгортці не
+# обійшли її тихо:
+#   а) в обгортці кожне монтування теки agy (A8_AGY_HOME, .gemini, a8_agy_*) —
+#      лише в гілці `gemini)` вибору виконавця, і така гілка є;
+#   б) гілка `gemini)` відмовляє (exit), коли бачить CLAUDE_CODE_OAUTH_TOKEN;
+#   в) `-e CLAUDE_CODE_OAUTH_TOKEN` — лише в гілці `claude)`;
+#   г) жоден інший файл ролі не монтує в контейнер теку налаштувань agy
+#      (a8_agy_config_dir, .gemini) — зокрема зонд verify, минаючи обгортку;
+#   ґ) тека налаштувань agy на хості лежить поза текою, яку бачить КОЖЕН
+#      контейнер (a8_container_home), і поза репо та worktree-ами.
+#
+# ЧОГО НЕ ДОВОДИТЬ: читає текст шаблону, а не рендер; не бачить монтувань,
+# зібраних у змінну поза гілкою і доданих далі. Живий стан — V23 у verify.yml.
+if [[ -f "$RUNNER_TPL" ]]; then
+  arms="$(strip_comments "$RUNNER_TPL" | cut -f2- | awk '
+    /^case "\$\{A8_EXECUTOR:-claude\}" in/ { incase = 1; next }
+    incase && /^esac/ { incase = 0; arm = ""; next }
+    incase && /^  [a-z*][^ ]*\)/ { arm = $1; sub(/\)$/, "", arm); next }
+    { print (incase ? arm : "-") "\t" $0 }')"
+  # Гілку gemini вимагаємо від обгортки, що взагалі знає про вибір виконавця:
+  # без A8_EXECUTOR вона однаково монтує лише спільне (перевіряє решта).
+  ! grep -qF 'A8_EXECUTOR' "$RUNNER_TPL" || grep -qP '^gemini\t' <<<"$arms" ||
+    violations+=("в обгортці $RUNNER_TPL немає гілки gemini) у case \"\${A8_EXECUTOR:-claude}\" — незрозуміло, де монтується тека agy")
+  while IFS=$'\t' read -r arm line; do
+    [[ -z "$line" ]] && continue
+    if [[ "$line" =~ -v[[:space:]] && "$line" =~ (A8_AGY_HOME|\.gemini|a8_agy_) && "$arm" != gemini ]]; then
+      violations+=("обгортка монтує теку agy поза гілкою gemini) — креденшали Google дістануться контейнеру Claude: $line")
+    fi
+    if [[ "$line" =~ -e[[:space:]]+CLAUDE_CODE_OAUTH_TOKEN && "$arm" != claude ]]; then
+      violations+=("обгортка передає CLAUDE_CODE_OAUTH_TOKEN поза гілкою claude) — токен Claude дістанеться контейнеру agy: $line")
+    fi
+  done <<<"$arms"
+  garm="$(grep -P '^gemini\t' <<<"$arms" | cut -f2- || true)"
+  # Відмова — це `exit` з ненульовим кодом усередині ТОГО `if`, що питає про
+  # токен; інший `exit` у гілці (напр. «немає теки agy») її не замінює.
+  refuses="$(awk '
+    /^[[:space:]]*if .*CLAUDE_CODE_OAUTH_TOKEN/ { inif = 1; next }
+    inif && /^[[:space:]]*fi([[:space:]]|$)/ { inif = 0 }
+    inif && /^[[:space:]]*exit[[:space:]]+[1-9]/ { print "yes"; exit }' <<<"$garm")"
+  if [[ -n "$garm" && "$refuses" != yes ]]; then
+    violations+=("гілка gemini) обгортки не відмовляє, коли в середовищі є CLAUDE_CODE_OAUTH_TOKEN — тік, що забув його прибрати, віддав би токен Claude агенту agy")
+  fi
+fi
+for d in "$ROLE/tasks" "$ROLE/templates" "$ROLE/handlers"; do
+  [[ -d "$d" ]] || continue
+  while IFS= read -r f; do
+    [[ "$f" == "$RUNNER_TPL" ]] && continue
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("теку налаштувань agy монтує в контейнер не обгортка (${f#"$ROOT"/}) — повз гілку gemini): $hit")
+    done < <(strip_comments "$f" | awk -v f="${f#"$ROOT"/}" -F '\t' '{ n = $1; sub(/^[^\t]*\t/, ""); if ($0 ~ /[^ \t]/) print f ":" n ":" $0 }' | grep -E '(^|[[:space:]])(-v|--volume|--mount)([[:space:]=]|$).*(a8_agy_config_dir|\.gemini)' || true)
+    # argv-форма: `- -v` окремим елементом, а тека — наступним.
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      violations+=("теку налаштувань agy монтує в контейнер не обгортка (${f#"$ROOT"/}) — повз гілку gemini): $hit")
+    done < <(strip_comments "$f" | awk -v f="${f#"$ROOT"/}" -F '\t' '{ n = $1; sub(/^[^\t]*\t/, ""); if ($0 ~ /[^ \t]/) print f ":" n ":" $0 }' | awk -F: '{ line = $0; sub(/^[^:]*:[^:]*:/, "", line) }
+      prev && line ~ /(a8_agy_config_dir|\.gemini)/ { print $0 }
+      { prev = (line ~ /^[[:space:]]*-[[:space:]]+"?(-v|--volume|--mount)"?[[:space:]]*$/) }' || true)
+  done < <(find "$d" -type f | sort)
+done
+DEFAULTS="$ROLE/defaults/main.yml"
+if [[ -f "$DEFAULTS" ]]; then
+  dval() { sed -nE "s/^$1:[[:space:]]*\"?([^\" #]+)\"?.*/\1/p" "$DEFAULTS" | head -n 1; }
+  agy_cfg="$(dval a8_agy_config_dir)"
+  if [[ -n "$agy_cfg" ]]; then
+    for v in a8_container_home a8_repo_dir a8_worktrees_dir; do
+      base="$(dval "$v")"
+      [[ -z "$base" ]] && continue
+      if [[ "${agy_cfg%/}" == "${base%/}" || "${agy_cfg%/}/" == "${base%/}/"* ]]; then
+        violations+=("a8_agy_config_dir ($agy_cfg) лежить у $v ($base) — цю теку бачить кожен контейнер, зокрема Claude")
+      fi
+    done
+  fi
+fi
+
 # Інваріант 14 — prune docker не видаляє образ агента.
 #
 # ЧОМУ. 2026-10-11 ручний `docker-prune.service` (поза git, issue #117) виконав
@@ -953,15 +1035,17 @@ while IFS= read -r -d $'\036' blk; do
     violations+=("задача ролі пише authorized_keys без command=\"/usr/local/bin/…\" (ключ дасть повну оболонку agent): ${blk%%:*} «$name»")
 done < <(printf '%s' "$akey_blocks")
 
-# Інваріант 18 — кожен скрипт, який роль ставить на хост з tools/scripts, —
-# у backstop'і заборонених шляхів (#302 D, рецензія #299).
+# Інваріант 18 — кожен файл, який роль ставить на хост з tools/ (скрипти з
+# tools/scripts, профіль agy з tools/agy, …), — у backstop'і заборонених шляхів
+# (#302 D, рецензія #299; tools/agy — рецензія Flash PR #277).
 #
 # ЧОМУ. a8-git-lib.sh (обгортка git на хості) лежав у tools/scripts, поза
 # check-forbidden-paths.sh (там `^infra`), тож агент міг змінити межу, що його
 # стримує, у власному PR. Тепер backstop забороняє a8-* і сам себе; цей
-# інваріант не дає новому скрипту ролі вислизнути: кожне `src: …/tools/scripts/X`
-# у задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати
-# exit 1 у check-forbidden-paths.sh.
+# інваріант не дає новому файлу ролі вислизнути: кожне `src: …/tools/X` у
+# задачах ролі (і `{{ item }}` з `loop:` того самого блоку) мусить давати exit 1
+# у check-forbidden-paths.sh. Саме tools/, а не лише tools/scripts: шаблон
+# профілю agy лежав у tools/agy і цим вислизав.
 FORBIDDEN_SH="$ROOT/tools/scripts/check-forbidden-paths.sh"
 role_scripts=""
 if [[ -d "$TASKS" ]]; then
@@ -978,8 +1062,8 @@ if [[ -d "$TASKS" ]]; then
         src = ""; items = ""; inloop = 0
       }
       /^- / { flush() }
-      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\/scripts\// {
-        s = $0; sub(/.*tools\/scripts\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/scripts/" s
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// {
+        s = $0; sub(/.*\/\.\.\/\.\.\/tools\//, "", s); sub(/"?[[:space:]]*$/, "", s); src = "tools/" s
       }
       /^[[:space:]]*loop:[[:space:]]*$/ { inloop = 1; next }
       inloop && /^[[:space:]]+- / { v = $0; sub(/^[[:space:]]+- */, "", v); items = items v "\n"; next }
@@ -987,9 +1071,37 @@ if [[ -d "$TASKS" ]]; then
       END { flush() }')"$'\n'
   done
 fi
+# Розбирач вище знає одну форму: `src: "{{ playbook_dir }}/../../tools/…"` одним
+# рядком і `{{ item }}` з плоского `loop:`. Будь-яка інша форма з tools/ (блоковий
+# скаляр, role_path, item.<поле>, with_items) пройшла б повз нього мовчки, тож
+# така форма — сама порушення: fail closed замість «не розібрав — значить
+# нічого немає» (контрприклад Argon №5, PR #277).
+if [[ -d "$TASKS" ]]; then
+  for tf in "$TASKS"/*.yml; do
+    [[ -f "$tf" ]] || continue
+    while IFS= read -r why; do
+      [[ -n "$why" ]] && violations+=("інваріант 18: ${tf##*/}: $why — backstop цього файла не перевірить; пиши src одним рядком \"{{ playbook_dir }}/../../tools/…\" (з {{ item }} — лише з плоским loop:)")
+    done < <(strip_comments "$tf" | cut -f2- | awk '
+      function flush() {
+        if (itemsrc && !hasloop) print "src з tools/ через {{ item }} без loop:"
+        itemsrc = 0; hasloop = 0
+      }
+      /^- / { flush() }
+      /^[[:space:]]*loop:/ { hasloop = 1 }
+      /src:[[:space:]]*[>|]/ { print "src блоковим скаляром"; next }
+      /src:/ && /tools\// && !/src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// {
+        print "src з tools/ у формі, яку інваріант 18 не розбирає"; next
+      }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// && /\{\{ *item\./ {
+        print "src з tools/ через item.<поле>"; next
+      }
+      /src:[[:space:]]*"?\{\{ *playbook_dir *\}\}\/\.\.\/\.\.\/tools\// && /\{\{ *item *\}\}/ { itemsrc = 1 }
+      END { flush() }')
+  done
+fi
 if [[ -n "${role_scripts//[[:space:]]/}" ]]; then
   if [[ ! -f "$FORBIDDEN_SH" ]]; then
-    violations+=("роль ставить скрипти з tools/scripts, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
+    violations+=("роль ставить файли з tools/, а tools/scripts/check-forbidden-paths.sh немає — backstop їх не бачить (#302)")
   else
     while IFS= read -r rs; do
       [[ -z "$rs" ]] && continue
