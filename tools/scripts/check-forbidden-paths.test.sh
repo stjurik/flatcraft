@@ -93,6 +93,12 @@ assert_exit "check-forbidden-paths.test.sh → 1" 1 "tools/scripts/check-forbidd
 assert_exit "сусідні скрипти (agy-call.sh, daily-digest.sh) → 0" 0 "$(printf 'tools/scripts/agy-call.sh\ntools/scripts/daily-digest.sh\n')"
 assert_exit "a8- лише як частина назви (tools/scripts/x-a8-y.sh) → 0" 0 "tools/scripts/x-a8-y.sh"
 
+# Рецензія Flash PR #277: профілі дозволів agy — межа виконавця gemini і рецензента.
+assert_exit "tools/agy/executor-permissions.json (шаблон профілю виконавця) → 1" 1 "tools/agy/executor-permissions.json"
+assert_exit "tools/agy/permissions.json (профіль рецензента) → 1" 1 "tools/agy/permissions.json"
+assert_exit "новий файл у tools/agy/ → 1" 1 "tools/agy/new-profile.json"
+assert_exit "tools/agy лише як префікс назви (tools/agyx.md) → 0" 0 "tools/agyx.md"
+
 if [[ "$fail" -eq 1 ]]; then
   echo "FAIL"
   exit 1

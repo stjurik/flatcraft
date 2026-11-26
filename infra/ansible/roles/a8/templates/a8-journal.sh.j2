@@ -21,12 +21,14 @@
 #     дійшло» (задача впала раніше) — це не те саме, що 0;
 #   OQ-34 → source (довіра); CLAUDE.md §0 «три джерела» → origin;
 #   інженерне рішення прогону → result (що сталося із задачею: ok, failed,
-#     no-credential, auth_stop, stopped) і note.
+#     no-credential, auth_stop, stopped, а для виконавця gemini ще retry і
+#     escalated — оракул червоний, задача знову в черзі) і note;
+#   orchestrator-autonomy.md §8 (смуга виконавця) → executor: gemini | claude.
 # `pr` зарезервоване: PR створює воркфлоу, якого ще немає; демон пише гілку.
 #
 # Використання:
 #   a8-journal append <task_id> <source> <result> <duration_s> <model> [нотатка] [ключ=значення ...]
-#     ключі: origin oracle oracle_rc branch worktree exit_class detail pr
+#     ключі: origin oracle oracle_rc branch worktree exit_class detail pr executor
 #   a8-journal reject <task_id> <причини через кому>   — ЯКІ поля відхилили задачу
 #   a8-journal event <стан> <пояснення>                — запобіжники, пауза, busy
 set -euo pipefail
@@ -60,7 +62,7 @@ case "${1:-}" in
     for kv in "$@"; do
       key="${kv%%=*}"; val="${kv#*=}"
       case "$key" in
-        origin|oracle|oracle_rc|branch|worktree|exit_class|detail|pr) ;;
+        origin|oracle|oracle_rc|branch|worktree|exit_class|detail|pr|executor) ;;
         *) echo "a8-journal: невідоме поле '$key'" >&2; exit 2 ;;
       esac
       extra="$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$extra")"

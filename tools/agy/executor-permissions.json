@@ -1,0 +1,4 @@
+{
+  "allow": ["read_file(@WT@)", "write_file(@WT@)", "command(git)", "command(pnpm)", "command(uv)"],
+  "deny": ["write_file(/tmp)"]
+}
