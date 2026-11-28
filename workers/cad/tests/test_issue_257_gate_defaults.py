@@ -339,5 +339,17 @@ class TestParamsWithDefaults:
         assert result["holes"] == []
 
     def test_невалідні_parameters_повертає_як_є(self) -> None:
+        """Issue #296 п.3: модель провалилась з причини, не пов'язаної з
+        bend_angle_deg (тут — зіпсоване legA_mm) — сирі значення НАЯВНИХ
+        ключів (зокрема зіпсований legA_mm) лишаються як є, без послаблення.
+        Але дефолти моделі для ВІДСУТНІХ у `parameters` ключів (тут —
+        bend_angle_deg і bend_direction, яких у VALID_PARAMS взагалі немає)
+        усе одно підставляються — інакше вони лишаються сліпими для гейтів,
+        хоча причина падіння геть не пов'язана з ними (раніше ця функція
+        повертала `parameters` без жодної зміни на будь-якій невдачі моделі)."""
         broken = {**VALID_PARAMS, "legA_mm": "not-a-number"}
-        assert _params_with_defaults("l_bracket", broken, 2.0) == broken
+        result = _params_with_defaults("l_bracket", broken, 2.0)
+        assert result["legA_mm"] == "not-a-number"
+        assert result["legB_mm"] == broken["legB_mm"]
+        assert result["bend_angle_deg"] == 90
+        assert result["thickness_mm"] == 2.0
