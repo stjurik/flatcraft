@@ -55,6 +55,7 @@ class TestWallShelfDefaultBendAngle:
                 "parameters": self.PARAMS,
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -69,6 +70,7 @@ class TestWallShelfDefaultBendAngle:
                 "parameters": params,
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -86,6 +88,7 @@ class TestWallShelfDefaultBendAngle:
                 "parameters": {**params, "thickness_mm": 99},
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -110,6 +113,7 @@ class TestPerforatedPanelDefaultRadius:
                 "parameters": params,
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -136,6 +140,7 @@ class TestHoleOrderIndependentOfBrokenEntry:
                 "parameters": {**VALID_PARAMS, "holes": [self.GOOD_BUT_TOO_CLOSE]},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -152,6 +157,7 @@ class TestHoleOrderIndependentOfBrokenEntry:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -168,6 +174,7 @@ class TestHoleOrderIndependentOfBrokenEntry:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -238,6 +245,7 @@ class TestMaterialNotAllowedReportedOnce:
                 "parameters": {**self.LONG, "holes": []},
                 "thickness_mm": 10,
                 "material_code": "stainless_304",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -264,6 +272,7 @@ class TestStringNumberInParameters:
                 "parameters": params,
                 "thickness_mm": 8,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text

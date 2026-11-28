@@ -107,6 +107,13 @@ class ExportRequest(BaseModel):
     # API (apps/api) уже завжди його передає (Zod-схема вимагає). Відсутнє
     # поле → 422 від Pydantic-схеми цього ExportRequest.
     material_code: str
+    # Issue #261 ч.2 (рішення yurii 2026-11-15 «4а»): одне джерело густини —
+    # таблиця `materials` у Postgres (apps/api), не дефолт 7850 у воркері.
+    # apps/api резолвить ρ з `material_code` ПЕРЕД форвардом сюди і ставить
+    # ОБОВ'ЯЗКОВИМ полем — мовчазного «сталевого» дефолту тут немає: відсутнє
+    # поле → 422 від цієї Pydantic-схеми. Межі — ті самі, що у пресі-оракула
+    # (ADR-019 клас: допустима густина метеріалів MVP, 1..25000 кг/м³).
+    density_kg_m3: float = Field(gt=0, le=25000)
 
     @field_validator("thickness_mm", mode="before")
     @classmethod
@@ -118,6 +125,15 @@ class ExportRequest(BaseModel):
         перевірки тихо ставало товщиною 1 мм замість 422."""
         if isinstance(value, bool):
             raise ValueError("thickness_mm має бути числом, не логічним значенням (true/false).")
+        return value
+
+    @field_validator("density_kg_m3", mode="before")
+    @classmethod
+    def _density_kg_m3_must_not_be_bool(cls, value: Any) -> Any:
+        """Issue #261: той самий контрприклад Argon, що й для `thickness_mm` —
+        Pydantic лояльно коерсує `bool` у `1.0`/`0.0` для `float`-поля."""
+        if isinstance(value, bool):
+            raise ValueError("density_kg_m3 має бути числом, не логічним значенням (true/false).")
         return value
 
 
@@ -267,6 +283,7 @@ def _generate_l_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
         material_label=req.material_code,
+        density_kg_m3=req.density_kg_m3,
     ).read_bytes()
     return dxf, pdf
 
@@ -296,6 +313,7 @@ def _generate_z_bracket(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes]
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
         material_label=req.material_code,
+        density_kg_m3=req.density_kg_m3,
     ).read_bytes()
     return dxf, pdf
 
@@ -325,6 +343,7 @@ def _generate_corner_angle(req: ExportRequest, tmpdir: Path) -> tuple[bytes, byt
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
         material_label=req.material_code,
+        density_kg_m3=req.density_kg_m3,
     ).read_bytes()
     return dxf, pdf
 
@@ -354,6 +373,7 @@ def _generate_wall_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, bytes
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
         material_label=req.material_code,
+        density_kg_m3=req.density_kg_m3,
     ).read_bytes()
     return dxf, pdf
 
@@ -382,6 +402,7 @@ def _generate_perforated_panel(req: ExportRequest, tmpdir: Path) -> tuple[bytes,
         solid=solid,
         permalink_url=_permalink_url(req.export_id),
         material_label=req.material_code,
+        density_kg_m3=req.density_kg_m3,
     ).read_bytes()
     return dxf, pdf
 
@@ -414,6 +435,7 @@ def _generate_enclosed_shelf(req: ExportRequest, tmpdir: Path) -> tuple[bytes, b
             tmpdir / "out.pdf",
             permalink_url=_permalink_url(req.export_id),
             material_label=req.material_code,
+            density_kg_m3=req.density_kg_m3,
         ).read_bytes()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"invalid_parameters: {exc}") from exc

@@ -287,6 +287,7 @@ class TestEnclosedShelfGateServer:
                 },
                 "thickness_mm": 2.5,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -306,6 +307,7 @@ class TestEnclosedShelfGateServer:
                 },
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text
@@ -320,6 +322,7 @@ class TestEnclosedShelfGateServer:
                 "parameters": {**ENCLOSED_SHELF_VALID_PARAMS, "side_perforation": SIDE},
                 "thickness_mm": 2,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 200, res.text
@@ -333,6 +336,7 @@ class TestEnclosedShelfGateServer:
                 "parameters": {**ENCLOSED_SHELF_VALID_PARAMS, **params},
                 "thickness_mm": t,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         if res.status_code != 422:
@@ -422,6 +426,7 @@ class TestSideHolesNearBendExport:
                 "parameters": params,
                 "thickness_mm": 2.5,
                 "material_code": material,
+                "density_kg_m3": 7850,
             },
         )
         if res.status_code != 422:
@@ -485,6 +490,7 @@ class TestSideHolesNearBendExport:
                 },
                 "thickness_mm": 2.5,
                 "material_code": "cold_rolled_steel",
+                "density_kg_m3": 7850,
             },
         )
         assert res.status_code == 422, res.text

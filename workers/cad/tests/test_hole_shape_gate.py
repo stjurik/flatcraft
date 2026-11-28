@@ -73,6 +73,7 @@ def _export(client: TestClient, slug: str, holes: object) -> Any:
             "parameters": params,
             "thickness_mm": 2,
             "material_code": "cold_rolled_steel",
+            "density_kg_m3": 7850,
         },
     )
 

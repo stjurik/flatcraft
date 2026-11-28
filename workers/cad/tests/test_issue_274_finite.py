@@ -87,6 +87,7 @@ def _export(client: TestClient, slug: str, params: dict[str, object], t: float =
             "parameters": params,
             "thickness_mm": t,
             "material_code": "cold_rolled_steel",
+            "density_kg_m3": 7850,
         },
     )
 
@@ -163,7 +164,7 @@ class TestНескінченнеУВерхньомуПолі:
         літерали без помилки, значення доходить як справжній python float."""
         body = (
             '{"template_slug":"l_bracket","thickness_mm":2,'
-            '"material_code":"cold_rolled_steel","parameters":'
+            '"material_code":"cold_rolled_steel","density_kg_m3":7850,"parameters":'
             f'{{"legA_mm":{lit},"legB_mm":40,"width_mm":30,'
             '"bend_radius_mm":2.5,"bend_angle_deg":90}}'
         )
@@ -358,7 +359,7 @@ class TestThicknessMm:
     def test_json_літерал_422_не_500(self, client: TestClient, lit: str) -> None:
         body = (
             '{"template_slug":"l_bracket","thickness_mm":' + lit + ","
-            '"material_code":"cold_rolled_steel","parameters":'
+            '"material_code":"cold_rolled_steel","density_kg_m3":7850,"parameters":'
             '{"legA_mm":50,"legB_mm":40,"width_mm":30,'
             '"bend_radius_mm":2.5,"bend_angle_deg":90}}'
         )
