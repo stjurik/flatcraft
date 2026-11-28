@@ -5,7 +5,7 @@
 словником у числовому полі має давати 422 зі списком помилок, а не 500
 (`float()`/порівняння падає у `validate/bend.py`,`perforation.py`) і не
 мовчазний 200 (holes.py й sheet.py вже самі ковтають погані типи —
-`validate_holes`/`_sheet_dimensions_mm` — і просто не перевіряють те, чого
+`validate_holes`/`_axis_dimensions_mm` — і просто не перевіряють те, чого
 не можуть прочитати).
 
 Працює НАД сирими `parameters` із payload, ДО `_params_with_defaults`
@@ -278,7 +278,7 @@ def sanitize_for_gates(
     ВКЛАДЕНІ поля об'єктів (`side_perforation.*`, `stiffening_rib.*`) теж
     нейтралізуються — доробка 049 (issue #274, рецензія Flash): `float("inf")`
     не кидає винятку, тож `stiffening_rib.height_mm: "inf"` без нейтралізації
-    доходило до `validate/sheet.py::_sheet_dimensions_mm` (`float()` без
+    доходило до тодішньої `validate/sheet.py::_sheet_dimensions_mm` (`float()` без
     `isfinite`) і давало побічний `SHEET_EXCEEDS_MAX_LENGTH` з «inf мм» поряд
     з `INVALID_PARAMETER_TYPE`. Елементи `holes[]` з помилкою форми
     (`holes.<idx>` — елемент не об'єкт) тут НЕ чіпаються: `validate/holes.py`

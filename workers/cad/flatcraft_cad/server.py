@@ -159,8 +159,14 @@ def _params_with_defaults(
     генерація бачать різні параметри. `req.thickness_mm` перемагає поле
     `thickness_mm` у `parameters` (той самий порядок, що й у `_generate_*`).
 
-    Невалідні parameters (модель кидає) → повертаємо parameters як є: 422
-    дасть генерація (`_generate_*`), як і зараз. Поля моделі (з приведеними
+    Невалідні parameters (модель кидає) → issue #296 п.3: причина падіння
+    може бути ЦІЛКОМ не пов'язана з полями, які читають гейти (напр.
+    зіпсоване `side_perforation.hole_size_mm` при відсутньому
+    `bend_angle_deg`) — `_missing_field_defaults` все одно підставляє
+    Pydantic-дефолти для ВІДСУТНІХ ключів (той самий `model.model_dump(...)`
+    формат, що й на успішній гілці), а сирі значення НАЯВНИХ ключів (навіть
+    зіпсовані) лишає як є: 422 за них дасть генерація (`_generate_*`) чи
+    гейт типів, як і зараз. На успішній гілці поля моделі (з приведеними
     типами й дефолтами, `thickness_mm` = req) мають пріоритет над сирими —
     інакше рядок "80" з `parameters` повертався б у гейт, ламав арифметику
     sheet-гейту (TypeError → []) і давав 200 замість 422 (контрприклади
@@ -171,8 +177,39 @@ def _params_with_defaults(
     try:
         model = model_cls.model_validate({**parameters, "thickness_mm": thickness_mm})
     except Exception:  # noqa: BLE001
-        return parameters
+        return {
+            **parameters,
+            **_missing_field_defaults(model_cls, parameters),
+            "thickness_mm": thickness_mm,
+        }
     return {**parameters, **model.model_dump(by_alias=True), "thickness_mm": thickness_mm}
+
+
+def _dump_default(value: Any) -> Any:
+    """JSON-подібне значення Pydantic-дефолту поля — те саме, що дав би
+    `model.model_dump(by_alias=True)` на успішній гілці: вкладена модель
+    (напр. `BendSpec`) чи список/тюпл моделей розгортається рекурсивно."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(by_alias=True)
+    if isinstance(value, (tuple, list)):
+        return [_dump_default(v) for v in value]
+    return value
+
+
+def _missing_field_defaults(
+    model_cls: type[BaseModel], parameters: dict[str, Any]
+) -> dict[str, Any]:
+    """Issue #296 п.3: Pydantic-дефолти ЛИШЕ для полів моделі, відсутніх у
+    `parameters` (`bend_angle_deg`, `rib_corner_radius_mm` тощо) — не чіпає
+    наявні ключі, навіть зіпсовані. Обов'язкові поля (без дефолту) не
+    підставляються — для них усе одно потрібне явне значення."""
+    defaults: dict[str, Any] = {}
+    for name, field in model_cls.model_fields.items():
+        key = field.alias or name
+        if key in parameters or field.is_required():
+            continue
+        defaults[key] = _dump_default(field.get_default(call_default_factory=True))
+    return defaults
 
 
 def _permalink_url(export_id: UUID | None) -> str | None:

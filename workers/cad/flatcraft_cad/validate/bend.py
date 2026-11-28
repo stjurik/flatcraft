@@ -81,8 +81,8 @@ def validate_bend(
     *,
     material_code: str | None,
     thickness_mm: float,
-    inner_radius_mm: float,
-    angle_deg: float,
+    inner_radius_mm: float | None,
+    angle_deg: float | None,
     spec: dict[str, Any] | None = None,
 ) -> list[BendError]:
     """Перевіряє один гиб проти матриці. Порожній список → валідно.
@@ -90,8 +90,13 @@ def validate_bend(
     Дзеркалить порядок і логіку TS `validateBend`:
       1. row-lookup за товщиною (немає → THICKNESS_NOT_SUPPORTED, рання відмова);
       2. material-group (лише якщо material_code задано);
-      3. allowed_inner_radius_mm для саме цієї товщини;
-      4. allowed_angles_deg (global).
+      3. allowed_inner_radius_mm для саме цієї товщини (лише якщо inner_radius_mm задано);
+      4. allowed_angles_deg (global; лише якщо angle_deg задано).
+
+    Issue #296: радіус і кут — незалежні перевірки. `None` в одному з них
+    (зіпсоване чи відсутнє поле, вже нейтралізоване `sanitize_for_gates`)
+    скасовує лише ЙОГО перевірку — material-check і друге з (радіус, кут)
+    усе одно спрацьовують.
     """
     spec = spec if spec is not None else load_spec()
     matrix: list[dict[str, Any]] = spec["capability_matrix"]
@@ -121,25 +126,27 @@ def validate_bend(
                 )
             )
 
-    allowed_radii: list[float] = row["allowed_inner_radius_mm"]
-    if inner_radius_mm not in allowed_radii:
-        errors.append(
-            BendError(
-                code="RADIUS_NOT_ALLOWED",
-                field="bend_radius_mm",
-                detail=_radius_hint(inner_radius_mm, allowed_radii, thickness_mm),
+    if inner_radius_mm is not None:
+        allowed_radii: list[float] = row["allowed_inner_radius_mm"]
+        if inner_radius_mm not in allowed_radii:
+            errors.append(
+                BendError(
+                    code="RADIUS_NOT_ALLOWED",
+                    field="bend_radius_mm",
+                    detail=_radius_hint(inner_radius_mm, allowed_radii, thickness_mm),
+                )
             )
-        )
 
-    allowed_angles: list[float] = spec["global"]["allowed_angles_deg"]
-    if angle_deg not in allowed_angles:
-        errors.append(
-            BendError(
-                code="ANGLE_NOT_ALLOWED",
-                field="bend_angle_deg",
-                detail=f"Кут {angle_deg}° недопустимий. Дозволено: {allowed_angles}.",
+    if angle_deg is not None:
+        allowed_angles: list[float] = spec["global"]["allowed_angles_deg"]
+        if angle_deg not in allowed_angles:
+            errors.append(
+                BendError(
+                    code="ANGLE_NOT_ALLOWED",
+                    field="bend_angle_deg",
+                    detail=f"Кут {angle_deg}° недопустимий. Дозволено: {allowed_angles}.",
+                )
             )
-        )
 
     return errors
 
@@ -156,17 +163,21 @@ def validate_export(
     validate_bend достатньо. perforated_panel (ребриста монтажна панель,
     ADR-030/031) ВАЛІДУЄТЬСЯ — має 4 гиби (ребра) з однаковим
     bend_radius_mm/bend_angle_deg. Шаблони без bend-полів → [] (нижче).
+
+    Issue #296: радіус і кут конвертуються й передаються в `validate_bend`
+    незалежно — зіпсований/відсутній один не ховає перевірку другого.
+    `[]` лише коли ОБИДВА відсутні (шаблон без bend-полів чи зовсім неповний
+    payload — Pydantic-валідація шаблону відмовить пізніше зі своєю причиною).
     """
     radius = parameters.get("bend_radius_mm")
     angle = parameters.get("bend_angle_deg")
-    if radius is None or angle is None:
-        # Відсутні bend-поля — Pydantic-валідація шаблону відмовить пізніше.
+    if radius is None and angle is None:
         return []
 
     errors = validate_bend(
         material_code=material_code,
         thickness_mm=thickness_mm,
-        inner_radius_mm=float(radius),
-        angle_deg=float(angle),
+        inner_radius_mm=float(radius) if radius is not None else None,
+        angle_deg=float(angle) if angle is not None else None,
     )
     return [asdict(e) for e in errors]
